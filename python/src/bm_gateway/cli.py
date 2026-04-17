@@ -21,7 +21,17 @@ from .runtime import (
     sleep_interval,
     state_file_path,
 )
-from .state_store import load_snapshot, persist_snapshot, prune_history, write_snapshot
+from .state_store import (
+    fetch_counts,
+    fetch_daily_history,
+    fetch_monthly_history,
+    fetch_recent_history,
+    fetch_storage_summary,
+    load_snapshot,
+    persist_snapshot,
+    prune_history,
+    write_snapshot,
+)
 from .web import render_snapshot_html, serve_management, serve_snapshot
 
 
@@ -36,6 +46,7 @@ def format_main_help() -> str:
             "  config   Show or validate the gateway configuration",
             "  devices  Inspect the configured device registry",
             "  ha       Render the Home Assistant MQTT contract",
+            "  history  Inspect persisted raw, daily, or monthly history",
             "  run      Execute the gateway runtime and persist snapshots",
             "  web      Render, serve, or manage the web interface",
             "",
@@ -99,6 +110,47 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Write one JSON payload file per discovery topic into this directory.",
     )
+
+    history_parser = subparsers.add_parser("history", help="Inspect persisted history.")
+    history_subparsers = history_parser.add_subparsers(dest="history_command")
+    history_raw = history_subparsers.add_parser("raw", help="Show recent raw device readings.")
+    history_daily = history_subparsers.add_parser("daily", help="Show daily device summaries.")
+    history_monthly = history_subparsers.add_parser(
+        "monthly", help="Show monthly device summaries."
+    )
+    history_stats = history_subparsers.add_parser(
+        "stats", help="Show storage counts and per-device history ranges."
+    )
+    history_prune = history_subparsers.add_parser(
+        "prune", help="Apply configured retention limits to persisted history."
+    )
+    for history_command in (history_raw, history_daily, history_monthly):
+        history_command.add_argument("--device-id", required=True, help="Device identifier.")
+        history_command.add_argument(
+            "--json", action="store_true", help="Print structured JSON output."
+        )
+        history_command.add_argument(
+            "--state-dir",
+            type=Path,
+            default=None,
+            help="Override the base directory used for runtime state files.",
+        )
+        history_command.add_argument(
+            "--limit",
+            type=int,
+            default=None,
+            help="Limit the number of rows returned.",
+        )
+    for history_command in (history_stats, history_prune):
+        history_command.add_argument(
+            "--json", action="store_true", help="Print structured JSON output."
+        )
+        history_command.add_argument(
+            "--state-dir",
+            type=Path,
+            default=None,
+            help="Override the base directory used for runtime state files.",
+        )
 
     run_parser = subparsers.add_parser("run", help="Execute the gateway runtime.")
     run_parser.add_argument("--once", action="store_true", help="Run one iteration and exit.")
@@ -399,6 +451,113 @@ def _handle_run(
     return 0
 
 
+def _handle_history(
+    path: Path,
+    *,
+    verbose: bool,
+    history_kind: str,
+    device_id: str,
+    as_json: bool,
+    state_dir: Path | None,
+    limit: int | None,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, _devices = runtime
+    database_path = database_file_path(config, state_dir=state_dir)
+    if history_kind == "raw":
+        rows = fetch_recent_history(database_path, device_id=device_id, limit=limit or 200)
+    elif history_kind == "daily":
+        rows = fetch_daily_history(database_path, device_id=device_id, limit=limit or 365)
+    else:
+        rows = fetch_monthly_history(database_path, device_id=device_id, limit=limit or 24)
+
+    if as_json:
+        _print_json(rows)
+        return 0
+
+    for row in rows:
+        print(json.dumps(row, sort_keys=True))
+    return 0
+
+
+def _handle_history_stats(
+    path: Path,
+    *,
+    verbose: bool,
+    as_json: bool,
+    state_dir: Path | None,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, _devices = runtime
+    database_path = database_file_path(config, state_dir=state_dir)
+    summary = fetch_storage_summary(database_path)
+
+    if as_json:
+        _print_json(summary)
+        return 0
+
+    counts = cast(dict[str, int], summary["counts"])
+    print(f"gateway_snapshots: {counts['gateway_snapshots']}")
+    print(f"device_readings: {counts['device_readings']}")
+    print(f"device_daily_rollups: {counts['device_daily_rollups']}")
+    for device in cast(list[dict[str, object]], summary["devices"]):
+        print(
+            f"{device['device_id']}: raw={device['raw_samples']} "
+            f"({device['raw_first_ts']} -> {device['raw_last_ts']}), "
+            f"daily={device['daily_days']} "
+            f"({device['daily_first_day']} -> {device['daily_last_day']})"
+        )
+    return 0
+
+
+def _handle_history_prune(
+    path: Path,
+    *,
+    verbose: bool,
+    as_json: bool,
+    state_dir: Path | None,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, _devices = runtime
+    database_path = database_file_path(config, state_dir=state_dir)
+    before = fetch_counts(database_path)
+    prune_history(
+        database_path,
+        raw_retention_days=config.retention.raw_retention_days,
+        daily_retention_days=config.retention.daily_retention_days,
+    )
+    after = fetch_counts(database_path)
+    payload = {
+        "before": before,
+        "after": after,
+        "retention": {
+            "raw_retention_days": config.retention.raw_retention_days,
+            "daily_retention_days": config.retention.daily_retention_days,
+        },
+    }
+
+    if as_json:
+        _print_json(payload)
+        return 0
+
+    print(
+        "Pruned history with "
+        f"raw_retention_days={config.retention.raw_retention_days} "
+        f"daily_retention_days={config.retention.daily_retention_days}"
+    )
+    print(f"device_readings: {before['device_readings']} -> {after['device_readings']}")
+    print(
+        f"device_daily_rollups: {before['device_daily_rollups']} -> {after['device_daily_rollups']}"
+    )
+    return 0
+
+
 def _handle_web_render(snapshot_file: Path) -> int:
     snapshot = load_snapshot(snapshot_file)
     print(render_snapshot_html(snapshot))
@@ -454,6 +613,30 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=bool(args.verbose),
             as_json=bool(args.json),
             output_dir=args.output_dir,
+        )
+    if args.command == "history" and args.history_command in {"raw", "daily", "monthly"}:
+        return _handle_history(
+            args.config,
+            verbose=bool(args.verbose),
+            history_kind=args.history_command,
+            device_id=args.device_id,
+            as_json=bool(args.json),
+            state_dir=args.state_dir,
+            limit=args.limit,
+        )
+    if args.command == "history" and args.history_command == "stats":
+        return _handle_history_stats(
+            args.config,
+            verbose=bool(args.verbose),
+            as_json=bool(args.json),
+            state_dir=args.state_dir,
+        )
+    if args.command == "history" and args.history_command == "prune":
+        return _handle_history_prune(
+            args.config,
+            verbose=bool(args.verbose),
+            as_json=bool(args.json),
+            state_dir=args.state_dir,
         )
 
     if args.command == "run":

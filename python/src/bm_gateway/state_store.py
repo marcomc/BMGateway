@@ -236,6 +236,72 @@ def fetch_counts(path: Path) -> dict[str, int]:
     }
 
 
+def fetch_storage_summary(path: Path) -> dict[str, object]:
+    connection = _connect_database(path)
+    try:
+        raw_rows = connection.execute(
+            """
+            SELECT
+                device_id,
+                COUNT(*) AS raw_samples,
+                MIN(snapshot_generated_at) AS raw_first_ts,
+                MAX(snapshot_generated_at) AS raw_last_ts
+            FROM device_readings
+            GROUP BY device_id
+            ORDER BY device_id
+            """
+        ).fetchall()
+        daily_rows = connection.execute(
+            """
+            SELECT
+                device_id,
+                COUNT(*) AS daily_days,
+                MIN(day) AS daily_first_day,
+                MAX(day) AS daily_last_day
+            FROM device_daily_rollups
+            GROUP BY device_id
+            ORDER BY device_id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    by_device: dict[str, dict[str, object]] = {}
+    for row in raw_rows:
+        device_id = cast(str, row[0])
+        by_device[device_id] = {
+            "device_id": device_id,
+            "raw_samples": int(row[1]),
+            "raw_first_ts": row[2],
+            "raw_last_ts": row[3],
+            "daily_days": 0,
+            "daily_first_day": None,
+            "daily_last_day": None,
+        }
+    for row in daily_rows:
+        device_id = cast(str, row[0])
+        summary = by_device.setdefault(
+            device_id,
+            {
+                "device_id": device_id,
+                "raw_samples": 0,
+                "raw_first_ts": None,
+                "raw_last_ts": None,
+                "daily_days": 0,
+                "daily_first_day": None,
+                "daily_last_day": None,
+            },
+        )
+        summary["daily_days"] = int(row[1])
+        summary["daily_first_day"] = row[2]
+        summary["daily_last_day"] = row[3]
+
+    return {
+        "counts": fetch_counts(path),
+        "devices": [by_device[device_id] for device_id in sorted(by_device)],
+    }
+
+
 def fetch_recent_history(
     path: Path,
     *,
@@ -294,7 +360,53 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
         connection.close()
     return [
         {
+            "device_id": device_id,
             "day": row[0],
+            "samples": row[1],
+            "min_voltage": row[2],
+            "max_voltage": row[3],
+            "avg_voltage": row[4],
+            "avg_soc": row[5],
+            "error_count": row[6],
+            "last_seen": row[7],
+        }
+        for row in rows
+    ]
+
+
+def fetch_monthly_history(
+    path: Path,
+    *,
+    device_id: str,
+    limit: int = 24,
+) -> list[dict[str, object]]:
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                substr(day, 1, 7) AS month,
+                SUM(samples),
+                MIN(min_voltage),
+                MAX(max_voltage),
+                AVG(avg_voltage),
+                AVG(avg_soc),
+                SUM(error_count),
+                MAX(last_seen)
+            FROM device_daily_rollups
+            WHERE device_id = ?
+            GROUP BY month
+            ORDER BY month DESC
+            LIMIT ?
+            """,
+            (device_id, limit),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        {
+            "device_id": device_id,
+            "month": row[0],
             "samples": row[1],
             "min_voltage": row[2],
             "max_voltage": row[3],

@@ -4,7 +4,12 @@ import sqlite3
 from pathlib import Path
 
 from bm_gateway.models import DeviceReading, GatewaySnapshot
-from bm_gateway.state_store import fetch_daily_history, persist_snapshot, prune_history
+from bm_gateway.state_store import (
+    fetch_daily_history,
+    fetch_storage_summary,
+    persist_snapshot,
+    prune_history,
+)
 
 
 def _snapshot(ts: str) -> GatewaySnapshot:
@@ -61,3 +66,28 @@ def test_prune_history_removes_old_raw_rows_but_keeps_daily_rollup_when_unlimite
         fetch_daily_history(database_path, device_id="bm200_house", limit=30)[0]["day"]
         == "2024-01-01"
     )
+
+
+def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+    persist_snapshot(database_path, _snapshot("2024-01-02T00:00:00+00:00"))
+
+    summary = fetch_storage_summary(database_path)
+
+    assert summary["counts"] == {
+        "gateway_snapshots": 2,
+        "device_readings": 2,
+        "device_daily_rollups": 2,
+    }
+    assert summary["devices"] == [
+        {
+            "device_id": "bm200_house",
+            "raw_samples": 2,
+            "raw_first_ts": "2024-01-01T00:00:00+00:00",
+            "raw_last_ts": "2024-01-02T00:00:00+00:00",
+            "daily_days": 2,
+            "daily_first_day": "2024-01-01",
+            "daily_last_day": "2024-01-02",
+        }
+    ]
