@@ -55,6 +55,12 @@ class WebConfig:
 
 
 @dataclass(frozen=True)
+class RetentionConfig:
+    raw_retention_days: int = 180
+    daily_retention_days: int = 0
+
+
+@dataclass(frozen=True)
 class AppConfig:
     source_path: Path
     device_registry_path: Path
@@ -63,6 +69,7 @@ class AppConfig:
     mqtt: MQTTConfig
     home_assistant: HomeAssistantConfig
     web: WebConfig
+    retention: RetentionConfig
     verbose: bool = False
 
     def with_cli_overrides(self, *, verbose: bool) -> "AppConfig":
@@ -76,6 +83,7 @@ class AppConfig:
             mqtt=self.mqtt,
             home_assistant=self.home_assistant,
             web=self.web,
+            retention=self.retention,
             verbose=True,
         )
 
@@ -117,6 +125,10 @@ class AppConfig:
                 "host": self.web.host,
                 "port": self.web.port,
             },
+            "retention": {
+                "raw_retention_days": self.retention.raw_retention_days,
+                "daily_retention_days": self.retention.daily_retention_days,
+            },
             "verbose": self.verbose,
         }
 
@@ -145,6 +157,56 @@ def _resolve_registry_path(config_path: Path, declared_path: str) -> Path:
     return (config_path.parent / registry_path).resolve()
 
 
+def _bool_to_toml(value: bool) -> str:
+    return "true" if value else "false"
+
+
+def write_config(path: Path, config: AppConfig) -> None:
+    payload = "\n".join(
+        [
+            "[gateway]",
+            f'name = "{config.gateway.name}"',
+            f'timezone = "{config.gateway.timezone}"',
+            f"poll_interval_seconds = {config.gateway.poll_interval_seconds}",
+            f'device_registry = "{config.gateway.device_registry}"',
+            f'data_dir = "{config.gateway.data_dir}"',
+            f'reader_mode = "{config.gateway.reader_mode}"',
+            "",
+            "[bluetooth]",
+            f'adapter = "{config.bluetooth.adapter}"',
+            f"scan_timeout_seconds = {config.bluetooth.scan_timeout_seconds}",
+            f"connect_timeout_seconds = {config.bluetooth.connect_timeout_seconds}",
+            "",
+            "[mqtt]",
+            f"enabled = {_bool_to_toml(config.mqtt.enabled)}",
+            f'host = "{config.mqtt.host}"',
+            f"port = {config.mqtt.port}",
+            f'username = "{config.mqtt.username}"',
+            f'password = "{config.mqtt.password}"',
+            f'base_topic = "{config.mqtt.base_topic}"',
+            f'discovery_prefix = "{config.mqtt.discovery_prefix}"',
+            f"retain_discovery = {_bool_to_toml(config.mqtt.retain_discovery)}",
+            f"retain_state = {_bool_to_toml(config.mqtt.retain_state)}",
+            "",
+            "[home_assistant]",
+            f"enabled = {_bool_to_toml(config.home_assistant.enabled)}",
+            f'status_topic = "{config.home_assistant.status_topic}"',
+            f'gateway_device_id = "{config.home_assistant.gateway_device_id}"',
+            "",
+            "[web]",
+            f"enabled = {_bool_to_toml(config.web.enabled)}",
+            f'host = "{config.web.host}"',
+            f"port = {config.web.port}",
+            "",
+            "[retention]",
+            f"raw_retention_days = {config.retention.raw_retention_days}",
+            f"daily_retention_days = {config.retention.daily_retention_days}",
+            "",
+        ]
+    )
+    path.write_text(payload, encoding="utf-8")
+
+
 def load_config(path: Path) -> AppConfig:
     data = _read_toml(path)
     gateway_table = _require_table(data, "gateway")
@@ -152,6 +214,7 @@ def load_config(path: Path) -> AppConfig:
     mqtt_table = _require_table(data, "mqtt")
     home_assistant_table = _require_table(data, "home_assistant")
     web_table = _require_table(data, "web")
+    retention_table = _require_table(data, "retention")
 
     gateway = GatewayConfig(
         name=str(gateway_table.get("name", "BMGateway")),
@@ -187,6 +250,10 @@ def load_config(path: Path) -> AppConfig:
         host=str(web_table.get("host", "0.0.0.0")),
         port=int(web_table.get("port", 8080)),
     )
+    retention = RetentionConfig(
+        raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
+        daily_retention_days=int(retention_table.get("daily_retention_days", 0)),
+    )
     source_path = path.resolve()
     device_registry_path = _resolve_registry_path(source_path, gateway.device_registry)
 
@@ -198,6 +265,7 @@ def load_config(path: Path) -> AppConfig:
         mqtt=mqtt,
         home_assistant=home_assistant,
         web=web,
+        retention=retention,
     )
 
 
@@ -223,6 +291,10 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("home_assistant.gateway_device_id must not be empty")
     if config.web.port <= 0:
         errors.append("web.port must be greater than zero")
+    if config.retention.raw_retention_days <= 0:
+        errors.append("retention.raw_retention_days must be greater than zero")
+    if config.retention.daily_retention_days < 0:
+        errors.append("retention.daily_retention_days must be zero or greater")
     if not config.device_registry_path.exists():
         errors.append(f"device registry file not found: {config.device_registry_path}")
     return errors

@@ -22,6 +22,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   rendering/serving commands.
 - BM200 live BLE protocol support with AES decryption, packet parsing, and
   runtime integration behind `gateway.reader_mode = "live"`.
+- SQLite persistence for gateway snapshots and device readings, plus explicit
+  `error_code` and `error_detail` fields in runtime payloads.
+- Raw-retention pruning and daily SQLite rollups for longer-term history on
+  Raspberry Pi storage.
+- Host-run Python management web interface with config/device TOML editing,
+  history views, and one-shot run triggering.
+- Source-backed Raspberry Pi 3B / Raspberry Pi OS 32-bit / Docker viability
+  research under `docs/research/`.
 - Raspberry Pi 3B manual setup guide, systemd service assets, install/update
   scripts, and an initial Ansible playbook.
-- Docker packaging for the status interface under `web/`.
+- Separate `bm-gateway-web.service` host process for the management UI.

@@ -87,6 +87,8 @@ class MQTTPublisher:
                             "last_seen": reading.last_seen,
                             "rssi": reading.rssi,
                             "state": reading.state,
+                            "error_code": reading.error_code,
+                            "error_detail": reading.error_detail,
                             "adapter": reading.adapter,
                             "driver": reading.driver,
                         },

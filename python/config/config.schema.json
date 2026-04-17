@@ -55,6 +55,13 @@
         "host": { "type": "string" },
         "port": { "type": "integer", "minimum": 1 }
       }
+    },
+    "retention": {
+      "type": "object",
+      "properties": {
+        "raw_retention_days": { "type": "integer", "minimum": 1 },
+        "daily_retention_days": { "type": "integer", "minimum": 0 }
+      }
     }
   }
 }

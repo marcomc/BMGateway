@@ -63,6 +63,7 @@ Contains the packaged Python application:
   contract rendering
 - fake-reader runtime, snapshot persistence, MQTT publishing, and a simple
   built-in web status layer
+- live `bm200` BLE polling, SQLite persistence, and classified device errors
 
 The CLI entry point remains `bm-gateway`, and `python -m bm_gateway` remains a
 supported module entry point through the root packaging configuration.
@@ -85,11 +86,16 @@ Contains Raspberry Pi setup and deployment guidance:
 
 ### `web/`
 
-Contains deployment packaging for the status interface.
+Contains the host-run management web interface plan and assets.
 
-The current Python component ships the actual status web server. The `web/`
-directory adds Docker packaging so the interface can run as a separate
-container when that fits the Raspberry Pi deployment better.
+The current Python component ships:
+
+- a simple snapshot/status web server
+- a separate host-run management web interface via `bm-gateway web manage`
+
+For Raspberry Pi 3B, the active recommendation is a separate Python process
+under `systemd`, not Docker. See
+`docs/research/2026-04-17-pi3b-web-and-os-research.md`.
 
 ## Requirements
 
@@ -105,7 +111,7 @@ For the runtime target:
 
 - Raspberry Pi 3B or compatible Linux host
 - Bluetooth support
-- optional Docker support if the web interface or supporting services use it
+- enough storage for SQLite history retention
 
 ## Installation
 
@@ -155,6 +161,11 @@ The key runtime switch is `gateway.reader_mode`:
 
 - `fake` keeps the deterministic development reader
 - `live` enables explicit BLE polling for `bm200` devices
+
+The key retention settings are:
+
+- `retention.raw_retention_days`
+- `retention.daily_retention_days`
 
 ## Usage
 
@@ -215,6 +226,28 @@ Render HTML from the latest snapshot:
 bm-gateway web render --snapshot-file ./python/config/data/runtime/latest_snapshot.json
 ```
 
+Run the host-managed web UI:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example web manage --port 8080
+```
+
+Runtime artifacts written by `run`:
+
+- `.../runtime/latest_snapshot.json`
+- `.../runtime/gateway.db`
+
+Per-device payloads now include:
+
+- `state`
+- `error_code`
+- `error_detail`
+
+The database keeps:
+
+- raw per-cycle readings with pruning
+- daily device rollups for long-term comparison
+
 ## Development
 
 Sync the environment and run the default quality gate:
@@ -235,9 +268,11 @@ make run
 ## Roadmap
 
 - Extend live Bluetooth support beyond the current BM200 implementation.
+- Add BM200 history retrieval and persistence.
+- Add monthly degradation summaries on top of the new daily rollups.
 - Extend the Home Assistant assets under `home-assistant/`.
 - Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
-- Choose and scaffold the web interface under `web/`.
+- Grow the host-run management web UI beyond the current editing and history views.
 
 ## License
 

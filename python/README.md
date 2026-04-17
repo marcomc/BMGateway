@@ -19,6 +19,7 @@ This directory contains the packaged Python CLI and service code for
 - `bm-gateway run --once --dry-run`
 - `bm-gateway web render --snapshot-file <path>`
 - `bm-gateway web serve --snapshot-file <path>`
+- `bm-gateway web manage`
 
 ## Runtime Modes
 
@@ -27,6 +28,22 @@ This directory contains the packaged Python CLI and service code for
   devices
 - `bm300pro` remains unsupported in live mode and will be reported as
   `unsupported`
+
+## Persisted Artifacts
+
+Each runtime cycle writes:
+
+- `runtime/latest_snapshot.json` for the latest rendered state
+- `runtime/gateway.db` for SQLite-backed gateway and device readings
+
+Device readings also carry:
+
+- `state`
+- `error_code`
+- `error_detail`
+
+The database also keeps daily rollups so long-term comparisons can survive raw
+retention pruning.
 
 ## Notes
 

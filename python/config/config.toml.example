@@ -36,3 +36,7 @@ gateway_device_id = "bm_gateway"
 enabled = true
 host = "0.0.0.0"
 port = 8080
+
+[retention]
+raw_retention_days = 180
+daily_retention_days = 0

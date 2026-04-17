@@ -10,7 +10,13 @@ from typing import Callable
 
 from .config import AppConfig, GatewayConfig
 from .device_registry import Device
-from .drivers.bm200 import BM200Measurement, read_bm200_measurement
+from .drivers.bm200 import (
+    BM200Error,
+    BM200Measurement,
+    BM200ProtocolError,
+    BM200TimeoutError,
+    read_bm200_measurement,
+)
 from .models import DeviceReading, GatewaySnapshot
 
 BM200Reader = Callable[[Device, str], BM200Measurement]
@@ -43,6 +49,8 @@ def _build_fake_reading(device: Device, *, generated_at: str, adapter: str) -> D
         temperature=temperature,
         rssi=rssi,
         state=state,
+        error_code=None,
+        error_detail=None,
         last_seen=generated_at,
         adapter=adapter,
         driver=device.type,
@@ -62,6 +70,8 @@ def _build_disabled_reading(device: Device, *, generated_at: str, adapter: str) 
         temperature=None,
         rssi=None,
         state="disabled",
+        error_code=None,
+        error_detail=None,
         last_seen=generated_at,
         adapter=adapter,
         driver=device.type,
@@ -81,13 +91,32 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
         temperature=None,
         rssi=None,
         state="unsupported",
+        error_code="unsupported_device_type",
+        error_detail=device.type,
         last_seen=generated_at,
         adapter=adapter,
         driver=device.type,
     )
 
 
-def _build_error_reading(device: Device, *, generated_at: str, adapter: str) -> DeviceReading:
+def _classify_bm200_error(error: Exception) -> tuple[str, str]:
+    if isinstance(error, BM200TimeoutError):
+        return "timeout", str(error)
+    if isinstance(error, BM200ProtocolError):
+        return "protocol_error", str(error)
+    if isinstance(error, BM200Error):
+        return "driver_error", str(error)
+    return "unexpected_error", str(error)
+
+
+def _build_error_reading(
+    device: Device,
+    *,
+    generated_at: str,
+    adapter: str,
+    error: Exception,
+) -> DeviceReading:
+    error_code, error_detail = _classify_bm200_error(error)
     return DeviceReading(
         id=device.id,
         type=device.type,
@@ -100,6 +129,8 @@ def _build_error_reading(device: Device, *, generated_at: str, adapter: str) -> 
         temperature=None,
         rssi=None,
         state="error",
+        error_code=error_code,
+        error_detail=error_detail,
         last_seen=generated_at,
         adapter=adapter,
         driver=device.type,
@@ -146,9 +177,14 @@ def build_snapshot(
 
         try:
             measurement = live_reader(device, adapter)
-        except Exception:
+        except Exception as error:
             readings.append(
-                _build_error_reading(device, generated_at=generated_at, adapter=adapter)
+                _build_error_reading(
+                    device,
+                    generated_at=generated_at,
+                    adapter=adapter,
+                    error=error,
+                )
             )
             continue
 
@@ -165,6 +201,8 @@ def build_snapshot(
                 temperature=None,
                 rssi=None,
                 state=measurement.state,
+                error_code=None,
+                error_detail=None,
                 last_seen=generated_at,
                 adapter=adapter,
                 driver="bm200",
@@ -200,6 +238,7 @@ def build_fake_snapshot(config: AppConfig, devices: list[Device]) -> GatewaySnap
         mqtt=config.mqtt,
         home_assistant=config.home_assistant,
         web=config.web,
+        retention=config.retention,
         verbose=config.verbose,
     )
     return build_snapshot(fake_config, devices)
@@ -218,6 +257,15 @@ def state_file_path(config: AppConfig, *, state_dir: Path | None = None) -> Path
         else (config.source_path.parent / config.gateway.data_dir)
     )
     return base_dir / "runtime" / "latest_snapshot.json"
+
+
+def database_file_path(config: AppConfig, *, state_dir: Path | None = None) -> Path:
+    base_dir = (
+        state_dir
+        if state_dir is not None
+        else (config.source_path.parent / config.gateway.data_dir)
+    )
+    return base_dir / "runtime" / "gateway.db"
 
 
 def sleep_interval(seconds: int) -> None:

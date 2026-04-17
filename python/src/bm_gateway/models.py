@@ -18,6 +18,8 @@ class DeviceReading:
     temperature: float | None
     rssi: int | None
     state: str
+    error_code: str | None
+    error_detail: str | None
     last_seen: str
     adapter: str
     driver: str
@@ -35,6 +37,8 @@ class DeviceReading:
             "temperature": self.temperature,
             "rssi": self.rssi,
             "state": self.state,
+            "error_code": self.error_code,
+            "error_detail": self.error_detail,
             "last_seen": self.last_seen,
             "adapter": self.adapter,
             "driver": self.driver,
