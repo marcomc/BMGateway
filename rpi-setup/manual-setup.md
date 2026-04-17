@@ -69,7 +69,7 @@ This creates:
 - a standalone runtime under `~/.local/share/bm-gateway/venv`
 - a user-facing command at `~/.local/bin/bm-gateway`
 - a config template at `~/.config/bm-gateway/config.toml` if missing
-- a devices template at `~/.config/bm-gateway/devices.toml.example` if missing
+- a devices registry at `~/.config/bm-gateway/devices.toml` if missing
 
 ## Configure the Gateway
 
@@ -77,8 +77,8 @@ Use the example files in `python/config/` as the starting point:
 
 - copy `python/config/config.toml.example` to
   `~/.config/bm-gateway/config.toml`
-- copy `python/config/devices.toml.example` beside it if you want a separate
-  working copy
+- copy `python/config/devices.toml` beside it if you want a separate working
+  copy
 - replace MQTT and device values with real values
 
 ## Validate the Setup
@@ -88,6 +88,7 @@ bm-gateway config show
 bm-gateway config validate
 bm-gateway devices list --json
 bm-gateway ha contract --json
+bm-gateway run --once --dry-run --json
 ```
 
 Expected outcomes:
@@ -97,15 +98,38 @@ Expected outcomes:
 - `devices list --json` prints the configured devices
 - `ha contract --json` prints the MQTT topics and entities expected by Home
   Assistant
+- `run --once --dry-run --json` writes a local snapshot without contacting MQTT
+
+## Install the Service Assets
+
+To install the runtime service unit on the Pi:
+
+```bash
+sudo ./rpi-setup/scripts/install-service.sh
+```
+
+This installs:
+
+- `/etc/bm-gateway/config.toml`
+- `/etc/bm-gateway/devices.toml`
+- `/etc/systemd/system/bm-gateway.service`
+
+Review the config, then start the service:
+
+```bash
+sudo systemctl start bm-gateway.service
+sudo systemctl status bm-gateway.service
+```
 
 ## Repository Areas
 
 - `python/` contains the packaged CLI and future runtime code
-- `home-assistant/` contains the MQTT/Home Assistant contract docs
-- `rpi-setup/ansible/` is reserved for future automation
-- `web/` is reserved for the future local UI
+- `home-assistant/` contains the MQTT/Home Assistant contract docs and assets
+- `rpi-setup/ansible/` contains the first provisioning playbook
+- `rpi-setup/systemd/` contains the service unit
+- `rpi-setup/scripts/` contains install and update helpers
+- `web/` contains Docker packaging for the status interface
 
 ## Next Step
 
-Once the manual flow is stable, encode it under `rpi-setup/ansible/` instead of
-editing the Pi by hand.
+Use the Ansible playbook when you want to stop managing the Pi by hand.

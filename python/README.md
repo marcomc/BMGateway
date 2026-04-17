@@ -15,6 +15,10 @@ This directory contains the packaged Python CLI and service code for
 - `bm-gateway config validate`
 - `bm-gateway devices list`
 - `bm-gateway ha contract`
+- `bm-gateway ha discovery`
+- `bm-gateway run --once --dry-run`
+- `bm-gateway web render --snapshot-file <path>`
+- `bm-gateway web serve --snapshot-file <path>`
 
 ## Notes
 
@@ -22,3 +26,5 @@ This directory contains the packaged Python CLI and service code for
 - The installed CLI name remains `bm-gateway`.
 - The root `Makefile` is the supported entry point for linting, testing, and
   installation.
+- The current runtime uses a fake reader to exercise the pipeline until the
+  real Bluetooth adapter implementation is ready.

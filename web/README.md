@@ -1,10 +1,18 @@
 # Web Component
 
-This directory is reserved for the local web interface.
+This directory owns the deployable web interface packaging for `BMGateway`.
 
-The implementation is intentionally undecided at scaffold time. Before building
-here, confirm:
+Current implementation:
 
-- the frontend/backend split
-- whether the UI runs directly on the Raspberry Pi or in a container
-- whether the chosen stack is realistic for Raspberry Pi 3B constraints
+- the actual web server lives in the Python CLI as `bm-gateway web serve`
+- `Dockerfile` wraps that server as a standalone container
+- `compose.yaml` mounts the runtime snapshot directory read-only at `/data`
+
+Local usage:
+
+```bash
+docker compose -f web/compose.yaml up --build
+```
+
+The container expects the runtime to keep writing
+`/data/runtime/latest_snapshot.json`.

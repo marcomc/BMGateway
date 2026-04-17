@@ -1,0 +1,55 @@
+{
+  "cmps": {
+    "active_adapter": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_active_adapter",
+      "value_template": "{{ value_json.active_adapter }}"
+    },
+    "devices_online": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_devices_online",
+      "value_template": "{{ value_json.devices_online }}"
+    },
+    "devices_total": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_devices_total",
+      "value_template": "{{ value_json.devices_total }}"
+    },
+    "mqtt_connected": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_mqtt_connected",
+      "value_template": "{{ value_json.mqtt_connected }}"
+    },
+    "running": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_running",
+      "value_template": "{{ value_json.running }}"
+    },
+    "uptime": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_uptime",
+      "value_template": "{{ value_json.uptime }}"
+    },
+    "version": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/gateway/state",
+      "unique_id": "bm_gateway_version",
+      "value_template": "{{ value_json.version }}"
+    }
+  },
+  "dev": {
+    "ids": "bm_gateway",
+    "name": "BMGateway",
+    "sw": "0.1.0"
+  },
+  "o": {
+    "name": "BMGateway",
+    "sw": "0.1.0"
+  }
+}

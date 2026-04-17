@@ -1,0 +1,26 @@
+template:
+  - binary_sensor:
+      - name: BMGateway Online
+        unique_id: bm_gateway_online
+        state: "{{ states('sensor.bm_gateway_running')|lower == 'true' }}"
+        icon: mdi:bluetooth-connect
+  - sensor:
+      - name: BMGateway Device Summary
+        unique_id: bm_gateway_device_summary
+        state: >
+          {{ states('sensor.bm_gateway_devices_online') }}
+          /
+          {{ states('sensor.bm_gateway_devices_total') }}
+        icon: mdi:car-battery
+
+automation:
+  - id: bm_gateway_log_homeassistant_birth
+    alias: BMGateway Home Assistant Birth Log
+    trigger:
+      - platform: homeassistant
+        event: start
+    action:
+      - service: logbook.log
+        data:
+          name: BMGateway
+          message: Home Assistant restarted. Gateway discovery should republish on the next runtime cycle.

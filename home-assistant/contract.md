@@ -11,6 +11,13 @@ The same contract is rendered by the Python CLI:
 bm-gateway --config ./python/config/gateway.toml.example ha contract --json
 ```
 
+Discovery payload examples can be exported with:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example ha discovery \
+  --output-dir ./home-assistant/discovery
+```
+
 ## Discovery Strategy
 
 - Use Home Assistant MQTT Device Discovery
@@ -93,5 +100,9 @@ Per-device state topic:
 
 - Disabled devices may still exist in the registry, but the runtime can choose
   whether to publish them.
+- `bm-gateway run --publish-discovery` is the intended path for publishing
+  retained discovery payloads in the current runtime slice.
+- `home-assistant/packages/bm_gateway.yaml` is optional convenience glue on top
+  of MQTT discovery, not a replacement for it.
 - The runtime implementation should keep this document and the CLI contract
   output aligned.

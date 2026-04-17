@@ -1,0 +1,34 @@
+title: BMGateway
+views:
+  - title: Overview
+    path: bm-gateway
+    icon: mdi:car-battery
+    badges: []
+    cards:
+      - type: entities
+        title: Gateway
+        entities:
+          - entity: sensor.bm_gateway_version
+          - entity: sensor.bm_gateway_active_adapter
+          - entity: sensor.bm_gateway_devices_online
+          - entity: sensor.bm_gateway_devices_total
+          - entity: binary_sensor.bm_gateway_online
+      - type: gauge
+        entity: sensor.bm_gateway_devices_online
+        min: 0
+        max: 10
+        name: Devices Online
+      - type: entities
+        title: Example Device
+        entities:
+          - entity: sensor.bm200_house_voltage
+          - entity: sensor.bm200_house_soc
+          - entity: sensor.bm200_house_temperature
+          - entity: sensor.bm200_house_rssi
+          - entity: sensor.bm200_house_state
+      - type: history-graph
+        title: Example Device History
+        hours_to_show: 24
+        entities:
+          - entity: sensor.bm200_house_voltage
+          - entity: sensor.bm200_house_soc

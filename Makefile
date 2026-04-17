@@ -15,7 +15,7 @@ APP_VENV ?= $(APP_HOME)/venv
 APP_PYTHON ?= $(APP_VENV)/bin/python
 CONFIG_DIR ?= $(HOME)/.config/$(CONFIG_NAME)
 CONFIG_PATH ?= $(CONFIG_DIR)/config.toml
-DEVICES_PATH ?= $(CONFIG_DIR)/devices.toml.example
+DEVICES_PATH ?= $(CONFIG_DIR)/devices.toml
 PYTHON_SRC ?= python/src
 PYTHON_TESTS ?= python/tests
 PYTHON_CONFIG ?= python/config
@@ -23,7 +23,7 @@ MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs pyt
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-deps sync install install-dev install-link install-config uninstall lint test check run clean
+.PHONY: help check-deps sync install install-dev install-link install-config uninstall lint test check run ha-export web-render clean
 
 help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##" } /^[a-zA-Z_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -89,7 +89,7 @@ lint: sync ## Run Python, Markdown, and shell quality checks
 	@"$(UV)" run ruff format --check "$(PYTHON_SRC)" "$(PYTHON_TESTS)"
 	@"$(UV)" run mypy "$(PYTHON_SRC)" "$(PYTHON_TESTS)"
 	markdownlint --config .markdownlint.json $(MARKDOWN_FILES)
-	shellcheck --enable=all scripts/*.sh
+	shellcheck --enable=all scripts/*.sh rpi-setup/scripts/*.sh
 
 test: sync ## Run the test suite
 	@"$(UV)" run pytest -q
@@ -98,6 +98,12 @@ check: lint test ## Run the full maintainer quality gate
 
 run: sync ## Show the CLI help from the dev environment
 	@"$(UV)" run "$(CLI_NAME)" --help
+
+ha-export: sync ## Export Home Assistant discovery examples from the shipped config
+	@"$(UV)" run "$(CLI_NAME)" --config python/config/gateway.toml.example ha discovery --output-dir home-assistant/discovery
+
+web-render: sync ## Render the shipped snapshot to HTML
+	@"$(UV)" run "$(CLI_NAME)" web render --snapshot-file python/config/data/runtime/latest_snapshot.json
 
 clean: ## Remove local development artifacts
 	rm -rf "$(VENV)" .pytest_cache .mypy_cache .ruff_cache build dist "$(PYTHON_SRC)"/*.egg-info *.egg-info

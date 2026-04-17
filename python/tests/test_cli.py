@@ -86,6 +86,8 @@ def test_main_without_args_prints_focused_help(capsys: pytest.CaptureFixture[str
     assert "config" in captured.out
     assert "devices" in captured.out
     assert "ha" in captured.out
+    assert "run" in captured.out
+    assert "web" in captured.out
 
 
 def test_config_show_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -148,6 +150,31 @@ def test_ha_contract_emits_topics_and_entities(
     assert "voltage" in payload["devices"][0]["entities"]
 
 
+def test_ha_discovery_writes_export_files(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    output_dir = tmp_path / "discovery"
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "ha",
+            "discovery",
+            "--output-dir",
+            str(output_dir),
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "homeassistant/device/bm_gateway/config" in captured.out
+    assert (output_dir / "homeassistant__device__bm_gateway__config.json").exists()
+    assert (output_dir / "homeassistant__device__bm200_house__config.json").exists()
+
+
 def test_main_uses_sys_argv_when_no_explicit_argv_is_passed(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
@@ -166,3 +193,63 @@ def test_main_uses_sys_argv_when_no_explicit_argv_is_passed(
 
     assert result == 0
     assert "Configuration is valid." in captured.out
+
+
+def test_run_once_writes_snapshot_and_emits_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert payload["devices_total"] == 2
+    assert payload["devices_online"] == 1
+    assert (state_dir / "runtime" / "latest_snapshot.json").exists()
+
+
+def test_web_render_outputs_html_from_snapshot(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+        ]
+    )
+
+    result = cli.main(
+        [
+            "web",
+            "render",
+            "--snapshot-file",
+            str(state_dir / "runtime" / "latest_snapshot.json"),
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "<title>BMGateway Status</title>" in captured.out

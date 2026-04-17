@@ -1,0 +1,11 @@
+services:
+  bm-gateway-web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    image: bm-gateway-web:local
+    ports:
+      - "8080:8080"
+    volumes:
+      - ../python/config/data:/data:ro
+    restart: unless-stopped

@@ -61,6 +61,8 @@ Contains the packaged Python application:
 - `python/config/` for example config and schema artifacts
 - CLI commands for config validation, device inspection, and Home Assistant
   contract rendering
+- fake-reader runtime, snapshot persistence, MQTT publishing, and a simple
+  built-in web status layer
 
 The CLI entry point remains `bm-gateway`, and `python -m bm_gateway` remains a
 supported module entry point through the root packaging configuration.
@@ -70,8 +72,8 @@ supported module entry point through the root packaging configuration.
 Contains Home Assistant facing artifacts such as:
 
 - the MQTT topic and entity contract
-- integration notes and future package snippets
-- a place for dashboard definitions
+- exportable discovery payload examples
+- package snippets and dashboard definitions
 
 ### `rpi-setup/`
 
@@ -83,10 +85,11 @@ Contains Raspberry Pi setup and deployment guidance:
 
 ### `web/`
 
-Reserved for the local web interface.
+Contains deployment packaging for the status interface.
 
-The exact implementation remains open. Containerized deployment is acceptable
-if the chosen stack is realistic for Raspberry Pi 3B constraints.
+The current Python component ships the actual status web server. The `web/`
+directory adds Docker packaging so the interface can run as a separate
+container when that fits the Raspberry Pi deployment better.
 
 ## Requirements
 
@@ -123,7 +126,7 @@ make install
 - installs a config template to `~/.config/bm-gateway/config.toml` if it is
   missing
 - installs a device registry template to
-  `~/.config/bm-gateway/devices.toml.example` if it is missing
+  `~/.config/bm-gateway/devices.toml` if it is missing
 
 ### Editable Development Install
 
@@ -143,6 +146,7 @@ The Python CLI reads optional config from:
 Start from the example files in `python/config/`:
 
 - `python/config/config.toml.example`
+- `python/config/devices.toml`
 - `python/config/devices.toml.example`
 - `python/config/gateway.toml.example`
 - `python/config/config.schema.json`
@@ -181,6 +185,24 @@ Render the Home Assistant contract:
 bm-gateway --config ./python/config/gateway.toml.example ha contract --json
 ```
 
+Export Home Assistant discovery payload examples:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example ha discovery --output-dir ./home-assistant/discovery
+```
+
+Run the fake-reader runtime once and persist a snapshot:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example run --once --dry-run --json
+```
+
+Render HTML from the latest snapshot:
+
+```bash
+bm-gateway web render --snapshot-file ./python/config/data/runtime/latest_snapshot.json
+```
+
 ## Development
 
 Sync the environment and run the default quality gate:
@@ -200,8 +222,7 @@ make run
 
 ## Roadmap
 
-- Build the Bluetooth polling and publish runtime behind the documented
-  contract.
+- Replace the fake reader with real Bluetooth-backed BM200/BM300 adapters.
 - Extend the Home Assistant assets under `home-assistant/`.
 - Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
 - Choose and scaffold the web interface under `web/`.

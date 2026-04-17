@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 from .config import AppConfig
 from .device_registry import Device
 
@@ -50,3 +52,51 @@ def build_contract(config: AppConfig, devices: list[Device]) -> dict[str, object
             for device in devices
         ],
     }
+
+
+def build_discovery_payloads(
+    config: AppConfig, devices: list[Device]
+) -> dict[str, dict[str, object]]:
+    contract = build_contract(config, devices)
+    payloads: dict[str, dict[str, object]] = {}
+
+    gateway = cast(dict[str, object], contract["gateway"])
+    payloads[str(gateway["discovery_topic"])] = {
+        "dev": {
+            "ids": config.home_assistant.gateway_device_id,
+            "name": config.gateway.name,
+            "sw": "0.1.0",
+        },
+        "o": {"name": config.gateway.name, "sw": "0.1.0"},
+        "cmps": {
+            entity: {
+                "p": "sensor",
+                "unique_id": f"{config.home_assistant.gateway_device_id}_{entity}",
+                "state_topic": str(gateway["state_topic"]),
+                "value_template": f"{{{{ value_json.{entity} }}}}",
+            }
+            for entity in GATEWAY_ENTITIES
+        },
+    }
+
+    for device in devices:
+        state_topic = f"{config.mqtt.base_topic.rstrip('/')}/devices/{device.id}/state"
+        payloads[f"{config.mqtt.discovery_prefix.rstrip('/')}/device/{device.id}/config"] = {
+            "dev": {
+                "ids": device.id,
+                "name": device.name,
+                "mdl": device.type,
+                "sw": "0.1.0",
+            },
+            "o": {"name": config.gateway.name, "sw": "0.1.0"},
+            "cmps": {
+                entity: {
+                    "p": "sensor",
+                    "unique_id": f"{device.id}_{entity}",
+                    "state_topic": state_topic,
+                    "value_template": f"{{{{ value_json.{entity} }}}}",
+                }
+                for entity in DEVICE_ENTITIES
+            },
+        }
+    return payloads

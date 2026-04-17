@@ -1,0 +1,56 @@
+{
+  "cmps": {
+    "connected": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_connected",
+      "value_template": "{{ value_json.connected }}"
+    },
+    "last_seen": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_last_seen",
+      "value_template": "{{ value_json.last_seen }}"
+    },
+    "rssi": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_rssi",
+      "value_template": "{{ value_json.rssi }}"
+    },
+    "soc": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_soc",
+      "value_template": "{{ value_json.soc }}"
+    },
+    "state": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_state",
+      "value_template": "{{ value_json.state }}"
+    },
+    "temperature": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_temperature",
+      "value_template": "{{ value_json.temperature }}"
+    },
+    "voltage": {
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_voltage",
+      "value_template": "{{ value_json.voltage }}"
+    }
+  },
+  "dev": {
+    "ids": "bm200_house",
+    "mdl": "bm200",
+    "name": "BM200 House",
+    "sw": "0.1.0"
+  },
+  "o": {
+    "name": "BMGateway",
+    "sw": "0.1.0"
+  }
+}

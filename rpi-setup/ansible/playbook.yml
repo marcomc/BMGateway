@@ -1,0 +1,55 @@
+---
+- name: Install BMGateway runtime assets
+  hosts: bm_gateway
+  become: true
+  vars:
+    bm_gateway_root: /opt/bm-gateway
+    bm_gateway_config_dir: /etc/bm-gateway
+    bm_gateway_state_dir: /var/lib/bm-gateway
+  tasks:
+    - name: Install system packages
+      ansible.builtin.apt:
+        name:
+          - bluetooth
+          - bluez
+          - curl
+          - git
+          - make
+        state: present
+        update_cache: true
+
+    - name: Ensure directories exist
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: "0755"
+      loop:
+        - "{{ bm_gateway_root }}"
+        - "{{ bm_gateway_config_dir }}"
+        - "{{ bm_gateway_state_dir }}"
+
+    - name: Install systemd service
+      ansible.builtin.copy:
+        src: ../systemd/bm-gateway.service
+        dest: /etc/systemd/system/bm-gateway.service
+        mode: "0644"
+
+    - name: Install example config
+      ansible.builtin.copy:
+        src: ../../python/config/config.toml.example
+        dest: "{{ bm_gateway_config_dir }}/config.toml"
+        mode: "0644"
+        force: false
+
+    - name: Install devices registry
+      ansible.builtin.copy:
+        src: ../../python/config/devices.toml
+        dest: "{{ bm_gateway_config_dir }}/devices.toml"
+        mode: "0644"
+        force: false
+
+    - name: Reload and enable service
+      ansible.builtin.systemd:
+        name: bm-gateway.service
+        daemon_reload: true
+        enabled: true

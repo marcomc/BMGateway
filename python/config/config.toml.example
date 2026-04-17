@@ -6,7 +6,7 @@
 name = "__PROJECT_NAME__"
 timezone = "Europe/Rome"
 poll_interval_seconds = 15
-device_registry = "devices.toml.example"
+device_registry = "devices.toml"
 data_dir = "data"
 
 [bluetooth]

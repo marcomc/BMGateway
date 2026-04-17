@@ -1,0 +1,17 @@
+[Unit]
+Description=BMGateway Runtime
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=BMGATEWAY_CONFIG=/etc/bm-gateway/config.toml
+ExecStart=/usr/local/bin/bm-gateway --config ${BMGATEWAY_CONFIG} run --publish-discovery
+Restart=always
+RestartSec=10
+User=pi
+Group=pi
+WorkingDirectory=/var/lib/bm-gateway
+
+[Install]
+WantedBy=multi-user.target

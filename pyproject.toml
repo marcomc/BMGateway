@@ -12,7 +12,9 @@ license = { text = "MIT" }
 authors = [
   { name = "Marco Massari Calderone", email = "marco@marcomc.com" }
 ]
-dependencies = []
+dependencies = [
+  "paho-mqtt>=2.1.0",
+]
 
 [project.optional-dependencies]
 dev = [
