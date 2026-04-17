@@ -104,6 +104,8 @@ Expected outcomes:
   Assistant
 - `run --once --dry-run --json` writes a local snapshot without contacting MQTT
 - `run --once --json` polls enabled BM200 devices when `reader_mode = "live"`
+- each run also writes `runtime/gateway.db` with persisted gateway and device
+  rows
 
 ## Install the Service Assets
 
@@ -118,12 +120,15 @@ This installs:
 - `/etc/bm-gateway/config.toml`
 - `/etc/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
+- `/etc/systemd/system/bm-gateway-web.service`
 
 Review the config, then start the service:
 
 ```bash
 sudo systemctl start bm-gateway.service
+sudo systemctl start bm-gateway-web.service
 sudo systemctl status bm-gateway.service
+sudo systemctl status bm-gateway-web.service
 ```
 
 ## Repository Areas
@@ -134,6 +139,7 @@ sudo systemctl status bm-gateway.service
 - `rpi-setup/systemd/` contains the service unit
 - `rpi-setup/scripts/` contains install and update helpers
 - `web/` contains Docker packaging for the status interface
+- `web/` contains the host-run management web plan and docs
 
 ## Next Step
 

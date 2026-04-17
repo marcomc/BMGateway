@@ -6,8 +6,8 @@ provisioning.
 Current contents:
 
 - `inventory.example.ini` as a starter inventory
-- `playbook.yml` to install packages, config, the devices registry, and the
-  systemd unit
+- `playbook.yml` to install packages, config, the devices registry, and both
+  systemd units
 
 Run it from the repository root with:
 

@@ -15,5 +15,6 @@ The install helper now places:
 - `/etc/bm-gateway/config.toml`
 - `/etc/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
+- `/etc/systemd/system/bm-gateway-web.service`
 
 Stabilize the manual setup first, then translate it into Ansible.

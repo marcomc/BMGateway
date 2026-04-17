@@ -41,6 +41,7 @@ def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
                 'timezone = "Europe/Rome"',
                 "poll_interval_seconds = 15",
                 'device_registry = "devices.toml"',
+                'reader_mode = "fake"',
                 "",
                 "[bluetooth]",
                 'adapter = "auto"',
@@ -67,6 +68,10 @@ def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
                 "enabled = true",
                 'host = "0.0.0.0"',
                 "port = 8080",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
             ]
         )
         + "\n",

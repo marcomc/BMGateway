@@ -1,18 +1,25 @@
 # Web Component
 
-This directory owns the deployable web interface packaging for `BMGateway`.
+This directory owns the host-run web interface plan for `BMGateway`.
 
 Current implementation:
 
-- the actual web server lives in the Python CLI as `bm-gateway web serve`
-- `Dockerfile` wraps that server as a standalone container
-- `compose.yaml` mounts the runtime snapshot directory read-only at `/data`
+- the actual web servers live in the Python CLI
+- `bm-gateway web serve` renders a snapshot file
+- `bm-gateway web manage` runs the management UI as a separate Python process
 
-Local usage:
+Recommended Raspberry Pi 3B usage:
 
 ```bash
-docker compose -f web/compose.yaml up --build
+bm-gateway --config /etc/bm-gateway/config.toml web manage --port 8080
 ```
 
-The container expects the runtime to keep writing
-`/data/runtime/latest_snapshot.json`.
+The active architecture recommendation is:
+
+- collector/runtime process under `systemd`
+- separate web-management process under `systemd`
+- no Docker requirement on Raspberry Pi OS 32-bit
+
+See:
+
+- `docs/research/2026-04-17-pi3b-web-and-os-research.md`

@@ -53,6 +53,23 @@ def load_device_registry(path: Path) -> list[Device]:
     return devices
 
 
+def write_device_registry(path: Path, devices: list[Device]) -> None:
+    lines: list[str] = []
+    for device in devices:
+        lines.extend(
+            [
+                "[[devices]]",
+                f'id = "{device.id}"',
+                f'type = "{device.type}"',
+                f'name = "{device.name}"',
+                f'mac = "{device.mac}"',
+                f"enabled = {'true' if device.enabled else 'false'}",
+                "",
+            ]
+        )
+    path.write_text("\n".join(lines), encoding="utf-8")
+
+
 def validate_devices(devices: list[Device]) -> list[str]:
     errors: list[str] = []
     seen_ids: set[str] = set()

@@ -14,9 +14,15 @@ from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, load_device_registry, validate_devices
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
-from .runtime import build_snapshot, iterations_from_flags, sleep_interval, state_file_path
-from .state_store import load_snapshot, write_snapshot
-from .web import render_snapshot_html, serve_snapshot
+from .runtime import (
+    build_snapshot,
+    database_file_path,
+    iterations_from_flags,
+    sleep_interval,
+    state_file_path,
+)
+from .state_store import load_snapshot, persist_snapshot, prune_history, write_snapshot
+from .web import render_snapshot_html, serve_management, serve_snapshot
 
 
 def format_main_help() -> str:
@@ -30,8 +36,8 @@ def format_main_help() -> str:
             "  config   Show or validate the gateway configuration",
             "  devices  Inspect the configured device registry",
             "  ha       Render the Home Assistant MQTT contract",
-            "  run      Execute the fake-reader runtime and persist snapshots",
-            "  web      Render or serve the latest snapshot",
+            "  run      Execute the gateway runtime and persist snapshots",
+            "  web      Render, serve, or manage the web interface",
             "",
             "Run `bm-gateway <command> --help` for command-specific help.",
         ]
@@ -94,7 +100,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Write one JSON payload file per discovery topic into this directory.",
     )
 
-    run_parser = subparsers.add_parser("run", help="Execute the fake-reader runtime.")
+    run_parser = subparsers.add_parser("run", help="Execute the gateway runtime.")
     run_parser.add_argument("--once", action="store_true", help="Run one iteration and exit.")
     run_parser.add_argument(
         "--iterations",
@@ -138,6 +144,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     web_serve.add_argument("--host", type=str, default="0.0.0.0", help="Bind host.")
     web_serve.add_argument("--port", type=int, default=8080, help="Bind port.")
+    web_manage = web_subparsers.add_parser(
+        "manage",
+        help="Run the host-managed web interface for status, config, and history.",
+    )
+    web_manage.add_argument("--host", type=str, default="0.0.0.0", help="Bind host.")
+    web_manage.add_argument("--port", type=int, default=8080, help="Bind port.")
+    web_manage.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="Override the base directory used for runtime state files.",
+    )
     return parser
 
 
@@ -181,6 +199,8 @@ def _handle_config_show(config: AppConfig, as_json: bool) -> int:
     print(f"gateway.poll_interval_seconds: {config.gateway.poll_interval_seconds}")
     print(f"gateway.device_registry: {config.device_registry_path}")
     print(f"gateway.reader_mode: {config.gateway.reader_mode}")
+    print(f"retention.raw_retention_days: {config.retention.raw_retention_days}")
+    print(f"retention.daily_retention_days: {config.retention.daily_retention_days}")
     print(f"mqtt.base_topic: {config.mqtt.base_topic}")
     print(f"home_assistant.status_topic: {config.home_assistant.status_topic}")
     print(f"web.bind: {config.web.host}:{config.web.port}")
@@ -324,6 +344,13 @@ def _run_cycle(
         devices=snapshot.devices,
     )
     write_snapshot(state_file_path(config, state_dir=state_dir), snapshot)
+    database_path = database_file_path(config, state_dir=state_dir)
+    persist_snapshot(database_path, snapshot)
+    prune_history(
+        database_path,
+        raw_retention_days=config.retention.raw_retention_days,
+        daily_retention_days=config.retention.daily_retention_days,
+    )
     return snapshot
 
 
@@ -380,6 +407,11 @@ def _handle_web_render(snapshot_file: Path) -> int:
 
 def _handle_web_serve(*, snapshot_file: Path, host: str, port: int) -> int:
     serve_snapshot(host=host, port=port, snapshot_path=snapshot_file)
+    return 0
+
+
+def _handle_web_manage(*, config_path: Path, host: str, port: int, state_dir: Path | None) -> int:
+    serve_management(host=host, port=port, config_path=config_path, state_dir=state_dir)
     return 0
 
 
@@ -444,6 +476,13 @@ def main(argv: Sequence[str] | None = None) -> int:
                 snapshot_file=args.snapshot_file,
                 host=args.host,
                 port=args.port,
+            )
+        if args.web_command == "manage":
+            return _handle_web_manage(
+                config_path=args.config,
+                host=args.host,
+                port=args.port,
+                state_dir=args.state_dir,
             )
 
     print(format_main_help())

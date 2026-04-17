@@ -28,10 +28,16 @@
         - "{{ bm_gateway_config_dir }}"
         - "{{ bm_gateway_state_dir }}"
 
-    - name: Install systemd service
+    - name: Install runtime systemd service
       ansible.builtin.copy:
         src: ../systemd/bm-gateway.service
         dest: /etc/systemd/system/bm-gateway.service
+        mode: "0644"
+
+    - name: Install web systemd service
+      ansible.builtin.copy:
+        src: ../systemd/bm-gateway-web.service
+        dest: /etc/systemd/system/bm-gateway-web.service
         mode: "0644"
 
     - name: Install example config
@@ -48,8 +54,13 @@
         mode: "0644"
         force: false
 
-    - name: Reload and enable service
+    - name: Reload and enable runtime service
       ansible.builtin.systemd:
         name: bm-gateway.service
         daemon_reload: true
+        enabled: true
+
+    - name: Enable web service
+      ansible.builtin.systemd:
+        name: bm-gateway-web.service
         enabled: true
