@@ -17,6 +17,10 @@ This directory contains the packaged Python CLI and service code for
 - `bm-gateway ha contract`
 - `bm-gateway ha discovery`
 - `bm-gateway run --once --dry-run`
+- `bm-gateway history daily --device-id <id>`
+- `bm-gateway history monthly --device-id <id>`
+- `bm-gateway history stats`
+- `bm-gateway history prune`
 - `bm-gateway web render --snapshot-file <path>`
 - `bm-gateway web serve --snapshot-file <path>`
 - `bm-gateway web manage`
@@ -43,7 +47,10 @@ Device readings also carry:
 - `error_detail`
 
 The database also keeps daily rollups so long-term comparisons can survive raw
-retention pruning.
+retention pruning, and monthly summaries are derived from those rollups.
+
+The CLI can inspect raw history, daily rollups, monthly summaries, and storage
+retention stats directly.
 
 ## Notes
 
@@ -51,5 +58,6 @@ retention pruning.
 - The installed CLI name remains `bm-gateway`.
 - The root `Makefile` is the supported entry point for linting, testing, and
   installation.
-- The current runtime uses a fake reader to exercise the pipeline until the
-  real Bluetooth adapter implementation is ready.
+- The runtime supports both fake and live `bm200` polling paths.
+- Live `bm200` history retrieval is not wired yet, so long-term history is
+  still built from per-cycle state snapshots.

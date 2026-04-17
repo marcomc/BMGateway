@@ -26,8 +26,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `error_code` and `error_detail` fields in runtime payloads.
 - Raw-retention pruning and daily SQLite rollups for longer-term history on
   Raspberry Pi storage.
+- CLI history inspection commands for raw, daily, and monthly summaries.
+- Storage summary and manual retention-pruning commands under `history`.
 - Host-run Python management web interface with config/device TOML editing,
   history views, and one-shot run triggering.
+- Expanded management web interface coverage for configured devices, Home
+  Assistant contract/discovery views, storage summary, and manual history
+  pruning.
 - Source-backed Raspberry Pi 3B / Raspberry Pi OS 32-bit / Docker viability
   research under `docs/research/`.
 - Raspberry Pi 3B manual setup guide, systemd service assets, install/update

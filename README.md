@@ -64,6 +64,7 @@ Contains the packaged Python application:
 - fake-reader runtime, snapshot persistence, MQTT publishing, and a simple
   built-in web status layer
 - live `bm200` BLE polling, SQLite persistence, and classified device errors
+- history inspection, storage stats, and retention pruning commands
 
 The CLI entry point remains `bm-gateway`, and `python -m bm_gateway` remains a
 supported module entry point through the root packaging configuration.
@@ -207,6 +208,15 @@ Export Home Assistant discovery payload examples:
 bm-gateway --config ./python/config/gateway.toml.example ha discovery --output-dir ./home-assistant/discovery
 ```
 
+Inspect persisted history:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example history daily --device-id bm200_house --json
+bm-gateway --config ./python/config/gateway.toml.example history monthly --device-id bm200_house --json
+bm-gateway --config ./python/config/gateway.toml.example history stats --json
+bm-gateway --config ./python/config/gateway.toml.example history prune
+```
+
 Run the fake-reader runtime once and persist a snapshot:
 
 ```bash
@@ -247,6 +257,7 @@ The database keeps:
 
 - raw per-cycle readings with pruning
 - daily device rollups for long-term comparison
+- monthly summaries derived from daily rollups
 
 ## Development
 
@@ -268,11 +279,12 @@ make run
 ## Roadmap
 
 - Extend live Bluetooth support beyond the current BM200 implementation.
-- Add BM200 history retrieval and persistence.
-- Add monthly degradation summaries on top of the new daily rollups.
+- Complete live BM200 history retrieval and persist decoded history packets.
+- Add yearly degradation summaries on top of the existing daily and monthly rollups.
 - Extend the Home Assistant assets under `home-assistant/`.
 - Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
-- Grow the host-run management web UI beyond the current editing and history views.
+- Grow the host-run management web UI beyond the current config, contract,
+  storage, and history views.
 
 ## License
 
