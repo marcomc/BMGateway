@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "BMGateway config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "app_name": {
+      "type": "string",
+      "default": "BMGateway"
+    },
+    "default_output": {
+      "type": "string",
+      "enum": ["text", "json"],
+      "default": "text"
+    },
+    "verbose": {
+      "type": "boolean",
+      "default": false
+    }
+  }
+}
+

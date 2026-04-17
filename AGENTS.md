@@ -1,0 +1,66 @@
+# Project Agent Notes
+
+## Project Identity
+
+- Project name: `BMGateway`
+- Python package: `bm_gateway`
+- Installed CLI: `bm-gateway`
+- Module entry point: `python -m bm_gateway`
+- Default user config path: `~/.config/bm-gateway/config.toml`
+- Default standalone runtime path: `~/.local/share/bm-gateway/venv`
+- Default user-facing binary path: `~/.local/bin/bm-gateway`
+- Repository shape: mono-repo with first-class `python/`, `home-assistant/`,
+  `rpi-setup/`, and `web/` directories
+
+## New Chat Bootstrap
+
+At the start of every new AI agent chat for this repository, read:
+
+1. `README.md`
+2. `Makefile`
+3. `pyproject.toml`
+4. `CHANGELOG.md`
+5. `TODO.md`
+6. `python/README.md`
+
+## Development Rules
+
+- Keep the project installable as a packaged Python CLI.
+- Keep importable application code under `python/src/bm_gateway/`.
+- Keep tests under `python/tests/`.
+- Prefer focused modules instead of one large `cli.py`.
+- Keep `python -m bm_gateway` working.
+- Preserve the standalone install behavior of `make install`.
+- Keep Home Assistant assets under `home-assistant/`.
+- Keep Raspberry Pi setup documentation and automation under `rpi-setup/`.
+- Keep web interface code and notes under `web/`.
+
+## Quality Gates
+
+Use `make check` as the default maintainer validation command.
+
+Expected checks:
+
+- `uv run pytest -q`
+- `uv run ruff check python/src python/tests`
+- `uv run ruff format --check python/src python/tests`
+- `uv run mypy python/src python/tests`
+- `markdownlint --config .markdownlint.json README.md CHANGELOG.md TODO.md AGENTS.md docs/*.md python/*.md home-assistant/*.md rpi-setup/*.md rpi-setup/ansible/*.md web/*.md`
+- `shellcheck --enable=all scripts/*.sh`
+
+## Documentation Rules
+
+- Keep `README.md` accurate for end users.
+- Keep component `README.md` files accurate for contributors.
+- Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
+- Remove completed items from `TODO.md` when they ship.
+- Update config documentation when adding or changing config keys.
+
+## Release Hygiene
+
+When cutting a release, update the version consistently in:
+
+- `pyproject.toml`
+- `python/src/bm_gateway/__init__.py`
+- `CHANGELOG.md`
+- tests that assert the version string

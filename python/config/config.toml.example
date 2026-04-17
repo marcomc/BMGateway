@@ -1,0 +1,7 @@
+# Copy this file to ~/.config/__CONFIG_NAME__/config.toml or pass it with
+# --config.
+
+app_name = "__PROJECT_NAME__"
+default_output = "text"
+verbose = false
+
