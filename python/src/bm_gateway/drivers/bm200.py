@@ -3,7 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import binascii
+import itertools
+import struct
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any, Protocol
 
 from bleak import BleakClient
@@ -27,6 +31,26 @@ class BM200Measurement:
     soc: int
     status_code: int
     state: str
+
+
+@dataclass(frozen=True)
+class BM200HistoryReading:
+    ts: str
+    voltage: float
+    min_crank_voltage: float
+    event_type: int
+
+
+class BM200Error(Exception):
+    """Base error for BM200 driver failures."""
+
+
+class BM200TimeoutError(BM200Error):
+    """Raised when no voltage notification is received in time."""
+
+
+class BM200ProtocolError(BM200Error):
+    """Raised when the payload is not a BM200 voltage packet."""
 
 
 class BM200Transport(Protocol):
@@ -54,7 +78,7 @@ def decrypt_payload(encrypted: bytes | bytearray) -> bytes:
 
 def parse_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
     if len(plaintext) < 4 or plaintext[0] != 0xF5:
-        raise ValueError("plaintext does not contain a BM200 voltage packet")
+        raise BM200ProtocolError("plaintext does not contain a BM200 voltage packet")
 
     raw = plaintext.hex()
     voltage = int(raw[2:5], 16) / 100.0
@@ -72,6 +96,60 @@ def parse_voltage_notification(encrypted: bytes | bytearray) -> BM200Measurement
     return parse_plaintext_measurement(decrypt_payload(encrypted))
 
 
+def encode_history_count_request() -> bytes:
+    return bytes([0xE7, 0x01])
+
+
+def encode_history_download_request(size: int) -> bytes:
+    return bytes([0xE3, 0x00, 0x00, *struct.pack(">L", size)])
+
+
+def decode_history_count_packet(plaintext: bytes) -> int:
+    if len(plaintext) < 4 or plaintext[0] != 0xE7:
+        raise BM200ProtocolError("plaintext does not contain a BM200 history-count packet")
+    return int(struct.unpack(">L", bytes([0, *plaintext[1:4]]))[0])
+
+
+def decode_history_nibbles(payload: bytes, fmt: str) -> list[int]:
+    hex_str = binascii.hexlify(payload)
+    letter_groups = [(item[0], len(list(item[1]))) for item in itertools.groupby(fmt)]
+    index = 0
+    values: list[int] = []
+    for _letter, letters_count in letter_groups:
+        part = hex_str[index : index + letters_count]
+        index += letters_count
+        values.append(
+            sum(int(chr(value), 16) << (4 * bit) for bit, value in enumerate(reversed(part)))
+        )
+    return values
+
+
+def parse_history_items(
+    payload: bytes,
+    *,
+    reference_ts: datetime,
+) -> list[BM200HistoryReading]:
+    items = [
+        payload[index : index + 4]
+        for index in range(0, len(payload), 4)
+        if len(payload[index : index + 4]) == 4
+    ]
+    total_items = len(items)
+    readings: list[BM200HistoryReading] = []
+    for index, item in enumerate(items):
+        values = decode_history_nibbles(item, "xxxkyyyp")
+        ts = reference_ts - timedelta(minutes=(total_items - 1 - index) * 2)
+        readings.append(
+            BM200HistoryReading(
+                ts=ts.isoformat(timespec="seconds"),
+                voltage=values[0] / 100,
+                min_crank_voltage=values[2] / 100,
+                event_type=values[3],
+            )
+        )
+    return readings
+
+
 class BleakBM200Transport:
     async def read_voltage_notification(
         self, *, address: str, adapter: str, timeout_seconds: float
@@ -86,7 +164,10 @@ class BleakBM200Transport:
             await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
             try:
                 while True:
-                    encrypted = await asyncio.wait_for(queue.get(), timeout=timeout_seconds)
+                    try:
+                        encrypted = await asyncio.wait_for(queue.get(), timeout=timeout_seconds)
+                    except TimeoutError as exc:
+                        raise BM200TimeoutError(address) from exc
                     plaintext = decrypt_payload(encrypted)
                     if plaintext and plaintext[0] == 0xF5:
                         return encrypted
