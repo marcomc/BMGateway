@@ -1,13 +1,11 @@
 # Home Assistant Component
 
-This directory is reserved for Home Assistant facing artifacts.
+This directory owns the Home Assistant facing contract for `BMGateway`.
 
-Planned contents include:
+Current contents:
 
-- MQTT discovery payload examples
-- Home Assistant package snippets
-- dashboard definitions
-- operator-facing integration notes
+- [contract.md](contract.md) for the MQTT topic and entity contract
+- `packages/` for future Home Assistant package snippets
+- `dashboards/` for future dashboard definitions
 
-This scaffold intentionally leaves the implementation open until the Python
-gateway contract is defined.
+The Python CLI mirrors this contract through `bm-gateway ha contract`.

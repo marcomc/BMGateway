@@ -1,22 +1,56 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "BMGateway config",
+  "title": "BMGateway Config",
   "type": "object",
-  "additionalProperties": false,
   "properties": {
-    "app_name": {
-      "type": "string",
-      "default": "BMGateway"
+    "gateway": {
+      "type": "object",
+      "required": ["name", "timezone", "poll_interval_seconds", "device_registry"],
+      "properties": {
+        "name": { "type": "string" },
+        "timezone": { "type": "string" },
+        "poll_interval_seconds": { "type": "integer", "minimum": 1 },
+        "device_registry": { "type": "string" },
+        "data_dir": { "type": "string" }
+      }
     },
-    "default_output": {
-      "type": "string",
-      "enum": ["text", "json"],
-      "default": "text"
+    "bluetooth": {
+      "type": "object",
+      "properties": {
+        "adapter": { "type": "string" },
+        "scan_timeout_seconds": { "type": "integer", "minimum": 1 },
+        "connect_timeout_seconds": { "type": "integer", "minimum": 1 }
+      }
     },
-    "verbose": {
-      "type": "boolean",
-      "default": false
+    "mqtt": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1 },
+        "username": { "type": "string" },
+        "password": { "type": "string" },
+        "base_topic": { "type": "string" },
+        "discovery_prefix": { "type": "string" },
+        "retain_discovery": { "type": "boolean" },
+        "retain_state": { "type": "boolean" }
+      }
+    },
+    "home_assistant": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "status_topic": { "type": "string" },
+        "gateway_device_id": { "type": "string" }
+      }
+    },
+    "web": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "host": { "type": "string" },
+        "port": { "type": "integer", "minimum": 1 }
+      }
     }
   }
 }
-

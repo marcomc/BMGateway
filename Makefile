@@ -15,10 +15,11 @@ APP_VENV ?= $(APP_HOME)/venv
 APP_PYTHON ?= $(APP_VENV)/bin/python
 CONFIG_DIR ?= $(HOME)/.config/$(CONFIG_NAME)
 CONFIG_PATH ?= $(CONFIG_DIR)/config.toml
+DEVICES_PATH ?= $(CONFIG_DIR)/devices.toml.example
 PYTHON_SRC ?= python/src
 PYTHON_TESTS ?= python/tests
 PYTHON_CONFIG ?= python/config
-MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md docs/*.md python/*.md home-assistant/*.md rpi-setup/*.md rpi-setup/ansible/*.md web/*.md
+MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs python home-assistant rpi-setup web -type f -name '*.md' | sort)
 
 .DEFAULT_GOAL := help
 
@@ -69,6 +70,12 @@ install-config: ## Install the example config file if missing
 		echo "Installed config template to $(CONFIG_PATH)"; \
 	else \
 		echo "Config already exists at $(CONFIG_PATH)"; \
+	fi
+	@if [ ! -f "$(DEVICES_PATH)" ]; then \
+		cp "$(PYTHON_CONFIG)/devices.toml.example" "$(DEVICES_PATH)"; \
+		echo "Installed devices template to $(DEVICES_PATH)"; \
+	else \
+		echo "Devices template already exists at $(DEVICES_PATH)"; \
 	fi
 
 uninstall: ## Remove the standalone runtime and user-facing symlink

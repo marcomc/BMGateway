@@ -1,9 +1,5 @@
-# Copy this file to ~/.config/__CONFIG_NAME__/config.toml or pass it with
-# --config. Keep devices.toml beside this file unless you use an absolute
-# device_registry path.
-
 [gateway]
-name = "__PROJECT_NAME__"
+name = "BMGateway"
 timezone = "Europe/Rome"
 poll_interval_seconds = 15
 device_registry = "devices.toml.example"

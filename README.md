@@ -59,25 +59,26 @@ Contains the packaged Python application:
 - `python/src/bm_gateway/` for importable code
 - `python/tests/` for test coverage
 - `python/config/` for example config and schema artifacts
+- CLI commands for config validation, device inspection, and Home Assistant
+  contract rendering
 
 The CLI entry point remains `bm-gateway`, and `python -m bm_gateway` remains a
 supported module entry point through the root packaging configuration.
 
 ### `home-assistant/`
 
-Reserved for Home Assistant facing artifacts such as:
+Contains Home Assistant facing artifacts such as:
 
-- MQTT discovery payload examples
-- package snippets
-- dashboard definitions
-- operator notes for HA setup
+- the MQTT topic and entity contract
+- integration notes and future package snippets
+- a place for dashboard definitions
 
 ### `rpi-setup/`
 
-Reserved for Raspberry Pi setup and deployment guidance:
+Contains Raspberry Pi setup and deployment guidance:
 
-- manual setup instructions first
-- Ansible playbooks and inventory later
+- a manual setup guide for Raspberry Pi 3B
+- an Ansible area for later automation
 - service installation and operational notes
 
 ### `web/`
@@ -121,6 +122,8 @@ make install
 - links `bm-gateway` into `~/.local/bin/bm-gateway`
 - installs a config template to `~/.config/bm-gateway/config.toml` if it is
   missing
+- installs a device registry template to
+  `~/.config/bm-gateway/devices.toml.example` if it is missing
 
 ### Editable Development Install
 
@@ -140,6 +143,8 @@ The Python CLI reads optional config from:
 Start from the example files in `python/config/`:
 
 - `python/config/config.toml.example`
+- `python/config/devices.toml.example`
+- `python/config/gateway.toml.example`
 - `python/config/config.schema.json`
 
 ## Usage
@@ -153,9 +158,27 @@ bm-gateway
 Inspect the resolved configuration:
 
 ```bash
-bm-gateway info
-bm-gateway --config ./python/config/config.toml.example info --json
-python -m bm_gateway info
+bm-gateway config show
+bm-gateway --config ./python/config/gateway.toml.example config show --json
+python -m bm_gateway config show
+```
+
+Validate the config and registry:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example config validate
+```
+
+Inspect configured devices:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example devices list --json
+```
+
+Render the Home Assistant contract:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example ha contract --json
 ```
 
 ## Development
@@ -177,9 +200,10 @@ make run
 
 ## Roadmap
 
-- Replace the placeholder `info` command with gateway-oriented commands.
-- Define the MQTT and Home Assistant contract under `home-assistant/`.
-- Write the Raspberry Pi setup guide under `rpi-setup/`.
+- Build the Bluetooth polling and publish runtime behind the documented
+  contract.
+- Extend the Home Assistant assets under `home-assistant/`.
+- Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
 - Choose and scaffold the web interface under `web/`.
 
 ## License

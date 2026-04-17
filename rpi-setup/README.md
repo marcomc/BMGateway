@@ -1,11 +1,11 @@
 # Raspberry Pi Setup
 
-This directory is reserved for Raspberry Pi provisioning and operational
-guidance.
+This directory owns Raspberry Pi provisioning and operational guidance.
 
-Planned contents include:
+Current contents:
 
-- manual setup instructions for Raspberry Pi 3B
-- Bluetooth and system package prerequisites
-- service installation notes
-- optional Ansible automation once the manual flow is stable
+- [manual-setup.md](manual-setup.md) for the first manual Raspberry Pi 3B setup
+  flow
+- `ansible/` as the future home for provisioning automation
+
+Stabilize the manual setup first, then translate it into Ansible.

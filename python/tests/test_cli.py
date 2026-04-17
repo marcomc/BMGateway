@@ -1,60 +1,168 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
-from bm_gateway import __version__, cli
+from bm_gateway import cli
+
+
+def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
+    devices_path = tmp_path / "devices.toml"
+    devices_path.write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+                "",
+                "[[devices]]",
+                'id = "bm300_van"',
+                'type = "bm300pro"',
+                'name = "BM300 Van"',
+                'mac = "AA:BB:CC:DD:EE:02"',
+                "enabled = false",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    config_path = tmp_path / "gateway.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 15",
+                'device_registry = "devices.toml"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 8",
+                "connect_timeout_seconds = 10",
+                "",
+                "[mqtt]",
+                "enabled = true",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "secret"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = true",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 8080",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    return config_path, devices_path
 
 
 def test_main_without_args_prints_focused_help(capsys: pytest.CaptureFixture[str]) -> None:
-    expected_usage = "usage: bm-gateway [--version] [--config PATH] [--verbose] <command>"
     result = cli.main([])
 
     captured = capsys.readouterr()
 
     assert result == 0
-    assert expected_usage in captured.out
-    assert "Commands:" in captured.out
-    assert "info" in captured.out
+    assert "usage: bm-gateway" in captured.out
+    assert "config" in captured.out
+    assert "devices" in captured.out
+    assert "ha" in captured.out
 
 
-def test_version_flag_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
-    result = cli.main(["--version"])
+def test_config_show_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
 
-    captured = capsys.readouterr()
-
-    assert result == 0
-    assert captured.out.strip() == __version__
-
-
-def test_info_command_reads_config_file(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    config_path = tmp_path / "config.toml"
-    config_path.write_text(
-        'app_name = "Example App"\ndefault_output = "json"\nverbose = false\n',
-        encoding="utf-8",
-    )
-
-    result = cli.main(["--config", str(config_path), "info"])
-
-    captured = capsys.readouterr()
-
-    assert result == 0
-    assert "app_name: Example App" in captured.out
-    assert "default_output: json" in captured.out
-    assert f"config_path: {config_path}" in captured.out
-
-
-def test_info_command_can_emit_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    config_path = tmp_path / "config.toml"
-    config_path.write_text('app_name = "Example App"\n', encoding="utf-8")
-
-    result = cli.main(["--config", str(config_path), "info", "--json"])
+    result = cli.main(["--config", str(config_path), "config", "show", "--json"])
 
     captured = capsys.readouterr()
 
     assert result == 0
     payload = json.loads(captured.out)
-    assert payload["project_name"] == "BMGateway"
-    assert payload["cli_name"] == "bm-gateway"
-    assert payload["config"]["app_name"] == "Example App"
+    assert payload["gateway"]["name"] == "BMGateway"
+    assert payload["gateway"]["device_registry"].endswith("devices.toml")
+    assert payload["mqtt"]["base_topic"] == "bm_gateway"
+
+
+def test_config_validate_reports_valid_configuration(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+
+    result = cli.main(["--config", str(config_path), "config", "validate"])
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "Configuration is valid." in captured.out
+    assert "2 devices loaded" in captured.out
+
+
+def test_devices_list_emits_registry_json(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+
+    result = cli.main(["--config", str(config_path), "devices", "list", "--json"])
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert len(payload["devices"]) == 2
+    assert payload["devices"][0]["id"] == "bm200_house"
+    assert payload["devices"][1]["enabled"] is False
+
+
+def test_ha_contract_emits_topics_and_entities(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+
+    result = cli.main(["--config", str(config_path), "ha", "contract", "--json"])
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert payload["gateway"]["state_topic"] == "bm_gateway/gateway/state"
+    assert payload["devices"][0]["discovery_topic"] == "homeassistant/device/bm200_house/config"
+    assert "voltage" in payload["devices"][0]["entities"]
+
+
+def test_main_uses_sys_argv_when_no_explicit_argv_is_passed(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["bm-gateway", "--config", str(config_path), "config", "validate"],
+    )
+
+    result = cli.main()
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "Configuration is valid." in captured.out

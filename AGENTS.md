@@ -22,6 +22,9 @@ At the start of every new AI agent chat for this repository, read:
 4. `CHANGELOG.md`
 5. `TODO.md`
 6. `python/README.md`
+7. `docs/specs/2026-04-17-foundation-spec.md`
+8. `home-assistant/contract.md`
+9. `rpi-setup/manual-setup.md`
 
 ## Development Rules
 
@@ -34,6 +37,7 @@ At the start of every new AI agent chat for this repository, read:
 - Keep Home Assistant assets under `home-assistant/`.
 - Keep Raspberry Pi setup documentation and automation under `rpi-setup/`.
 - Keep web interface code and notes under `web/`.
+- Keep the CLI contract aligned with `home-assistant/contract.md`.
 
 ## Quality Gates
 
