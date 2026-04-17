@@ -15,8 +15,8 @@ class DeviceReading:
     connected: bool
     voltage: float
     soc: int
-    temperature: float
-    rssi: int
+    temperature: float | None
+    rssi: int | None
     state: str
     last_seen: str
     adapter: str

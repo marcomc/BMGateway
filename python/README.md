@@ -20,6 +20,14 @@ This directory contains the packaged Python CLI and service code for
 - `bm-gateway web render --snapshot-file <path>`
 - `bm-gateway web serve --snapshot-file <path>`
 
+## Runtime Modes
+
+- `gateway.reader_mode = "fake"` keeps the deterministic development reader
+- `gateway.reader_mode = "live"` enables explicit BLE polling for `bm200`
+  devices
+- `bm300pro` remains unsupported in live mode and will be reported as
+  `unsupported`
+
 ## Notes
 
 - The packaging metadata lives in the repository root `pyproject.toml`.

@@ -6,7 +6,8 @@ This guide bootstraps a Raspberry Pi 3B to the point where the `BMGateway` CLI
 can validate config, inspect the device registry, and render the Home Assistant
 contract.
 
-It does not yet install the future long-running Bluetooth polling service.
+It also covers the current BM200 live polling path. BM300 Pro is still not
+implemented.
 
 ## Base System
 
@@ -79,6 +80,8 @@ Use the example files in `python/config/` as the starting point:
   `~/.config/bm-gateway/config.toml`
 - copy `python/config/devices.toml` beside it if you want a separate working
   copy
+- set `gateway.reader_mode = "live"` when you want to connect to real BM200
+  hardware
 - replace MQTT and device values with real values
 
 ## Validate the Setup
@@ -89,6 +92,7 @@ bm-gateway config validate
 bm-gateway devices list --json
 bm-gateway ha contract --json
 bm-gateway run --once --dry-run --json
+bm-gateway run --once --json
 ```
 
 Expected outcomes:
@@ -99,6 +103,7 @@ Expected outcomes:
 - `ha contract --json` prints the MQTT topics and entities expected by Home
   Assistant
 - `run --once --dry-run --json` writes a local snapshot without contacting MQTT
+- `run --once --json` polls enabled BM200 devices when `reader_mode = "live"`
 
 ## Install the Service Assets
 

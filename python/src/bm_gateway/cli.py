@@ -14,7 +14,7 @@ from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, load_device_registry, validate_devices
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
-from .runtime import build_fake_snapshot, iterations_from_flags, sleep_interval, state_file_path
+from .runtime import build_snapshot, iterations_from_flags, sleep_interval, state_file_path
 from .state_store import load_snapshot, write_snapshot
 from .web import render_snapshot_html, serve_snapshot
 
@@ -180,6 +180,7 @@ def _handle_config_show(config: AppConfig, as_json: bool) -> int:
     print(f"gateway.timezone: {config.gateway.timezone}")
     print(f"gateway.poll_interval_seconds: {config.gateway.poll_interval_seconds}")
     print(f"gateway.device_registry: {config.device_registry_path}")
+    print(f"gateway.reader_mode: {config.gateway.reader_mode}")
     print(f"mqtt.base_topic: {config.mqtt.base_topic}")
     print(f"home_assistant.status_topic: {config.home_assistant.status_topic}")
     print(f"web.bind: {config.web.host}:{config.web.port}")
@@ -304,7 +305,7 @@ def _run_cycle(
     publish_discovery: bool,
     state_dir: Path | None,
 ) -> GatewaySnapshot:
-    snapshot = build_fake_snapshot(config, devices)
+    snapshot = build_snapshot(config, devices)
     mqtt_connected = publisher.publish_runtime(
         config=config,
         devices=devices,

@@ -20,6 +20,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   package helpers, and a starter dashboard.
 - Fake-reader runtime, snapshot persistence, MQTT publishing, and web
   rendering/serving commands.
+- BM200 live BLE protocol support with AES decryption, packet parsing, and
+  runtime integration behind `gateway.reader_mode = "live"`.
 - Raspberry Pi 3B manual setup guide, systemd service assets, install/update
   scripts, and an initial Ansible playbook.
 - Docker packaging for the status interface under `web/`.

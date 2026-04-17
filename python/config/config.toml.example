@@ -8,6 +8,8 @@ timezone = "Europe/Rome"
 poll_interval_seconds = 15
 device_registry = "devices.toml"
 data_dir = "data"
+# Use "fake" for development or "live" to poll BM200 devices over BLE.
+reader_mode = "fake"
 
 [bluetooth]
 adapter = "auto"

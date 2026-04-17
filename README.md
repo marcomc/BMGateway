@@ -151,6 +151,11 @@ Start from the example files in `python/config/`:
 - `python/config/gateway.toml.example`
 - `python/config/config.schema.json`
 
+The key runtime switch is `gateway.reader_mode`:
+
+- `fake` keeps the deterministic development reader
+- `live` enables explicit BLE polling for `bm200` devices
+
 ## Usage
 
 Show the focused CLI help:
@@ -197,6 +202,13 @@ Run the fake-reader runtime once and persist a snapshot:
 bm-gateway --config ./python/config/gateway.toml.example run --once --dry-run --json
 ```
 
+Enable real BM200 polling by setting `gateway.reader_mode = "live"` in the
+config, then run:
+
+```bash
+bm-gateway --config ./python/config/gateway.toml.example run --once --json
+```
+
 Render HTML from the latest snapshot:
 
 ```bash
@@ -222,7 +234,7 @@ make run
 
 ## Roadmap
 
-- Replace the fake reader with real Bluetooth-backed BM200/BM300 adapters.
+- Extend live Bluetooth support beyond the current BM200 implementation.
 - Extend the Home Assistant assets under `home-assistant/`.
 - Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
 - Choose and scaffold the web interface under `web/`.

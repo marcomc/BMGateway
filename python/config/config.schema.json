@@ -11,7 +11,11 @@
         "timezone": { "type": "string" },
         "poll_interval_seconds": { "type": "integer", "minimum": 1 },
         "device_registry": { "type": "string" },
-        "data_dir": { "type": "string" }
+        "data_dir": { "type": "string" },
+        "reader_mode": {
+          "type": "string",
+          "enum": ["fake", "live"]
+        }
       }
     },
     "bluetooth": {

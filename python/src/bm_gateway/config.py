@@ -17,6 +17,7 @@ class GatewayConfig:
     poll_interval_seconds: int = 15
     device_registry: str = "devices.toml"
     data_dir: str = "data"
+    reader_mode: str = "fake"
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ class AppConfig:
                 "poll_interval_seconds": self.gateway.poll_interval_seconds,
                 "device_registry": self.gateway.device_registry,
                 "data_dir": self.gateway.data_dir,
+                "reader_mode": self.gateway.reader_mode,
             },
             "bluetooth": {
                 "adapter": self.bluetooth.adapter,
@@ -157,6 +159,7 @@ def load_config(path: Path) -> AppConfig:
         poll_interval_seconds=int(gateway_table.get("poll_interval_seconds", 15)),
         device_registry=str(gateway_table.get("device_registry", "devices.toml")),
         data_dir=str(gateway_table.get("data_dir", "data")),
+        reader_mode=str(gateway_table.get("reader_mode", "fake")),
     )
     bluetooth = BluetoothConfig(
         adapter=str(bluetooth_table.get("adapter", "auto")),
@@ -204,6 +207,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("gateway.name must not be empty")
     if config.gateway.poll_interval_seconds <= 0:
         errors.append("gateway.poll_interval_seconds must be greater than zero")
+    if config.gateway.reader_mode not in {"fake", "live"}:
+        errors.append("gateway.reader_mode must be one of: fake, live")
     if config.bluetooth.scan_timeout_seconds <= 0:
         errors.append("bluetooth.scan_timeout_seconds must be greater than zero")
     if config.bluetooth.connect_timeout_seconds <= 0:
