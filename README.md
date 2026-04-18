@@ -83,7 +83,7 @@ Contains Home Assistant facing artifacts such as:
 
 Contains Raspberry Pi setup and deployment guidance:
 
-- a manual setup guide for Raspberry Pi 3B
+- a manual setup guide for the currently used Raspberry Pi gateway hardware
 - a macOS Raspberry Pi Imager CLI provisioning guide
 - an Ansible area for later automation
 - service installation and operational notes
@@ -97,9 +97,10 @@ The current Python component ships:
 - a simple snapshot/status web server
 - a separate host-run management web interface via `bm-gateway web manage`
 
-For Raspberry Pi 3B, the active recommendation is a separate Python process
-under `systemd`, not Docker. See
-`docs/research/2026-04-17-pi3b-web-and-os-research.md`.
+For Raspberry Pi deployment, the active recommendation is a separate Python
+process under `systemd`, not Docker. See
+`docs/research/2026-04-17-pi3b-web-and-os-research.md` for the earlier Pi 3B
+research baseline.
 
 ## Requirements
 
@@ -113,7 +114,10 @@ For development:
 
 For the runtime target:
 
-- Raspberry Pi 3B or compatible Linux host
+- the currently audited hardware is a Raspberry Pi `Model B Rev 2` with USB
+  Wi-Fi and USB Bluetooth dongles
+- a Raspberry Pi `3B`, `3B+`, `Zero W`, `Zero 2 W`, `4`, `400`, or `5` is the
+  preferred baseline if you want integrated Wi-Fi and Bluetooth
 - Bluetooth support
 - enough storage for SQLite history retention
 
