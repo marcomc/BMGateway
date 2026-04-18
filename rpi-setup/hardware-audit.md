@@ -157,6 +157,69 @@ Expected outcomes:
 - `bluetoothctl list` shows an HCI controller
 - the journal shows device discovery instead of only generic service startup
 
+## Current Gateway Hardware and Radio State
+
+The currently used `BMGateway` host is:
+
+- Raspberry Pi `Model B Rev 2`
+- USB Wi-Fi dongle: `Ralink RT5370`
+- USB Bluetooth dongle: `Cambridge Silicon Radio`
+
+On this hardware, successful bring-up means:
+
+- `wlan0` exists and can connect through NetworkManager
+- `eth0` remains the preferred default route when the cable is connected
+- the Bluetooth USB controller appears as `hci0`
+- `rfkill` shows Bluetooth as not soft-blocked
+- `bluetoothctl show` reports the controller as powered on
+
+## Bluetooth Unblock and Bring-Up Commands
+
+Use this exact sequence when the Bluetooth USB controller exists but is blocked
+or down:
+
+```bash
+sudo rfkill unblock bluetooth
+sudo sh -c 'for f in /var/lib/systemd/rfkill/*bluetooth; do printf 0 > "$f"; done'
+sudo systemctl restart bluetooth.service
+sudo hciconfig hci0 up
+sudo bluetoothctl power on
+sudo rfkill list
+sudo hciconfig -a
+sudo bluetoothctl show
+```
+
+What this does:
+
+- removes the current soft block
+- clears persisted rfkill state so the block does not come back after reboot
+- restarts the Bluetooth daemon
+- brings the HCI device up
+- powers the controller on through BlueZ
+
+## Ethernet and Wi-Fi Priority
+
+The approved target behavior for this project is:
+
+- `eth0` is primary when Ethernet is connected
+- `wlan0` is the fallback path when Ethernet is not connected
+
+On the current host, the intended NetworkManager metrics are:
+
+- `eth0` default route metric `100`
+- `wlan0` default route metric `600`
+
+Apply that policy with:
+
+```bash
+sudo nmcli connection modify netplan-eth0 ipv4.route-metric 100 ipv6.route-metric 100
+sudo nmcli connection modify netplan-wlan0-HAL9000 ipv4.route-metric 600 ipv6.route-metric 600
+sudo nmcli connection modify netplan-eth0 connection.autoconnect-priority 100
+sudo nmcli connection modify netplan-wlan0-HAL9000 connection.autoconnect-priority 10
+sudo nmcli connection up netplan-eth0
+sudo nmcli connection up netplan-wlan0-HAL9000
+```
+
 ## Performance and Boot Audit
 
 Use:
@@ -255,6 +318,18 @@ Optional:
 sudo systemctl disable --now getty@tty1.service
 ```
 
+Project-specific decision:
+
+- keep `NetworkManager-wait-online.service`
+  - the gateway also hosts a web interface and should not race dependent
+    startup logic unnecessarily
+- disable `udisks2.service`
+  - no desktop-style removable media management is required
+- disable `serial-getty@ttyAMA0.service`
+  - the project keeps HDMI console access through `getty@tty1.service` instead
+- keep `getty@tty1.service`
+  - HDMI console debugging remains desirable
+
 ### Disable After Initial Provisioning
 
 If you are not using cloud-init after first boot, disable it after the machine
@@ -278,6 +353,14 @@ Note:
 
 - do this only after confirming you no longer depend on cloud-init for future
   boot configuration
+
+Project-specific decision:
+
+- cloud-init is useful during initial imaging and first-boot provisioning
+- cloud-init is not the intended long-term update mechanism for `BMGateway`
+- normal ongoing changes should come through SSH, Git, scripts, or Ansible
+- once the machine has joined the network and the base configuration is
+  settled, disabling cloud-init is reasonable
 
 ## Optional Kernel Module Reductions
 
@@ -309,6 +392,37 @@ This should be implemented carefully through `/boot/firmware/config.txt` and
 `/etc/modprobe.d/*.conf`, then retested after reboot.
 
 Do not disable them blindly if you still rely on a local display for recovery.
+
+Project-specific decision:
+
+- keep the HDMI display stack:
+  - `vc4`
+  - `drm`
+  - `drm_kms_helper`
+  - `drm_display_helper`
+- do not disable those modules if HDMI console debugging must continue to work
+- only blacklist:
+  - `snd_bcm2835`
+  - `snd_soc_hdmi_codec`
+  - `bcm2835_codec`
+  - `bcm2835_v4l2`
+  - `bcm2835_isp`
+  - `bcm2835_mmal_vchiq`
+
+Use this exact blacklist file:
+
+```bash
+printf '%s\n' \
+  '# BMGateway headless appliance module blacklist' \
+  '# Keep vc4/drm for HDMI console output; drop audio and camera/video acceleration.' \
+  'blacklist snd_bcm2835' \
+  'blacklist snd_soc_hdmi_codec' \
+  'blacklist bcm2835_codec' \
+  'blacklist bcm2835_v4l2' \
+  'blacklist bcm2835_isp' \
+  'blacklist bcm2835_mmal_vchiq' \
+  | sudo tee /etc/modprobe.d/bm-gateway-blacklist.conf >/dev/null
+```
 
 ## Recommended Hardware for This Project
 

@@ -136,8 +136,12 @@ Before using that script in a real deployment, set:
 - `BMGATEWAY_REPO_URL`
 - optionally `BMGATEWAY_REPO_DIR`
 
-You can embed those variables directly in the script, or maintain your own
-copy of the file for deployment.
+The shipped default now points at:
+
+- `https://github.com/marcomc/BMGateway.git`
+
+You can still override that variable or maintain your own copy of the file for
+deployment.
 
 ## Flash with Cloud-Init Payloads
 

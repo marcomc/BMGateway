@@ -64,6 +64,8 @@ comparison windows.
 - The installed CLI name remains `bm-gateway`.
 - The root `Makefile` is the supported entry point for linting, testing, and
   installation.
+- Host bootstrap should use `../scripts/bootstrap-install.sh`, which ultimately
+  runs `make install` for a standalone runtime instead of `make install-dev`.
 - The runtime supports both fake and live `bm200` polling paths.
 - Live `bm200` history retrieval is not wired yet, so long-term history is
   still built from per-cycle state snapshots.

@@ -123,10 +123,39 @@ For the runtime target:
 
 ## Installation
 
+For Raspberry Pi or any other host install, the intended target is
+`make install`, not `make install-dev`.
+
+### One-Liner Bootstrap
+
+If you already have a checkout of this repository on the target machine, the
+shortest supported install path is:
+
+```bash
+./scripts/bootstrap-install.sh
+```
+
+That script:
+
+- installs apt prerequisites
+- installs `uv` if it is missing
+- clones or updates the repository checkout
+- runs `make install` with the host `python3`
+- preserves existing user config under `~/.config/bm-gateway/`
+
+If you publish the bootstrap script at a reachable URL, the same flow becomes a
+single remote one-liner:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/bootstrap-install.sh | bash -s -- --repo-url https://github.com/marcomc/BMGateway.git
+```
+
+### Manual Install
+
 Clone the repository and install the standalone CLI runtime:
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/marcomc/BMGateway.git
 cd BMGateway
 make install
 ```

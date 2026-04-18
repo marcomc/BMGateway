@@ -14,6 +14,7 @@ Current contents:
 - `examples/imager/` for first-boot payload examples
 - `systemd/` for the runtime unit
 - `scripts/` for install and update helpers
+- `../scripts/bootstrap-install.sh` for one-line host bootstrap onto the Pi
 
 macOS helpers now include:
 

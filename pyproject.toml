@@ -10,7 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [
-  { name = "Marco Massari Calderone", email = "marco@marcomc.com" }
+  { name = "Marco Massari Calderone" },
+  { name = "OpenAI" }
 ]
 dependencies = [
   "bleak>=0.22.3",

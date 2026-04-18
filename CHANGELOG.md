@@ -48,3 +48,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Raspberry Pi 3B manual setup guide, systemd service assets, install/update
   scripts, and an initial Ansible playbook.
 - Separate `bm-gateway-web.service` host process for the management UI.
+- Host bootstrap install script that installs apt prerequisites, `uv`,
+  clone-or-update checkout state, and the standalone `make install` runtime in
+  one step.

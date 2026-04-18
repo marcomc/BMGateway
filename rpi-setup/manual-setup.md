@@ -81,6 +81,29 @@ If the adapter is not visible, inspect Raspberry Pi Bluetooth configuration
 before proceeding. If the board model is an older non-wireless Pi, there may be
 no Bluetooth controller to configure.
 
+## One-Liner Bootstrap
+
+For routine host installation, the supported bootstrap path is the repository
+script that performs apt setup, `uv` installation, clone-or-update, and
+`make install` in one step:
+
+```bash
+./scripts/bootstrap-install.sh
+```
+
+That is the recommended command once the repository is already present on the
+target machine.
+
+If you later publish the script at a reachable URL, the same bootstrap can be
+run without a pre-existing checkout:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/bootstrap-install.sh | bash -s -- --repo-url https://github.com/marcomc/BMGateway.git
+```
+
+The bootstrap script intentionally installs the standalone runtime through
+`make install`, not `make install-dev`.
+
 ## Install `uv`
 
 Install `uv` with the official bootstrap command:
@@ -94,7 +117,7 @@ Restart the shell or source the updated profile so `uv` is on `PATH`.
 ## Clone the Repository
 
 ```bash
-git clone <repo-url>
+git clone https://github.com/marcomc/BMGateway.git
 cd BMGateway
 ```
 
@@ -123,6 +146,45 @@ printf 'admin ALL=(ALL) NOPASSWD:ALL\n' | sudo tee /etc/sudoers.d/10-admin-nopas
 
 This still requires the current `sudo` password one last time when you run the
 command, unless `admin` is already passwordless.
+
+## Radio Bring-Up on the Current Host
+
+The current gateway host uses USB radios, not onboard ones:
+
+- Wi-Fi: `Ralink RT5370`
+- Bluetooth: `Cambridge Silicon Radio`
+
+After attaching those dongles, verify:
+
+```bash
+lsusb
+ip -br link
+sudo iw dev
+sudo rfkill list
+sudo bluetoothctl list
+sudo hciconfig -a
+sudo nmcli device status
+sudo ip route
+```
+
+If the Bluetooth dongle appears but is blocked or down, run:
+
+```bash
+sudo rfkill unblock bluetooth
+sudo sh -c 'for f in /var/lib/systemd/rfkill/*bluetooth; do printf 0 > "$f"; done'
+sudo systemctl restart bluetooth.service
+sudo hciconfig hci0 up
+sudo bluetoothctl power on
+sudo rfkill list
+sudo hciconfig -a
+sudo bluetoothctl show
+```
+
+The intended steady state is:
+
+- `eth0` connected and preferred as the default route
+- `wlan0` connected as fallback with a higher route metric
+- `hci0` present, unblocked, and powered on
 
 ## Configure the Gateway
 
@@ -184,6 +246,42 @@ sudo systemctl start bm-gateway-web.service
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
 ```
+
+## Service and Module Policy for This Project
+
+Keep enabled:
+
+- `bluetooth.service`
+- `wpa_supplicant.service`
+- `NetworkManager.service`
+- `avahi-daemon.service`
+- `getty@tty1.service`
+
+Disable:
+
+- `udisks2.service`
+- `serial-getty@ttyAMA0.service`
+
+Disable after provisioning is complete:
+
+- `cloud-init-local.service`
+- `cloud-init-main.service`
+- `cloud-init-network.service`
+- `cloud-config.service`
+- `cloud-final.service`
+
+Keep HDMI console support:
+
+- do not disable `vc4`, `drm`, `drm_kms_helper`, or `drm_display_helper`
+
+Blacklist only:
+
+- `snd_bcm2835`
+- `snd_soc_hdmi_codec`
+- `bcm2835_codec`
+- `bcm2835_v4l2`
+- `bcm2835_isp`
+- `bcm2835_mmal_vchiq`
 
 ## Repository Areas
 

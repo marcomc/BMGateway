@@ -3,7 +3,7 @@
 set -eu
 
 LOG_FILE="/var/log/bm-gateway-first-run.log"
-REPO_URL="${BMGATEWAY_REPO_URL:-https://example.invalid/BMGateway.git}"
+REPO_URL="${BMGATEWAY_REPO_URL:-https://github.com/marcomc/BMGateway.git}"
 REPO_DIR="${BMGATEWAY_REPO_DIR:-/opt/BMGateway}"
 CONFIG_DIR="/etc/bm-gateway"
 BOOT_DIR="/boot/firmware"
