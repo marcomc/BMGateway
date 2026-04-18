@@ -65,6 +65,8 @@ Contains the packaged Python application:
   built-in web status layer
 - live `bm200` BLE polling, SQLite persistence, and classified device errors
 - history inspection, storage stats, and retention pruning commands
+- yearly summaries, degradation comparison windows, and richer MQTT
+  availability semantics
 
 The CLI entry point remains `bm-gateway`, and `python -m bm_gateway` remains a
 supported module entry point through the root packaging configuration.
@@ -214,6 +216,8 @@ Inspect persisted history:
 ```bash
 bm-gateway --config ./python/config/gateway.toml.example history daily --device-id bm200_house --json
 bm-gateway --config ./python/config/gateway.toml.example history monthly --device-id bm200_house --json
+bm-gateway --config ./python/config/gateway.toml.example history yearly --device-id bm200_house --json
+bm-gateway --config ./python/config/gateway.toml.example history compare --device-id bm200_house --json
 bm-gateway --config ./python/config/gateway.toml.example history stats --json
 bm-gateway --config ./python/config/gateway.toml.example history prune
 ```
@@ -259,6 +263,7 @@ The database keeps:
 - raw per-cycle readings with pruning
 - daily device rollups for long-term comparison
 - monthly summaries derived from daily rollups
+- yearly summaries and degradation comparison windows derived from daily rollups
 
 ## Development
 
@@ -292,7 +297,7 @@ The automated test suite now covers:
 - Extend the Home Assistant assets under `home-assistant/`.
 - Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
 - Grow the host-run management web UI beyond the current config, contract,
-  storage, and history views.
+  storage, analytics, and history views.
 
 ## License
 

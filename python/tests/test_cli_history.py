@@ -147,6 +147,84 @@ def test_history_monthly_emits_json(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert payload[0]["device_id"] == "bm200_house"
 
 
+def test_history_yearly_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+        ]
+    )
+    capsys.readouterr()
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "history",
+            "yearly",
+            "--device-id",
+            "bm200_house",
+            "--state-dir",
+            str(state_dir),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert payload[0]["device_id"] == "bm200_house"
+    assert "year" in payload[0]
+
+
+def test_history_compare_emits_degradation_report(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+        ]
+    )
+    capsys.readouterr()
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "history",
+            "compare",
+            "--device-id",
+            "bm200_house",
+            "--state-dir",
+            str(state_dir),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert payload["device_id"] == "bm200_house"
+    assert "windows" in payload
+
+
 def test_history_stats_emits_storage_summary(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

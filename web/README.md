@@ -9,7 +9,8 @@ Current implementation:
 - `bm-gateway web manage` runs the management UI as a separate Python process
 - the management UI exposes config editing, run-once control, retention-driven
   pruning, configured devices, Home Assistant contract views, storage summary,
-  and raw/daily/monthly history from SQLite
+  raw/daily/monthly history from SQLite, device analytics pages, yearly
+  summaries, and degradation comparison windows
 
 Recommended Raspberry Pi 3B usage:
 

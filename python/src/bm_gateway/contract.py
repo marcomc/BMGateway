@@ -22,6 +22,8 @@ DEVICE_ENTITIES = [
     "soc",
     "temperature",
     "connected",
+    "availability_reason",
+    "error_code",
     "last_seen",
     "rssi",
     "state",
@@ -36,6 +38,7 @@ def build_contract(config: AppConfig, devices: list[Device]) -> dict[str, object
         "gateway": {
             "device_id": config.home_assistant.gateway_device_id,
             "state_topic": f"{base_topic}/gateway/state",
+            "availability_topic": f"{base_topic}/gateway/availability",
             "discovery_topic": (
                 f"{discovery_prefix}/device/{config.home_assistant.gateway_device_id}/config"
             ),
@@ -46,6 +49,7 @@ def build_contract(config: AppConfig, devices: list[Device]) -> dict[str, object
                 "id": device.id,
                 "enabled": device.enabled,
                 "state_topic": f"{base_topic}/devices/{device.id}/state",
+                "availability_topic": f"{base_topic}/devices/{device.id}/availability",
                 "discovery_topic": f"{discovery_prefix}/device/{device.id}/config",
                 "entities": list(DEVICE_ENTITIES),
             }
@@ -73,6 +77,7 @@ def build_discovery_payloads(
                 "p": "sensor",
                 "unique_id": f"{config.home_assistant.gateway_device_id}_{entity}",
                 "state_topic": str(gateway["state_topic"]),
+                "availability_topic": str(gateway["availability_topic"]),
                 "value_template": f"{{{{ value_json.{entity} }}}}",
             }
             for entity in GATEWAY_ENTITIES
@@ -94,6 +99,9 @@ def build_discovery_payloads(
                     "p": "sensor",
                     "unique_id": f"{device.id}_{entity}",
                     "state_topic": state_topic,
+                    "availability_topic": (
+                        f"{config.mqtt.base_topic.rstrip('/')}/devices/{device.id}/availability"
+                    ),
                     "value_template": f"{{{{ value_json.{entity} }}}}",
                 }
                 for entity in DEVICE_ENTITIES

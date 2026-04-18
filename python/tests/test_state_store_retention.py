@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import sqlite3
+from datetime import date, timedelta
 from pathlib import Path
+from typing import cast
 
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import (
     fetch_daily_history,
+    fetch_degradation_report,
     fetch_storage_summary,
+    fetch_yearly_history,
     persist_snapshot,
     prune_history,
 )
@@ -91,3 +95,241 @@ def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> N
             "daily_last_day": "2024-01-02",
         }
     ]
+
+
+def test_fetch_yearly_history_groups_daily_rollups_by_year(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+    persist_snapshot(database_path, _snapshot("2025-01-01T00:00:00+00:00"))
+
+    yearly = fetch_yearly_history(database_path, device_id="bm200_house", limit=5)
+
+    assert yearly == [
+        {
+            "device_id": "bm200_house",
+            "year": "2025",
+            "samples": 1,
+            "min_voltage": 12.73,
+            "max_voltage": 12.73,
+            "avg_voltage": 12.73,
+            "avg_soc": 58.0,
+            "error_count": 0,
+            "last_seen": "2025-01-01T00:00:00+00:00",
+        },
+        {
+            "device_id": "bm200_house",
+            "year": "2024",
+            "samples": 1,
+            "min_voltage": 12.73,
+            "max_voltage": 12.73,
+            "avg_voltage": 12.73,
+            "avg_soc": 58.0,
+            "error_count": 0,
+            "last_seen": "2024-01-01T00:00:00+00:00",
+        },
+    ]
+
+
+def test_fetch_yearly_history_uses_sample_weighted_averages(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS device_daily_rollups (
+                device_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                samples INTEGER NOT NULL,
+                min_voltage REAL NOT NULL,
+                max_voltage REAL NOT NULL,
+                avg_voltage REAL NOT NULL,
+                avg_soc REAL NOT NULL,
+                error_count INTEGER NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (device_id, day)
+            )
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO device_daily_rollups (
+                device_id,
+                day,
+                samples,
+                min_voltage,
+                max_voltage,
+                avg_voltage,
+                avg_soc,
+                error_count,
+                last_seen
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "bm200_house",
+                    "2025-01-01",
+                    1,
+                    12.9,
+                    13.1,
+                    13.0,
+                    90.0,
+                    0,
+                    "2025-01-01T23:55:00+00:00",
+                ),
+                (
+                    "bm200_house",
+                    "2025-01-02",
+                    9,
+                    11.9,
+                    12.1,
+                    12.0,
+                    50.0,
+                    0,
+                    "2025-01-02T23:55:00+00:00",
+                ),
+            ],
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    yearly = fetch_yearly_history(database_path, device_id="bm200_house", limit=5)
+
+    assert yearly[0]["samples"] == 10
+    assert yearly[0]["avg_voltage"] == 12.1
+    assert yearly[0]["avg_soc"] == 54.0
+
+
+def test_fetch_degradation_report_compares_recent_window_with_previous_window(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS device_daily_rollups (
+                device_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                samples INTEGER NOT NULL,
+                min_voltage REAL NOT NULL,
+                max_voltage REAL NOT NULL,
+                avg_voltage REAL NOT NULL,
+                avg_soc REAL NOT NULL,
+                error_count INTEGER NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (device_id, day)
+            )
+            """
+        )
+        start_day = date(2024, 1, 1)
+        for day in range(60):
+            avg_voltage = 12.9 if day < 30 else 12.4
+            avg_soc = 88.0 if day < 30 else 72.0
+            iso_day = (start_day + timedelta(days=day)).isoformat()
+            connection.execute(
+                """
+                INSERT INTO device_daily_rollups (
+                    device_id,
+                    day,
+                    samples,
+                    min_voltage,
+                    max_voltage,
+                    avg_voltage,
+                    avg_soc,
+                    error_count,
+                    last_seen
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "bm200_house",
+                    iso_day,
+                    4,
+                    avg_voltage - 0.1,
+                    avg_voltage + 0.1,
+                    avg_voltage,
+                    avg_soc,
+                    0,
+                    f"{iso_day}T23:55:00+00:00",
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = fetch_degradation_report(database_path, device_id="bm200_house")
+    windows = cast(list[dict[str, object]], report["windows"])
+
+    assert report["latest_day"] == "2024-02-29"
+    assert windows[0]["days"] == 30
+    assert windows[0]["current_avg_voltage"] == 12.4
+    assert windows[0]["previous_avg_voltage"] == 12.9
+    assert windows[0]["delta_avg_voltage"] == -0.5
+    assert windows[0]["current_avg_soc"] == 72.0
+    assert windows[0]["previous_avg_soc"] == 88.0
+    assert windows[0]["delta_avg_soc"] == -16.0
+
+
+def test_fetch_degradation_report_uses_sample_weighted_averages(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE IF NOT EXISTS device_daily_rollups (
+                device_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                samples INTEGER NOT NULL,
+                min_voltage REAL NOT NULL,
+                max_voltage REAL NOT NULL,
+                avg_voltage REAL NOT NULL,
+                avg_soc REAL NOT NULL,
+                error_count INTEGER NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (device_id, day)
+            )
+            """
+        )
+        start_day = date(2025, 1, 1)
+        for offset in range(60):
+            is_previous = offset < 30
+            avg_voltage = 12.8 if is_previous else (13.0 if offset == 30 else 12.0)
+            avg_soc = 80.0 if is_previous else (90.0 if offset == 30 else 50.0)
+            samples = 1 if is_previous else (50 if offset == 30 else 1)
+            iso_day = (start_day + timedelta(days=offset)).isoformat()
+            connection.execute(
+                """
+                INSERT INTO device_daily_rollups (
+                    device_id,
+                    day,
+                    samples,
+                    min_voltage,
+                    max_voltage,
+                    avg_voltage,
+                    avg_soc,
+                    error_count,
+                    last_seen
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    "bm200_house",
+                    iso_day,
+                    samples,
+                    avg_voltage - 0.1,
+                    avg_voltage + 0.1,
+                    avg_voltage,
+                    avg_soc,
+                    0,
+                    f"{iso_day}T23:55:00+00:00",
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+    report = fetch_degradation_report(database_path, device_id="bm200_house")
+    windows = cast(list[dict[str, object]], report["windows"])
+
+    assert windows[0]["days"] == 30
+    assert windows[0]["current_avg_voltage"] == 12.63
+    assert windows[0]["current_avg_soc"] == 75.32

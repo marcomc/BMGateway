@@ -3,7 +3,9 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+import pytest
 from bm_gateway import cli
+from bm_gateway.drivers.bm200 import BM200Measurement
 
 
 def _write_example_files(tmp_path: Path) -> Path:
@@ -133,3 +135,52 @@ def test_run_once_still_persists_when_mqtt_publish_fails(tmp_path: Path) -> None
 
     assert gateway_count == (1,)
     assert device_count == (1,)
+
+
+def test_live_mode_run_uses_simulated_bm200_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config_text = config_path.read_text(encoding="utf-8").replace(
+        'reader_mode = "fake"',
+        'reader_mode = "live"',
+    )
+    config_path.write_text(config_text, encoding="utf-8")
+    state_dir = tmp_path / "state"
+
+    def fake_live_reader(device_mac: object, adapter: object) -> BM200Measurement:
+        assert device_mac is not None
+        assert adapter is not None
+        return BM200Measurement(
+            voltage=12.91,
+            soc=77,
+            status_code=2,
+            state="normal",
+        )
+
+    monkeypatch.setattr("bm_gateway.runtime._read_live_bm200", fake_live_reader)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+        ]
+    )
+
+    assert result == 0
+
+    connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
+    try:
+        row = connection.execute(
+            "SELECT voltage, soc, state FROM device_readings ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert row == (12.91, 77, "normal")

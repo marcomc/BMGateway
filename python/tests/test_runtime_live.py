@@ -137,3 +137,31 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
     assert counts["gateway_snapshots"] == 1
     assert counts["device_readings"] == 1
     assert counts["device_daily_rollups"] == 1
+
+
+def test_build_snapshot_marks_non_bm200_devices_unsupported_in_live_mode() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm300_van",
+            type="bm300pro",
+            name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+
+    snapshot = build_snapshot(config, devices)
+
+    assert snapshot.devices_online == 0
+    assert snapshot.devices[0].state == "unsupported"
+    assert snapshot.devices[0].error_code == "unsupported_device_type"

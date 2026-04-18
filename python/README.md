@@ -19,6 +19,8 @@ This directory contains the packaged Python CLI and service code for
 - `bm-gateway run --once --dry-run`
 - `bm-gateway history daily --device-id <id>`
 - `bm-gateway history monthly --device-id <id>`
+- `bm-gateway history yearly --device-id <id>`
+- `bm-gateway history compare --device-id <id>`
 - `bm-gateway history stats`
 - `bm-gateway history prune`
 - `bm-gateway web render --snapshot-file <path>`
@@ -50,7 +52,8 @@ The database also keeps daily rollups so long-term comparisons can survive raw
 retention pruning, and monthly summaries are derived from those rollups.
 
 The CLI can inspect raw history, daily rollups, monthly summaries, and storage
-retention stats directly.
+retention stats directly, and it now exposes yearly summaries plus degradation
+comparison windows.
 
 ## Notes
 
@@ -63,3 +66,5 @@ retention stats directly.
   still built from per-cycle state snapshots.
 - End-to-end subprocess coverage now exercises:
   `bm-gateway`, `python -m bm_gateway`, `web serve`, and `web manage`.
+- MQTT publishing now includes availability topics and richer device
+  availability semantics in the state payloads.

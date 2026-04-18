@@ -292,6 +292,10 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
         history_payload = _http_json(
             f"{base_url}/api/history?device_id=bm200_house&kind=monthly&limit=24"
         )
+        yearly_payload = _http_json(
+            f"{base_url}/api/history?device_id=bm200_house&kind=yearly&limit=10"
+        )
+        analytics_payload = _http_json(f"{base_url}/api/analytics?device_id=bm200_house")
         config_payload = _http_json(f"{base_url}/api/config")
 
         assert isinstance(status_payload, dict)
@@ -299,6 +303,8 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
         assert isinstance(contract_payload, dict)
         assert isinstance(storage_payload, dict)
         assert isinstance(history_payload, list)
+        assert isinstance(yearly_payload, list)
+        assert isinstance(analytics_payload, dict)
         assert isinstance(config_payload, dict)
 
         assert status_payload["devices_online"] == 1
@@ -306,6 +312,18 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
         assert contract_payload["gateway"]["state_topic"] == "bm_gateway/gateway/state"
         assert storage_payload["counts"]["device_readings"] == 1
         assert history_payload[0]["device_id"] == "bm200_house"
+        assert yearly_payload[0]["device_id"] == "bm200_house"
+        assert analytics_payload["device_id"] == "bm200_house"
+
+        device_page = (
+            urllib.request.urlopen(
+                f"{base_url}/device?device_id=bm200_house", timeout=RUNTIME_TIMEOUT_SECONDS
+            )
+            .read()
+            .decode("utf-8")
+        )
+        assert "Trend Windows" in device_page
+        assert "Historical Chart" in device_page
 
         connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
         try:

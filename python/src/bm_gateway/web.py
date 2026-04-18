@@ -11,7 +11,7 @@ from dataclasses import replace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import cast
-from urllib.parse import parse_qs, quote, urlparse
+from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 from .config import AppConfig, load_config, write_config
 from .contract import build_contract, build_discovery_payloads
@@ -19,9 +19,11 @@ from .device_registry import load_device_registry, validate_devices, write_devic
 from .runtime import database_file_path, state_file_path
 from .state_store import (
     fetch_daily_history,
+    fetch_degradation_report,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_storage_summary,
+    fetch_yearly_history,
     load_snapshot,
     prune_history,
 )
@@ -123,6 +125,26 @@ def _management_links(snapshot: dict[str, object]) -> str:
     return "\n".join(items) or "<li>No devices available</li>"
 
 
+def _device_dashboard_cards(snapshot: dict[str, object]) -> str:
+    devices = snapshot.get("devices", [])
+    cards: list[str] = []
+    for device in devices if isinstance(devices, list) else []:
+        if not isinstance(device, dict):
+            continue
+        device_id = str(device.get("id", ""))
+        cards.append(
+            "<article class='device-card'>"
+            f"<h3>{html.escape(str(device.get('name', device_id)))}</h3>"
+            f"<p><strong>ID:</strong> {html.escape(device_id)}</p>"
+            f"<p><strong>State:</strong> {html.escape(str(device.get('state', 'unknown')))}</p>"
+            f"<p><strong>Voltage:</strong> {html.escape(str(device.get('voltage', '-')))}</p>"
+            f"<p><strong>SoC:</strong> {html.escape(str(device.get('soc', '-')))}</p>"
+            f"<p><a href='/device?device_id={quote(device_id)}'>Open device page</a></p>"
+            "</article>"
+        )
+    return "\n".join(cards) or "<p>No active device cards yet.</p>"
+
+
 def _device_table_rows(devices: list[dict[str, object]]) -> str:
     rows: list[str] = []
     for device in devices:
@@ -136,6 +158,10 @@ def _device_table_rows(devices: list[dict[str, object]]) -> str:
             "</tr>"
         )
     return "\n".join(rows) or "<tr><td colspan='5'>No configured devices</td></tr>"
+
+
+def _escape_cell(value: object) -> str:
+    return html.escape(str(value))
 
 
 def _storage_rows(summary: dict[str, object]) -> str:
@@ -196,11 +222,30 @@ def render_management_html(
       ul {{ margin: 0; padding-left: 1.25rem; }}
       table {{ width: 100%; border-collapse: collapse; background: white; }}
       th, td {{ padding: 0.55rem; border-bottom: 1px solid #ddd; text-align: left; }}
+      .device-grid {{
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+        gap: 1rem;
+      }}
+      .device-card {{
+        background: linear-gradient(180deg, #f9fbfc 0%, #eef3f6 100%);
+        border-radius: 12px;
+        padding: 1rem;
+        border: 1px solid #d7e1e8;
+      }}
     </style>
   </head>
   <body>
     <h1>BMGateway Management</h1>
     {banner}
+    <div class="panel">
+      <h2>Gateway Overview</h2>
+      <p>
+        This host-run control plane complements the CLI. Use it for device pages,
+        analytics, storage review, and configuration changes without taking over
+        the collector runtime.
+      </p>
+    </div>
     <div class="grid">
       <div class="panel">
         <strong>Latest snapshot</strong><br>
@@ -236,8 +281,15 @@ def render_management_html(
         <code>/api/ha/contract</code>,
         <code>/api/ha/discovery</code>,
         <code>/api/storage</code>,
+        <code>/api/analytics?device_id=&lt;id&gt;</code>,
         <code>/api/history?device_id=&lt;id&gt;&amp;kind=daily</code>
       </p>
+    </div>
+    <div class="panel">
+      <h2>Device Dashboard</h2>
+      <div class="device-grid">
+        {_device_dashboard_cards(snapshot)}
+      </div>
     </div>
     <div class="panel">
       <h2>Configured Devices</h2>
@@ -283,6 +335,125 @@ def render_management_html(
 """
 
 
+def _sparkline_svg(daily_history: list[dict[str, object]]) -> str:
+    values = [
+        float(cast(float | int | str, row["avg_voltage"]))
+        for row in daily_history
+        if row.get("avg_voltage") is not None
+    ]
+    if len(values) < 2:
+        return "<p>Historical Chart unavailable</p>"
+    min_value = min(values)
+    max_value = max(values)
+    span = max(max_value - min_value, 0.01)
+    points: list[str] = []
+    for index, value in enumerate(values):
+        x = 20 + (760 * index / max(len(values) - 1, 1))
+        y = 180 - (((value - min_value) / span) * 140)
+        points.append(f"{x:.2f},{y:.2f}")
+    return (
+        "<svg viewBox='0 0 800 200' role='img' aria-label='Historical Chart'>"
+        "<rect x='0' y='0' width='800' height='200' fill='#f5f7f9' rx='16' />"
+        f"<polyline fill='none' stroke='#1a6f8b' stroke-width='4' points='{' '.join(points)}' />"
+        "</svg>"
+    )
+
+
+def render_device_html(
+    *,
+    device_id: str,
+    raw_history: list[dict[str, object]],
+    daily_history: list[dict[str, object]],
+    monthly_history: list[dict[str, object]],
+    yearly_history: list[dict[str, object]],
+    analytics: dict[str, object],
+) -> str:
+    trend_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{window['days']}</td>"
+            f"<td>{window['current_avg_voltage']}</td>"
+            f"<td>{window['previous_avg_voltage']}</td>"
+            f"<td>{window['delta_avg_voltage']}</td>"
+            f"<td>{window['current_avg_soc']}</td>"
+            f"<td>{window['previous_avg_soc']}</td>"
+            f"<td>{window['delta_avg_soc']}</td>"
+            "</tr>"
+        )
+        for window in cast(list[dict[str, object]], analytics.get("windows", []))
+    )
+    yearly_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{row['year']}</td><td>{row['samples']}</td>"
+            f"<td>{row['avg_voltage']}</td><td>{row['avg_soc']}</td>"
+            f"<td>{row['error_count']}</td>"
+            "</tr>"
+        )
+        for row in yearly_history
+    )
+    recent_daily_history = sorted(
+        daily_history[:30],
+        key=lambda row: str(row.get("day", "")),
+    )
+    sparkline = _sparkline_svg(recent_daily_history)
+    history_sections = _render_history_sections(
+        raw_history=raw_history,
+        daily_history=daily_history,
+        monthly_history=monthly_history,
+    )
+    return f"""<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>{html.escape(device_id)} Device</title>
+    <style>
+      body {{ font-family: sans-serif; margin: 2rem; background: #f4f6f8; color: #132029; }}
+      .panel {{
+        background: white;
+        border-radius: 14px;
+        padding: 1rem;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+        margin-bottom: 1rem;
+      }}
+      table {{ width: 100%; border-collapse: collapse; background: white; }}
+      th, td {{ padding: 0.6rem; border-bottom: 1px solid #ddd; text-align: left; }}
+    </style>
+  </head>
+  <body>
+    <p><a href="/">Back</a> | <a href="/history?device_id={quote(device_id)}">History Tables</a></p>
+    <h1>{html.escape(device_id)} Device</h1>
+    <div class="panel">
+      <h2>Trend Windows</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Days</th><th>Current Avg V</th><th>Previous Avg V</th><th>Delta V</th>
+            <th>Current Avg SoC</th><th>Previous Avg SoC</th><th>Delta SoC</th>
+          </tr>
+        </thead>
+        <tbody>{trend_rows or "<tr><td colspan='7'>No comparison windows</td></tr>"}</tbody>
+      </table>
+    </div>
+    <div class="panel">
+      <h2>Historical Chart</h2>
+      {sparkline}
+    </div>
+    <div class="panel">
+      <h2>Yearly Summary</h2>
+      <table>
+        <thead>
+          <tr><th>Year</th><th>Samples</th><th>Avg V</th><th>Avg SoC</th><th>Error Count</th></tr>
+        </thead>
+        <tbody>{yearly_rows or "<tr><td colspan='5'>No yearly data</td></tr>"}</tbody>
+      </table>
+    </div>
+    {history_sections}
+  </body>
+</html>
+"""
+
+
 def render_history_html(
     *,
     device_id: str,
@@ -290,23 +461,17 @@ def render_history_html(
     daily_history: list[dict[str, object]],
     monthly_history: list[dict[str, object]],
 ) -> str:
-    raw_rows = "\n".join(
-        f"<tr><td>{row['ts']}</td><td>{row['voltage']}</td><td>{row['soc']}</td><td>{row['state']}</td><td>{row['error_code']}</td></tr>"
-        for row in raw_history
+    sections = _render_history_sections(
+        raw_history=raw_history,
+        daily_history=daily_history,
+        monthly_history=monthly_history,
     )
-    daily_rows = "\n".join(
-        f"<tr><td>{row['day']}</td><td>{row['samples']}</td><td>{row['min_voltage']}</td><td>{row['max_voltage']}</td><td>{row['avg_voltage']}</td><td>{row['avg_soc']}</td><td>{row['error_count']}</td></tr>"
-        for row in daily_history
-    )
-    monthly_rows = "\n".join(
-        f"<tr><td>{row['month']}</td><td>{row['samples']}</td><td>{row['min_voltage']}</td><td>{row['max_voltage']}</td><td>{row['avg_voltage']}</td><td>{row['avg_soc']}</td><td>{row['error_count']}</td></tr>"
-        for row in monthly_history
-    )
+    escaped_device_id = html.escape(device_id)
     return f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
-    <title>{device_id} History</title>
+    <title>{escaped_device_id} History</title>
     <style>
       body {{ font-family: sans-serif; margin: 2rem; background: #f4f6f8; color: #132029; }}
       table {{ width: 100%; border-collapse: collapse; background: white; margin-bottom: 2rem; }}
@@ -316,6 +481,61 @@ def render_history_html(
   <body>
     <p><a href="/">Back</a></p>
     <h1>{html.escape(device_id)} History</h1>
+    {sections}
+  </body>
+</html>
+"""
+
+
+def _parse_history_limit(values: list[str], *, default: int) -> int:
+    raw_limit = values[0] if values else str(default)
+    limit = int(raw_limit)
+    if limit <= 0:
+        raise ValueError("limit must be positive")
+    return limit
+
+
+def _render_history_sections(
+    *,
+    raw_history: list[dict[str, object]],
+    daily_history: list[dict[str, object]],
+    monthly_history: list[dict[str, object]],
+) -> str:
+    raw_rows = "\n".join(
+        "<tr>"
+        f"<td>{_escape_cell(row['ts'])}</td>"
+        f"<td>{_escape_cell(row['voltage'])}</td>"
+        f"<td>{_escape_cell(row['soc'])}</td>"
+        f"<td>{_escape_cell(row['state'])}</td>"
+        f"<td>{_escape_cell(row['error_code'])}</td>"
+        "</tr>"
+        for row in raw_history
+    )
+    daily_rows = "\n".join(
+        "<tr>"
+        f"<td>{_escape_cell(row['day'])}</td>"
+        f"<td>{_escape_cell(row['samples'])}</td>"
+        f"<td>{_escape_cell(row['min_voltage'])}</td>"
+        f"<td>{_escape_cell(row['max_voltage'])}</td>"
+        f"<td>{_escape_cell(row['avg_voltage'])}</td>"
+        f"<td>{_escape_cell(row['avg_soc'])}</td>"
+        f"<td>{_escape_cell(row['error_count'])}</td>"
+        "</tr>"
+        for row in daily_history
+    )
+    monthly_rows = "\n".join(
+        "<tr>"
+        f"<td>{_escape_cell(row['month'])}</td>"
+        f"<td>{_escape_cell(row['samples'])}</td>"
+        f"<td>{_escape_cell(row['min_voltage'])}</td>"
+        f"<td>{_escape_cell(row['max_voltage'])}</td>"
+        f"<td>{_escape_cell(row['avg_voltage'])}</td>"
+        f"<td>{_escape_cell(row['avg_soc'])}</td>"
+        f"<td>{_escape_cell(row['error_count'])}</td>"
+        "</tr>"
+        for row in monthly_history
+    )
+    return f"""
     <h2>Recent raw readings</h2>
     <table>
       <thead><tr><th>Timestamp</th><th>Voltage</th><th>SoC</th><th>State</th><th>Error</th></tr></thead>
@@ -341,8 +561,6 @@ def render_history_html(
       </thead>
       <tbody>{monthly_rows or "<tr><td colspan='7'>No data</td></tr>"}</tbody>
     </table>
-  </body>
-</html>
 """
 
 
@@ -508,12 +726,21 @@ def serve_management(
             if parsed.path == "/api/storage":
                 self._send_json(fetch_storage_summary(database_path))
                 return
+            if parsed.path == "/api/analytics":
+                params = parse_qs(parsed.query)
+                device_id = params.get("device_id", [""])[0]
+                self._send_json(fetch_degradation_report(database_path, device_id=device_id))
+                return
 
             if parsed.path == "/api/history":
                 params = parse_qs(parsed.query)
                 device_id = params.get("device_id", [""])[0]
                 kind = params.get("kind", ["daily"])[0]
-                limit = int(params.get("limit", ["365"])[0])
+                try:
+                    limit = _parse_history_limit(params.get("limit", []), default=365)
+                except ValueError as error:
+                    self._send_json({"error": str(error)}, status=400)
+                    return
                 if kind == "raw":
                     self._send_json(
                         fetch_recent_history(database_path, device_id=device_id, limit=limit)
@@ -522,10 +749,40 @@ def serve_management(
                     self._send_json(
                         fetch_monthly_history(database_path, device_id=device_id, limit=limit)
                     )
+                elif kind == "yearly":
+                    self._send_json(
+                        fetch_yearly_history(database_path, device_id=device_id, limit=limit)
+                    )
                 else:
                     self._send_json(
                         fetch_daily_history(database_path, device_id=device_id, limit=limit)
                     )
+                return
+
+            if parsed.path == "/device":
+                params = parse_qs(parsed.query)
+                device_id = params.get("device_id", [""])[0]
+                html = render_device_html(
+                    device_id=device_id,
+                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=200),
+                    daily_history=fetch_daily_history(
+                        database_path,
+                        device_id=device_id,
+                        limit=365,
+                    ),
+                    monthly_history=fetch_monthly_history(
+                        database_path,
+                        device_id=device_id,
+                        limit=24,
+                    ),
+                    yearly_history=fetch_yearly_history(
+                        database_path,
+                        device_id=device_id,
+                        limit=10,
+                    ),
+                    analytics=fetch_degradation_report(database_path, device_id=device_id),
+                )
+                self._send_html(html)
                 return
 
             if parsed.path == "/history":
@@ -606,7 +863,7 @@ def serve_management(
                 if completed.stderr:
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)
-                self.send_header("Location", f"/?message={message.replace(' ', '%20')}")
+                self.send_header("Location", "/?" + urlencode({"message": message}))
                 self.end_headers()
                 return
 
@@ -618,7 +875,7 @@ def serve_management(
                     daily_retention_days=config.retention.daily_retention_days,
                 )
                 self.send_response(303)
-                self.send_header("Location", "/?message=History%20pruned")
+                self.send_header("Location", "/?" + urlencode({"message": "History pruned"}))
                 self.end_headers()
                 return
 

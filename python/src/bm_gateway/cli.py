@@ -24,9 +24,11 @@ from .runtime import (
 from .state_store import (
     fetch_counts,
     fetch_daily_history,
+    fetch_degradation_report,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_storage_summary,
+    fetch_yearly_history,
     load_snapshot,
     persist_snapshot,
     prune_history,
@@ -118,13 +120,17 @@ def build_parser() -> argparse.ArgumentParser:
     history_monthly = history_subparsers.add_parser(
         "monthly", help="Show monthly device summaries."
     )
+    history_yearly = history_subparsers.add_parser("yearly", help="Show yearly device summaries.")
+    history_compare = history_subparsers.add_parser(
+        "compare", help="Show long-term degradation comparison windows."
+    )
     history_stats = history_subparsers.add_parser(
         "stats", help="Show storage counts and per-device history ranges."
     )
     history_prune = history_subparsers.add_parser(
         "prune", help="Apply configured retention limits to persisted history."
     )
-    for history_command in (history_raw, history_daily, history_monthly):
+    for history_command in (history_raw, history_daily, history_monthly, history_yearly):
         history_command.add_argument("--device-id", required=True, help="Device identifier.")
         history_command.add_argument(
             "--json", action="store_true", help="Print structured JSON output."
@@ -141,6 +147,16 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Limit the number of rows returned.",
         )
+    history_compare.add_argument("--device-id", required=True, help="Device identifier.")
+    history_compare.add_argument(
+        "--json", action="store_true", help="Print structured JSON output."
+    )
+    history_compare.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="Override the base directory used for runtime state files.",
+    )
     for history_command in (history_stats, history_prune):
         history_command.add_argument(
             "--json", action="store_true", help="Print structured JSON output."
@@ -473,6 +489,8 @@ def _handle_history(
         rows = fetch_recent_history(database_path, device_id=device_id, limit=limit or 200)
     elif history_kind == "daily":
         rows = fetch_daily_history(database_path, device_id=device_id, limit=limit or 365)
+    elif history_kind == "yearly":
+        rows = fetch_yearly_history(database_path, device_id=device_id, limit=limit or 10)
     else:
         rows = fetch_monthly_history(database_path, device_id=device_id, limit=limit or 24)
 
@@ -482,6 +500,37 @@ def _handle_history(
 
     for row in rows:
         print(json.dumps(row, sort_keys=True))
+    return 0
+
+
+def _handle_history_compare(
+    path: Path,
+    *,
+    verbose: bool,
+    device_id: str,
+    as_json: bool,
+    state_dir: Path | None,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, _devices = runtime
+    database_path = database_file_path(config, state_dir=state_dir)
+    report = fetch_degradation_report(database_path, device_id=device_id)
+
+    if as_json:
+        _print_json(report)
+        return 0
+
+    print(f"device_id: {report['device_id']}")
+    print(f"latest_day: {report['latest_day']}")
+    for window in cast(list[dict[str, object]], report["windows"]):
+        print(
+            f"{window['days']}d: voltage {window['current_avg_voltage']} vs "
+            f"{window['previous_avg_voltage']} (delta {window['delta_avg_voltage']}), "
+            f"soc {window['current_avg_soc']} vs {window['previous_avg_soc']} "
+            f"(delta {window['delta_avg_soc']})"
+        )
     return 0
 
 
@@ -617,7 +666,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             as_json=bool(args.json),
             output_dir=args.output_dir,
         )
-    if args.command == "history" and args.history_command in {"raw", "daily", "monthly"}:
+    if args.command == "history" and args.history_command in {"raw", "daily", "monthly", "yearly"}:
         return _handle_history(
             args.config,
             verbose=bool(args.verbose),
@@ -626,6 +675,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             as_json=bool(args.json),
             state_dir=args.state_dir,
             limit=args.limit,
+        )
+    if args.command == "history" and args.history_command == "compare":
+        return _handle_history_compare(
+            args.config,
+            verbose=bool(args.verbose),
+            device_id=args.device_id,
+            as_json=bool(args.json),
+            state_dir=args.state_dir,
         )
     if args.command == "history" and args.history_command == "stats":
         return _handle_history_stats(

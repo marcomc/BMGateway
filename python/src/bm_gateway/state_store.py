@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
 
@@ -389,8 +389,8 @@ def fetch_monthly_history(
                 SUM(samples),
                 MIN(min_voltage),
                 MAX(max_voltage),
-                AVG(avg_voltage),
-                AVG(avg_soc),
+                SUM(avg_voltage * samples) / SUM(samples),
+                SUM(avg_soc * samples) / SUM(samples),
                 SUM(error_count),
                 MAX(last_seen)
             FROM device_daily_rollups
@@ -417,3 +417,157 @@ def fetch_monthly_history(
         }
         for row in rows
     ]
+
+
+def fetch_yearly_history(
+    path: Path,
+    *,
+    device_id: str,
+    limit: int = 10,
+) -> list[dict[str, object]]:
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                substr(day, 1, 4) AS year,
+                SUM(samples),
+                MIN(min_voltage),
+                MAX(max_voltage),
+                SUM(avg_voltage * samples) / SUM(samples),
+                SUM(avg_soc * samples) / SUM(samples),
+                SUM(error_count),
+                MAX(last_seen)
+            FROM device_daily_rollups
+            WHERE device_id = ?
+            GROUP BY year
+            ORDER BY year DESC
+            LIMIT ?
+            """,
+            (device_id, limit),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        {
+            "device_id": device_id,
+            "year": row[0],
+            "samples": row[1],
+            "min_voltage": row[2],
+            "max_voltage": row[3],
+            "avg_voltage": row[4],
+            "avg_soc": row[5],
+            "error_count": row[6],
+            "last_seen": row[7],
+        }
+        for row in rows
+    ]
+
+
+def _load_daily_rows_for_analytics(
+    path: Path, *, device_id: str
+) -> list[tuple[date, float, float, int, int]]:
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT day, avg_voltage, avg_soc, error_count, samples
+            FROM device_daily_rollups
+            WHERE device_id = ?
+            ORDER BY day ASC
+            """,
+            (device_id,),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        (
+            date.fromisoformat(cast(str, row[0])),
+            float(row[1]),
+            float(row[2]),
+            int(row[3]),
+            int(row[4]),
+        )
+        for row in rows
+    ]
+
+
+def _weighted_average(
+    rows: list[tuple[date, float, float, int, int]],
+    value_index: int,
+) -> float | None:
+    total_samples = sum(row[4] for row in rows)
+    if total_samples <= 0:
+        return None
+    if value_index == 1:
+        weighted_sum = sum(row[1] * row[4] for row in rows)
+    elif value_index == 2:
+        weighted_sum = sum(row[2] * row[4] for row in rows)
+    else:
+        raise ValueError(f"unsupported weighted average index: {value_index}")
+    return round(weighted_sum / total_samples, 2)
+
+
+def fetch_degradation_report(path: Path, *, device_id: str) -> dict[str, object]:
+    rows = _load_daily_rows_for_analytics(path, device_id=device_id)
+    if not rows:
+        return {
+            "device_id": device_id,
+            "latest_day": None,
+            "windows": [],
+        }
+
+    latest_day = rows[-1][0]
+    windows: list[dict[str, object]] = []
+    durations = (30, 90, 180, 365, 730)
+    for days in durations:
+        current_start = latest_day - timedelta(days=days - 1)
+        previous_end = current_start - timedelta(days=1)
+        previous_start = previous_end - timedelta(days=days - 1)
+
+        current_rows = [row for row in rows if current_start <= row[0] <= latest_day]
+        previous_rows = [row for row in rows if previous_start <= row[0] <= previous_end]
+        if not current_rows:
+            continue
+
+        current_avg_voltage = _weighted_average(current_rows, 1)
+        current_avg_soc = _weighted_average(current_rows, 2)
+        previous_avg_voltage = _weighted_average(previous_rows, 1) if previous_rows else None
+        previous_avg_soc = _weighted_average(previous_rows, 2) if previous_rows else None
+        if current_avg_voltage is None or current_avg_soc is None:
+            continue
+        windows.append(
+            {
+                "days": days,
+                "current_start_day": current_rows[0][0].isoformat(),
+                "current_end_day": current_rows[-1][0].isoformat(),
+                "current_days": len(current_rows),
+                "current_avg_voltage": current_avg_voltage,
+                "current_avg_soc": current_avg_soc,
+                "current_error_count": sum(row[3] for row in current_rows),
+                "current_samples": sum(row[4] for row in current_rows),
+                "previous_start_day": previous_rows[0][0].isoformat() if previous_rows else None,
+                "previous_end_day": previous_rows[-1][0].isoformat() if previous_rows else None,
+                "previous_days": len(previous_rows),
+                "previous_avg_voltage": previous_avg_voltage,
+                "previous_avg_soc": previous_avg_soc,
+                "previous_error_count": sum(row[3] for row in previous_rows),
+                "previous_samples": sum(row[4] for row in previous_rows),
+                "delta_avg_voltage": (
+                    round(current_avg_voltage - previous_avg_voltage, 2)
+                    if previous_avg_voltage is not None
+                    else None
+                ),
+                "delta_avg_soc": (
+                    round(current_avg_soc - previous_avg_soc, 2)
+                    if previous_avg_soc is not None
+                    else None
+                ),
+            }
+        )
+
+    return {
+        "device_id": device_id,
+        "latest_day": latest_day.isoformat(),
+        "windows": windows,
+    }

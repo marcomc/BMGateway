@@ -28,13 +28,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Raspberry Pi storage.
 - CLI history inspection commands for raw, daily, and monthly summaries.
 - Storage summary and manual retention-pruning commands under `history`.
+- Yearly history summaries and degradation-comparison analytics from persisted
+  rollups.
 - Host-run Python management web interface with config/device TOML editing,
   history views, and one-shot run triggering.
 - Expanded management web interface coverage for configured devices, Home
-  Assistant contract/discovery views, storage summary, and manual history
-  pruning.
+  Assistant contract/discovery views, storage summary, manual history pruning,
+  device analytics pages, and trend charts.
 - End-to-end subprocess regression coverage for `bm-gateway`,
   `python -m bm_gateway`, `web serve`, and `web manage`.
+- MQTT availability topics and richer device availability/error payload
+  semantics.
 - macOS Raspberry Pi Imager CLI guide, wrapper script, and first-run bootstrap
   example for SD-card provisioning.
 - Runtime persistence now survives MQTT publish failures instead of aborting the
