@@ -140,7 +140,7 @@ if [[ "${install_services}" -eq 1 ]]; then
   if [[ "${enable_home_assistant}" -eq 0 ]]; then
     service_args+=(--disable-home-assistant)
   fi
-  sudo "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"
+  sudo bash "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"
 fi
 
 hostname_name="$(hostname)"

@@ -98,7 +98,7 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
-    assert f"{repo_dir}/rpi-setup/scripts/install-service.sh --user" in commands
+    assert f"bash {repo_dir}/rpi-setup/scripts/install-service.sh --user" in commands
     assert "markdownlint" not in commands
     assert "shellcheck" not in commands
 
