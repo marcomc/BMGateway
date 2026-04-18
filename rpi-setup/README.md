@@ -23,9 +23,17 @@ macOS helpers now include:
 
 The install helper now places:
 
-- `/etc/bm-gateway/config.toml`
-- `/etc/bm-gateway/devices.toml`
+- `~/.config/bm-gateway/config.toml`
+- `~/.config/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/usr/local/bin/bm-gateway`
+
+The one-line bootstrap now installs the full appliance by default:
+
+- standalone CLI runtime
+- runtime service
+- management web service
+- live-ready config with an empty device registry
 
 Stabilize the manual setup first, then translate it into Ansible.

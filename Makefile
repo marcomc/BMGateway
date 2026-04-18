@@ -59,7 +59,11 @@ sync: $(VENV)/bin/python ## Sync the project environment
 
 install: install-deps ## Install a standalone user-facing runtime
 	@mkdir -p "$(APP_HOME)"
-	@"$(UV)" venv --python "$(PYTHON_VERSION)" "$(APP_VENV)"
+	@if [ ! -x "$(APP_PYTHON)" ]; then \
+		"$(UV)" venv --python "$(PYTHON_VERSION)" "$(APP_VENV)"; \
+	else \
+		echo "Reusing existing runtime at $(APP_VENV)"; \
+	fi
 	@"$(UV)" pip install --python "$(APP_PYTHON)" .
 	@$(MAKE) install-link install-config
 

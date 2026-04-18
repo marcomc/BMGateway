@@ -15,7 +15,13 @@ from urllib.parse import parse_qs, quote, urlencode, urlparse
 
 from .config import AppConfig, load_config, write_config
 from .contract import build_contract, build_discovery_payloads
-from .device_registry import load_device_registry, validate_devices, write_device_registry
+from .device_registry import (
+    Device,
+    load_device_registry,
+    normalize_mac_address,
+    validate_devices,
+    write_device_registry,
+)
 from .runtime import database_file_path, state_file_path
 from .state_store import (
     fetch_daily_history,
@@ -290,6 +296,27 @@ def render_management_html(
       <div class="device-grid">
         {_device_dashboard_cards(snapshot)}
       </div>
+    </div>
+    <div class="panel">
+      <h2>Add Device</h2>
+      <form method="post" action="/devices/add">
+        <p><label>Device ID<br><input type="text" name="device_id" required></label></p>
+        <p><label>Name<br><input type="text" name="device_name" required></label></p>
+        <p>
+          <label>Type<br>
+            <select name="device_type">
+              <option value="bm200">bm200</option>
+              <option value="bm300pro">bm300pro</option>
+            </select>
+          </label>
+        </p>
+        <p><label>MAC or serial<br><input type="text" name="device_mac" required></label></p>
+        <p><button type="submit">Add Device and Enable Live Polling</button></p>
+      </form>
+      <p>
+        You can paste a compact 12-hex serial such as <code>3CAB728286EA</code>;
+        the UI will normalize it to Bluetooth MAC format.
+      </p>
     </div>
     <div class="panel">
       <h2>Configured Devices</h2>
@@ -612,6 +639,41 @@ def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml
         return []
 
 
+def add_device_from_form(
+    *,
+    config_path: Path,
+    device_id: str,
+    device_type: str,
+    device_name: str,
+    device_mac: str,
+) -> list[str]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    devices.append(
+        Device(
+            id=device_id.strip(),
+            type=device_type.strip(),
+            name=device_name.strip(),
+            mac=normalize_mac_address(device_mac),
+            enabled=True,
+        )
+    )
+    errors = validate_devices(devices)
+    if errors:
+        return errors
+
+    write_device_registry(config.device_registry_path, devices)
+    if config.gateway.reader_mode != "live":
+        write_config(
+            config_path,
+            replace(
+                config,
+                gateway=replace(config.gateway, reader_mode="live"),
+            ),
+        )
+    return []
+
+
 def build_run_once_command(config_path: Path, *, state_dir: Path | None = None) -> list[str]:
     command = [
         sys.executable,
@@ -854,6 +916,43 @@ def serve_management(
 
                 self.send_response(303)
                 self.send_header("Location", "/?message=Configuration%20saved")
+                self.end_headers()
+                return
+
+            if parsed.path == "/devices/add":
+                errors = add_device_from_form(
+                    config_path=config_path,
+                    device_id=form.get("device_id", [""])[0],
+                    device_type=form.get("device_type", ["bm200"])[0],
+                    device_name=form.get("device_name", [""])[0],
+                    device_mac=form.get("device_mac", [""])[0],
+                )
+                if errors:
+                    config_text, devices_text = _config_and_registry_texts(config_path)
+                    config, snapshot, database_path = self._load_current()
+                    html = render_management_html(
+                        snapshot=snapshot,
+                        storage_summary=fetch_storage_summary(database_path),
+                        devices=[
+                            device.to_dict()
+                            for device in load_device_registry(config.device_registry_path)
+                        ],
+                        config_text=config_text,
+                        devices_text=devices_text,
+                        contract=build_contract(
+                            config,
+                            load_device_registry(config.device_registry_path),
+                        ),
+                        message="Validation failed: " + "; ".join(errors),
+                    )
+                    self._send_html(html, status=400)
+                    return
+
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/?" + urlencode({"message": "Device added. Live polling enabled."}),
+                )
                 self.end_headers()
                 return
 

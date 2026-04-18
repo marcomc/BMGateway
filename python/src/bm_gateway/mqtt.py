@@ -153,6 +153,8 @@ class MQTTPublisher:
         snapshot: GatewaySnapshot,
         publish_discovery: bool,
     ) -> bool:
+        if not config.mqtt.enabled:
+            return False
         client = self._build_client()
         if config.mqtt.username:
             client.username_pw_set(config.mqtt.username, config.mqtt.password)

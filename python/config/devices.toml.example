@@ -1,13 +1,8 @@
-[[devices]]
-id = "bm200_house"
-type = "bm200"
-name = "BM200 House"
-mac = "AA:BB:CC:DD:EE:01"
-enabled = true
-
-[[devices]]
-id = "bm300_van"
-type = "bm300pro"
-name = "BM300 Van"
-mac = "AA:BB:CC:DD:EE:02"
-enabled = false
+# Add one or more [[devices]] entries here, for example:
+#
+# [[devices]]
+# id = "ancell_bm200"
+# type = "bm200"
+# name = "Ancell BM200"
+# mac = "3C:AB:72:82:86:EA"
+# enabled = true

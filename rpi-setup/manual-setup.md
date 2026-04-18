@@ -85,7 +85,7 @@ no Bluetooth controller to configure.
 
 For routine host installation, the supported bootstrap path is the repository
 script that performs apt setup, `uv` installation, clone-or-update, and
-`make install` in one step:
+full appliance installation in one step:
 
 ```bash
 ./scripts/bootstrap-install.sh
@@ -103,6 +103,20 @@ curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/boot
 
 The bootstrap script intentionally installs the standalone runtime through
 `make install`, not `make install-dev`.
+
+By default it also:
+
+- installs and starts `bm-gateway.service`
+- installs and starts `bm-gateway-web.service`
+- keeps the management UI on `0.0.0.0:8080`
+- prints the working management URLs at the end of the run
+
+Useful options:
+
+- `--disable-web`
+- `--disable-home-assistant`
+- `--skip-services`
+- `--web-port <port>`
 
 ## Install `uv`
 
@@ -186,19 +200,33 @@ The intended steady state is:
 - `wlan0` connected as fallback with a higher route metric
 - `hci0` present, unblocked, and powered on
 
+For BM200 support, powered on is not enough. The Bluetooth adapter must also
+support BLE central mode. The currently audited CSR USB dongle identified as
+`0a12:0001` exposes BR/EDR only and does not provide the BLE central role
+required by `bleak`, so it cannot monitor BM200 devices.
+
 ## Configure the Gateway
 
-Use the example files in `python/config/` as the starting point:
+The appliance bootstrap now writes a live-ready config to:
 
-- copy `python/config/config.toml.example` to
-  `~/.config/bm-gateway/config.toml`
-- copy `python/config/devices.toml` beside it if you want a separate working
-  copy
-- set `gateway.reader_mode = "live"` when you want to connect to real BM200
-  hardware
-- keep `gateway.poll_interval_seconds = 300` as the default baseline unless
-  you have a specific reason to poll more aggressively
-- replace MQTT and device values with real values
+- `~/.config/bm-gateway/config.toml`
+- `~/.config/bm-gateway/devices.toml`
+
+The default post-install workflow is:
+
+1. Open the management UI
+2. Add your Bluetooth devices there
+3. Update MQTT settings there when you are ready to publish to Home Assistant
+
+The installed config keeps:
+
+- `gateway.reader_mode = "live"`
+- `gateway.poll_interval_seconds = 300`
+- `web.host = "0.0.0.0"`
+- `web.port = 8080`
+
+The devices registry starts empty on purpose so the web UI can be the first
+real configuration surface instead of shipping fake sample hardware.
 
 ## Validate the Setup
 
@@ -225,7 +253,7 @@ Expected outcomes:
 
 ## Install the Service Assets
 
-To install the runtime service unit on the Pi:
+To install or refresh the runtime and web services on the Pi:
 
 ```bash
 sudo ./rpi-setup/scripts/install-service.sh
@@ -233,16 +261,15 @@ sudo ./rpi-setup/scripts/install-service.sh
 
 This installs:
 
-- `/etc/bm-gateway/config.toml`
-- `/etc/bm-gateway/devices.toml`
+- `/home/<user>/.config/bm-gateway/config.toml`
+- `/home/<user>/.config/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/usr/local/bin/bm-gateway` as a stable systemd-facing symlink
 
-Review the config, then start the service:
+Review the config, then check the service state:
 
 ```bash
-sudo systemctl start bm-gateway.service
-sudo systemctl start bm-gateway-web.service
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
 ```

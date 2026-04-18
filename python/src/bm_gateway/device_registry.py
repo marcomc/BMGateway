@@ -9,6 +9,7 @@ from pathlib import Path
 
 VALID_DEVICE_TYPES = {"bm200", "bm300pro"}
 MAC_ADDRESS_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
+COMPACT_MAC_RE = re.compile(r"^[0-9A-F]{12}$")
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,13 @@ class Device:
         }
 
 
+def normalize_mac_address(value: str) -> str:
+    raw = re.sub(r"[^0-9A-Fa-f]", "", value).upper()
+    if COMPACT_MAC_RE.fullmatch(raw):
+        return ":".join(raw[index : index + 2] for index in range(0, 12, 2))
+    return value.strip().upper()
+
+
 def load_device_registry(path: Path) -> list[Device]:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
@@ -46,7 +54,7 @@ def load_device_registry(path: Path) -> list[Device]:
                 id=str(item.get("id", "")).strip(),
                 type=str(item.get("type", "")).strip(),
                 name=str(item.get("name", "")).strip(),
-                mac=str(item.get("mac", "")).strip().upper(),
+                mac=normalize_mac_address(str(item.get("mac", ""))),
                 enabled=bool(item.get("enabled", True)),
             )
         )
@@ -98,8 +106,4 @@ def validate_devices(devices: list[Device]) -> list[str]:
             errors.append(f"duplicate device mac: {device.mac}")
         else:
             seen_macs.add(device.mac)
-
-    if not devices:
-        errors.append("device registry must define at least one device")
-
     return errors

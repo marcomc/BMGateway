@@ -4,8 +4,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
 from bm_gateway.config import load_config
-from bm_gateway.device_registry import load_device_registry
+from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.web import (
+    add_device_from_form,
     build_run_once_command,
     render_device_html,
     render_history_html,
@@ -84,6 +85,78 @@ def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: 
     assert devices[0].id == "bm200_house"
 
 
+def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 300",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "fake"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 8",
+                "connect_timeout_seconds = 10",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 8080",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = add_device_from_form(
+        config_path=config_path,
+        device_id="bm200_ancell",
+        device_type="bm200",
+        device_name="Ancell BM200",
+        device_mac="3CAB728286EA",
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert config.gateway.reader_mode == "live"
+    assert devices[0].mac == "3C:AB:72:82:86:EA"
+
+
+def test_compact_mac_address_is_normalized() -> None:
+    assert normalize_mac_address("3CAB728286EA") == "3C:AB:72:82:86:EA"
+
+
+def test_empty_device_registry_is_allowed() -> None:
+    assert validate_devices([]) == []
+
+
 def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     state_dir = tmp_path / "state"
@@ -141,6 +214,7 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert "Storage Summary" in html
     assert "/api/ha/contract" in html
     assert "Prune History Using Retention Settings" in html
+    assert "Add Device and Enable Live Polling" in html
 
 
 def test_render_management_html_includes_analytics_and_device_links() -> None:

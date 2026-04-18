@@ -44,6 +44,9 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
         + 'if [ "$1" = "clone" ]; then\n'
         + '  destination="$3"\n'
         + '  mkdir -p "$destination/.git"\n'
+        + '  mkdir -p "$destination/rpi-setup/scripts"\n'
+        + '  printf "#!/bin/sh\\nexit 0\\n" > "$destination/rpi-setup/scripts/install-service.sh"\n'
+        + '  chmod +x "$destination/rpi-setup/scripts/install-service.sh"\n'
         + "  exit 0\n"
         + "fi\n"
         + 'if [ "$1" = "-C" ]; then\n'
@@ -95,6 +98,7 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
+    assert f"{repo_dir}/rpi-setup/scripts/install-service.sh --user" in commands
     assert "markdownlint" not in commands
     assert "shellcheck" not in commands
 
@@ -104,6 +108,9 @@ def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> N
     fake_bin, command_log = _make_fake_environment(tmp_path)
     repo_dir = tmp_path / "BMGateway"
     (repo_dir / ".git").mkdir(parents=True)
+    service_script = repo_dir / "rpi-setup" / "scripts" / "install-service.sh"
+    service_script.parent.mkdir(parents=True)
+    _write_executable(service_script, "#!/bin/sh\nexit 0\n")
 
     env = os.environ.copy()
     env["HOME"] = str(tmp_path / "home")
@@ -143,7 +150,7 @@ def test_bootstrap_install_script_uses_current_checkout_without_repo_url(
     env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
 
     result = subprocess.run(
-        [str(script_path), "--skip-apt", "--skip-uv"],
+        [str(script_path), "--skip-apt", "--skip-uv", "--skip-services"],
         cwd=tmp_path,
         env=env,
         check=False,
@@ -176,7 +183,7 @@ def test_bootstrap_install_script_uses_uv_from_local_bin_when_skip_uv_is_set(
     env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
 
     result = subprocess.run(
-        [str(script_path), "--skip-apt", "--skip-uv"],
+        [str(script_path), "--skip-apt", "--skip-uv", "--skip-services"],
         cwd=tmp_path,
         env=env,
         check=False,

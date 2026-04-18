@@ -173,6 +173,20 @@ On this hardware, successful bring-up means:
 - `rfkill` shows Bluetooth as not soft-blocked
 - `bluetoothctl show` reports the controller as powered on
 
+Important limitation discovered during live BM200 testing:
+
+- the attached CSR dongle with USB ID `0a12:0001` powered on correctly
+- `hciconfig -a` reported Bluetooth `2.0`
+- `btmgmt info` exposed only `br/edr` in current settings
+- `bleak` reported: `No Bluetooth adapters with BLE 'central' role found`
+
+Conclusion:
+
+- this dongle is usable for classic Bluetooth only
+- it is not sufficient for BM200 monitoring
+- replace it with a BLE central-capable adapter before expecting live BM200
+  reads to work
+
 ## Bluetooth Unblock and Bring-Up Commands
 
 Use this exact sequence when the Bluetooth USB controller exists but is blocked

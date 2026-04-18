@@ -118,8 +118,15 @@ For the runtime target:
   Wi-Fi and USB Bluetooth dongles
 - a Raspberry Pi `3B`, `3B+`, `Zero W`, `Zero 2 W`, `4`, `400`, or `5` is the
   preferred baseline if you want integrated Wi-Fi and Bluetooth
-- Bluetooth support
+- a Bluetooth adapter with BLE central support
 - enough storage for SQLite history retention
+
+Important hardware note:
+
+- classic-only Bluetooth adapters are not sufficient for BM200 monitoring
+- the audited USB dongle `0a12:0001` from Cambridge Silicon Radio powered on
+  correctly, but exposed only BR/EDR and no BLE central role, so it could not
+  scan or connect to BM200 devices
 
 ## Installation
 
@@ -141,7 +148,17 @@ That script:
 - installs `uv` if it is missing
 - clones or updates the repository checkout
 - runs `make install` with the host `python3`
-- preserves existing user config under `~/.config/bm-gateway/`
+- installs and starts the runtime and web `systemd` services by default
+- preserves and updates user config under `~/.config/bm-gateway/`
+- prints the management URLs at the end of the run
+
+Supported bootstrap options:
+
+- `--disable-web` keeps the runtime service but disables the management UI
+- `--disable-home-assistant` disables MQTT and Home Assistant publishing in the
+  installed config
+- `--skip-services` performs only the standalone CLI install
+- `--web-port <port>` changes the management UI port
 
 If you publish the bootstrap script at a reachable URL, the same flow becomes a
 single remote one-liner:

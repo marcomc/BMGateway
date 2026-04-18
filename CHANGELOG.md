@@ -51,3 +51,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Host bootstrap install script that installs apt prerequisites, `uv`,
   clone-or-update checkout state, and the standalone `make install` runtime in
   one step.
+- Full appliance bootstrap that now installs and starts the runtime and web
+  services, prints management URLs, and accepts `--disable-web` /
+  `--disable-home-assistant` options.
+- Web-based device-add flow that normalizes compact BM200 serials into MAC
+  format and enables live polling when the first device is added.
+- Standalone install now reuses an existing runtime venv on upgrade instead of
+  failing on repeated installs.
+
+### Changed
+
+- Runtime appliance config now uses a live-ready empty device registry instead
+  of shipping sample hardware into the installed user config.
+- Raspberry Pi service install now renders units for the active user and
+  installs a stable `/usr/local/bin/bm-gateway` symlink for systemd.
+
+### Documented
+
+- The currently tested CSR USB Bluetooth dongle (`0a12:0001`) exposes only
+  classic BR/EDR and cannot provide the BLE central role required by BM200
+  monitoring.

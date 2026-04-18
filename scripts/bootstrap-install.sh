@@ -7,11 +7,15 @@ Usage:
   bootstrap-install.sh --repo-url <repo-url> [options]
 
 Options:
-  --repo-dir <path>    Checkout path. Default: $HOME/BMGateway
-  --ref <git-ref>      Optional branch, tag, or commit to checkout after update
-  --skip-apt           Skip apt package installation
-  --skip-uv            Skip uv bootstrap
-  --help               Show this help text
+  --repo-dir <path>               Checkout path. Default: $HOME/BMGateway
+  --ref <git-ref>                 Optional branch, tag, or commit to checkout after update
+  --disable-web                   Do not enable the management web service
+  --disable-home-assistant        Disable MQTT and Home Assistant in the installed config
+  --skip-apt                      Skip apt package installation
+  --skip-uv                       Skip uv bootstrap
+  --skip-services                 Skip systemd service installation and startup
+  --web-port <port>               Management web port. Default: 8080
+  --help                          Show this help text
 EOF
 }
 
@@ -20,8 +24,13 @@ script_dir="$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)"
 script_repo_dir="$(CDPATH='' cd -- "${script_dir}/.." && pwd)"
 repo_dir="${HOME}/BMGateway"
 git_ref=""
+service_user="$(id -un)"
 skip_apt=0
 skip_uv=0
+install_services=1
+enable_web=1
+enable_home_assistant=1
+web_port="8080"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -44,6 +53,22 @@ while [[ "$#" -gt 0 ]]; do
     --skip-uv)
       skip_uv=1
       shift
+      ;;
+    --skip-services)
+      install_services=0
+      shift
+      ;;
+    --disable-web)
+      enable_web=0
+      shift
+      ;;
+    --disable-home-assistant)
+      enable_home_assistant=0
+      shift
+      ;;
+    --web-port)
+      web_port="${2:?missing value for --web-port}"
+      shift 2
       ;;
     --help)
       usage
@@ -102,6 +127,28 @@ python_path="$(command -v python3)"
 cd "${repo_dir}"
 make install "PYTHON_VERSION=${python_path}"
 
+if [[ "${install_services}" -eq 1 ]]; then
+  service_args=(--user "${service_user}" --web-port "${web_port}")
+  if [[ "${enable_web}" -eq 0 ]]; then
+    service_args+=(--disable-web)
+  fi
+  if [[ "${enable_home_assistant}" -eq 0 ]]; then
+    service_args+=(--disable-home-assistant)
+  fi
+  sudo "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"
+fi
+
+hostname_name="$(hostname)"
+bonjour_name="${hostname_name}.local"
+primary_ip="$(hostname -I 2>/dev/null | awk '{print $1}' || true)"
+
 printf '\nBMGateway installed.\n'
 printf 'CLI: %s/.local/bin/bm-gateway\n' "${HOME}"
 printf 'Config: %s/.config/bm-gateway/config.toml\n' "${HOME}"
+if [[ "${install_services}" -eq 1 ]] && [[ "${enable_web}" -eq 1 ]]; then
+  printf 'Web UI: http://%s:%s/\n' "${bonjour_name}" "${web_port}"
+  if [[ -n "${primary_ip}" ]]; then
+    printf 'Web UI (IP): http://%s:%s/\n' "${primary_ip}" "${web_port}"
+  fi
+  printf 'Next step: open the Web UI and add your Bluetooth devices to start monitoring.\n'
+fi
