@@ -9,6 +9,9 @@ contract.
 It also covers the current BM200 live polling path. BM300 Pro is still not
 implemented.
 
+If you want to prebuild and customise the SD card from macOS before first
+boot, use [macos-imager-cli.md](macos-imager-cli.md).
+
 ## Base System
 
 - Install Raspberry Pi OS
@@ -138,7 +141,6 @@ sudo systemctl status bm-gateway-web.service
 - `rpi-setup/ansible/` contains the first provisioning playbook
 - `rpi-setup/systemd/` contains the service unit
 - `rpi-setup/scripts/` contains install and update helpers
-- `web/` contains Docker packaging for the status interface
 - `web/` contains the host-run management web plan and docs
 
 ## Next Step

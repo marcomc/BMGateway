@@ -394,8 +394,8 @@ def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml
         return []
 
 
-def build_run_once_command(config_path: Path) -> list[str]:
-    return [
+def build_run_once_command(config_path: Path, *, state_dir: Path | None = None) -> list[str]:
+    command = [
         sys.executable,
         "-m",
         "bm_gateway",
@@ -404,11 +404,16 @@ def build_run_once_command(config_path: Path) -> list[str]:
         "run",
         "--once",
     ]
+    if state_dir is not None:
+        command.extend(["--state-dir", str(state_dir)])
+    return command
 
 
-def run_once_via_cli(config_path: Path) -> subprocess.CompletedProcess[str]:
+def run_once_via_cli(
+    config_path: Path, *, state_dir: Path | None = None
+) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        build_run_once_command(config_path),
+        build_run_once_command(config_path, state_dir=state_dir),
         check=False,
         capture_output=True,
         text=True,
@@ -596,7 +601,7 @@ def serve_management(
                 return
 
             if parsed.path == "/actions/run-once":
-                completed = run_once_via_cli(config_path)
+                completed = run_once_via_cli(config_path, state_dir=state_dir)
                 message = "Run completed" if completed.returncode == 0 else "Run failed"
                 if completed.stderr:
                     message += f": {completed.stderr.strip()}"

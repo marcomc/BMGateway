@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import Protocol, cast
+from typing import Any, Protocol, cast
 
 import paho.mqtt.client as mqtt
 
@@ -42,6 +42,12 @@ class DryRunPublisher:
 class MQTTPublisher:
     timeout_seconds: int = 10
 
+    def _build_client(self) -> mqtt.Client:
+        callback_api_version = getattr(mqtt, "CallbackAPIVersion", None)
+        if callback_api_version is None:
+            return mqtt.Client()
+        return mqtt.Client(cast(Any, callback_api_version).VERSION2)
+
     def publish_runtime(
         self,
         *,
@@ -50,7 +56,7 @@ class MQTTPublisher:
         snapshot: GatewaySnapshot,
         publish_discovery: bool,
     ) -> bool:
-        client = mqtt.Client()
+        client = self._build_client()
         if config.mqtt.username:
             client.username_pw_set(config.mqtt.username, config.mqtt.password)
         client.connect(config.mqtt.host, config.mqtt.port, keepalive=self.timeout_seconds)

@@ -99,3 +99,37 @@ def test_run_once_persists_sqlite_database(tmp_path: Path) -> None:
 
     assert gateway_count == (1,)
     assert device_count == (1,)
+
+
+def test_run_once_still_persists_when_mqtt_publish_fails(tmp_path: Path) -> None:
+    config_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    config_text = config_path.read_text(encoding="utf-8").replace(
+        'host = "mqtt.local"',
+        'host = "127.0.0.1"',
+    )
+    config_path.write_text(config_text, encoding="utf-8")
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--state-dir",
+            str(state_dir),
+            "--json",
+        ]
+    )
+
+    assert result == 0
+
+    connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
+    try:
+        gateway_count = connection.execute("SELECT COUNT(*) FROM gateway_snapshots").fetchone()
+        device_count = connection.execute("SELECT COUNT(*) FROM device_readings").fetchone()
+    finally:
+        connection.close()
+
+    assert gateway_count == (1,)
+    assert device_count == (1,)

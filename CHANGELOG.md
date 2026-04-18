@@ -33,6 +33,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Expanded management web interface coverage for configured devices, Home
   Assistant contract/discovery views, storage summary, and manual history
   pruning.
+- End-to-end subprocess regression coverage for `bm-gateway`,
+  `python -m bm_gateway`, `web serve`, and `web manage`.
+- macOS Raspberry Pi Imager CLI guide, wrapper script, and first-run bootstrap
+  example for SD-card provisioning.
+- Runtime persistence now survives MQTT publish failures instead of aborting the
+  collection cycle.
 - Source-backed Raspberry Pi 3B / Raspberry Pi OS 32-bit / Docker viability
   research under `docs/research/`.
 - Raspberry Pi 3B manual setup guide, systemd service assets, install/update

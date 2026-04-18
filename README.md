@@ -82,6 +82,7 @@ Contains Home Assistant facing artifacts such as:
 Contains Raspberry Pi setup and deployment guidance:
 
 - a manual setup guide for Raspberry Pi 3B
+- a macOS Raspberry Pi Imager CLI provisioning guide
 - an Ansible area for later automation
 - service installation and operational notes
 
@@ -275,6 +276,13 @@ make test
 make lint
 make run
 ```
+
+The automated test suite now covers:
+
+- direct CLI invocation through `bm-gateway`
+- module invocation through `python -m bm_gateway`
+- subprocess-driven fake-device runtime flows
+- HTTP checks for `web serve` and `web manage`
 
 ## Roadmap
 

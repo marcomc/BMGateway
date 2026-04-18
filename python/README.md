@@ -61,3 +61,5 @@ retention stats directly.
 - The runtime supports both fake and live `bm200` polling paths.
 - Live `bm200` history retrieval is not wired yet, so long-term history is
   still built from per-cycle state snapshots.
+- End-to-end subprocess coverage now exercises:
+  `bm-gateway`, `python -m bm_gateway`, `web serve`, and `web manage`.

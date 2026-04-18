@@ -83,11 +83,12 @@ def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: 
 
 def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
+    state_dir = tmp_path / "state"
 
-    command = build_run_once_command(config_path)
+    command = build_run_once_command(config_path, state_dir=state_dir)
 
     assert command[1:4] == ["-m", "bm_gateway", "--config"]
-    assert command[-2:] == ["run", "--once"]
+    assert command[-4:] == ["run", "--once", "--state-dir", str(state_dir)]
 
 
 def test_render_management_html_includes_contract_and_storage_sections() -> None:

@@ -378,12 +378,15 @@ def _run_cycle(
     state_dir: Path | None,
 ) -> GatewaySnapshot:
     snapshot = build_snapshot(config, devices)
-    mqtt_connected = publisher.publish_runtime(
-        config=config,
-        devices=devices,
-        snapshot=snapshot,
-        publish_discovery=publish_discovery,
-    )
+    try:
+        mqtt_connected = publisher.publish_runtime(
+            config=config,
+            devices=devices,
+            snapshot=snapshot,
+            publish_discovery=publish_discovery,
+        )
+    except Exception:
+        mqtt_connected = False
     snapshot = GatewaySnapshot(
         generated_at=snapshot.generated_at,
         gateway_name=snapshot.gateway_name,
