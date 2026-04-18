@@ -166,6 +166,13 @@ The key runtime switch is `gateway.reader_mode`:
 - `fake` keeps the deterministic development reader
 - `live` enables explicit BLE polling for `bm200` devices
 
+The default polling baseline is intentionally low-frequency:
+
+- `gateway.poll_interval_seconds = 300`
+- this means one collection cycle every 5 minutes by default
+- tighter intervals are allowed, but they are an explicit opt-in for
+  troubleshooting or short-term monitoring, not the project default
+
 The key retention settings are:
 
 - `retention.raw_retention_days`
@@ -234,6 +241,11 @@ config, then run:
 ```bash
 bm-gateway --config ./python/config/gateway.toml.example run --once --json
 ```
+
+The project default is a 5-minute polling interval because this is a battery
+gateway, not a real-time telemetry stream. That reduces BLE churn, lowers
+device wakeups, and fits weaker Raspberry Pi hardware better. If you need
+short-interval diagnostics, lower `gateway.poll_interval_seconds` explicitly.
 
 Render HTML from the latest snapshot:
 

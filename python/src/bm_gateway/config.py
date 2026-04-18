@@ -14,7 +14,7 @@ DEFAULT_CONFIG_PATH = Path.home() / ".config" / "bm-gateway" / "config.toml"
 class GatewayConfig:
     name: str = "BMGateway"
     timezone: str = "Europe/Rome"
-    poll_interval_seconds: int = 15
+    poll_interval_seconds: int = 300
     device_registry: str = "devices.toml"
     data_dir: str = "data"
     reader_mode: str = "fake"
@@ -219,7 +219,7 @@ def load_config(path: Path) -> AppConfig:
     gateway = GatewayConfig(
         name=str(gateway_table.get("name", "BMGateway")),
         timezone=str(gateway_table.get("timezone", "Europe/Rome")),
-        poll_interval_seconds=int(gateway_table.get("poll_interval_seconds", 15)),
+        poll_interval_seconds=int(gateway_table.get("poll_interval_seconds", 300)),
         device_registry=str(gateway_table.get("device_registry", "devices.toml")),
         data_dir=str(gateway_table.get("data_dir", "data")),
         reader_mode=str(gateway_table.get("reader_mode", "fake")),

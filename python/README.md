@@ -32,6 +32,9 @@ This directory contains the packaged Python CLI and service code for
 - `gateway.reader_mode = "fake"` keeps the deterministic development reader
 - `gateway.reader_mode = "live"` enables explicit BLE polling for `bm200`
   devices
+- `gateway.poll_interval_seconds = 300` is the intended default baseline
+  because battery monitoring should normally run every few minutes, not every
+  few seconds
 - `bm300pro` remains unsupported in live mode and will be reported as
   `unsupported`
 

@@ -5,9 +5,11 @@
 [gateway]
 name = "__PROJECT_NAME__"
 timezone = "Europe/Rome"
-poll_interval_seconds = 15
+poll_interval_seconds = 300
 device_registry = "devices.toml"
 data_dir = "data"
+# Default is 5 minutes. Lower it only when you explicitly need tighter
+# monitoring and accept the extra BLE, CPU, and battery overhead.
 # Use "fake" for development or "live" to poll BM200 devices over BLE.
 reader_mode = "fake"
 
