@@ -116,6 +116,18 @@ def bool_to_toml(value: bool) -> str:
     return "true" if value else "false"
 
 
+def string_to_toml(value: str) -> str:
+    escaped = (
+        str(value)
+        .replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
 config_path = Path(sys.argv[1])
 state_dir = sys.argv[2]
 web_host = sys.argv[3]
@@ -148,37 +160,37 @@ web["port"] = web_port
 payload = "\n".join(
     [
         "[gateway]",
-        f'name = "{gateway.get("name", "BMGateway")}"',
-        f'timezone = "{gateway.get("timezone", "Europe/Rome")}"',
+        f'name = {string_to_toml(gateway.get("name", "BMGateway"))}',
+        f'timezone = {string_to_toml(gateway.get("timezone", "Europe/Rome"))}',
         f'poll_interval_seconds = {int(gateway.get("poll_interval_seconds", 300))}',
-        f'device_registry = "{gateway["device_registry"]}"',
-        f'data_dir = "{gateway["data_dir"]}"',
-        f'reader_mode = "{gateway["reader_mode"]}"',
+        f'device_registry = {string_to_toml(gateway["device_registry"])}',
+        f'data_dir = {string_to_toml(gateway["data_dir"])}',
+        f'reader_mode = {string_to_toml(gateway["reader_mode"])}',
         "",
         "[bluetooth]",
-        f'adapter = "{bluetooth.get("adapter", "auto")}"',
+        f'adapter = {string_to_toml(bluetooth.get("adapter", "auto"))}',
         f'scan_timeout_seconds = {int(bluetooth.get("scan_timeout_seconds", 8))}',
         f'connect_timeout_seconds = {int(bluetooth.get("connect_timeout_seconds", 10))}',
         "",
         "[mqtt]",
         f'enabled = {bool_to_toml(bool(mqtt.get("enabled", enable_home_assistant)))}',
-        f'host = "{mqtt.get("host", "mqtt.local")}"',
+        f'host = {string_to_toml(mqtt.get("host", "mqtt.local"))}',
         f'port = {int(mqtt.get("port", 1883))}',
-        f'username = "{mqtt.get("username", "homeassistant")}"',
-        f'password = "{mqtt.get("password", "CHANGE_ME")}"',
-        f'base_topic = "{mqtt.get("base_topic", "bm_gateway")}"',
-        f'discovery_prefix = "{mqtt.get("discovery_prefix", "homeassistant")}"',
+        f'username = {string_to_toml(mqtt.get("username", "homeassistant"))}',
+        f'password = {string_to_toml(mqtt.get("password", "CHANGE_ME"))}',
+        f'base_topic = {string_to_toml(mqtt.get("base_topic", "bm_gateway"))}',
+        f'discovery_prefix = {string_to_toml(mqtt.get("discovery_prefix", "homeassistant"))}',
         f'retain_discovery = {bool_to_toml(bool(mqtt.get("retain_discovery", True)))}',
         f'retain_state = {bool_to_toml(bool(mqtt.get("retain_state", False)))}',
         "",
         "[home_assistant]",
         f'enabled = {bool_to_toml(bool(home_assistant.get("enabled", enable_home_assistant)))}',
-        f'status_topic = "{home_assistant.get("status_topic", "homeassistant/status")}"',
-        f'gateway_device_id = "{home_assistant.get("gateway_device_id", "bm_gateway")}"',
+        f'status_topic = {string_to_toml(home_assistant.get("status_topic", "homeassistant/status"))}',
+        f'gateway_device_id = {string_to_toml(home_assistant.get("gateway_device_id", "bm_gateway"))}',
         "",
         "[web]",
         f'enabled = {bool_to_toml(bool(web.get("enabled", True)))}',
-        f'host = "{web.get("host", web_host)}"',
+        f'host = {string_to_toml(web.get("host", web_host))}',
         f'port = {int(web.get("port", web_port))}',
         "",
         "[retention]",

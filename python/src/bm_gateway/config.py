@@ -161,41 +161,52 @@ def _bool_to_toml(value: bool) -> str:
     return "true" if value else "false"
 
 
+def _string_to_toml(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
 def write_config(path: Path, config: AppConfig) -> None:
     payload = "\n".join(
         [
             "[gateway]",
-            f'name = "{config.gateway.name}"',
-            f'timezone = "{config.gateway.timezone}"',
+            f"name = {_string_to_toml(config.gateway.name)}",
+            f"timezone = {_string_to_toml(config.gateway.timezone)}",
             f"poll_interval_seconds = {config.gateway.poll_interval_seconds}",
-            f'device_registry = "{config.gateway.device_registry}"',
-            f'data_dir = "{config.gateway.data_dir}"',
-            f'reader_mode = "{config.gateway.reader_mode}"',
+            f"device_registry = {_string_to_toml(config.gateway.device_registry)}",
+            f"data_dir = {_string_to_toml(config.gateway.data_dir)}",
+            f"reader_mode = {_string_to_toml(config.gateway.reader_mode)}",
             "",
             "[bluetooth]",
-            f'adapter = "{config.bluetooth.adapter}"',
+            f"adapter = {_string_to_toml(config.bluetooth.adapter)}",
             f"scan_timeout_seconds = {config.bluetooth.scan_timeout_seconds}",
             f"connect_timeout_seconds = {config.bluetooth.connect_timeout_seconds}",
             "",
             "[mqtt]",
             f"enabled = {_bool_to_toml(config.mqtt.enabled)}",
-            f'host = "{config.mqtt.host}"',
+            f"host = {_string_to_toml(config.mqtt.host)}",
             f"port = {config.mqtt.port}",
-            f'username = "{config.mqtt.username}"',
-            f'password = "{config.mqtt.password}"',
-            f'base_topic = "{config.mqtt.base_topic}"',
-            f'discovery_prefix = "{config.mqtt.discovery_prefix}"',
+            f"username = {_string_to_toml(config.mqtt.username)}",
+            f"password = {_string_to_toml(config.mqtt.password)}",
+            f"base_topic = {_string_to_toml(config.mqtt.base_topic)}",
+            f"discovery_prefix = {_string_to_toml(config.mqtt.discovery_prefix)}",
             f"retain_discovery = {_bool_to_toml(config.mqtt.retain_discovery)}",
             f"retain_state = {_bool_to_toml(config.mqtt.retain_state)}",
             "",
             "[home_assistant]",
             f"enabled = {_bool_to_toml(config.home_assistant.enabled)}",
-            f'status_topic = "{config.home_assistant.status_topic}"',
-            f'gateway_device_id = "{config.home_assistant.gateway_device_id}"',
+            f"status_topic = {_string_to_toml(config.home_assistant.status_topic)}",
+            f"gateway_device_id = {_string_to_toml(config.home_assistant.gateway_device_id)}",
             "",
             "[web]",
             f"enabled = {_bool_to_toml(config.web.enabled)}",
-            f'host = "{config.web.host}"',
+            f"host = {_string_to_toml(config.web.host)}",
             f"port = {config.web.port}",
             "",
             "[retention]",

@@ -11,6 +11,7 @@ Options:
   --ref <git-ref>                 Optional branch, tag, or commit to checkout after update
   --disable-web                   Do not enable the management web service
   --disable-home-assistant        Disable MQTT and Home Assistant in the installed config
+  --service-user <name>           User that owns the services and config. Default: current user
   --skip-apt                      Skip apt package installation
   --skip-uv                       Skip uv bootstrap
   --skip-services                 Skip systemd service installation and startup
@@ -65,6 +66,10 @@ while [[ "$#" -gt 0 ]]; do
     --disable-home-assistant)
       enable_home_assistant=0
       shift
+      ;;
+    --service-user)
+      service_user="${2:?missing value for --service-user}"
+      shift 2
       ;;
     --web-port)
       web_port="${2:?missing value for --web-port}"

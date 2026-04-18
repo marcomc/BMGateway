@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 from bm_gateway import cli
+from bm_gateway.models import GatewaySnapshot
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -258,3 +259,107 @@ def test_web_render_outputs_html_from_snapshot(
 
     assert result == 0
     assert "<title>BMGateway Status</title>" in captured.out
+
+
+def test_run_reloads_config_and_device_registry_between_iterations(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices_path = tmp_path / "devices.toml"
+    devices_path.write_text("", encoding="utf-8")
+    config_path = tmp_path / "gateway.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 1",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "live"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 8",
+                "connect_timeout_seconds = 10",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "127.0.0.1"',
+                "port = 8080",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    observed_devices: list[list[str]] = []
+
+    def fake_run_cycle(**kwargs: object) -> GatewaySnapshot:
+        devices = kwargs["devices"]
+        assert isinstance(devices, list)
+        observed_devices.append([device.id for device in devices])
+        if len(observed_devices) == 1:
+            devices_path.write_text(
+                "\n".join(
+                    [
+                        "[[devices]]",
+                        'id = "ancell_bm200"',
+                        'type = "bm200"',
+                        'name = "Ancell BM200"',
+                        'mac = "A1:B2:C3:D4:E5:F6"',
+                        "enabled = true",
+                        "",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+        return GatewaySnapshot(
+            generated_at="2026-04-18T23:00:00+02:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=False,
+            mqtt_connected=False,
+            devices_total=len(devices),
+            devices_online=0,
+            poll_interval_seconds=1,
+            devices=[],
+        )
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", fake_run_cycle)
+    monkeypatch.setattr("bm_gateway.cli.sleep_interval", lambda _seconds: None)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--iterations",
+            "2",
+            "--dry-run",
+        ]
+    )
+
+    assert result == 0
+    assert observed_devices == [[], ["ancell_bm200"]]

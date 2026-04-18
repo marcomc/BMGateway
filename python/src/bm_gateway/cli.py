@@ -446,6 +446,9 @@ def _handle_run(
     last_snapshot: GatewaySnapshot | None = None
 
     while iteration_limit is None or completed < iteration_limit:
+        runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+        if runtime is not None:
+            config, devices = runtime
         last_snapshot = _run_cycle(
             config=config,
             devices=devices,

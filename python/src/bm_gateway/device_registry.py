@@ -12,6 +12,17 @@ MAC_ADDRESS_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
 COMPACT_MAC_RE = re.compile(r"^[0-9A-F]{12}$")
 
 
+def _toml_string(value: str) -> str:
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
+
+
 @dataclass(frozen=True)
 class Device:
     id: str
@@ -67,10 +78,10 @@ def write_device_registry(path: Path, devices: list[Device]) -> None:
         lines.extend(
             [
                 "[[devices]]",
-                f'id = "{device.id}"',
-                f'type = "{device.type}"',
-                f'name = "{device.name}"',
-                f'mac = "{device.mac}"',
+                f"id = {_toml_string(device.id)}",
+                f"type = {_toml_string(device.type)}",
+                f"name = {_toml_string(device.name)}",
+                f"mac = {_toml_string(device.mac)}",
                 f"enabled = {'true' if device.enabled else 'false'}",
                 "",
             ]

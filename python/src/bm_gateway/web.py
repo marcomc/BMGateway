@@ -314,7 +314,7 @@ def render_management_html(
         <p><button type="submit">Add Device and Enable Live Polling</button></p>
       </form>
       <p>
-        You can paste a compact 12-hex serial such as <code>3CAB728286EA</code>;
+        You can paste a compact 12-hex serial such as <code>A1B2C3D4E5F6</code>;
         the UI will normalize it to Bluetooth MAC format.
       </p>
     </div>
@@ -930,24 +930,20 @@ def serve_management(
                 if errors:
                     config_text, devices_text = _config_and_registry_texts(config_path)
                     config, snapshot, database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
                     html = render_management_html(
                         snapshot=snapshot,
                         storage_summary=fetch_storage_summary(database_path),
-                        devices=[
-                            device.to_dict()
-                            for device in load_device_registry(config.device_registry_path)
-                        ],
+                        devices=[device.to_dict() for device in configured_devices],
                         config_text=config_text,
                         devices_text=devices_text,
-                        contract=build_contract(
-                            config,
-                            load_device_registry(config.device_registry_path),
-                        ),
+                        contract=build_contract(config, configured_devices),
                         message="Validation failed: " + "; ".join(errors),
                     )
                     self._send_html(html, status=400)
                     return
 
+                run_once_via_cli(config_path, state_dir=state_dir)
                 self.send_response(303)
                 self.send_header(
                     "Location",
