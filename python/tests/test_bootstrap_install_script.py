@@ -95,6 +95,8 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
+    assert "markdownlint" not in commands
+    assert "shellcheck" not in commands
 
 
 def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> None:
@@ -155,3 +157,69 @@ def test_bootstrap_install_script_uses_current_checkout_without_repo_url(
     assert "git clone" not in commands
     assert "fetch --all --tags --prune" not in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
+
+
+def test_bootstrap_install_script_uses_uv_from_local_bin_when_skip_uv_is_set(
+    tmp_path: Path,
+) -> None:
+    script_path = Path("scripts/bootstrap-install.sh").resolve()
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+    local_bin = tmp_path / "home" / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    _write_executable(
+        local_bin / "uv",
+        "#!/bin/sh\n" + f'printf "%s\\n" "$0 $*" >> "{command_log}"\n' + "exit 0\n",
+    )
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        [str(script_path), "--skip-apt", "--skip-uv"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_make_install_does_not_depend_on_maintainer_lint_tools() -> None:
+    result = subprocess.run(
+        ["make", "-n", "install"],
+        cwd=Path(__file__).resolve().parents[2],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "markdownlint not found" not in result.stdout
+    assert "shellcheck not found" not in result.stdout
+
+
+def test_make_install_finds_uv_from_local_bin_on_clean_path(tmp_path: Path) -> None:
+    local_bin = tmp_path / ".local" / "bin"
+    local_bin.mkdir(parents=True)
+    _write_executable(local_bin / "uv", "#!/bin/sh\nexit 0\n")
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path)
+    env["PATH"] = "/usr/bin:/bin"
+
+    result = subprocess.run(
+        ["bash", "-lc", 'export PATH="$HOME/.local/bin:$PATH"; make install-deps'],
+        cwd=Path(__file__).resolve().parents[2],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr

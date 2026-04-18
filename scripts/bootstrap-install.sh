@@ -57,6 +57,8 @@ while [[ "$#" -gt 0 ]]; do
   esac
 done
 
+export PATH="${HOME}/.local/bin:${PATH}"
+
 if [[ -d "${script_repo_dir}/.git" ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
   repo_dir="${script_repo_dir}"
 fi

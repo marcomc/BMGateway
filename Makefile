@@ -23,7 +23,7 @@ MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs pyt
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-deps sync install install-dev install-link install-config uninstall lint test check run ha-export web-render clean
+.PHONY: help check-deps install-deps sync install install-dev install-link install-config uninstall lint test check run ha-export web-render clean
 
 help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##" } /^[a-zA-Z_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -41,12 +41,23 @@ check-deps: ## Verify required local tools
 		echo "export PATH=\"$(BINDIR):\$$PATH\""; \
 	fi
 
+install-deps: ## Verify required runtime install tools
+	@command -v "$(UV)" >/dev/null 2>&1 || { echo "uv not found"; exit 1; }
+	@mkdir -p "$(BINDIR)" "$(CONFIG_DIR)"
+	@if echo "$$PATH" | tr ':' '\n' | grep -Fxq "$(BINDIR)"; then \
+		echo "$(BINDIR) is on PATH"; \
+	else \
+		echo "warning: $(BINDIR) is not on PATH"; \
+		echo "add this to your shell profile:"; \
+		echo "export PATH=\"$(BINDIR):\$$PATH\""; \
+	fi
+
 $(VENV)/bin/python: pyproject.toml
 	@"$(UV)" sync --extra dev
 
 sync: $(VENV)/bin/python ## Sync the project environment
 
-install: check-deps ## Install a standalone user-facing runtime
+install: install-deps ## Install a standalone user-facing runtime
 	@mkdir -p "$(APP_HOME)"
 	@"$(UV)" venv --python "$(PYTHON_VERSION)" "$(APP_VENV)"
 	@"$(UV)" pip install --python "$(APP_PYTHON)" .
