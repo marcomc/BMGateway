@@ -14,8 +14,11 @@ from bleak import BleakClient
 from Crypto.Cipher import AES
 
 BM200_NOTIFY_CHARACTERISTIC = "0000fff4-0000-1000-8000-00805f9b34fb"
+BM200_WRITE_CHARACTERISTIC = "0000fff3-0000-1000-8000-00805f9b34fb"
 BM200_AES_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 49, 56, 56, 50, 52, 54, 54])
+BM6_AES_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 48, 49, 48, 48, 48, 48, 57])
 BM200_BLOCK_SIZE = 16
+BM6_POLL_PLAINTEXT = bytes.fromhex("d1550700000000000000000000000000")
 BM200_STATUS = {
     0: "critical",
     1: "low",
@@ -60,7 +63,11 @@ class BM200Transport(Protocol):
 
 
 def _create_cipher() -> Any:
-    return AES.new(BM200_AES_KEY, AES.MODE_CBC, bytes(BM200_BLOCK_SIZE))
+    return _create_cipher_for_key(BM200_AES_KEY)
+
+
+def _create_cipher_for_key(key: bytes) -> Any:
+    return AES.new(key, AES.MODE_CBC, bytes(BM200_BLOCK_SIZE))
 
 
 def _pad_payload(data: bytes) -> bytes:
@@ -72,8 +79,16 @@ def encrypt_payload(plaintext: bytes) -> bytes:
     return bytes(_create_cipher().encrypt(_pad_payload(plaintext)))
 
 
+def encrypt_bm6_payload(plaintext: bytes) -> bytes:
+    return bytes(_create_cipher_for_key(BM6_AES_KEY).encrypt(_pad_payload(plaintext)))
+
+
 def decrypt_payload(encrypted: bytes | bytearray) -> bytes:
     return bytes(_create_cipher().decrypt(bytes(encrypted)))
+
+
+def decrypt_bm6_payload(encrypted: bytes | bytearray) -> bytes:
+    return bytes(_create_cipher_for_key(BM6_AES_KEY).decrypt(bytes(encrypted)))
 
 
 def parse_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
@@ -92,8 +107,34 @@ def parse_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
     )
 
 
+def parse_bm6_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
+    if len(plaintext) < 16 or not plaintext.startswith(bytes.fromhex("d15507")):
+        raise BM200ProtocolError("plaintext does not contain a BM6 voltage packet")
+    if plaintext[3] == 0xFF:
+        raise BM200ProtocolError("plaintext contains a BM6 acknowledgement packet")
+
+    raw = plaintext.hex()
+    voltage = int(raw[15:18], 16) / 100.0
+    soc = int(raw[12:14], 16)
+    return BM200Measurement(
+        voltage=voltage,
+        soc=soc,
+        status_code=2,
+        state="normal",
+    )
+
+
 def parse_voltage_notification(encrypted: bytes | bytearray) -> BM200Measurement:
-    return parse_plaintext_measurement(decrypt_payload(encrypted))
+    errors: list[Exception] = []
+    for decryptor, parser in (
+        (decrypt_payload, parse_plaintext_measurement),
+        (decrypt_bm6_payload, parse_bm6_plaintext_measurement),
+    ):
+        try:
+            return parser(decryptor(encrypted))
+        except BM200ProtocolError as exc:
+            errors.append(exc)
+    raise BM200ProtocolError(str(errors[-1]))
 
 
 def encode_history_count_request() -> bytes:
@@ -163,16 +204,54 @@ class BleakBM200Transport:
         async with client:
             await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
             try:
+                loop = asyncio.get_running_loop()
+                deadline = loop.time() + timeout_seconds
+                bm6_request_sent = False
                 while True:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise BM200TimeoutError(address)
                     try:
-                        encrypted = await asyncio.wait_for(queue.get(), timeout=timeout_seconds)
+                        encrypted = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=min(2.0, remaining),
+                        )
                     except TimeoutError as exc:
-                        raise BM200TimeoutError(address) from exc
-                    plaintext = decrypt_payload(encrypted)
-                    if plaintext and plaintext[0] == 0xF5:
+                        if bm6_request_sent:
+                            raise BM200TimeoutError(address) from exc
+                        await client.write_gatt_char(
+                            BM200_WRITE_CHARACTERISTIC,
+                            encrypt_bm6_payload(BM6_POLL_PLAINTEXT),
+                            response=False,
+                        )
+                        bm6_request_sent = True
+                        continue
+                    if _is_bm200_measurement_packet(encrypted) or _is_bm6_measurement_packet(
+                        encrypted
+                    ):
                         return encrypted
             finally:
                 await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
+
+
+def _is_bm200_measurement_packet(encrypted: bytes) -> bool:
+    try:
+        plaintext = decrypt_payload(encrypted)
+    except ValueError:
+        return False
+    return bool(plaintext) and plaintext[0] == 0xF5
+
+
+def _is_bm6_measurement_packet(encrypted: bytes) -> bool:
+    try:
+        plaintext = decrypt_bm6_payload(encrypted)
+    except ValueError:
+        return False
+    return (
+        len(plaintext) >= 16
+        and plaintext.startswith(bytes.fromhex("d15507"))
+        and plaintext[3] != 0xFF
+    )
 
 
 async def read_bm200_measurement(
