@@ -149,9 +149,16 @@ def test_live_mode_run_uses_simulated_bm200_reader(
     config_path.write_text(config_text, encoding="utf-8")
     state_dir = tmp_path / "state"
 
-    def fake_live_reader(device_mac: object, adapter: object) -> BM200Measurement:
+    def fake_live_reader(
+        device_mac: object,
+        adapter: object,
+        timeout_seconds: object,
+        scan_timeout_seconds: object,
+    ) -> BM200Measurement:
         assert device_mac is not None
         assert adapter is not None
+        assert timeout_seconds is not None
+        assert scan_timeout_seconds is not None
         return BM200Measurement(
             voltage=12.91,
             soc=77,

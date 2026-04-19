@@ -11,8 +11,10 @@ reader_mode = "fake"
 
 [bluetooth]
 adapter = "auto"
-scan_timeout_seconds = 8
-connect_timeout_seconds = 10
+# BM6-family devices can be intermittent in discovery. Use a longer scan
+# window and overall connect budget than generic BLE defaults.
+scan_timeout_seconds = 15
+connect_timeout_seconds = 45
 
 [mqtt]
 enabled = true

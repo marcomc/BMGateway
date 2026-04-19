@@ -35,6 +35,10 @@ This directory contains the packaged Python CLI and service code for
 - `gateway.poll_interval_seconds = 300` is the intended default baseline
   because battery monitoring should normally run every few minutes, not every
   few seconds
+- `bluetooth.scan_timeout_seconds = 15` and
+  `bluetooth.connect_timeout_seconds = 45` are the tuned defaults for
+  BM6-family devices that do not advertise consistently on every short scan
+  window
 - `bm300pro` remains unsupported in live mode and will be reported as
   `unsupported`
 

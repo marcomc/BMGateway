@@ -11,5 +11,9 @@ htmlcov/
 *.egg-info/
 python/config/data/
 output/images/
+BMGateway-v2-premium-scaffold/
 *.img
 *.img.xz
+
+.playwright-cli/
+output/playwright/

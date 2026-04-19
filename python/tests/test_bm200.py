@@ -135,6 +135,7 @@ def test_bleak_transport_scans_before_connecting(monkeypatch: pytest.MonkeyPatch
             address="AA:BB:CC:DD:EE:FF",
             adapter="hci0",
             timeout_seconds=5.0,
+            scan_timeout_seconds=3.0,
         )
     )
 
@@ -159,6 +160,7 @@ def test_bleak_transport_raises_when_device_is_missing(monkeypatch: pytest.Monke
                 address="AA:BB:CC:DD:EE:FF",
                 adapter="hci0",
                 timeout_seconds=5.0,
+                scan_timeout_seconds=3.0,
             )
         )
 
@@ -217,7 +219,79 @@ def test_bleak_transport_retries_until_device_appears(monkeypatch: pytest.Monkey
             address="AA:BB:CC:DD:EE:FF",
             adapter="hci0",
             timeout_seconds=8.0,
+            scan_timeout_seconds=3.0,
         )
     )
 
+    assert parse_voltage_notification(payload).voltage == 13.4
+
+
+def test_bleak_transport_retries_after_initial_notification_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanned_device = object()
+    encrypted = encrypt_bm6_payload(bytes.fromhex("d1550700170064053c0000000102ffff"))
+    writes: list[bytes] = []
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+            self._callback: Callable[[object | None, bytearray], None] | None = None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            self._callback = callback
+
+        async def write_gatt_char(self, _char: str, data: bytes, response: bool) -> None:
+            assert response is False
+            writes.append(data)
+            if len(writes) == 2:
+                assert self._callback is not None
+                self._callback(None, bytearray(encrypted))
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(address: str, timeout: float) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout == 3.0
+        return scanned_device
+
+    async def fake_sleep(delay: float) -> None:
+        assert delay > 0
+        return None
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm200.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm200.BleakClient", FakeClient)
+    monkeypatch.setattr("bm_gateway.drivers.bm200.asyncio.sleep", fake_sleep)
+
+    transport = BleakBM200Transport()
+    payload = asyncio.run(
+        transport.read_voltage_notification(
+            address="AA:BB:CC:DD:EE:FF",
+            adapter="hci0",
+            timeout_seconds=8.0,
+            scan_timeout_seconds=3.0,
+        )
+    )
+
+    assert len(writes) == 2
     assert parse_voltage_notification(payload).voltage == 13.4

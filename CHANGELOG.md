@@ -58,6 +58,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   format and enables live polling when the first device is added.
 - Standalone install now reuses an existing runtime venv on upgrade instead of
   failing on repeated installs.
+- BM300-inspired premium redesign for the server-rendered management, history,
+  and device pages, including reusable UI primitives, calmer operational
+  hierarchy, and interactive metric/range charts backed by live gateway data.
+- BM300-style battery landing page plus dedicated devices and settings routes,
+  giving the web app a full product journey instead of only admin-centric
+  pages.
 
 ### Changed
 
@@ -65,6 +71,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   of shipping sample hardware into the installed user config.
 - Raspberry Pi service install now renders units for the active user and
   installs a stable `/usr/local/bin/bm-gateway` symlink for systemd.
+- Live BM200/BM6 polling now uses the configured scan timeout, proactively
+  sends the BM6 poll request after notifications are armed, retries once per
+  connection window, and preserves the last BLE exception instead of collapsing
+  intermittent BlueZ failures into blank `unexpected_error` rows.
+- Default Bluetooth timing in example and generated config now uses a more
+  conservative `15s` scan window and `45s` overall connect budget for
+  BM6-family devices.
 
 ### Documented
 

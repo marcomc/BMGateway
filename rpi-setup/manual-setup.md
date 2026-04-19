@@ -222,8 +222,14 @@ The installed config keeps:
 
 - `gateway.reader_mode = "live"`
 - `gateway.poll_interval_seconds = 300`
+- `bluetooth.scan_timeout_seconds = 15`
+- `bluetooth.connect_timeout_seconds = 45`
 - `web.host = "0.0.0.0"`
 - `web.port = 8080`
+
+For BM6-family monitors, those Bluetooth defaults are intentionally more
+conservative than generic BLE examples because the device can disappear across
+short discovery windows even when it is healthy and nearby.
 
 The devices registry starts empty on purpose so the web UI can be the first
 real configuration surface instead of shipping fake sample hardware.

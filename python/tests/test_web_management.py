@@ -278,6 +278,9 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert "/api/ha/contract" in html
     assert "Prune History Using Retention Settings" in html
     assert "Add Device and Enable Live Polling" in html
+    assert "control-plane" in html
+    assert "api-chip" in html
+    assert "config-grid" in html
 
 
 def test_render_management_html_includes_analytics_and_device_links() -> None:
@@ -312,6 +315,8 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
     assert "/device?device_id=bm200_house" in html
     assert "/api/analytics?device_id=" in html
     assert "Gateway Overview" in html
+    assert "Device Dashboard" in html
+    assert "Operational Surfaces" in html
 
 
 def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
@@ -349,11 +354,27 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
         monthly_history=[],
         yearly_history=[],
         analytics={"windows": []},
+        device_summary={
+            "name": "BM200 House",
+            "soc": 81,
+            "voltage": 12.7,
+            "temperature": 17.2,
+            "rssi": -71,
+            "state": "normal",
+            "error_code": None,
+            "last_seen": "2026-04-18T12:30:00+02:00",
+            "connected": True,
+        },
     )
 
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
     assert "Historical Chart" in html
+    assert "Battery Health" in html
+    assert "Signal Quality" in html
+    assert "Last Seen" in html
+    assert "Runtime Status" in html
+    assert "hero-shell" in html
 
 
 def test_redirect_message_query_round_trips_special_characters() -> None:
@@ -365,10 +386,37 @@ def test_redirect_message_query_round_trips_special_characters() -> None:
 def test_render_history_html_escapes_device_id_in_title() -> None:
     html = render_history_html(
         device_id='bm200_house"><script>alert(1)</script>',
-        raw_history=[],
+        raw_history=[
+            {
+                "ts": "2026-04-17T20:00:00+02:00",
+                "voltage": 12.7,
+                "soc": 81,
+                "temperature": 17.2,
+                "state": "normal",
+                "error_code": None,
+                "error_detail": None,
+            },
+            {
+                "ts": "2026-04-17T20:05:00+02:00",
+                "voltage": 0.0,
+                "soc": 0,
+                "temperature": None,
+                "state": "error",
+                "error_code": "timeout",
+                "error_detail": "timeout",
+            },
+        ],
         daily_history=[],
         monthly_history=[],
     )
 
     assert "&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; History" in html
     assert 'bm200_house"><script>alert(1)</script> History' not in html
+    assert "Voltage" in html
+    assert "SoC" in html
+    assert "Temperature" in html
+    assert "Valid samples" in html
+    assert "Error count" in html
+    assert "Average voltage" in html
+    assert "Average SoC" in html
+    assert "history-controls" in html

@@ -21,7 +21,7 @@ from .drivers.bm200 import (
 )
 from .models import DeviceReading, GatewaySnapshot
 
-BM200Reader = Callable[[Device, str, float], BM200Measurement]
+BM200Reader = Callable[[Device, str, float, float], BM200Measurement]
 
 
 def _active_adapter(config: AppConfig) -> str:
@@ -102,13 +102,14 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
 
 
 def _classify_bm200_error(error: Exception) -> tuple[str, str]:
+    detail = str(error) or error.__class__.__name__
     if isinstance(error, BM200TimeoutError):
-        return "timeout", str(error)
+        return "timeout", detail
     if isinstance(error, BM200ProtocolError):
-        return "protocol_error", str(error)
+        return "protocol_error", detail
     if isinstance(error, BM200Error):
-        return "driver_error", str(error)
-    return "unexpected_error", str(error)
+        return "driver_error", detail
+    return "unexpected_error", detail
 
 
 def _build_error_reading(
@@ -139,12 +140,18 @@ def _build_error_reading(
     )
 
 
-def _read_live_bm200(device: Device, adapter: str, timeout_seconds: float) -> BM200Measurement:
+def _read_live_bm200(
+    device: Device,
+    adapter: str,
+    timeout_seconds: float,
+    scan_timeout_seconds: float,
+) -> BM200Measurement:
     return asyncio.run(
         read_bm200_measurement(
             address=device.mac,
             adapter=adapter,
             timeout_seconds=timeout_seconds,
+            scan_timeout_seconds=scan_timeout_seconds,
         )
     )
 
@@ -200,6 +207,7 @@ def build_snapshot(
                 device,
                 adapter,
                 float(config.bluetooth.connect_timeout_seconds),
+                float(config.bluetooth.scan_timeout_seconds),
             )
         except Exception as error:
             readings.append(

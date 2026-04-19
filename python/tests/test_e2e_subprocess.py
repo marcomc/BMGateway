@@ -315,6 +315,36 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
         assert yearly_payload[0]["device_id"] == "bm200_house"
         assert analytics_payload["device_id"] == "bm200_house"
 
+        battery_page = (
+            urllib.request.urlopen(base_url, timeout=RUNTIME_TIMEOUT_SECONDS).read().decode("utf-8")
+        )
+        assert "BMGateway Battery" in battery_page
+        assert "Add Device" in battery_page
+
+        management_page = (
+            urllib.request.urlopen(f"{base_url}/management", timeout=RUNTIME_TIMEOUT_SECONDS)
+            .read()
+            .decode("utf-8")
+        )
+        assert "Operational Surfaces" in management_page
+        assert "Device Dashboard" in management_page
+
+        devices_page = (
+            urllib.request.urlopen(f"{base_url}/devices", timeout=RUNTIME_TIMEOUT_SECONDS)
+            .read()
+            .decode("utf-8")
+        )
+        assert "Configured Devices" in devices_page
+        assert "Gateway-ready device registry" in devices_page
+
+        settings_page = (
+            urllib.request.urlopen(f"{base_url}/settings", timeout=RUNTIME_TIMEOUT_SECONDS)
+            .read()
+            .decode("utf-8")
+        )
+        assert "Gateway Settings" in settings_page
+        assert "Export Data" in settings_page
+
         device_page = (
             urllib.request.urlopen(
                 f"{base_url}/device?device_id=bm200_house", timeout=RUNTIME_TIMEOUT_SECONDS
@@ -322,8 +352,20 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
             .read()
             .decode("utf-8")
         )
-        assert "Trend Windows" in device_page
+        assert "Battery Health" in device_page
+        assert "Runtime Status" in device_page
         assert "Historical Chart" in device_page
+
+        history_page = (
+            urllib.request.urlopen(
+                f"{base_url}/history?device_id=bm200_house", timeout=RUNTIME_TIMEOUT_SECONDS
+            )
+            .read()
+            .decode("utf-8")
+        )
+        assert "Valid samples" in history_page
+        assert "Average voltage" in history_page
+        assert "Temperature" in history_page
 
         connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
         try:

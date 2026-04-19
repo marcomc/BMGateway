@@ -312,7 +312,14 @@ def fetch_recent_history(
     try:
         rows = connection.execute(
             """
-            SELECT snapshot_generated_at, voltage, soc, state, error_code, error_detail
+            SELECT
+                snapshot_generated_at,
+                voltage,
+                soc,
+                temperature,
+                state,
+                error_code,
+                error_detail
             FROM device_readings
             WHERE device_id = ?
             ORDER BY snapshot_generated_at DESC
@@ -327,9 +334,10 @@ def fetch_recent_history(
             "ts": row[0],
             "voltage": row[1],
             "soc": row[2],
-            "state": row[3],
-            "error_code": row[4],
-            "error_detail": row[5],
+            "temperature": row[3],
+            "state": row[4],
+            "error_code": row[5],
+            "error_detail": row[6],
         }
         for row in rows
     ]

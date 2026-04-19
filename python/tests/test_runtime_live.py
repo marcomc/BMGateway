@@ -46,10 +46,16 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
         ),
     ]
 
-    def fake_reader(device: Device, adapter: str, timeout_seconds: float) -> BM200Measurement:
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
         assert device.id == "bm200_house"
         assert adapter == "hci0"
-        assert timeout_seconds == 10.0
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
         return BM200Measurement(
             voltage=12.73,
             soc=58,
@@ -90,8 +96,14 @@ def test_build_snapshot_classifies_live_reader_errors() -> None:
         )
     ]
 
-    def failing_reader(device: Device, adapter: str, timeout_seconds: float) -> BM200Measurement:
-        assert timeout_seconds == 10.0
+    def failing_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
         raise BM200TimeoutError(f"{device.id}:{adapter}")
 
     snapshot = build_snapshot(config, devices, bm200_reader=failing_reader)
@@ -123,8 +135,14 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
         )
     ]
 
-    def fake_reader(device: Device, adapter: str, timeout_seconds: float) -> BM200Measurement:
-        assert timeout_seconds == 10.0
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
         return BM200Measurement(
             voltage=12.73,
             soc=58,
@@ -198,10 +216,16 @@ def test_build_snapshot_powers_on_adapter_before_live_polling(
     def fake_run(command: list[str], **_kwargs: object) -> None:
         calls.append(command)
 
-    def fake_reader(device: Device, adapter: str, timeout_seconds: float) -> BM200Measurement:
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
         assert device.id == "bm200_house"
         assert adapter == "hci0"
-        assert timeout_seconds == 10.0
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
         return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")

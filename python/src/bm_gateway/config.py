@@ -23,8 +23,8 @@ class GatewayConfig:
 @dataclass(frozen=True)
 class BluetoothConfig:
     adapter: str = "auto"
-    scan_timeout_seconds: int = 8
-    connect_timeout_seconds: int = 10
+    scan_timeout_seconds: int = 15
+    connect_timeout_seconds: int = 45
 
 
 @dataclass(frozen=True)
@@ -237,8 +237,8 @@ def load_config(path: Path) -> AppConfig:
     )
     bluetooth = BluetoothConfig(
         adapter=str(bluetooth_table.get("adapter", "auto")),
-        scan_timeout_seconds=int(bluetooth_table.get("scan_timeout_seconds", 8)),
-        connect_timeout_seconds=int(bluetooth_table.get("connect_timeout_seconds", 10)),
+        scan_timeout_seconds=int(bluetooth_table.get("scan_timeout_seconds", 15)),
+        connect_timeout_seconds=int(bluetooth_table.get("connect_timeout_seconds", 45)),
     )
     mqtt = MQTTConfig(
         enabled=bool(mqtt_table.get("enabled", True)),

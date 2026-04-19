@@ -59,6 +59,14 @@ Expected checks:
 - Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
 - Remove completed items from `TODO.md` when they ship.
 - Update config documentation when adding or changing config keys.
+- Whenever battery-monitor device work reveals new verified behavior,
+  diagnostics, protocol details, hardware interactions, or runtime tuning that
+  was not already captured in the consulted upstream/community sources, write a
+  developer-facing note under `docs/`.
+- In those notes, clearly separate:
+  - externally sourced knowledge already known in the community
+  - project-specific verified findings from BMGateway work
+  - remaining hypotheses or unverified observations
 
 ## Release Hygiene
 

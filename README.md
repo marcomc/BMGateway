@@ -25,6 +25,17 @@ into four first-class parts:
 - Raspberry Pi setup and operations guidance
 - a web interface area for the local UI
 
+The management UI now ships as a BM300-inspired premium control plane:
+
+- a card-first management dashboard with gateway stats, actions, API surface,
+  Home Assistant contract visibility, and config editing
+- a battery-first landing page at `/` with live device cards and a fleet chart
+- dedicated `/devices` and `/settings` pages that repeat the mobile-app style
+  journey with gateway-safe content
+- a chart-first history page with segmented Voltage / SoC / Temperature views
+- a richer device detail page with SoC hero, runtime health cards, and calmer
+  raw data presentation
+
 The earlier ChatGPT research informed the problem space, but this repository
 structure follows the local project template standards rather than that
 exploratory draft layout.
@@ -96,6 +107,8 @@ The current Python component ships:
 
 - a simple snapshot/status web server
 - a separate host-run management web interface via `bm-gateway web manage`
+- premium management, history, and device pages built on the existing live
+  server-rendered routes and APIs
 
 For Raspberry Pi deployment, the active recommendation is a separate Python
 process under `systemd`, not Docker. See

@@ -12,8 +12,8 @@
   error semantics.
 - Expand integration tests to cover live-mode config handling and BLE transport
   failure paths.
-- Grow the web interface beyond the current config, contract, storage,
-  analytics, and history views.
+- Add editable gateway-safe settings forms and multi-device comparative
+  filtering on top of the new premium battery/history/devices/settings UI.
 - Add integration tests that exercise the example config files end-to-end.
 - Revisit Docker only for 64-bit deployment targets if containerization becomes
   operationally useful again.
