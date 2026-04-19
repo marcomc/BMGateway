@@ -11,6 +11,7 @@ from bm_gateway.web import (
     add_device_from_form,
     build_run_once_command,
     render_device_html,
+    render_devices_html,
     render_history_html,
     render_management_html,
     update_config_from_text,
@@ -476,3 +477,35 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert '<a class="secondary-button" href="/">Battery</a>' in html
     assert 'aria-current="page"' in html
     assert "&quot;series&quot;:&quot;bm200_house" in html
+
+
+def test_render_devices_html_explains_offline_device_not_found_state() -> None:
+    html = render_devices_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "ancell_bm200",
+                    "state": "offline",
+                    "error_code": "device_not_found",
+                    "error_detail": "No BLE advertisement seen during the scan window.",
+                    "rssi": None,
+                    "last_seen": "2026-04-19T15:20:39+02:00",
+                    "connected": False,
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "ancell_bm200",
+                "type": "bm200",
+                "name": "Ancell BM200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+            }
+        ],
+    )
+
+    assert "Offline" in html
+    assert "No BLE advertisement seen during the latest scan window." in html
+    assert "Not visible" in html
+    assert "The adapter did not see this monitor in the latest scan." in html

@@ -218,7 +218,7 @@ def _storage_rows(summary: dict[str, object]) -> str:
 
 
 def _device_tone(index: int, state: str = "") -> str:
-    if state in {"error", "critical"}:
+    if state in {"error", "critical", "offline"}:
         return "orange"
     tones = ("green", "purple", "blue", "orange")
     return tones[index % len(tones)]
@@ -226,7 +226,7 @@ def _device_tone(index: int, state: str = "") -> str:
 
 def _status_kind(state: str, error_code: str | None = None, connected: bool = True) -> str:
     normalized = state.lower()
-    if not connected:
+    if not connected or error_code == "device_not_found" or normalized == "offline":
         return "offline"
     if error_code is not None or normalized in {"error", "critical"}:
         return "error"
@@ -242,6 +242,26 @@ def _format_number(value: object, *, digits: int = 2, suffix: str = "") -> str:
         formatted = f"{float(value):.{digits}f}" if digits > 0 else f"{int(round(float(value)))}"
         return f"{formatted}{suffix}"
     return f"{value}{suffix}"
+
+
+def _device_runtime_summary(runtime: dict[str, object]) -> tuple[str, str]:
+    error_code = str(runtime.get("error_code") or "")
+    if error_code == "device_not_found":
+        return "Offline", "No BLE advertisement seen during the latest scan window."
+    if error_code == "timeout":
+        return "Timeout", "The device was visible but did not return a reading in time."
+    if error_code == "protocol_error":
+        return "Protocol", str(runtime.get("error_detail") or "Protocol mismatch")
+    if error_code:
+        return "Error", str(runtime.get("error_detail") or error_code.replace("_", " "))
+
+    state = str(runtime.get("state", "configured")).replace("_", " ").title()
+    if bool(runtime.get("connected")):
+        last_seen = runtime.get("last_seen")
+        if last_seen:
+            return state, f"Last seen {last_seen}"
+        return state, "Latest runtime sample"
+    return state, "Waiting for runtime data"
 
 
 def _chart_points(
@@ -771,19 +791,27 @@ def render_devices_html(
     }
     for index, device in enumerate(devices):
         device_id = str(device.get("id", ""))
-        tone = _device_tone(index, str(snapshot_devices.get(device_id, {}).get("state", "")))
         runtime = snapshot_devices.get(device_id, {})
+        runtime_state = str(runtime.get("state", ""))
+        runtime_error_code = cast(str | None, runtime.get("error_code"))
+        tone = _device_tone(index, runtime_state)
+        status_value, status_subvalue = _device_runtime_summary(runtime)
         state_tile = metric_tile(
             label="Status",
-            value=str(runtime.get("state", "configured")).title(),
+            value=status_value,
             tone=tone,
-            subvalue="Runtime signal",
+            subvalue=status_subvalue,
         )
+        signal_value = f"{runtime.get('rssi')} dBm" if runtime.get("rssi") is not None else "-"
+        signal_subvalue = "Last seen adapter RSSI"
+        if runtime_error_code == "device_not_found":
+            signal_value = "Not visible"
+            signal_subvalue = "The adapter did not see this monitor in the latest scan."
         signal_tile = metric_tile(
             label="Signal",
-            value=(f"{runtime.get('rssi')} dBm" if runtime.get("rssi") is not None else "-"),
+            value=signal_value,
             tone="blue",
-            subvalue="Last seen adapter RSSI",
+            subvalue=signal_subvalue,
         )
         battery_type = html.escape(
             battery_types.get(str(device.get("type", "bm200")), "Unknown Battery")

@@ -85,6 +85,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Daily rollups now exclude error snapshots from voltage/SoC averages, the
   history charts only plot valid samples, and repaired rollups can be rebuilt
   from raw readings so long-range history stays readable after BLE outages.
+- BM200 discovery misses are now classified as `device_not_found` / offline
+  instead of a generic `driver_error`, and the Devices page explains that the
+  monitor was not advertising during the latest scan window.
 
 ### Documented
 

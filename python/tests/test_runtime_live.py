@@ -114,6 +114,43 @@ def test_build_snapshot_classifies_live_reader_errors() -> None:
     assert snapshot.devices[0].error_detail == "bm200_house:hci0"
 
 
+def test_build_snapshot_classifies_device_not_found_as_offline() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+
+    def failing_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        raise BleakDeviceNotFoundError(device.mac)
+
+    snapshot = build_snapshot(config, devices, bm200_reader=failing_reader)
+
+    assert snapshot.devices_online == 0
+    assert snapshot.devices[0].state == "offline"
+    assert snapshot.devices[0].error_code == "device_not_found"
+    assert snapshot.devices[0].error_detail == "No BLE advertisement seen during the scan window."
+
+
 def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None:
     config = AppConfig(
         source_path=tmp_path / "gateway.toml",

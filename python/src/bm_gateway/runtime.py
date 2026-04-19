@@ -104,6 +104,8 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
 
 def _classify_bm200_error(error: Exception) -> tuple[str, str]:
     detail = str(error) or error.__class__.__name__
+    if isinstance(error, BleakDeviceNotFoundError):
+        return "device_not_found", "No BLE advertisement seen during the scan window."
     if isinstance(error, BM200TimeoutError):
         return "timeout", detail
     if isinstance(error, BM200ProtocolError):
@@ -121,6 +123,7 @@ def _build_error_reading(
     error: Exception,
 ) -> DeviceReading:
     error_code, error_detail = _classify_bm200_error(error)
+    state = "offline" if error_code == "device_not_found" else "error"
     return DeviceReading(
         id=device.id,
         type=device.type,
@@ -132,7 +135,7 @@ def _build_error_reading(
         soc=0,
         temperature=None,
         rssi=None,
-        state="error",
+        state=state,
         error_code=error_code,
         error_detail=error_detail,
         last_seen=generated_at,

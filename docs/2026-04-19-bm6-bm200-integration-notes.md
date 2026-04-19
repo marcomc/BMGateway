@@ -85,6 +85,8 @@ Verified result:
 - preserving the last BLE-layer exception produces more useful history rows
 - the most useful real failure string so far has been:
   - `Device with address 3C:AB:72:82:86:EA was not found.`
+- `BMGateway` should surface that specifically as a `device_not_found` /
+  offline condition, not as a generic driver failure
 
 That distinction matters because it separates:
 
