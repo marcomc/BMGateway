@@ -23,7 +23,7 @@ from .device_registry import (
     validate_devices,
     write_device_registry,
 )
-from .runtime import database_file_path, state_file_path
+from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
     fetch_daily_history,
     fetch_degradation_report,
@@ -247,31 +247,84 @@ def _format_number(value: object, *, digits: int = 2, suffix: str = "") -> str:
 def _chart_points(
     raw_history: list[dict[str, object]],
     daily_history: list[dict[str, object]],
+    *,
+    series: str = "Series",
+    series_color: str = "#4f8df7",
 ) -> list[dict[str, object]]:
     points: list[dict[str, object]] = []
     for row in sorted(daily_history, key=lambda item: str(item.get("day", ""))):
+        samples = row.get("samples")
+        avg_voltage = row.get("avg_voltage")
+        avg_soc = row.get("avg_soc")
+        if not isinstance(samples, (int, float)) or float(samples) <= 0:
+            continue
+        if not isinstance(avg_voltage, (int, float)) or float(avg_voltage) <= 0:
+            continue
         points.append(
             {
                 "ts": f"{row.get('day', '')}T12:00:00",
                 "label": str(row.get("day", ""))[5:],
                 "kind": "daily",
-                "voltage": row.get("avg_voltage"),
-                "soc": row.get("avg_soc"),
+                "voltage": avg_voltage,
+                "soc": avg_soc,
                 "temperature": None,
+                "series": series,
+                "series_color": series_color,
             }
         )
     for row in sorted(raw_history, key=lambda item: str(item.get("ts", ""))):
+        if row.get("error_code") is not None:
+            continue
+        voltage = row.get("voltage")
+        soc = row.get("soc")
+        temperature = row.get("temperature")
+        has_metric = (
+            isinstance(voltage, (int, float))
+            and float(voltage) > 0
+            or isinstance(soc, (int, float))
+            or isinstance(temperature, (int, float))
+        )
+        if not has_metric:
+            continue
         points.append(
             {
                 "ts": row.get("ts"),
                 "label": str(row.get("ts", ""))[11:16],
                 "kind": "raw",
-                "voltage": row.get("voltage"),
-                "soc": row.get("soc"),
-                "temperature": row.get("temperature"),
+                "voltage": voltage,
+                "soc": soc,
+                "temperature": temperature,
+                "series": series,
+                "series_color": series_color,
             }
         )
     return points
+
+
+def _fleet_chart_points(
+    *,
+    database_path: Path,
+    devices: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[tuple[str, str]]]:
+    colors = ("#17c45a", "#9a57f5", "#4f8df7", "#f4a340")
+    points: list[dict[str, object]] = []
+    legend: list[tuple[str, str]] = []
+    for index, device in enumerate(devices):
+        device_id = str(device.get("id", ""))
+        if not device_id:
+            continue
+        device_name = str(device.get("name", device_id))
+        color = colors[index % len(colors)]
+        legend.append((device_name, color))
+        points.extend(
+            _chart_points(
+                fetch_recent_history(database_path, device_id=device_id, limit=48),
+                fetch_daily_history(database_path, device_id=device_id, limit=30),
+                series=device_name,
+                series_color=color,
+            )
+        )
+    return points, legend
 
 
 def _history_summary(raw_history: list[dict[str, object]]) -> dict[str, str]:
@@ -454,6 +507,9 @@ def render_management_html(
         '<form method="post" action="/actions/run-once">'
         f"{button('Run One Collection Cycle', kind='primary')}"
         "</form>"
+        '<form method="post" action="/actions/recover-bluetooth">'
+        f"{button('Recover Bluetooth Adapter', kind='secondary')}"
+        "</form>"
         '<form method="post" action="/actions/prune-history">'
         f"{button('Prune History Using Retention Settings', kind='secondary')}"
         "</form>"
@@ -591,21 +647,19 @@ def render_battery_html(
     *,
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
+    chart_points: list[dict[str, object]],
+    legend: list[tuple[str, str]],
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
     snapshot_devices = snapshot.get("devices", [])
     device_cards: list[str] = []
-    legend: list[tuple[str, str]] = []
-    chart_points: list[dict[str, object]] = []
     tones = ("green", "purple", "blue", "orange")
-    colors = ("#17c45a", "#9a57f5", "#4f8df7", "#f4a340")
     if isinstance(snapshot_devices, list):
         for index, device in enumerate(snapshot_devices):
             if not isinstance(device, dict):
                 continue
             tone = tones[index % len(tones)]
-            color = colors[index % len(colors)]
             device_id = str(device.get("id", ""))
             voltage_text = html.escape(_format_number(device.get("voltage"), digits=2, suffix=" V"))
             temperature_text = html.escape(
@@ -618,17 +672,6 @@ def render_battery_html(
                     cast(str | None, device.get("error_code")),
                     bool(device.get("connected", True)),
                 ),
-            )
-            legend.append((str(device.get("name", device_id)), color))
-            chart_points.append(
-                {
-                    "ts": snapshot.get("generated_at"),
-                    "label": str(snapshot.get("generated_at", ""))[11:16],
-                    "kind": "raw",
-                    "voltage": device.get("voltage"),
-                    "soc": device.get("soc"),
-                    "temperature": device.get("temperature"),
-                }
             )
             device_cards.append(
                 tone_card(
@@ -687,11 +730,15 @@ def render_battery_html(
         + chart_card(
             chart_id=chart_id,
             title="Fleet Trend",
-            subtitle="Overview chart styled after the BM300 battery landing page.",
+            subtitle=(
+                "Historical fleet chart with multi-device overlays, calmer "
+                "axis rhythm, and the same metric switching model used "
+                "throughout the app."
+            ),
             points=chart_points,
-            range_options=(("raw", "Live"), ("30", "30 days")),
-            default_range="raw",
-            default_metric="voltage",
+            range_options=(("raw", "Recent raw"), ("30", "30 days"), ("90", "90 days")),
+            default_range="30",
+            default_metric="soc",
             legend=legend or [("No devices", "#95a3b8")],
         )
     )
@@ -961,7 +1008,7 @@ def render_device_html(
             ),
             eyebrow="Battery Detail",
             right=(
-                '<div class="hero-actions"><a class="secondary-button" href="/">Management</a>'
+                '<div class="hero-actions"><a class="secondary-button" href="/">Battery</a>'
                 f'<a class="secondary-button" href="/history?device_id={quote(device_id)}">'
                 "History Tables</a></div>"
             ),
@@ -1045,7 +1092,12 @@ def render_device_html(
                 "the page. Longer ranges prioritize rollups, recent ranges "
                 "keep raw samples visible."
             ),
-            points=_chart_points(raw_history, daily_history),
+            points=_chart_points(
+                raw_history,
+                daily_history,
+                series=str(summary.get("name", device_id)),
+                series_color="#17c45a",
+            ),
             range_options=(
                 ("raw", "Recent raw"),
                 ("30", "30 days"),
@@ -1086,7 +1138,7 @@ def render_device_html(
     return app_document(
         title=f"{device_id} Device",
         body=body,
-        active_nav="device",
+        active_nav="battery",
         version_label=version_label,
         script=chart_script(chart_id),
     )
@@ -1117,7 +1169,7 @@ def render_history_html(
             ),
             eyebrow="History",
             right=(
-                '<div class="hero-actions"><a class="secondary-button" href="/">Management</a>'
+                '<div class="hero-actions"><a class="secondary-button" href="/">Battery</a>'
                 f'<a class="secondary-button" href="/device?device_id={quote(device_id)}">'
                 "Device Detail</a></div>"
             ),
@@ -1145,7 +1197,12 @@ def render_history_html(
                 "Temperature. Range controls rebalance recent raw readings "
                 "against daily rollups."
             ),
-            points=_chart_points(raw_history, daily_history),
+            points=_chart_points(
+                raw_history,
+                daily_history,
+                series=device_id,
+                series_color="#4f8df7",
+            ),
             range_options=(
                 ("raw", "Recent raw"),
                 ("30", "30 days"),
@@ -1579,7 +1636,16 @@ def serve_management(
                 self._send_html(html)
                 return
 
-            html = render_battery_html(snapshot=snapshot, devices=serialized_devices)
+            battery_chart_points, battery_legend = _fleet_chart_points(
+                database_path=database_path,
+                devices=serialized_devices,
+            )
+            html = render_battery_html(
+                snapshot=snapshot,
+                devices=serialized_devices,
+                chart_points=battery_chart_points,
+                legend=battery_legend,
+            )
             self._send_html(html)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -1661,6 +1727,18 @@ def serve_management(
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)
                 self.send_header("Location", "/management?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/recover-bluetooth":
+                config, _snapshot, _database_path = self._load_current()
+                adapter = config.bluetooth.adapter if config.bluetooth.adapter != "auto" else "hci0"
+                recover_adapter(adapter)
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/management?" + urlencode({"message": "Bluetooth adapter recovery triggered"}),
+                )
                 self.end_headers()
                 return
 

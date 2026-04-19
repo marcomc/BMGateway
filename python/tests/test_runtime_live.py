@@ -13,8 +13,8 @@ from bm_gateway.config import (
     WebConfig,
 )
 from bm_gateway.device_registry import Device
-from bm_gateway.drivers.bm200 import BM200Measurement, BM200TimeoutError
-from bm_gateway.runtime import build_snapshot, database_file_path
+from bm_gateway.drivers.bm200 import BleakDeviceNotFoundError, BM200Measurement, BM200TimeoutError
+from bm_gateway.runtime import build_snapshot, database_file_path, recover_adapter
 from bm_gateway.state_store import fetch_counts, persist_snapshot
 
 
@@ -235,3 +235,75 @@ def test_build_snapshot_powers_on_adapter_before_live_polling(
 
     assert calls == [["bluetoothctl", "power", "on"]]
     assert snapshot.devices_online == 1
+
+
+def test_build_snapshot_retries_after_device_not_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+    calls: list[str] = []
+    attempts = {"count": 0}
+
+    def fake_run(command: list[str], **_kwargs: object) -> None:
+        calls.append(" ".join(command))
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        attempts["count"] += 1
+        assert adapter == "hci0"
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
+        if attempts["count"] == 1:
+            raise BleakDeviceNotFoundError(device.mac)
+        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
+
+    monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
+    monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("bm_gateway.runtime.sleep", lambda _seconds: None)
+
+    snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
+
+    assert snapshot.devices_online == 1
+    assert attempts["count"] == 2
+    assert calls == [
+        "bluetoothctl power on",
+        "bluetoothctl scan off",
+        "bluetoothctl power off",
+        "bluetoothctl power on",
+    ]
+
+
+def test_recover_adapter_is_noop_without_bluetoothctl(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = {"run": False}
+
+    def fake_run(*_args: object, **_kwargs: object) -> None:
+        called["run"] = True
+
+    monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: None)
+    monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
+
+    recover_adapter("hci0")
+
+    assert called["run"] is False

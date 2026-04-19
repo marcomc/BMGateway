@@ -31,11 +31,15 @@ The management UI now ships as a BM300-inspired premium control plane:
 - a card-first management dashboard with gateway stats, actions, API surface,
   Home Assistant contract visibility, and config editing
 - a battery-first landing page at `/` with live device cards and a fleet chart
+- richer historical fleet overlays and interactive chart tooltips across the
+  landing, history, and device pages
 - dedicated `/devices` and `/settings` pages that repeat the mobile-app style
   journey with gateway-safe content
 - a chart-first history page with segmented Voltage / SoC / Temperature views
 - a richer device detail page with SoC hero, runtime health cards, and calmer
   raw data presentation
+- a management action for manual Bluetooth adapter recovery when live BLE
+  polling needs operator intervention
 
 The earlier ChatGPT research informed the problem space, but this repository
 structure follows the local project template standards rather than that

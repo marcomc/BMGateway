@@ -17,3 +17,7 @@ adapts them for a broader mono-repo.
 3. Add Home Assistant, Raspberry Pi, and web assets as sibling components.
 4. Preserve `make install` as the durable user-facing installation path for the
    CLI unless distribution requirements change.
+
+## Device Notes
+
+- [BM6 / BM200 Integration Notes](2026-04-19-bm6-bm200-integration-notes.md)

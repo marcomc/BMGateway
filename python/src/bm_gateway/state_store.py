@@ -154,39 +154,129 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                 ),
             )
             day = device.last_seen[:10]
-            connection.execute(
-                """
-                INSERT INTO device_daily_rollups (
-                    device_id,
-                    day,
-                    samples,
-                    min_voltage,
-                    max_voltage,
-                    avg_voltage,
-                    avg_soc,
-                    error_count,
-                    last_seen
-                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(device_id, day) DO UPDATE SET
-                    samples = samples + 1,
-                    min_voltage = MIN(min_voltage, excluded.min_voltage),
-                    max_voltage = MAX(max_voltage, excluded.max_voltage),
-                    avg_voltage = ((avg_voltage * samples) + excluded.avg_voltage) / (samples + 1),
-                    avg_soc = ((avg_soc * samples) + excluded.avg_soc) / (samples + 1),
-                    error_count = error_count + excluded.error_count,
-                    last_seen = excluded.last_seen
-                """,
+            if device.error_code is None and device.voltage > 0:
+                connection.execute(
+                    """
+                    INSERT INTO device_daily_rollups (
+                        device_id,
+                        day,
+                        samples,
+                        min_voltage,
+                        max_voltage,
+                        avg_voltage,
+                        avg_soc,
+                        error_count,
+                        last_seen
+                    ) VALUES (?, ?, 1, ?, ?, ?, ?, 0, ?)
+                    ON CONFLICT(device_id, day) DO UPDATE SET
+                        samples = samples + 1,
+                        min_voltage = CASE
+                            WHEN samples = 0 THEN excluded.min_voltage
+                            ELSE MIN(min_voltage, excluded.min_voltage)
+                        END,
+                        max_voltage = CASE
+                            WHEN samples = 0 THEN excluded.max_voltage
+                            ELSE MAX(max_voltage, excluded.max_voltage)
+                        END,
+                        avg_voltage = CASE
+                            WHEN samples = 0 THEN excluded.avg_voltage
+                            ELSE ((avg_voltage * samples) + excluded.avg_voltage) / (samples + 1)
+                        END,
+                        avg_soc = CASE
+                            WHEN samples = 0 THEN excluded.avg_soc
+                            ELSE ((avg_soc * samples) + excluded.avg_soc) / (samples + 1)
+                        END,
+                        last_seen = excluded.last_seen
+                    """,
+                    (
+                        device.id,
+                        day,
+                        device.voltage,
+                        device.voltage,
+                        device.voltage,
+                        float(device.soc),
+                        device.last_seen,
+                    ),
+                )
+            else:
+                connection.execute(
+                    """
+                    INSERT INTO device_daily_rollups (
+                        device_id,
+                        day,
+                        samples,
+                        min_voltage,
+                        max_voltage,
+                        avg_voltage,
+                        avg_soc,
+                        error_count,
+                        last_seen
+                    ) VALUES (?, ?, 0, 0.0, 0.0, 0.0, 0.0, 1, ?)
+                    ON CONFLICT(device_id, day) DO UPDATE SET
+                        error_count = error_count + 1,
+                        last_seen = excluded.last_seen
+                    """,
+                    (
+                        device.id,
+                        day,
+                        device.last_seen,
+                    ),
+                )
+        connection.commit()
+    finally:
+        connection.close()
+
+
+def rebuild_daily_rollups(path: Path) -> None:
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                device_id,
+                substr(last_seen, 1, 10) AS day,
+                SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END) AS samples,
+                MIN(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END) AS min_voltage,
+                MAX(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END) AS max_voltage,
+                AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END) AS avg_voltage,
+                AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN soc END) AS avg_soc,
+                SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
+                MAX(last_seen) AS last_seen
+            FROM device_readings
+            GROUP BY device_id, day
+            ORDER BY device_id, day
+            """
+        ).fetchall()
+        connection.execute("DELETE FROM device_daily_rollups")
+        connection.executemany(
+            """
+            INSERT INTO device_daily_rollups (
+                device_id,
+                day,
+                samples,
+                min_voltage,
+                max_voltage,
+                avg_voltage,
+                avg_soc,
+                error_count,
+                last_seen
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
                 (
-                    device.id,
-                    day,
-                    device.voltage,
-                    device.voltage,
-                    device.voltage,
-                    float(device.soc),
-                    1 if device.error_code is not None else 0,
-                    device.last_seen,
-                ),
-            )
+                    row[0],
+                    row[1],
+                    int(row[2] or 0),
+                    float(row[3] or 0.0),
+                    float(row[4] or 0.0),
+                    float(row[5] or 0.0),
+                    float(row[6] or 0.0),
+                    int(row[7] or 0),
+                    row[8],
+                )
+                for row in rows
+            ],
+        )
         connection.commit()
     finally:
         connection.close()
@@ -397,8 +487,8 @@ def fetch_monthly_history(
                 SUM(samples),
                 MIN(min_voltage),
                 MAX(max_voltage),
-                SUM(avg_voltage * samples) / SUM(samples),
-                SUM(avg_soc * samples) / SUM(samples),
+                COALESCE(SUM(avg_voltage * samples) / NULLIF(SUM(samples), 0), 0.0),
+                COALESCE(SUM(avg_soc * samples) / NULLIF(SUM(samples), 0), 0.0),
                 SUM(error_count),
                 MAX(last_seen)
             FROM device_daily_rollups
@@ -442,8 +532,8 @@ def fetch_yearly_history(
                 SUM(samples),
                 MIN(min_voltage),
                 MAX(max_voltage),
-                SUM(avg_voltage * samples) / SUM(samples),
-                SUM(avg_soc * samples) / SUM(samples),
+                COALESCE(SUM(avg_voltage * samples) / NULLIF(SUM(samples), 0), 0.0),
+                COALESCE(SUM(avg_soc * samples) / NULLIF(SUM(samples), 0), 0.0),
                 SUM(error_count),
                 MAX(last_seen)
             FROM device_daily_rollups

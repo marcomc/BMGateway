@@ -13,6 +13,7 @@ from typing import Callable
 from .config import AppConfig, GatewayConfig
 from .device_registry import Device
 from .drivers.bm200 import (
+    BleakDeviceNotFoundError,
     BM200Error,
     BM200Measurement,
     BM200ProtocolError,
@@ -170,6 +171,24 @@ def _ensure_adapter_ready(adapter: str) -> None:
     )
 
 
+def recover_adapter(adapter: str) -> None:
+    _ = adapter
+    if shutil.which("bluetoothctl") is None:
+        return
+    for command in (
+        ["bluetoothctl", "scan", "off"],
+        ["bluetoothctl", "power", "off"],
+        ["bluetoothctl", "power", "on"],
+    ):
+        subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        sleep(1)
+
+
 def build_snapshot(
     config: AppConfig,
     devices: list[Device],
@@ -203,12 +222,21 @@ def build_snapshot(
             continue
 
         try:
-            measurement = live_reader(
-                device,
-                adapter,
-                float(config.bluetooth.connect_timeout_seconds),
-                float(config.bluetooth.scan_timeout_seconds),
-            )
+            try:
+                measurement = live_reader(
+                    device,
+                    adapter,
+                    float(config.bluetooth.connect_timeout_seconds),
+                    float(config.bluetooth.scan_timeout_seconds),
+                )
+            except (BleakDeviceNotFoundError, BM200TimeoutError):
+                recover_adapter(adapter)
+                measurement = live_reader(
+                    device,
+                    adapter,
+                    float(config.bluetooth.connect_timeout_seconds),
+                    float(config.bluetooth.scan_timeout_seconds),
+                )
         except Exception as error:
             readings.append(
                 _build_error_reading(

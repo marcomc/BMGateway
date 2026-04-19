@@ -13,6 +13,7 @@ from bm_gateway.state_store import (
     fetch_yearly_history,
     persist_snapshot,
     prune_history,
+    rebuild_daily_rollups,
 )
 
 
@@ -333,3 +334,213 @@ def test_fetch_degradation_report_uses_sample_weighted_averages(tmp_path: Path) 
     assert windows[0]["days"] == 30
     assert windows[0]["current_avg_voltage"] == 12.63
     assert windows[0]["current_avg_soc"] == 75.32
+
+
+def test_persist_snapshot_keeps_daily_rollups_weighted_only_by_valid_samples(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T00:05:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=0,
+            poll_interval_seconds=300,
+            devices=[
+                DeviceReading(
+                    id="bm200_house",
+                    type="bm200",
+                    name="BM200 House",
+                    mac="AA:BB:CC:DD:EE:01",
+                    enabled=True,
+                    connected=False,
+                    voltage=0.0,
+                    soc=0,
+                    temperature=None,
+                    rssi=None,
+                    state="error",
+                    error_code="timeout",
+                    error_detail="Device not found",
+                    last_seen="2024-01-01T00:05:00+00:00",
+                    adapter="hci0",
+                    driver="bm200",
+                )
+            ],
+        ),
+    )
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=5)
+
+    assert daily == [
+        {
+            "device_id": "bm200_house",
+            "day": "2024-01-01",
+            "samples": 1,
+            "min_voltage": 12.73,
+            "max_voltage": 12.73,
+            "avg_voltage": 12.73,
+            "avg_soc": 58.0,
+            "error_count": 1,
+            "last_seen": "2024-01-01T00:05:00+00:00",
+        }
+    ]
+
+
+def test_rebuild_daily_rollups_repairs_error_polluted_rollups(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE device_readings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_generated_at TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                device_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                mac TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                connected INTEGER NOT NULL,
+                voltage REAL NOT NULL,
+                soc INTEGER NOT NULL,
+                temperature REAL,
+                rssi INTEGER,
+                state TEXT NOT NULL,
+                error_code TEXT,
+                error_detail TEXT,
+                last_seen TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                driver TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            CREATE TABLE device_daily_rollups (
+                device_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                samples INTEGER NOT NULL,
+                min_voltage REAL NOT NULL,
+                max_voltage REAL NOT NULL,
+                avg_voltage REAL NOT NULL,
+                avg_soc REAL NOT NULL,
+                error_count INTEGER NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (device_id, day)
+            )
+            """
+        )
+        connection.executemany(
+            """
+            INSERT INTO device_readings (
+                snapshot_generated_at,
+                device_id,
+                device_type,
+                name,
+                mac,
+                enabled,
+                connected,
+                voltage,
+                soc,
+                temperature,
+                rssi,
+                state,
+                error_code,
+                error_detail,
+                last_seen,
+                adapter,
+                driver
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    "2024-01-01T00:00:00+00:00",
+                    "bm200_house",
+                    "bm200",
+                    "BM200 House",
+                    "AA:BB:CC:DD:EE:01",
+                    1,
+                    1,
+                    12.73,
+                    58,
+                    None,
+                    None,
+                    "normal",
+                    None,
+                    None,
+                    "2024-01-01T00:00:00+00:00",
+                    "hci0",
+                    "bm200",
+                ),
+                (
+                    "2024-01-01T00:05:00+00:00",
+                    "bm200_house",
+                    "bm200",
+                    "BM200 House",
+                    "AA:BB:CC:DD:EE:01",
+                    1,
+                    0,
+                    0.0,
+                    0,
+                    None,
+                    None,
+                    "error",
+                    "timeout",
+                    "Device not found",
+                    "2024-01-01T00:05:00+00:00",
+                    "hci0",
+                    "bm200",
+                ),
+            ],
+        )
+        connection.execute(
+            """
+            INSERT INTO device_daily_rollups (
+                device_id,
+                day,
+                samples,
+                min_voltage,
+                max_voltage,
+                avg_voltage,
+                avg_soc,
+                error_count,
+                last_seen
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "bm200_house",
+                "2024-01-01",
+                2,
+                0.0,
+                12.73,
+                6.365,
+                29.0,
+                1,
+                "2024-01-01T00:05:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    rebuild_daily_rollups(database_path)
+
+    assert fetch_daily_history(database_path, device_id="bm200_house", limit=5) == [
+        {
+            "device_id": "bm200_house",
+            "day": "2024-01-01",
+            "samples": 1,
+            "min_voltage": 12.73,
+            "max_voltage": 12.73,
+            "avg_voltage": 12.73,
+            "avg_soc": 58.0,
+            "error_count": 1,
+            "last_seen": "2024-01-01T00:05:00+00:00",
+        }
+    ]

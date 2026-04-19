@@ -7,6 +7,7 @@ from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.web import (
+    _chart_points,
     add_device_from_form,
     build_run_once_command,
     render_device_html,
@@ -329,6 +330,41 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
     assert "Gateway Overview" in html
     assert "Device Dashboard" in html
     assert "Operational Surfaces" in html
+    assert "Recover Bluetooth Adapter" in html
+
+
+def test_chart_points_ignore_error_rows_and_empty_raw_samples() -> None:
+    points = _chart_points(
+        raw_history=[
+            {
+                "ts": "2026-04-19T10:00:00+02:00",
+                "voltage": 0.0,
+                "soc": 0,
+                "temperature": None,
+                "error_code": "timeout",
+            },
+            {
+                "ts": "2026-04-19T10:05:00+02:00",
+                "voltage": 13.32,
+                "soc": 92,
+                "temperature": 17.2,
+                "error_code": None,
+            },
+        ],
+        daily_history=[
+            {
+                "day": "2026-04-18",
+                "samples": 4,
+                "avg_voltage": 13.31,
+                "avg_soc": 91,
+            }
+        ],
+    )
+
+    assert len(points) == 2
+    assert [point["kind"] for point in points] == ["daily", "raw"]
+    assert points[-1]["voltage"] == 13.32
+    assert points[-1]["soc"] == 92
 
 
 def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
@@ -386,7 +422,12 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
     assert "Signal Quality" in html
     assert "Last Seen" in html
     assert "Runtime Status" in html
+    assert '<a class="secondary-button" href="/">Battery</a>' in html
+    assert 'aria-current="page"' in html
     assert "hero-shell" in html
+    assert "chart-tooltip" in html
+    assert "chart-overlay" in html
+    assert "&quot;series&quot;:&quot;BM200 House&quot;" in html
 
 
 def test_redirect_message_query_round_trips_special_characters() -> None:
@@ -432,3 +473,6 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "Average voltage" in html
     assert "Average SoC" in html
     assert "history-controls" in html
+    assert '<a class="secondary-button" href="/">Battery</a>' in html
+    assert 'aria-current="page"' in html
+    assert "&quot;series&quot;:&quot;bm200_house" in html

@@ -538,6 +538,7 @@ details summary::-webkit-details-marker { display: none; }
   box-shadow: var(--shadow-card);
 }
 .chart-frame {
+  position: relative;
   min-height: 320px;
   padding: 1rem;
   border-radius: var(--radius-lg);
@@ -577,6 +578,43 @@ details summary::-webkit-details-marker { display: none; }
   color: var(--text-secondary);
   font-size: 0.92rem;
   font-variant-numeric: tabular-nums;
+}
+.chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  min-width: 170px;
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgba(215, 224, 234, 0.95);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--shadow-elevated);
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  line-height: 1.4;
+  pointer-events: none;
+  opacity: 0;
+  transform: translate(-50%, calc(-100% - 16px));
+  transition: opacity 120ms ease;
+  backdrop-filter: blur(14px);
+}
+.chart-tooltip.visible {
+  opacity: 1;
+}
+.chart-tooltip .tooltip-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.chart-tooltip .tooltip-value {
+  margin-top: 0.25rem;
+  font-size: 1.15rem;
+  font-weight: 800;
+}
+.chart-tooltip .tooltip-detail {
+  margin-top: 0.2rem;
+  color: var(--text-secondary);
 }
 .hero-shell {
   display: grid;
@@ -841,7 +879,10 @@ def bottom_nav(active_nav: str, *, primary_device_id: str = "") -> str:
     links = []
     for item_id, href, label in items:
         classes = "nav-link active" if active_nav == item_id else "nav-link"
-        links.append(f'<a class="{classes}" href="{href}"><span>{html.escape(label)}</span></a>')
+        current = ' aria-current="page"' if active_nav == item_id else ""
+        links.append(
+            f'<a class="{classes}" href="{href}"{current}><span>{html.escape(label)}</span></a>'
+        )
     return (
         '<nav class="bottom-nav" aria-label="Primary">'
         f'<div class="bottom-nav-inner">{"".join(links)}</div></nav>'
@@ -901,7 +942,9 @@ def chart_card(
         "</div>"
         "</div>"
         f'<div class="chart-legend">{legend_html}</div>'
-        f'<div class="chart-frame" id="{html.escape(chart_id)}" data-chart-points="{points_json}"></div>'
+        f'<div class="chart-frame" id="{html.escape(chart_id)}" data-chart-points="{points_json}">'
+        '<div class="chart-tooltip" aria-hidden="true"></div>'
+        "</div>"
         f'<div class="chart-meta" id="{html.escape(chart_id)}-meta"></div>'
         "</section>"
     )
@@ -918,9 +961,33 @@ def chart_script(*chart_ids: str) -> str:
     soc: {{ label: "SoC", color: "#17c45a", format: (value) => `${{value.toFixed(0)}}%` }},
     temperature: {{ label: "Temperature", color: "#9a57f5", format: (value) => `${{value.toFixed(1)}} C` }},
   }};
+  const AXIS_FORMATTERS = {{
+    time: new Intl.DateTimeFormat(undefined, {{ hour: "2-digit", minute: "2-digit" }}),
+    day: new Intl.DateTimeFormat(undefined, {{ month: "short", day: "numeric" }}),
+    month: new Intl.DateTimeFormat(undefined, {{ month: "short", year: "2-digit" }}),
+    detail: new Intl.DateTimeFormat(undefined, {{
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    }}),
+  }};
   function parseTime(value) {{
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? null : parsed;
+  }}
+  function formatAxisLabel(timestamp, span) {{
+    const date = new Date(timestamp);
+    if (span <= 36 * 60 * 60 * 1000) {{
+      return AXIS_FORMATTERS.time.format(date);
+    }}
+    if (span <= 120 * 24 * 60 * 60 * 1000) {{
+      return AXIS_FORMATTERS.day.format(date);
+    }}
+    return AXIS_FORMATTERS.month.format(date);
+  }}
+  function formatDetailLabel(timestamp) {{
+    return AXIS_FORMATTERS.detail.format(new Date(timestamp));
   }}
   function pickRange(points, rangeValue) {{
     if (rangeValue === "raw") {{
@@ -941,51 +1008,158 @@ def chart_script(*chart_ids: str) -> str:
       return parsed !== null && parsed >= cutoff;
     }});
   }}
-  function buildSvg(points, metric) {{
-    const usable = points.filter((point) => typeof point[metric] === "number");
-    if (usable.length === 0) {{
-      return '<div class="chart-empty">No ' + METRICS[metric].label + ' data available in this range.</div>';
+  function metricBounds(metric, values) {{
+    if (metric === "soc") {{
+      return {{ min: 0, max: 100 }};
     }}
-    const width = 960;
-    const height = 320;
-    const padLeft = 64;
-    const padRight = 20;
-    const padTop = 12;
-    const padBottom = 36;
-    const values = usable.map((point) => point[metric]);
     let minValue = Math.min(...values);
     let maxValue = Math.max(...values);
     if (minValue === maxValue) {{
-      minValue -= 1;
-      maxValue += 1;
+      minValue -= metric === "voltage" ? 0.4 : 2.0;
+      maxValue += metric === "voltage" ? 0.4 : 2.0;
     }}
+    const padding = metric === "voltage"
+      ? Math.max((maxValue - minValue) * 0.12, 0.18)
+      : Math.max((maxValue - minValue) * 0.18, 1.5);
+    return {{ min: minValue - padding, max: maxValue + padding }};
+  }}
+  function buildSvg(points, metric, chartId) {{
+    const usable = points.filter((point) => typeof point[metric] === "number");
+    if (usable.length === 0) {{
+      return {{
+        svg: '<div class="chart-empty">No ' + METRICS[metric].label + ' data available in this range.</div>',
+        coords: [],
+        width: 960,
+        height: 360,
+      }};
+    }}
+    const width = 960;
+    const height = 360;
+    const padLeft = 68;
+    const padRight = 18;
+    const padTop = 18;
+    const padBottom = 44;
+    const sortedUsable = [...usable].sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
+    const values = sortedUsable.map((point) => point[metric]);
+    const bounds = metricBounds(metric, values);
+    const minValue = bounds.min;
+    const maxValue = bounds.max;
     const span = maxValue - minValue;
-    const start = parseTime(usable[0].ts) ?? 0;
-    const end = parseTime(usable[usable.length - 1].ts) ?? start + 1;
+    const start = parseTime(sortedUsable[0].ts) ?? 0;
+    const end = parseTime(sortedUsable[sortedUsable.length - 1].ts) ?? start + 1;
     const xSpan = Math.max(end - start, 1);
     const plotWidth = width - padLeft - padRight;
     const plotHeight = height - padTop - padBottom;
-    const coords = usable.map((point, index) => {{
+    const coords = sortedUsable.map((point, index) => {{
       const time = parseTime(point.ts) ?? (start + index);
       const x = padLeft + ((time - start) / xSpan) * plotWidth;
       const y = padTop + (1 - ((point[metric] - minValue) / span)) * plotHeight;
       return {{
         x,
         y,
+        time,
+        kind: point.kind || "raw",
+        ts: point.ts,
         label: point.label || point.ts,
         value: point[metric],
+        series: point.series || "Series",
+        seriesColor: point.series_color || METRICS[metric].color,
       }};
     }});
-    const line = coords.map((point) => `${{point.x.toFixed(1)}},${{point.y.toFixed(1)}}`).join(" ");
-    const area = `${{padLeft}},${{height - padBottom}} ` + line + ` ${{coords[coords.length - 1].x.toFixed(1)}},${{height - padBottom}}`;
-    const grid = Array.from({{ length: 5 }}, (_, index) => {{
+    const seriesBuckets = new Map();
+    coords.forEach((point) => {{
+      const key = `${{point.series}}|${{point.seriesColor}}`;
+      const bucket = seriesBuckets.get(key) || {{ label: point.series, color: point.seriesColor, points: [] }};
+      bucket.points.push(point);
+      seriesBuckets.set(key, bucket);
+    }});
+    const yGuides = Array.from({{ length: 5 }}, (_, index) => {{
       const y = padTop + ((plotHeight / 4) * index);
       const labelValue = maxValue - ((span / 4) * index);
-      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="#c0cad7" stroke-width="1"/>\n<text x="8" y="${{(y + 4).toFixed(1)}}" fill="#7c8797" font-size="12">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
+      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="#d2dbe7" stroke-width="1"/>\n<text x="10" y="${{(y + 4).toFixed(1)}}" fill="#7c8797" font-size="12">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
     }}).join("");
-    const xLabels = coords.filter((_, index) => index === 0 || index === coords.length - 1 || index === Math.floor(coords.length / 2)).map((point) => `\n<text x="${{point.x.toFixed(1)}}" y="${{height - 10}}" text-anchor="middle" fill="#7c8797" font-size="12">${{point.label}}</text>`).join("");
-    const dots = coords.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4" fill="${{METRICS[metric].color}}" />`).join("");
-    return `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="20" fill="#f7f9fc"/>\n${{grid}}\n<polyline fill="${{METRICS[metric].color}}22" stroke="none" points="${{area}}" />\n<polyline fill="none" stroke="${{METRICS[metric].color}}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" points="${{line}}" />\n${{dots}}\n${{xLabels}}\n</svg>`;
+    const xIndexes = new Set([0, Math.floor(coords.length / 3), Math.floor((coords.length * 2) / 3), coords.length - 1]);
+    const xGuides = coords.filter((_, index) => xIndexes.has(index)).map((point) => `\n<line x1="${{point.x.toFixed(1)}}" y1="${{padTop}}" x2="${{point.x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="rgba(201,210,224,0.82)" stroke-dasharray="4 8" stroke-width="1"/>`).join("");
+    const xLabels = coords.filter((_, index) => xIndexes.has(index)).map((point) => {{
+      const timestamp = parseTime(point.ts) ?? start;
+      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - 12}}" text-anchor="middle" fill="#7c8797" font-size="12">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
+    }}).join("");
+    const gapThreshold = Math.max(xSpan / 8, 6 * 60 * 60 * 1000);
+    const segmentSeries = (points) => {{
+      const segments = [];
+      let current = [];
+      for (const point of points) {{
+        const previous = current[current.length - 1];
+        const shouldBreak = previous && (
+          point.kind !== previous.kind ||
+          (point.time - previous.time) > gapThreshold
+        );
+        if (shouldBreak) {{
+          segments.push(current);
+          current = [];
+        }}
+        current.push(point);
+      }}
+      if (current.length > 0) {{
+        segments.push(current);
+      }}
+      return segments;
+    }};
+    const seriesLayers = Array.from(seriesBuckets.values()).map((series, seriesIndex) => {{
+      const segments = segmentSeries(series.points);
+      const gradientId = `${{chartId}}-${{metric}}-gradient-${{seriesIndex}}`;
+      const segmentSvg = segments.map((segment) => {{
+        const line = segment.map((point) => `${{point.x.toFixed(1)}},${{point.y.toFixed(1)}}`).join(" ");
+        const startX = segment[0].x.toFixed(1);
+        const endX = segment[segment.length - 1].x.toFixed(1);
+        const area = `${{startX}},${{height - padBottom}} ` + line + ` ${{endX}},${{height - padBottom}}`;
+        const areaSvg = segment.length > 1
+          ? `<polyline fill="url(#${{gradientId}})" stroke="none" points="${{area}}" />`
+          : "";
+        const lineSvg = segment.length > 1
+          ? `<polyline fill="none" stroke="${{series.color}}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" points="${{line}}" />`
+          : "";
+        const dotsSvg = segment.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4.5" fill="#ffffff" stroke="${{series.color}}" stroke-width="3" />`).join("");
+        return `${{areaSvg}}${{lineSvg}}${{dotsSvg}}`;
+      }}).join("");
+      return {{
+        defs: `\n<linearGradient id="${{gradientId}}" x1="0" x2="0" y1="0" y2="1">\n<stop offset="0%" stop-color="${{series.color}}" stop-opacity="0.28"/>\n<stop offset="100%" stop-color="${{series.color}}" stop-opacity="0.03"/>\n</linearGradient>`,
+        body: `\n${{segmentSvg}}`,
+      }};
+    }});
+    const overlayId = `${{chartId}}-${{metric}}-overlay`;
+    return {{
+      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="22" fill="#f7f9fc"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
+      coords,
+      metric,
+      width,
+      height,
+      padLeft,
+      padRight,
+      overlayId,
+    }};
+  }}
+  function showTooltip(frame, chart, index) {{
+    const tooltip = frame.querySelector(".chart-tooltip");
+    const crosshair = frame.querySelector(".chart-crosshair");
+    if (!tooltip || !crosshair || chart.coords.length === 0) {{
+      return;
+    }}
+    const point = chart.coords[Math.max(0, Math.min(index, chart.coords.length - 1))];
+    const timestamp = parseTime(point.ts) ?? 0;
+    crosshair.setAttribute("x1", point.x.toFixed(1));
+    crosshair.setAttribute("x2", point.x.toFixed(1));
+    crosshair.setAttribute("stroke", point.seriesColor || METRICS[chart.metric].color);
+    tooltip.innerHTML = `<div class="tooltip-label">${{point.series}}</div><div class="tooltip-value">${{METRICS[chart.metric].format(point.value)}}</div><div class="tooltip-detail">${{formatDetailLabel(timestamp)}}</div>`;
+    tooltip.classList.add("visible");
+    tooltip.style.left = `${{(point.x / chart.width) * 100}}%`;
+    tooltip.style.top = `${{(point.y / chart.height) * 100}}%`;
+  }}
+  function hideTooltip(frame) {{
+    const tooltip = frame.querySelector(".chart-tooltip");
+    if (tooltip) {{
+      tooltip.classList.remove("visible");
+    }}
   }}
   function initChart(id) {{
     const frame = document.getElementById(id);
@@ -1004,7 +1178,12 @@ def chart_script(*chart_ids: str) -> str:
     let currentMetric = metricButtons.find((button) => button.classList.contains("active"))?.dataset.metric || "voltage";
     function render() {{
       const points = pickRange(allPoints, currentRange);
-      frame.innerHTML = buildSvg(points, currentMetric);
+      const tooltip = frame.querySelector(".chart-tooltip");
+      const chart = buildSvg(points, currentMetric, id);
+      frame.innerHTML = chart.svg;
+      if (tooltip) {{
+        frame.appendChild(tooltip);
+      }}
       const usable = points.filter((point) => typeof point[currentMetric] === "number");
       if (usable.length === 0) {{
         meta.innerHTML = '<span>No usable samples</span>';
@@ -1017,6 +1196,40 @@ def chart_script(*chart_ids: str) -> str:
         `<span>Average: ${{METRICS[currentMetric].format(average)}}</span>`,
         `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`
       ].join("");
+      const overlay = frame.querySelector(".chart-overlay");
+      if (overlay && chart.coords.length > 0) {{
+        const pointIndexFromEvent = (event) => {{
+          const bounds = overlay.getBoundingClientRect();
+          const relativeX = Math.max(0, Math.min(event.clientX - bounds.left, bounds.width));
+          const targetX = chart.padLeft + ((relativeX / bounds.width) * (chart.width - chart.padLeft - chart.padRight));
+          let bestIndex = 0;
+          let bestDistance = Infinity;
+          chart.coords.forEach((point, index) => {{
+            const distance = Math.abs(point.x - targetX);
+            if (distance < bestDistance) {{
+              bestDistance = distance;
+              bestIndex = index;
+            }}
+          }});
+          return bestIndex;
+        }};
+        const move = (event) => showTooltip(frame, chart, pointIndexFromEvent(event));
+        overlay.addEventListener("mousemove", move);
+        overlay.addEventListener("mouseenter", () => showTooltip(frame, chart, chart.coords.length - 1));
+        overlay.addEventListener("mouseleave", () => hideTooltip(frame));
+        overlay.addEventListener("touchstart", (event) => {{
+          if (event.touches.length > 0) {{
+            showTooltip(frame, chart, pointIndexFromEvent(event.touches[0]));
+          }}
+        }}, {{ passive: true }});
+        overlay.addEventListener("touchmove", (event) => {{
+          if (event.touches.length > 0) {{
+            showTooltip(frame, chart, pointIndexFromEvent(event.touches[0]));
+          }}
+        }}, {{ passive: true }});
+        overlay.addEventListener("touchend", () => hideTooltip(frame));
+        showTooltip(frame, chart, chart.coords.length - 1);
+      }}
     }}
     for (const button of rangeButtons) {{
       button.addEventListener("click", () => {{

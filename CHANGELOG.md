@@ -67,6 +67,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Remote development deployment now supports
   `make dev-deploy TARGET=admin@host` for syncing the current checkout to an
   already bootstrapped host and refreshing the runtime/web services.
+- Developer integration notes under `docs/` for verified BM6/BM200 live
+  behavior, separating upstream knowledge from BMGateway-specific findings.
 
 ### Changed
 
@@ -74,6 +76,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   of shipping sample hardware into the installed user config.
 - Raspberry Pi service install now renders units for the active user and
   installs a stable `/usr/local/bin/bm-gateway` symlink for systemd.
+- The runtime now performs one bounded Bluetooth recovery and retry after
+  `not found` / timeout-class BM200 live failures, and the management UI now
+  exposes a manual Bluetooth recovery action.
+- The shared chart renderer now uses richer time-axis formatting, interactive
+  tooltips, calmer fills, and historical fleet overlays on the battery landing
+  page.
+- Daily rollups now exclude error snapshots from voltage/SoC averages, the
+  history charts only plot valid samples, and repaired rollups can be rebuilt
+  from raw readings so long-range history stays readable after BLE outages.
 
 ### Documented
 
