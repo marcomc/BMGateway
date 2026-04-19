@@ -4,6 +4,11 @@ type = "bm200"
 name = "BM200 House"
 mac = "AA:BB:CC:DD:EE:01"
 enabled = true
+icon_key = "lead_acid_battery"
+[devices.battery]
+family = "lead_acid"
+profile = "regular_lead_acid"
+custom_soc_mode = "intelligent_algorithm"
 
 [[devices]]
 id = "bm300_van"
@@ -11,3 +16,8 @@ type = "bm300pro"
 name = "BM300 Van"
 mac = "AA:BB:CC:DD:EE:02"
 enabled = false
+icon_key = "lithium_battery"
+[devices.battery]
+family = "lithium"
+profile = "lithium"
+custom_soc_mode = "intelligent_algorithm"

@@ -1,18 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime
 from typing import Callable
 
 import pytest
 from bm_gateway.drivers.bm200 import (
+    BleakBM200HistoryTransport,
     BleakBM200Transport,
     BleakDeviceNotFoundError,
     BM200Measurement,
     decrypt_bm6_payload,
     decrypt_payload,
+    encode_history_count_request,
+    encode_history_download_request,
     encrypt_bm6_payload,
     encrypt_payload,
     parse_bm6_plaintext_measurement,
+    parse_history_items,
     parse_plaintext_measurement,
     parse_voltage_notification,
 )
@@ -60,6 +65,7 @@ def test_parse_bm6_plaintext_measurement_decodes_voltage_and_soc() -> None:
         soc=100,
         status_code=2,
         state="normal",
+        temperature=23.0,
     )
 
 
@@ -72,6 +78,7 @@ def test_parse_voltage_notification_supports_bm6_packets() -> None:
     assert measurement.voltage == 13.4
     assert measurement.soc == 100
     assert measurement.state == "normal"
+    assert measurement.temperature == 23.0
 
 
 def test_decrypt_bm6_payload_reverses_encrypt_bm6_payload() -> None:
@@ -295,3 +302,92 @@ def test_bleak_transport_retries_after_initial_notification_timeout(
 
     assert len(writes) == 2
     assert parse_voltage_notification(payload).voltage == 13.4
+
+
+def test_parse_history_items_decodes_item_count() -> None:
+    readings = parse_history_items(
+        b"\x00\x00\x00\x00" * 3,
+        reference_ts=datetime.fromisoformat("2026-04-19T12:00:00"),
+    )
+
+    assert len(readings) == 3
+    assert readings[0].ts == "2026-04-19T11:56:00"
+    assert readings[-1].ts == "2026-04-19T12:00:00"
+
+
+def test_bleak_history_transport_downloads_archive(monkeypatch: pytest.MonkeyPatch) -> None:
+    scanned_device = object()
+    writes: list[bytes] = []
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+            self._callback: Callable[[object | None, bytearray], None] | None = None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            self._callback = callback
+
+        async def write_gatt_char(self, _char: str, data: bytes, response: bool) -> None:
+            assert response is False
+            assert self._callback is not None
+            writes.append(data)
+            if len(writes) == 1:
+                count_packet = encrypt_payload(bytes([0xE7, 0x00, 0x00, 0x08]))
+                self._callback(None, bytearray(count_packet))
+            elif len(writes) == 2:
+                start_packet = encrypt_payload(bytes.fromhex("fffffe00000000000000000000000000"))
+                data_packet = encrypt_payload(bytes.fromhex("00000000000000000000000000000000"))
+                end_packet = encrypt_payload(bytes.fromhex("fffefe00001100000000000000000000"))
+                self._callback(None, bytearray(start_packet))
+                self._callback(None, bytearray(data_packet))
+                self._callback(None, bytearray(end_packet))
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(address: str, timeout: float) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout > 0
+        return scanned_device
+
+    async def fake_sleep(delay: float) -> None:
+        assert delay > 0
+        return None
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm200.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm200.BleakClient", FakeClient)
+    monkeypatch.setattr("bm_gateway.drivers.bm200.asyncio.sleep", fake_sleep)
+
+    transport = BleakBM200HistoryTransport()
+    readings = asyncio.run(
+        transport.read_history(
+            address="AA:BB:CC:DD:EE:FF",
+            adapter="hci0",
+            timeout_seconds=8.0,
+            scan_timeout_seconds=3.0,
+            reference_ts=datetime.fromisoformat("2026-04-19T12:00:00"),
+        )
+    )
+
+    assert writes[0] == encrypt_payload(encode_history_count_request())
+    assert writes[1] == encrypt_payload(encode_history_download_request(8))
+    assert len(readings) == 2

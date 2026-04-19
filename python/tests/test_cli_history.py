@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 from bm_gateway import cli
@@ -223,6 +224,50 @@ def test_history_compare_emits_degradation_report(
     payload = json.loads(captured.out)
     assert payload["device_id"] == "bm200_house"
     assert "windows" in payload
+
+
+def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    config_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+
+    def fake_sync(*, config: object, device: object, database_path: Path) -> dict[str, object]:
+        assert database_path == state_dir / "runtime" / "gateway.db"
+        return {
+            "device_id": "bm200_house",
+            "fetched": 12,
+            "inserted": 10,
+            "adapter": "hci0",
+            "profile": "legacy_bm2_history",
+        }
+
+    from bm_gateway import cli as cli_module
+
+    cli_module_any = cast(Any, cli_module)
+    original = cli_module_any.sync_bm200_device_archive
+    cli_module_any.sync_bm200_device_archive = fake_sync
+    try:
+        result = cli.main(
+            [
+                "--config",
+                str(config_path),
+                "history",
+                "sync-device",
+                "--device-id",
+                "bm200_house",
+                "--state-dir",
+                str(state_dir),
+                "--json",
+            ]
+        )
+    finally:
+        cli_module_any.sync_bm200_device_archive = original
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert payload["synced"] is True
+    assert payload["inserted"] == 10
 
 
 def test_history_stats_emits_storage_summary(

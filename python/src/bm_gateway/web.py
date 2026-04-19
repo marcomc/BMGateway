@@ -17,7 +17,18 @@ from . import __build_timestamp__, __version__, display_version
 from .config import AppConfig, load_config, write_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import (
+    BATTERY_FAMILIES,
+    CUSTOM_SOC_MODES,
+    ICON_CATALOG,
+    LEAD_ACID_PROFILES,
+    LITHIUM_PROFILES,
     Device,
+    battery_family_label,
+    battery_profile_label,
+    default_battery_family,
+    default_battery_profile,
+    default_icon_key,
+    icon_label,
     load_device_registry,
     normalize_mac_address,
     validate_devices,
@@ -41,6 +52,8 @@ from .web_ui import (
     button,
     chart_card,
     chart_script,
+    device_icon,
+    icon_picker_option,
     metric_tile,
     section_card,
     settings_row,
@@ -181,20 +194,202 @@ def _device_dashboard_cards(snapshot: dict[str, object]) -> str:
 def _device_table_rows(devices: list[dict[str, object]]) -> str:
     rows: list[str] = []
     for device in devices:
+        family_label, profile_label = _battery_summary(device)
         rows.append(
             "<tr>"
             f"<td>{html.escape(str(device.get('id', '')))}</td>"
             f"<td>{html.escape(str(device.get('type', '')))}</td>"
             f"<td>{html.escape(str(device.get('name', '')))}</td>"
             f"<td>{html.escape(str(device.get('mac', '')))}</td>"
+            f"<td>{html.escape(profile_label)}</td>"
+            f"<td>{html.escape(family_label)}</td>"
             f"<td>{html.escape(str(device.get('enabled', '')))}</td>"
             "</tr>"
         )
-    return "\n".join(rows) or "<tr><td colspan='5'>No configured devices</td></tr>"
+    return "\n".join(rows) or "<tr><td colspan='7'>No configured devices</td></tr>"
 
 
 def _escape_cell(value: object) -> str:
     return html.escape(str(value))
+
+
+def _battery_summary(device: dict[str, object]) -> tuple[str, str]:
+    battery = device.get("battery")
+    if isinstance(battery, dict):
+        family = str(battery.get("family", "lead_acid"))
+        device_type = str(device.get("type", "bm200"))
+        profile = str(
+            battery.get(
+                "profile",
+                default_battery_profile(device_type, family),
+            )
+        )
+        return battery_family_label(family), battery_profile_label(
+            family=family,
+            profile=profile,
+        )
+    family = default_battery_family(str(device.get("type", "bm200")))
+    profile = default_battery_profile(str(device.get("type", "bm200")), family)
+    return battery_family_label(family), battery_profile_label(family=family, profile=profile)
+
+
+def _device_icon_key(device: dict[str, object]) -> str:
+    icon_key = device.get("icon_key")
+    if isinstance(icon_key, str) and icon_key in ICON_CATALOG:
+        return icon_key
+    battery = device.get("battery")
+    if isinstance(battery, dict):
+        family = str(
+            battery.get(
+                "family",
+                default_battery_family(str(device.get("type", "bm200"))),
+            )
+        )
+        profile = str(
+            battery.get(
+                "profile",
+                default_battery_profile(str(device.get("type", "bm200")), family),
+            )
+        )
+    else:
+        family = default_battery_family(str(device.get("type", "bm200")))
+        profile = default_battery_profile(str(device.get("type", "bm200")), family)
+    return default_icon_key(battery_family=family, battery_profile=profile)
+
+
+def _device_icon_markup(device: dict[str, object]) -> str:
+    icon_key = _device_icon_key(device)
+    return device_icon(icon_key, label=icon_label(icon_key))
+
+
+def _curve_field_name(percent: int) -> str:
+    return f"custom_curve_{percent}"
+
+
+def _default_curve_pairs() -> list[tuple[int, float]]:
+    return [
+        (100, 12.90),
+        (90, 12.80),
+        (80, 12.70),
+        (70, 12.60),
+        (60, 12.50),
+        (50, 12.40),
+        (40, 12.30),
+        (30, 12.20),
+        (20, 12.10),
+        (10, 12.00),
+        (0, 11.90),
+    ]
+
+
+def _curve_rows_html() -> str:
+    rows: list[str] = []
+    for percent, voltage in _default_curve_pairs():
+        rows.append(
+            "<div class='curve-grid-row'>"
+            f"<label class='settings-label' for='{_curve_field_name(percent)}'>{percent}%</label>"
+            f"<input id='{_curve_field_name(percent)}' type='number' step='0.01' min='0' "
+            f"name='{_curve_field_name(percent)}' value='{voltage:.2f}'></div>"
+        )
+    return "".join(rows)
+
+
+def _battery_family_options() -> str:
+    return "".join(
+        f"<option value='{html.escape(value)}'>{html.escape(label)}</option>"
+        for value, label in BATTERY_FAMILIES.items()
+    )
+
+
+def _battery_profile_options() -> str:
+    entries = [("lead_acid", value, label) for value, label in LEAD_ACID_PROFILES.items()] + [
+        ("lithium", value, label) for value, label in LITHIUM_PROFILES.items()
+    ]
+    return "".join(
+        f"<option value='{html.escape(value)}' data-family='{html.escape(family)}'>"
+        f"{html.escape(label)}</option>"
+        for family, value, label in entries
+    )
+
+
+def _custom_mode_options() -> str:
+    return "".join(
+        f"<option value='{html.escape(value)}'>{html.escape(label)}</option>"
+        for value, label in CUSTOM_SOC_MODES.items()
+    )
+
+
+def _icon_picker_options(*, selected_key: str = "battery_monitor") -> str:
+    return "".join(
+        icon_picker_option(value, label=label, checked=value == selected_key)
+        for value, label in ICON_CATALOG.items()
+    )
+
+
+def _battery_form_script() -> str:
+    return """
+<script>
+(() => {
+  const form = document.getElementById("add-device");
+  if (!form) {
+    return;
+  }
+  const familySelect = form.querySelector("[name='battery_family']");
+  const profileSelect = form.querySelector("[name='battery_profile']");
+  const modeSelect = form.querySelector("[name='custom_soc_mode']");
+  const modeSection = document.getElementById("custom-soc-mode-section");
+  const curveSection = document.getElementById("custom-curve-section");
+  if (!familySelect || !profileSelect || !modeSelect || !modeSection || !curveSection) {
+    return;
+  }
+
+  function syncProfileOptions() {
+    const family = familySelect.value;
+    let selectedVisible = false;
+    for (const option of profileSelect.options) {
+      const visible = option.dataset.family === family;
+      option.hidden = !visible;
+      option.disabled = !visible;
+      if (visible && option.value === profileSelect.value) {
+        selectedVisible = true;
+      }
+    }
+    if (!selectedVisible) {
+      const fallback = Array.from(profileSelect.options).find((option) => !option.hidden);
+      if (fallback) {
+        profileSelect.value = fallback.value;
+      }
+    }
+  }
+
+  function syncCustomSections() {
+    const isCustom = profileSelect.value === "custom";
+    modeSection.hidden = !isCustom;
+    const showCurve = isCustom && modeSelect.value === "voltage_corresponding_power";
+    curveSection.hidden = !showCurve;
+  }
+
+  function syncAll() {
+    syncProfileOptions();
+    syncCustomSections();
+  }
+
+  familySelect.addEventListener("change", syncAll);
+  profileSelect.addEventListener("change", syncCustomSections);
+  modeSelect.addEventListener("change", syncCustomSections);
+  syncAll();
+})();
+</script>
+"""
+
+
+def _parse_custom_curve_from_form(form: dict[str, list[str]]) -> tuple[tuple[int, float], ...]:
+    rows: list[tuple[int, float]] = []
+    for percent, default_voltage in _default_curve_pairs():
+        raw_value = form.get(_curve_field_name(percent), [f"{default_voltage:.2f}"])[0]
+        value = float(raw_value)
+        rows.append((percent, value))
+    return tuple(rows)
 
 
 def _storage_rows(summary: dict[str, object]) -> str:
@@ -287,7 +482,7 @@ def _chart_points(
                 "kind": "daily",
                 "voltage": avg_voltage,
                 "soc": avg_soc,
-                "temperature": None,
+                "temperature": row.get("avg_temperature"),
                 "series": series,
                 "series_color": series_color,
             }
@@ -338,8 +533,8 @@ def _fleet_chart_points(
         legend.append((device_name, color))
         points.extend(
             _chart_points(
-                fetch_recent_history(database_path, device_id=device_id, limit=48),
-                fetch_daily_history(database_path, device_id=device_id, limit=30),
+                fetch_recent_history(database_path, device_id=device_id, limit=576),
+                fetch_daily_history(database_path, device_id=device_id, limit=730),
                 series=device_name,
                 series_color=color,
             )
@@ -572,6 +767,44 @@ def render_management_html(
         "You can paste a compact 12-hex serial such as "
         "<code>A1B2C3D4E5F6</code>; the UI normalizes it to Bluetooth MAC format."
         "</div>"
+        '<div class="battery-form-section" style="grid-column:1 / -1">'
+        '<div><div class="settings-label">Battery Support</div>'
+        "<div class='inline-field-help'>"
+        "BM200, BM200 Pro, BM300, and BM300 Pro app families all expose "
+        "lead-acid and lithium setup paths. Lead-acid supports regular, AGM, "
+        "EFB, GEL, and custom. Lithium supports lithium and custom. Custom "
+        "profiles can use the intelligent algorithm or a voltage-to-SoC curve."
+        "</div></div>"
+        "<div><div class='settings-label'>Choose a built-in icon</div>"
+        "<div class='inline-field-help'>"
+        "This icon is used on the Battery Overview and device cards. Pick the "
+        "closest visual identity for the battery or monitor."
+        "</div>"
+        "<div class='icon-picker-grid'>"
+        f"{_icon_picker_options(selected_key='battery_monitor')}"
+        "</div>"
+        "</div>"
+        '<div class="battery-form-grid">'
+        "<div><label class='settings-label' for='battery-family-input'>Battery family</label>"
+        f"<select id='battery-family-input' name='battery_family'>"
+        f"{_battery_family_options()}</select></div>"
+        "<div><label class='settings-label' for='battery-profile-input'>Battery profile</label>"
+        f"<select id='battery-profile-input' name='battery_profile'>"
+        f"{_battery_profile_options()}</select></div>"
+        "<div id='custom-soc-mode-section'><label class='settings-label' "
+        "for='custom-soc-mode-input'>Custom battery mode</label>"
+        f"<select id='custom-soc-mode-input' name='custom_soc_mode'>"
+        f"{_custom_mode_options()}</select></div>"
+        "</div>"
+        '<div id="custom-curve-section">'
+        '<div class="settings-label">Voltage corresponding to power</div>'
+        "<div class='inline-field-help'>"
+        "This mirrors the official-app custom battery flow. Edit the per-10% "
+        "thresholds if you want a manual SoC curve instead of the intelligent "
+        "algorithm.</div>"
+        f'<div class="curve-grid">{_curve_rows_html()}</div>'
+        "</div>"
+        "</div>"
         '<div style="grid-column:1 / -1">'
         f"{button('Add Device and Enable Live Polling', kind='primary')}"
         "</div>"
@@ -594,7 +827,7 @@ def render_management_html(
             title="Add Device",
             subtitle=(
                 "Register BM devices, normalize compact serials to MAC format, "
-                "and enable live polling."
+                "capture the official battery taxonomy, and enable live polling."
             ),
             body=add_device_form,
         )
@@ -603,7 +836,7 @@ def render_management_html(
             subtitle="The registry table remains fully visible for operational clarity.",
             body=(
                 '<div class="table-shell"><table><thead><tr><th>ID</th><th>Type</th>'
-                "<th>Name</th><th>MAC</th><th>Enabled</th></tr></thead>"
+                "<th>Name</th><th>MAC</th><th>Profile</th><th>Family</th><th>Enabled</th></tr></thead>"
                 f"<tbody>{_device_table_rows(devices)}</tbody></table></div>"
             ),
         )
@@ -660,6 +893,7 @@ def render_management_html(
         active_nav="management",
         primary_device_id=primary_device_id,
         version_label=version_label,
+        script=_battery_form_script(),
     )
 
 
@@ -696,6 +930,9 @@ def render_battery_html(
             device_cards.append(
                 tone_card(
                     (
+                        "<div class='device-card-head'>"
+                        f"{_device_icon_markup(device)}"
+                        "<div class='device-card-copy'>"
                         f"<div class='meta'>{html.escape(str(device.get('name', device_id)))}</div>"
                         f"<div class='meta'>{html.escape(str(device.get('type', 'bm200')))}</div>"
                         f"<div class='hero-soc'>{html.escape(str(device.get('soc', '-')))}%</div>"
@@ -703,6 +940,8 @@ def render_battery_html(
                         f"<div style='margin-top:0.65rem'>{badge}</div>"
                         "<div class='footer-row'>"
                         f"<a href='/device?device_id={quote(device_id)}'>Open device</a>"
+                        "</div>"
+                        "</div>"
                         "</div>"
                     ),
                     tone=tone,
@@ -756,7 +995,15 @@ def render_battery_html(
                 "throughout the app."
             ),
             points=chart_points,
-            range_options=(("raw", "Recent raw"), ("30", "30 days"), ("90", "90 days")),
+            range_options=(
+                ("raw", "Recent raw"),
+                ("1", "1 day"),
+                ("7", "7 days"),
+                ("30", "30 days"),
+                ("90", "90 days"),
+                ("365", "1 year"),
+                ("730", "2 years"),
+            ),
             default_range="30",
             default_metric="soc",
             legend=legend or [("No devices", "#95a3b8")],
@@ -785,16 +1032,13 @@ def render_devices_html(
         if isinstance(device, dict)
     }
     cards: list[str] = []
-    battery_types = {
-        "bm200": "Lead-Acid Battery",
-        "bm300pro": "Lithium Battery",
-    }
     for index, device in enumerate(devices):
         device_id = str(device.get("id", ""))
         runtime = snapshot_devices.get(device_id, {})
         runtime_state = str(runtime.get("state", ""))
         runtime_error_code = cast(str | None, runtime.get("error_code"))
         tone = _device_tone(index, runtime_state)
+        icon_key = _device_icon_key(device)
         status_value, status_subvalue = _device_runtime_summary(runtime)
         state_tile = metric_tile(
             label="Status",
@@ -813,9 +1057,8 @@ def render_devices_html(
             tone="blue",
             subvalue=signal_subvalue,
         )
-        battery_type = html.escape(
-            battery_types.get(str(device.get("type", "bm200")), "Unknown Battery")
-        )
+        family_label, profile_label = _battery_summary(device)
+        battery_type = html.escape(profile_label)
         enabled_badge = status_badge(
             "Enabled" if bool(device.get("enabled", False)) else "Disabled",
             kind="ok" if bool(device.get("enabled", False)) else "offline",
@@ -828,9 +1071,13 @@ def render_devices_html(
                 body=(
                     "<div class='settings-row' style='padding-top:0;"
                     "padding-bottom:0.8rem;border-bottom:0'>"
-                    f"<div><div class='settings-label'>{device_type_text}</div>"
+                    "<div class='device-card-head'>"
+                    f"{device_icon(icon_key, label=icon_label(icon_key))}"
+                    "<div class='device-card-copy'>"
+                    f"<div class='settings-label'>{device_type_text}</div>"
                     f"<div class='section-title'>{device_name_text}</div>"
                     f"<div class='muted-note'>Serial / MAC: {device_mac_text}</div>"
+                    "</div>"
                     "</div>"
                     f"<a class='ghost-button' href='/management'>Edit</a>"
                     "</div>"
@@ -840,8 +1087,19 @@ def render_devices_html(
                     "</div>"
                     "<div class='settings-row' style='padding-bottom:0;border-bottom:0'>"
                     f"<div class='pill-chip'>{battery_type}</div>"
+                    f"<div class='muted-note'>{html.escape(family_label)}</div>"
                     f"{enabled_badge}"
                     "</div>"
+                    "<details style='margin-top:1rem'>"
+                    "<summary class='settings-label'>Change icon</summary>"
+                    "<form method='post' action='/devices/icon' style='margin-top:0.9rem'>"
+                    f"<input type='hidden' name='device_id' value='{html.escape(device_id)}'>"
+                    "<div class='icon-picker-grid'>"
+                    f"{_icon_picker_options(selected_key=icon_key)}"
+                    "</div>"
+                    f"<div style='margin-top:0.85rem'>{button('Save icon', kind='secondary')}</div>"
+                    "</form>"
+                    "</details>"
                 ),
                 classes=f"tone-card {tone}",
             )
@@ -1128,9 +1386,12 @@ def render_device_html(
             ),
             range_options=(
                 ("raw", "Recent raw"),
+                ("1", "1 day"),
+                ("7", "7 days"),
                 ("30", "30 days"),
                 ("90", "90 days"),
                 ("365", "1 year"),
+                ("730", "2 years"),
             ),
             default_range="30",
             default_metric="voltage",
@@ -1233,9 +1494,12 @@ def render_history_html(
             ),
             range_options=(
                 ("raw", "Recent raw"),
+                ("1", "1 day"),
+                ("7", "7 days"),
                 ("30", "30 days"),
                 ("90", "90 days"),
                 ("365", "1 year"),
+                ("730", "2 years"),
             ),
             default_range="30",
             default_metric="soc",
@@ -1285,6 +1549,7 @@ def _render_history_sections(
         f"<td>{_escape_cell(row['max_voltage'])}</td>"
         f"<td>{_escape_cell(row['avg_voltage'])}</td>"
         f"<td>{_escape_cell(row['avg_soc'])}</td>"
+        f"<td>{_escape_cell(row.get('avg_temperature', '-'))}</td>"
         f"<td>{_escape_cell(row['error_count'])}</td>"
         "</tr>"
         for row in daily_history
@@ -1297,13 +1562,14 @@ def _render_history_sections(
         f"<td>{_escape_cell(row['max_voltage'])}</td>"
         f"<td>{_escape_cell(row['avg_voltage'])}</td>"
         f"<td>{_escape_cell(row['avg_soc'])}</td>"
+        f"<td>{_escape_cell(row.get('avg_temperature', '-'))}</td>"
         f"<td>{_escape_cell(row['error_count'])}</td>"
         "</tr>"
         for row in monthly_history
     )
     raw_rows_html = raw_rows or "<tr><td colspan='6'>No data</td></tr>"
-    daily_rows_html = daily_rows or "<tr><td colspan='7'>No data</td></tr>"
-    monthly_rows_html = monthly_rows or "<tr><td colspan='7'>No data</td></tr>"
+    daily_rows_html = daily_rows or "<tr><td colspan='8'>No data</td></tr>"
+    monthly_rows_html = monthly_rows or "<tr><td colspan='8'>No data</td></tr>"
     return (
         section_card(
             title="Recent Raw Readings",
@@ -1328,7 +1594,7 @@ def _render_history_sections(
             body=(
                 '<div class="table-shell"><table><thead><tr><th>Day</th><th>Samples</th>'
                 "<th>Min V</th><th>Max V</th>"
-                "<th>Avg V</th><th>Avg SoC</th><th>Error count</th></tr></thead>"
+                "<th>Avg V</th><th>Avg SoC</th><th>Avg Temp</th><th>Error count</th></tr></thead>"
                 f"<tbody>{daily_rows_html}</tbody></table></div>"
             ),
         )
@@ -1342,7 +1608,7 @@ def _render_history_sections(
             body=(
                 '<div class="table-shell"><table><thead><tr><th>Month</th><th>Samples</th>'
                 "<th>Min V</th><th>Max V</th>"
-                "<th>Avg V</th><th>Avg SoC</th><th>Error count</th></tr></thead>"
+                "<th>Avg V</th><th>Avg SoC</th><th>Avg Temp</th><th>Error count</th></tr></thead>"
                 f"<tbody>{monthly_rows_html}</tbody></table></div>"
             ),
         )
@@ -1404,9 +1670,19 @@ def add_device_from_form(
     device_type: str,
     device_name: str,
     device_mac: str,
+    battery_family: str | None = None,
+    battery_profile: str | None = None,
+    custom_soc_mode: str = "intelligent_algorithm",
+    custom_voltage_curve: tuple[tuple[int, float], ...] | None = None,
+    icon_key: str | None = None,
 ) -> list[str]:
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
+    resolved_family = battery_family or default_battery_family(device_type.strip())
+    resolved_profile = battery_profile or default_battery_profile(
+        device_type.strip(),
+        resolved_family,
+    )
     devices.append(
         Device(
             id=device_id.strip(),
@@ -1414,6 +1690,17 @@ def add_device_from_form(
             name=device_name.strip(),
             mac=normalize_mac_address(device_mac),
             enabled=True,
+            battery_family=resolved_family.strip(),
+            battery_profile=resolved_profile.strip(),
+            custom_soc_mode=custom_soc_mode.strip(),
+            custom_voltage_curve=custom_voltage_curve or tuple(_default_curve_pairs()),
+            icon_key=(
+                icon_key
+                or default_icon_key(
+                    battery_family=resolved_family.strip(),
+                    battery_profile=resolved_profile.strip(),
+                )
+            ).strip(),
         )
     )
     errors = validate_devices(devices)
@@ -1429,6 +1716,26 @@ def add_device_from_form(
                 gateway=replace(config.gateway, reader_mode="live"),
             ),
         )
+    return []
+
+
+def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> list[str]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    updated_devices: list[Device] = []
+    found = False
+    for device in devices:
+        if device.id == device_id:
+            updated_devices.append(replace(device, icon_key=icon_key.strip()))
+            found = True
+        else:
+            updated_devices.append(device)
+    if not found:
+        return [f"device {device_id} was not found"]
+    errors = validate_devices(updated_devices)
+    if errors:
+        return errors
+    write_device_registry(config.device_registry_path, updated_devices)
     return []
 
 
@@ -1593,11 +1900,11 @@ def serve_management(
                             break
                 html = render_device_html(
                     device_id=device_id,
-                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=200),
+                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=576),
                     daily_history=fetch_daily_history(
                         database_path,
                         device_id=device_id,
-                        limit=365,
+                        limit=730,
                     ),
                     monthly_history=fetch_monthly_history(
                         database_path,
@@ -1620,11 +1927,11 @@ def serve_management(
                 device_id = params.get("device_id", [""])[0]
                 html = render_history_html(
                     device_id=device_id,
-                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=200),
+                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=576),
                     daily_history=fetch_daily_history(
                         database_path,
                         device_id=device_id,
-                        limit=365,
+                        limit=730,
                     ),
                     monthly_history=fetch_monthly_history(
                         database_path,
@@ -1722,6 +2029,11 @@ def serve_management(
                     device_type=form.get("device_type", ["bm200"])[0],
                     device_name=form.get("device_name", [""])[0],
                     device_mac=form.get("device_mac", [""])[0],
+                    battery_family=form.get("battery_family", ["lead_acid"])[0],
+                    battery_profile=form.get("battery_profile", ["regular_lead_acid"])[0],
+                    custom_soc_mode=form.get("custom_soc_mode", ["intelligent_algorithm"])[0],
+                    custom_voltage_curve=_parse_custom_curve_from_form(form),
+                    icon_key=form.get("icon_key", ["battery_monitor"])[0],
                 )
                 if errors:
                     config_text, devices_text = _config_and_registry_texts(config_path)
@@ -1745,6 +2057,27 @@ def serve_management(
                     "Location",
                     "/management?" + urlencode({"message": "Device added. Live polling enabled."}),
                 )
+                self.end_headers()
+                return
+
+            if parsed.path == "/devices/icon":
+                errors = update_device_icon(
+                    config_path=config_path,
+                    device_id=form.get("device_id", [""])[0],
+                    icon_key=form.get("icon_key", ["battery_monitor"])[0],
+                )
+                if errors:
+                    config, snapshot, database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    html = render_devices_html(
+                        snapshot=snapshot,
+                        devices=[device.to_dict() for device in configured_devices],
+                    )
+                    self._send_html(html, status=400)
+                    return
+
+                self.send_response(303)
+                self.send_header("Location", "/devices")
                 self.end_headers()
                 return
 

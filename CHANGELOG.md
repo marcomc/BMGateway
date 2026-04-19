@@ -30,6 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Storage summary and manual retention-pruning commands under `history`.
 - Yearly history summaries and degradation-comparison analytics from persisted
   rollups.
+- Built-in SVG icon selection for battery overview cards, wired into the
+  device registry and add-device flow without uploads or external assets.
 - Host-run Python management web interface with config/device TOML editing,
   history views, and one-shot run triggering.
 - Expanded management web interface coverage for configured devices, Home
@@ -69,6 +71,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   already bootstrapped host and refreshing the runtime/web services.
 - Developer integration notes under `docs/` for verified BM6/BM200 live
   behavior, separating upstream knowledge from BMGateway-specific findings.
+- Device registry battery metadata for lead-acid/lithium profiles, custom
+  algorithm selection, and editable voltage-to-SoC curves in the web add-device
+  flow.
 
 ### Changed
 
@@ -88,6 +93,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - BM200 discovery misses are now classified as `device_not_found` / offline
   instead of a generic `driver_error`, and the Devices page explains that the
   monitor was not advertising during the latest scan window.
+- BM6-family live parsing now captures temperature, and daily/monthly history
+  rollups retain temperature averages so long-range temperature charts work.
+- History chart controls now use horizontally scrollable mobile rails with
+  `Recent raw`, `1 day`, `7 days`, `30 days`, `90 days`, `1 year`, and `2 years`
+  ranges instead of wrapping into overlapping pills on narrow screens.
 
 ### Documented
 

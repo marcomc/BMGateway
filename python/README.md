@@ -58,6 +58,16 @@ Device readings also carry:
 The database also keeps daily rollups so long-term comparisons can survive raw
 retention pruning, and monthly summaries are derived from those rollups.
 
+The device registry now also supports battery metadata that mirrors the
+official BM200/BM300 app flow:
+
+- lead-acid vs lithium family
+- lead-acid profile selection: regular, AGM, EFB, GEL, custom
+- lithium profile selection: lithium or custom
+- custom battery mode: intelligent algorithm or voltage-to-SoC curve
+- built-in icon selection for the battery overview cards, including car,
+  motorcycle, chemistry-specific, and custom battery monitor visuals
+
 The CLI can inspect raw history, daily rollups, monthly summaries, and storage
 retention stats directly, and it now exposes yearly summaries plus degradation
 comparison windows.

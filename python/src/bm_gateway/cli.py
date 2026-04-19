@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Sequence, cast
 
 from . import __version__
+from .archive_sync import sync_bm200_device_archive
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, load_device_registry, validate_devices
@@ -22,6 +23,7 @@ from .runtime import (
     state_file_path,
 )
 from .state_store import (
+    fetch_archive_history,
     fetch_counts,
     fetch_daily_history,
     fetch_degradation_report,
@@ -48,7 +50,7 @@ def format_main_help() -> str:
             "  config   Show or validate the gateway configuration",
             "  devices  Inspect the configured device registry",
             "  ha       Render the Home Assistant MQTT contract",
-            "  history  Inspect persisted raw, daily, or monthly history",
+            "  history  Inspect persisted and imported device history",
             "  run      Execute the gateway runtime and persist snapshots",
             "  web      Render, serve, or manage the web interface",
             "",
@@ -124,13 +126,26 @@ def build_parser() -> argparse.ArgumentParser:
     history_compare = history_subparsers.add_parser(
         "compare", help="Show long-term degradation comparison windows."
     )
+    history_archive = history_subparsers.add_parser(
+        "archive", help="Show imported device-archive history rows."
+    )
+    history_sync = history_subparsers.add_parser(
+        "sync-device",
+        help="Download archive history from a BM200-class device into local storage.",
+    )
     history_stats = history_subparsers.add_parser(
         "stats", help="Show storage counts and per-device history ranges."
     )
     history_prune = history_subparsers.add_parser(
         "prune", help="Apply configured retention limits to persisted history."
     )
-    for history_command in (history_raw, history_daily, history_monthly, history_yearly):
+    for history_command in (
+        history_raw,
+        history_daily,
+        history_monthly,
+        history_yearly,
+        history_archive,
+    ):
         history_command.add_argument("--device-id", required=True, help="Device identifier.")
         history_command.add_argument(
             "--json", action="store_true", help="Print structured JSON output."
@@ -147,6 +162,14 @@ def build_parser() -> argparse.ArgumentParser:
             default=None,
             help="Limit the number of rows returned.",
         )
+    history_sync.add_argument("--device-id", required=True, help="Device identifier.")
+    history_sync.add_argument("--json", action="store_true", help="Print structured JSON output.")
+    history_sync.add_argument(
+        "--state-dir",
+        type=Path,
+        default=None,
+        help="Override the base directory used for runtime state files.",
+    )
     history_compare.add_argument("--device-id", required=True, help="Device identifier.")
     history_compare.add_argument(
         "--json", action="store_true", help="Print structured JSON output."
@@ -494,6 +517,8 @@ def _handle_history(
         rows = fetch_daily_history(database_path, device_id=device_id, limit=limit or 365)
     elif history_kind == "yearly":
         rows = fetch_yearly_history(database_path, device_id=device_id, limit=limit or 10)
+    elif history_kind == "archive":
+        rows = fetch_archive_history(database_path, device_id=device_id, limit=limit or 2000)
     else:
         rows = fetch_monthly_history(database_path, device_id=device_id, limit=limit or 24)
 
@@ -503,6 +528,55 @@ def _handle_history(
 
     for row in rows:
         print(json.dumps(row, sort_keys=True))
+    return 0
+
+
+def _handle_history_sync_device(
+    path: Path,
+    *,
+    verbose: bool,
+    device_id: str,
+    as_json: bool,
+    state_dir: Path | None,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, devices = runtime
+    device = next((item for item in devices if item.id == device_id), None)
+    if device is None:
+        print(f"Unknown device: {device_id}", file=sys.stderr)
+        return 2
+
+    database_path = database_file_path(config, state_dir=state_dir)
+    try:
+        payload = sync_bm200_device_archive(
+            config=config,
+            device=device,
+            database_path=database_path,
+        )
+    except Exception as exc:
+        failure = {
+            "device_id": device_id,
+            "synced": False,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc) or exc.__class__.__name__,
+        }
+        if as_json:
+            _print_json(failure)
+        else:
+            print(failure["error"], file=sys.stderr)
+        return 1
+
+    payload["synced"] = True
+    if as_json:
+        _print_json(payload)
+        return 0
+
+    print(
+        f"Synced archive for {device_id}: "
+        f"fetched={payload['fetched']} inserted={payload['inserted']}"
+    )
     return 0
 
 
@@ -669,7 +743,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             as_json=bool(args.json),
             output_dir=args.output_dir,
         )
-    if args.command == "history" and args.history_command in {"raw", "daily", "monthly", "yearly"}:
+    if args.command == "history" and args.history_command in {
+        "raw",
+        "daily",
+        "monthly",
+        "yearly",
+        "archive",
+    }:
         return _handle_history(
             args.config,
             verbose=bool(args.verbose),
@@ -681,6 +761,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     if args.command == "history" and args.history_command == "compare":
         return _handle_history_compare(
+            args.config,
+            verbose=bool(args.verbose),
+            device_id=args.device_id,
+            as_json=bool(args.json),
+            state_dir=args.state_dir,
+        )
+    if args.command == "history" and args.history_command == "sync-device":
+        return _handle_history_sync_device(
             args.config,
             verbose=bool(args.verbose),
             device_id=args.device_id,

@@ -34,6 +34,7 @@ class BM200Measurement:
     soc: int
     status_code: int
     state: str
+    temperature: float | None = None
 
 
 @dataclass(frozen=True)
@@ -65,6 +66,18 @@ class BM200Transport(Protocol):
         timeout_seconds: float,
         scan_timeout_seconds: float,
     ) -> bytes: ...
+
+
+class BM200HistoryTransport(Protocol):
+    async def read_history(
+        self,
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        reference_ts: datetime,
+    ) -> list[BM200HistoryReading]: ...
 
 
 def _create_cipher() -> Any:
@@ -107,6 +120,7 @@ def parse_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
     return BM200Measurement(
         voltage=voltage,
         soc=soc,
+        temperature=None,
         status_code=status_code,
         state=BM200_STATUS.get(status_code, "unknown"),
     )
@@ -121,9 +135,12 @@ def parse_bm6_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
     raw = plaintext.hex()
     voltage = int(raw[15:18], 16) / 100.0
     soc = int(raw[12:14], 16)
+    temperature_raw = plaintext[4]
+    temperature = -float(temperature_raw) if plaintext[3] == 0x01 else float(temperature_raw)
     return BM200Measurement(
         voltage=voltage,
         soc=soc,
+        temperature=temperature,
         status_code=2,
         state="normal",
     )
@@ -154,6 +171,10 @@ def decode_history_count_packet(plaintext: bytes) -> int:
     if len(plaintext) < 4 or plaintext[0] != 0xE7:
         raise BM200ProtocolError("plaintext does not contain a BM200 history-count packet")
     return int(struct.unpack(">L", bytes([0, *plaintext[1:4]]))[0])
+
+
+def decode_3bytes(payload: bytes) -> int:
+    return int(struct.unpack(">L", bytes([0, *payload[:3]]))[0])
 
 
 def decode_history_nibbles(payload: bytes, fmt: str) -> list[int]:
@@ -281,6 +302,82 @@ class BleakBM200Transport:
                 continue
 
 
+class BleakBM200HistoryTransport:
+    async def read_history(
+        self,
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        reference_ts: datetime,
+    ) -> list[BM200HistoryReading]:
+        _ = adapter
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        last_error: Exception | None = None
+        scan_timeout = max(1.0, scan_timeout_seconds)
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                if last_error is not None:
+                    raise last_error
+                raise BleakDeviceNotFoundError(address)
+
+            device = await BleakScanner.find_device_by_address(
+                address,
+                timeout=min(scan_timeout, remaining),
+            )
+            if device is None:
+                continue
+
+            client = BleakClient(device, timeout=min(scan_timeout, remaining))
+            packet_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+            def notification_handler(
+                _: object,
+                data: bytearray,
+                *,
+                notification_queue: asyncio.Queue[bytes] = packet_queue,
+            ) -> None:
+                notification_queue.put_nowait(bytes(data))
+
+            try:
+                async with client:
+                    await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
+                    try:
+                        await client.write_gatt_char(
+                            BM200_WRITE_CHARACTERISTIC,
+                            encrypt_payload(encode_history_count_request()),
+                            response=False,
+                        )
+                        history_size = await _await_history_size(
+                            packet_queue,
+                            deadline=deadline,
+                        )
+                        if history_size == 0:
+                            return []
+                        await asyncio.sleep(min(1.0, max(deadline - loop.time(), 0.0)))
+                        await client.write_gatt_char(
+                            BM200_WRITE_CHARACTERISTIC,
+                            encrypt_payload(encode_history_download_request(history_size)),
+                            response=False,
+                        )
+                        payload = await _collect_history_payload(
+                            packet_queue,
+                            deadline=deadline,
+                        )
+                        return parse_history_items(payload, reference_ts=reference_ts)
+                    finally:
+                        await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
+            except BM200TimeoutError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                await asyncio.sleep(min(1.0, max(deadline - loop.time(), 0.0)))
+                continue
+
+
 def _is_bm200_measurement_packet(encrypted: bytes) -> bool:
     try:
         plaintext = decrypt_payload(encrypted)
@@ -305,6 +402,42 @@ class BleakDeviceNotFoundError(BM200Error):
     """Raised when a scanned device cannot be resolved before connecting."""
 
 
+async def _next_decrypted_packet(packet_queue: asyncio.Queue[bytes], *, deadline: float) -> bytes:
+    loop = asyncio.get_running_loop()
+    remaining = deadline - loop.time()
+    if remaining <= 0:
+        raise BM200TimeoutError("history")
+    encrypted = await asyncio.wait_for(packet_queue.get(), timeout=min(4.0, remaining))
+    try:
+        return decrypt_payload(encrypted)
+    except ValueError as exc:  # pragma: no cover - defensive
+        raise BM200ProtocolError("failed to decrypt history packet") from exc
+
+
+async def _await_history_size(packet_queue: asyncio.Queue[bytes], *, deadline: float) -> int:
+    while True:
+        plaintext = await _next_decrypted_packet(packet_queue, deadline=deadline)
+        if len(plaintext) >= 4 and plaintext[0] == 0xE7:
+            return decode_history_count_packet(plaintext)
+
+
+async def _collect_history_payload(packet_queue: asyncio.Queue[bytes], *, deadline: float) -> bytes:
+    receiving = False
+    history_data = b""
+    while True:
+        plaintext = await _next_decrypted_packet(packet_queue, deadline=deadline)
+        if plaintext.startswith(bytes.fromhex("fffffe")):
+            receiving = True
+            history_data = b""
+            continue
+        if not receiving:
+            continue
+        if plaintext.startswith(bytes.fromhex("fffefe")):
+            history_size = decode_3bytes(plaintext[3:6]) - 9
+            return history_data[:history_size]
+        history_data += plaintext
+
+
 async def read_bm200_measurement(
     *,
     address: str,
@@ -321,3 +454,22 @@ async def read_bm200_measurement(
         scan_timeout_seconds=scan_timeout_seconds,
     )
     return parse_voltage_notification(encrypted)
+
+
+async def read_bm200_history(
+    *,
+    address: str,
+    adapter: str,
+    timeout_seconds: float,
+    scan_timeout_seconds: float,
+    reference_ts: datetime | None = None,
+    transport: BM200HistoryTransport | None = None,
+) -> list[BM200HistoryReading]:
+    active_transport = transport or BleakBM200HistoryTransport()
+    return await active_transport.read_history(
+        address=address,
+        adapter=adapter,
+        timeout_seconds=timeout_seconds,
+        scan_timeout_seconds=scan_timeout_seconds,
+        reference_ts=reference_ts or datetime.now().replace(microsecond=0, second=0),
+    )

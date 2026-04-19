@@ -61,6 +61,7 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
             soc=58,
             status_code=2,
             state="normal",
+            temperature=23.0,
         )
 
     snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
@@ -70,7 +71,7 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
     assert snapshot.devices[0].voltage == 12.73
     assert snapshot.devices[0].soc == 58
     assert snapshot.devices[0].state == "normal"
-    assert snapshot.devices[0].temperature is None
+    assert snapshot.devices[0].temperature == 23.0
     assert snapshot.devices[1].connected is False
     assert snapshot.devices[1].state == "disabled"
 
@@ -185,6 +186,7 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
             soc=58,
             status_code=2,
             state="normal",
+            temperature=18.5,
         )
 
     snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)

@@ -73,12 +73,46 @@ def _connect_database(path: Path) -> sqlite3.Connection:
             max_voltage REAL NOT NULL,
             avg_voltage REAL NOT NULL,
             avg_soc REAL NOT NULL,
+            min_temperature REAL,
+            max_temperature REAL,
+            avg_temperature REAL,
             error_count INTEGER NOT NULL,
             last_seen TEXT NOT NULL,
             PRIMARY KEY (device_id, day)
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS device_archive_readings (
+            device_id TEXT NOT NULL,
+            device_type TEXT NOT NULL,
+            name TEXT NOT NULL,
+            mac TEXT NOT NULL,
+            ts TEXT NOT NULL,
+            voltage REAL NOT NULL,
+            min_crank_voltage REAL,
+            event_type INTEGER,
+            imported_at TEXT NOT NULL,
+            adapter TEXT NOT NULL,
+            driver TEXT NOT NULL,
+            profile TEXT NOT NULL,
+            PRIMARY KEY (device_id, ts, profile)
+        )
+        """
+    )
+    existing_columns = {
+        row[1] for row in connection.execute("PRAGMA table_info(device_daily_rollups)").fetchall()
+    }
+    for column_name, definition in (
+        ("min_temperature", "REAL"),
+        ("max_temperature", "REAL"),
+        ("avg_temperature", "REAL"),
+    ):
+        if column_name not in existing_columns:
+            connection.execute(
+                f"ALTER TABLE device_daily_rollups ADD COLUMN {column_name} {definition}"
+            )
     connection.commit()
     return connection
 
@@ -165,9 +199,12 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                         max_voltage,
                         avg_voltage,
                         avg_soc,
+                        min_temperature,
+                        max_temperature,
+                        avg_temperature,
                         error_count,
                         last_seen
-                    ) VALUES (?, ?, 1, ?, ?, ?, ?, 0, ?)
+                    ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0, ?)
                     ON CONFLICT(device_id, day) DO UPDATE SET
                         samples = samples + 1,
                         min_voltage = CASE
@@ -186,6 +223,23 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                             WHEN samples = 0 THEN excluded.avg_soc
                             ELSE ((avg_soc * samples) + excluded.avg_soc) / (samples + 1)
                         END,
+                        min_temperature = CASE
+                            WHEN excluded.min_temperature IS NULL THEN min_temperature
+                            WHEN min_temperature IS NULL THEN excluded.min_temperature
+                            ELSE MIN(min_temperature, excluded.min_temperature)
+                        END,
+                        max_temperature = CASE
+                            WHEN excluded.max_temperature IS NULL THEN max_temperature
+                            WHEN max_temperature IS NULL THEN excluded.max_temperature
+                            ELSE MAX(max_temperature, excluded.max_temperature)
+                        END,
+                        avg_temperature = CASE
+                            WHEN excluded.avg_temperature IS NULL THEN avg_temperature
+                            WHEN avg_temperature IS NULL THEN excluded.avg_temperature
+                            ELSE (
+                                (avg_temperature * samples) + excluded.avg_temperature
+                            ) / (samples + 1)
+                        END,
                         last_seen = excluded.last_seen
                     """,
                     (
@@ -195,6 +249,9 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                         device.voltage,
                         device.voltage,
                         float(device.soc),
+                        device.temperature,
+                        device.temperature,
+                        device.temperature,
                         device.last_seen,
                     ),
                 )
@@ -209,9 +266,12 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                         max_voltage,
                         avg_voltage,
                         avg_soc,
+                        min_temperature,
+                        max_temperature,
+                        avg_temperature,
                         error_count,
                         last_seen
-                    ) VALUES (?, ?, 0, 0.0, 0.0, 0.0, 0.0, 1, ?)
+                    ) VALUES (?, ?, 0, 0.0, 0.0, 0.0, 0.0, NULL, NULL, NULL, 1, ?)
                     ON CONFLICT(device_id, day) DO UPDATE SET
                         error_count = error_count + 1,
                         last_seen = excluded.last_seen
@@ -240,6 +300,15 @@ def rebuild_daily_rollups(path: Path) -> None:
                 MAX(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END) AS max_voltage,
                 AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END) AS avg_voltage,
                 AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN soc END) AS avg_soc,
+                MIN(
+                    CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END
+                ) AS min_temperature,
+                MAX(
+                    CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END
+                ) AS max_temperature,
+                AVG(
+                    CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END
+                ) AS avg_temperature,
                 SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
                 MAX(last_seen) AS last_seen
             FROM device_readings
@@ -258,9 +327,12 @@ def rebuild_daily_rollups(path: Path) -> None:
                 max_voltage,
                 avg_voltage,
                 avg_soc,
+                min_temperature,
+                max_temperature,
+                avg_temperature,
                 error_count,
                 last_seen
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (
@@ -271,8 +343,11 @@ def rebuild_daily_rollups(path: Path) -> None:
                     float(row[4] or 0.0),
                     float(row[5] or 0.0),
                     float(row[6] or 0.0),
-                    int(row[7] or 0),
-                    row[8],
+                    float(row[7]) if row[7] is not None else None,
+                    float(row[8]) if row[8] is not None else None,
+                    float(row[9]) if row[9] is not None else None,
+                    int(row[10] or 0),
+                    row[11],
                 )
                 for row in rows
             ],
@@ -317,12 +392,16 @@ def fetch_counts(path: Path) -> dict[str, int]:
         gateway_count = connection.execute("SELECT COUNT(*) FROM gateway_snapshots").fetchone()
         device_count = connection.execute("SELECT COUNT(*) FROM device_readings").fetchone()
         daily_count = connection.execute("SELECT COUNT(*) FROM device_daily_rollups").fetchone()
+        archive_count = connection.execute(
+            "SELECT COUNT(*) FROM device_archive_readings"
+        ).fetchone()
     finally:
         connection.close()
     return {
         "gateway_snapshots": int(gateway_count[0]) if gateway_count is not None else 0,
         "device_readings": int(device_count[0]) if device_count is not None else 0,
         "device_daily_rollups": int(daily_count[0]) if daily_count is not None else 0,
+        "device_archive_readings": int(archive_count[0]) if archive_count is not None else 0,
     }
 
 
@@ -353,6 +432,18 @@ def fetch_storage_summary(path: Path) -> dict[str, object]:
             ORDER BY device_id
             """
         ).fetchall()
+        archive_rows = connection.execute(
+            """
+            SELECT
+                device_id,
+                COUNT(*) AS archive_samples,
+                MIN(ts) AS archive_first_ts,
+                MAX(ts) AS archive_last_ts
+            FROM device_archive_readings
+            GROUP BY device_id
+            ORDER BY device_id
+            """
+        ).fetchall()
     finally:
         connection.close()
 
@@ -367,6 +458,9 @@ def fetch_storage_summary(path: Path) -> dict[str, object]:
             "daily_days": 0,
             "daily_first_day": None,
             "daily_last_day": None,
+            "archive_samples": 0,
+            "archive_first_ts": None,
+            "archive_last_ts": None,
         }
     for row in daily_rows:
         device_id = cast(str, row[0])
@@ -380,11 +474,34 @@ def fetch_storage_summary(path: Path) -> dict[str, object]:
                 "daily_days": 0,
                 "daily_first_day": None,
                 "daily_last_day": None,
+                "archive_samples": 0,
+                "archive_first_ts": None,
+                "archive_last_ts": None,
             },
         )
         summary["daily_days"] = int(row[1])
         summary["daily_first_day"] = row[2]
         summary["daily_last_day"] = row[3]
+    for row in archive_rows:
+        device_id = cast(str, row[0])
+        summary = by_device.setdefault(
+            device_id,
+            {
+                "device_id": device_id,
+                "raw_samples": 0,
+                "raw_first_ts": None,
+                "raw_last_ts": None,
+                "daily_days": 0,
+                "daily_first_day": None,
+                "daily_last_day": None,
+                "archive_samples": 0,
+                "archive_first_ts": None,
+                "archive_last_ts": None,
+            },
+        )
+        summary["archive_samples"] = int(row[1])
+        summary["archive_first_ts"] = row[2]
+        summary["archive_last_ts"] = row[3]
 
     return {
         "counts": fetch_counts(path),
@@ -403,19 +520,43 @@ def fetch_recent_history(
         rows = connection.execute(
             """
             SELECT
-                snapshot_generated_at,
+                ts,
                 voltage,
                 soc,
                 temperature,
                 state,
                 error_code,
-                error_detail
-            FROM device_readings
-            WHERE device_id = ?
-            ORDER BY snapshot_generated_at DESC
+                error_detail,
+                sample_source
+            FROM (
+                SELECT
+                    snapshot_generated_at AS ts,
+                    voltage,
+                    soc,
+                    temperature,
+                    state,
+                    error_code,
+                    error_detail,
+                    'live' AS sample_source
+                FROM device_readings
+                WHERE device_id = ?
+                UNION ALL
+                SELECT
+                    ts,
+                    voltage,
+                    NULL AS soc,
+                    NULL AS temperature,
+                    'archive' AS state,
+                    NULL AS error_code,
+                    NULL AS error_detail,
+                    'device_archive' AS sample_source
+                FROM device_archive_readings
+                WHERE device_id = ?
+            )
+            ORDER BY ts DESC
             LIMIT ?
             """,
-            (device_id, limit),
+            (device_id, device_id, limit),
         ).fetchall()
     finally:
         connection.close()
@@ -428,6 +569,107 @@ def fetch_recent_history(
             "state": row[4],
             "error_code": row[5],
             "error_detail": row[6],
+            "sample_source": row[7],
+        }
+        for row in rows
+    ]
+
+
+def import_archive_history(
+    path: Path,
+    *,
+    device_id: str,
+    device_type: str,
+    name: str,
+    mac: str,
+    adapter: str,
+    driver: str,
+    profile: str,
+    readings: list[dict[str, object]],
+) -> int:
+    connection = _connect_database(path)
+    imported_at = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+    inserted = 0
+    try:
+        for reading in readings:
+            cursor = connection.execute(
+                """
+                INSERT OR IGNORE INTO device_archive_readings (
+                    device_id,
+                    device_type,
+                    name,
+                    mac,
+                    ts,
+                    voltage,
+                    min_crank_voltage,
+                    event_type,
+                    imported_at,
+                    adapter,
+                    driver,
+                    profile
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    device_id,
+                    device_type,
+                    name,
+                    mac,
+                    reading["ts"],
+                    reading["voltage"],
+                    reading.get("min_crank_voltage"),
+                    reading.get("event_type"),
+                    imported_at,
+                    adapter,
+                    driver,
+                    profile,
+                ),
+            )
+            inserted += int(cursor.rowcount or 0)
+        connection.commit()
+    finally:
+        connection.close()
+    return inserted
+
+
+def fetch_archive_history(
+    path: Path,
+    *,
+    device_id: str,
+    limit: int = 2000,
+) -> list[dict[str, object]]:
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT
+                ts,
+                voltage,
+                min_crank_voltage,
+                event_type,
+                imported_at,
+                adapter,
+                driver,
+                profile
+            FROM device_archive_readings
+            WHERE device_id = ?
+            ORDER BY ts DESC
+            LIMIT ?
+            """,
+            (device_id, limit),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        {
+            "ts": row[0],
+            "voltage": row[1],
+            "min_crank_voltage": row[2],
+            "event_type": row[3],
+            "imported_at": row[4],
+            "adapter": row[5],
+            "driver": row[6],
+            "profile": row[7],
+            "sample_source": "device_archive",
         }
         for row in rows
     ]
@@ -445,6 +687,7 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
                 max_voltage,
                 avg_voltage,
                 avg_soc,
+                avg_temperature,
                 error_count,
                 last_seen
             FROM device_daily_rollups
@@ -465,8 +708,9 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
             "max_voltage": row[3],
             "avg_voltage": row[4],
             "avg_soc": row[5],
-            "error_count": row[6],
-            "last_seen": row[7],
+            "avg_temperature": row[6],
+            "error_count": row[7],
+            "last_seen": row[8],
         }
         for row in rows
     ]
@@ -489,6 +733,12 @@ def fetch_monthly_history(
                 MAX(max_voltage),
                 COALESCE(SUM(avg_voltage * samples) / NULLIF(SUM(samples), 0), 0.0),
                 COALESCE(SUM(avg_soc * samples) / NULLIF(SUM(samples), 0), 0.0),
+                CASE
+                    WHEN SUM(CASE WHEN avg_temperature IS NOT NULL THEN samples ELSE 0 END) = 0
+                    THEN NULL
+                    ELSE SUM(avg_temperature * samples)
+                        / SUM(CASE WHEN avg_temperature IS NOT NULL THEN samples ELSE 0 END)
+                END,
                 SUM(error_count),
                 MAX(last_seen)
             FROM device_daily_rollups
@@ -510,8 +760,9 @@ def fetch_monthly_history(
             "max_voltage": row[3],
             "avg_voltage": row[4],
             "avg_soc": row[5],
-            "error_count": row[6],
-            "last_seen": row[7],
+            "avg_temperature": row[6],
+            "error_count": row[7],
+            "last_seen": row[8],
         }
         for row in rows
     ]
@@ -534,6 +785,12 @@ def fetch_yearly_history(
                 MAX(max_voltage),
                 COALESCE(SUM(avg_voltage * samples) / NULLIF(SUM(samples), 0), 0.0),
                 COALESCE(SUM(avg_soc * samples) / NULLIF(SUM(samples), 0), 0.0),
+                CASE
+                    WHEN SUM(CASE WHEN avg_temperature IS NOT NULL THEN samples ELSE 0 END) = 0
+                    THEN NULL
+                    ELSE SUM(avg_temperature * samples)
+                        / SUM(CASE WHEN avg_temperature IS NOT NULL THEN samples ELSE 0 END)
+                END,
                 SUM(error_count),
                 MAX(last_seen)
             FROM device_daily_rollups
@@ -555,8 +812,9 @@ def fetch_yearly_history(
             "max_voltage": row[3],
             "avg_voltage": row[4],
             "avg_soc": row[5],
-            "error_count": row[6],
-            "last_seen": row[7],
+            "avg_temperature": row[6],
+            "error_count": row[7],
+            "last_seen": row[8],
         }
         for row in rows
     ]

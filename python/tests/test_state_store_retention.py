@@ -7,10 +7,12 @@ from typing import cast
 
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import (
+    fetch_archive_history,
     fetch_daily_history,
     fetch_degradation_report,
     fetch_storage_summary,
     fetch_yearly_history,
+    import_archive_history,
     persist_snapshot,
     prune_history,
     rebuild_daily_rollups,
@@ -84,6 +86,7 @@ def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> N
         "gateway_snapshots": 2,
         "device_readings": 2,
         "device_daily_rollups": 2,
+        "device_archive_readings": 0,
     }
     assert summary["devices"] == [
         {
@@ -94,6 +97,9 @@ def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> N
             "daily_days": 2,
             "daily_first_day": "2024-01-01",
             "daily_last_day": "2024-01-02",
+            "archive_samples": 0,
+            "archive_first_ts": None,
+            "archive_last_ts": None,
         }
     ]
 
@@ -114,6 +120,7 @@ def test_fetch_yearly_history_groups_daily_rollups_by_year(tmp_path: Path) -> No
             "max_voltage": 12.73,
             "avg_voltage": 12.73,
             "avg_soc": 58.0,
+            "avg_temperature": None,
             "error_count": 0,
             "last_seen": "2025-01-01T00:00:00+00:00",
         },
@@ -125,6 +132,7 @@ def test_fetch_yearly_history_groups_daily_rollups_by_year(tmp_path: Path) -> No
             "max_voltage": 12.73,
             "avg_voltage": 12.73,
             "avg_soc": 58.0,
+            "avg_temperature": None,
             "error_count": 0,
             "last_seen": "2024-01-01T00:00:00+00:00",
         },
@@ -386,6 +394,7 @@ def test_persist_snapshot_keeps_daily_rollups_weighted_only_by_valid_samples(
             "max_voltage": 12.73,
             "avg_voltage": 12.73,
             "avg_soc": 58.0,
+            "avg_temperature": None,
             "error_count": 1,
             "last_seen": "2024-01-01T00:05:00+00:00",
         }
@@ -540,7 +549,61 @@ def test_rebuild_daily_rollups_repairs_error_polluted_rollups(tmp_path: Path) ->
             "max_voltage": 12.73,
             "avg_voltage": 12.73,
             "avg_soc": 58.0,
+            "avg_temperature": None,
             "error_count": 1,
             "last_seen": "2024-01-01T00:05:00+00:00",
         }
     ]
+
+
+def test_import_archive_history_is_idempotent_and_queryable(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    readings = [
+        {
+            "ts": "2024-01-01T00:00:00",
+            "voltage": 12.61,
+            "min_crank_voltage": 11.95,
+            "event_type": 1,
+        },
+        {
+            "ts": "2024-01-01T00:02:00",
+            "voltage": 12.58,
+            "min_crank_voltage": 11.92,
+            "event_type": 1,
+        },
+    ]
+
+    inserted_first = import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=readings,
+    )
+    inserted_second = import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=readings,
+    )
+
+    archive_rows = fetch_archive_history(database_path, device_id="bm200_house", limit=10)
+    summary = fetch_storage_summary(database_path)
+    summary_counts = cast(dict[str, object], summary["counts"])
+    summary_devices = cast(list[dict[str, object]], summary["devices"])
+
+    assert inserted_first == 2
+    assert inserted_second == 0
+    assert archive_rows[0]["ts"] == "2024-01-01T00:02:00"
+    assert archive_rows[0]["sample_source"] == "device_archive"
+    assert summary_counts["device_archive_readings"] == 2
+    assert summary_devices[0]["archive_samples"] == 2

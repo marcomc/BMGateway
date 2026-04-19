@@ -373,6 +373,15 @@ details summary::-webkit-details-marker { display: none; }
   padding: 1rem;
   border: 1px solid rgba(255, 255, 255, 0.5);
 }
+.device-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.9rem;
+}
+.device-card-copy {
+  min-width: 0;
+  flex: 1 1 auto;
+}
 .tone-card.green { background: var(--accent-green-soft); }
 .tone-card.purple { background: var(--accent-purple-soft); }
 .tone-card.blue { background: var(--accent-blue-soft); }
@@ -398,6 +407,46 @@ details summary::-webkit-details-marker { display: none; }
   gap: 0.65rem 1rem;
   margin-top: 0.8rem;
   color: var(--text-secondary);
+}
+.device-icon-frame {
+  display: grid;
+  place-items: center;
+  flex: 0 0 72px;
+  width: 72px;
+  height: 72px;
+  border-radius: 22px;
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: rgba(255, 255, 255, 0.52);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), var(--shadow-card);
+}
+.device-icon-svg {
+  width: 48px;
+  height: 48px;
+  color: rgba(17, 24, 39, 0.78);
+}
+.device-icon-svg .fill-soft {
+  fill: rgba(255, 255, 255, 0.45);
+}
+.device-icon-svg .stroke-main {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.6;
+}
+.device-icon-svg .stroke-accent {
+  fill: none;
+  stroke: rgba(23, 196, 90, 0.88);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.6;
+}
+.device-icon-svg .fill-accent {
+  fill: rgba(23, 196, 90, 0.16);
+  stroke: rgba(23, 196, 90, 0.88);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.2;
 }
 .status-badge {
   display: inline-flex;
@@ -504,19 +553,32 @@ details summary::-webkit-details-marker { display: none; }
 }
 .control-segment {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.35rem;
   padding: 0.28rem;
   border-radius: var(--radius-pill);
   background: rgba(221, 229, 240, 0.95);
 }
+.control-rail {
+  max-width: 100%;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 0.1rem;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.control-rail::-webkit-scrollbar {
+  display: none;
+}
 .control-segment button {
+  flex: 0 0 auto;
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text-primary);
   padding: 0.6rem 0.95rem;
   font-weight: 700;
+  white-space: nowrap;
 }
 .control-segment button.active {
   background: var(--accent-green);
@@ -524,10 +586,8 @@ details summary::-webkit-details-marker { display: none; }
   box-shadow: var(--shadow-card);
 }
 .history-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  justify-items: end;
   gap: 1rem;
 }
 .chart-card {
@@ -675,6 +735,85 @@ details summary::-webkit-details-marker { display: none; }
 .raw-table-shell details > div {
   margin-top: 0.8rem;
 }
+.battery-form-section {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: var(--radius-lg);
+  background: rgba(244, 248, 252, 0.9);
+  border: 1px solid var(--border-soft);
+}
+.battery-form-grid {
+  display: grid;
+  gap: 0.7rem;
+}
+.icon-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(132px, 1fr));
+  gap: 0.75rem;
+}
+.icon-picker-card {
+  position: relative;
+  display: block;
+}
+.icon-picker-card input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+}
+.icon-picker-surface {
+  display: grid;
+  gap: 0.55rem;
+  justify-items: center;
+  min-height: 148px;
+  padding: 0.85rem 0.75rem;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-card);
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 120ms ease;
+}
+.icon-picker-card:hover .icon-picker-surface {
+  transform: translateY(-1px);
+}
+.icon-picker-card input:checked + .icon-picker-surface {
+  border-color: rgba(23, 196, 90, 0.5);
+  background: linear-gradient(180deg, rgba(245, 255, 247, 0.98), rgba(233, 250, 238, 0.95));
+  box-shadow: var(--shadow-glow);
+}
+.icon-picker-card input:focus-visible + .icon-picker-surface {
+  outline: 3px solid rgba(79, 141, 247, 0.9);
+  outline-offset: 3px;
+}
+.icon-picker-label {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1.3;
+  text-align: center;
+}
+.curve-grid {
+  display: grid;
+  gap: 0.6rem;
+}
+.curve-grid-row {
+  display: grid;
+  grid-template-columns: 92px minmax(0, 1fr);
+  gap: 0.8rem;
+  align-items: center;
+}
+.curve-grid-row .settings-label {
+  margin: 0;
+}
+.inline-field-help {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
 .error-pill {
   display: inline-flex;
   align-items: center;
@@ -741,6 +880,16 @@ details summary::-webkit-details-marker { display: none; }
   .page-shell { padding: 1rem 0.8rem 5.8rem; }
   .top-header { padding: 1.1rem; }
   .section-card { padding: 1rem; }
+  .history-controls {
+    justify-items: stretch;
+  }
+  .control-rail {
+    width: 100%;
+  }
+  .curve-grid-row {
+    grid-template-columns: 72px minmax(0, 1fr);
+    gap: 0.65rem;
+  }
   .app-version-badge {
     top: 0.75rem;
     right: 0.75rem;
@@ -866,6 +1015,108 @@ def tone_card(body: str, *, tone: str) -> str:
     return f'<article class="tone-card {html.escape(tone)}">{body}</article>'
 
 
+def device_icon(icon_key: str, *, label: str) -> str:
+    safe_key = html.escape(icon_key)
+    safe_label = html.escape(label)
+    return (
+        f'<div class="device-icon-frame" data-icon-key="{safe_key}" aria-hidden="true">'
+        f"{_device_icon_svg(icon_key, label=safe_label)}"
+        "</div>"
+    )
+
+
+def icon_picker_option(icon_key: str, *, label: str, checked: bool = False) -> str:
+    checked_attr = " checked" if checked else ""
+    safe_key = html.escape(icon_key)
+    safe_label = html.escape(label)
+    return (
+        '<label class="icon-picker-card">'
+        f'<input type="radio" name="icon_key" value="{safe_key}"{checked_attr}>'
+        '<span class="icon-picker-surface">'
+        f"{device_icon(icon_key, label=label)}"
+        f'<span class="icon-picker-label">{safe_label}</span>'
+        "</span>"
+        "</label>"
+    )
+
+
+def _device_icon_svg(icon_key: str, *, label: str) -> str:
+    title = f"<title>{label}</title>"
+    if icon_key == "car_12v":
+        content = """
+<path class="stroke-main" d="M14 38h36l-3-9c-.7-2.2-2.7-3.6-5-3.6H22c-2.3 0-4.3 1.4-5 3.6z"/>
+<path class="stroke-main" d="M12 38h40v7H12z"/>
+<circle class="fill-soft" cx="21" cy="45" r="4.5"/>
+<circle class="fill-soft" cx="43" cy="45" r="4.5"/>
+<path class="stroke-accent" d="M31 18v9m-4.5-4.5h9"/>
+"""
+    elif icon_key == "motorcycle_12v":
+        content = """
+<circle class="fill-soft" cx="20" cy="44" r="6"/>
+<circle class="fill-soft" cx="45" cy="44" r="6"/>
+<path class="stroke-main" d="M20 44h10l6-10h7"/>
+<path class="stroke-main" d="M32 34h-6l-5-7h7l4 7"/>
+<path class="stroke-main" d="M42 26h6"/>
+<path class="stroke-accent" d="M46 18v8m-4-4h8"/>
+"""
+    elif icon_key == "lead_acid_battery":
+        content = """
+<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
+<path class="stroke-main" d="M22 33c3.5-4 6.5-4 10 0s6.5 4 10 0"/>
+<path class="stroke-accent" d="M32 26v14"/>
+"""
+    elif icon_key == "agm_battery":
+        content = """
+<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
+<path class="stroke-main" d="M24 39l8-13 8 13h-16z"/>
+<path class="stroke-accent" d="M32 29v6"/>
+"""
+    elif icon_key == "efb_battery":
+        content = """
+<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
+<path class="stroke-main" d="M22 29h20M22 35h20M22 41h20"/>
+<path class="stroke-accent" d="M27 24v5"/>
+"""
+    elif icon_key == "gel_battery":
+        content = """
+<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
+<path class="fill-accent" d="M32 25c-3 4-5 7-5 10.2A5 5 0 0037 35c0-3.2-2-6.2-5-10z"/>
+"""
+    elif icon_key == "lithium_battery":
+        content = """
+<rect class="fill-soft" x="20" y="12" width="24" height="40" rx="8"/>
+<path class="stroke-main" d="M28 12V8h8v4"/>
+<path class="stroke-accent" d="M34 22l-5 9h4l-3 10 8-12h-4l4-7z"/>
+"""
+    elif icon_key == "custom_battery":
+        content = """
+<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
+<path class="stroke-main" d="M21 39c5-7 8-5 11-8s5-4 11-4"/>
+<circle class="fill-accent" cx="24" cy="35" r="2.5"/>
+<circle class="fill-accent" cx="33" cy="31" r="2.5"/>
+<circle class="fill-accent" cx="42" cy="27" r="2.5"/>
+"""
+    else:
+        content = """
+<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
+<path class="stroke-main" d="M24 32h16"/>
+<path class="stroke-accent" d="M32 24v16"/>
+"""
+    return (
+        '<svg class="device-icon-svg" viewBox="0 0 64 64" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" role="img" aria-label="'
+        f"{label}"
+        '">'
+        f"{title}{content}</svg>"
+    )
+
+
 def bottom_nav(active_nav: str, *, primary_device_id: str = "") -> str:
     history_href = "/history"
     if primary_device_id:
@@ -937,8 +1188,8 @@ def chart_card(
         f'<div class="section-subtitle">{html.escape(subtitle)}</div>'
         "</div>"
         '<div class="history-controls">'
-        f'<div class="control-segment range-strip">{range_buttons}</div>'
-        f'<div class="control-segment tab-strip">{metric_buttons}</div>'
+        f'<div class="control-rail"><div class="control-segment range-strip">{range_buttons}</div></div>'
+        f'<div class="control-rail"><div class="control-segment tab-strip">{metric_buttons}</div></div>'
         "</div>"
         "</div>"
         f'<div class="chart-legend">{legend_html}</div>'
@@ -1237,6 +1488,7 @@ def chart_script(*chart_ids: str) -> str:
         for (const candidate of rangeButtons) {{
           candidate.classList.toggle("active", candidate === button);
         }}
+        button.scrollIntoView({{ behavior: "smooth", inline: "center", block: "nearest" }});
         render();
       }});
     }}
@@ -1246,6 +1498,7 @@ def chart_script(*chart_ids: str) -> str:
         for (const candidate of metricButtons) {{
           candidate.classList.toggle("active", candidate === button);
         }}
+        button.scrollIntoView({{ behavior: "smooth", inline: "center", block: "nearest" }});
         render();
       }});
     }}

@@ -15,6 +15,7 @@ from bm_gateway.web import (
     render_history_html,
     render_management_html,
     update_config_from_text,
+    update_device_icon,
 )
 
 
@@ -143,6 +144,7 @@ def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_p
         device_type="bm200",
         device_name="Ancell BM200",
         device_mac="A1B2C3D4E5F6",
+        icon_key="motorcycle_12v",
     )
 
     assert errors == []
@@ -150,6 +152,7 @@ def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_p
     devices = load_device_registry(config.device_registry_path)
     assert config.gateway.reader_mode == "live"
     assert devices[0].mac == "A1:B2:C3:D4:E5:F6"
+    assert devices[0].icon_key == "motorcycle_12v"
 
 
 def test_add_device_from_form_writes_toml_safe_strings(tmp_path: Path) -> None:
@@ -207,12 +210,92 @@ def test_add_device_from_form_writes_toml_safe_strings(tmp_path: Path) -> None:
         device_type="bm200",
         device_name='Ancell "Quoted" \\ Unit',
         device_mac="A1B2C3D4E5F6",
+        icon_key="battery_monitor",
     )
 
     assert errors == []
     devices = load_device_registry(tmp_path / "devices.toml")
     assert devices[0].id == 'bm200_"quoted"'
     assert devices[0].name == 'Ancell "Quoted" \\ Unit'
+    assert devices[0].icon_key == "battery_monitor"
+
+
+def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 300",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "live"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 8",
+                "connect_timeout_seconds = 10",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 8080",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "ancell_bm200"',
+                'type = "bm200"',
+                'name = "Ancell BM200"',
+                'mac = "3C:AB:72:82:86:EA"',
+                "enabled = true",
+                'icon_key = "lead_acid_battery"',
+                "[devices.battery]",
+                'family = "lead_acid"',
+                'profile = "regular_lead_acid"',
+                'custom_soc_mode = "intelligent_algorithm"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    errors = update_device_icon(
+        config_path=config_path,
+        device_id="ancell_bm200",
+        icon_key="motorcycle_12v",
+    )
+
+    assert errors == []
+    devices = load_device_registry(tmp_path / "devices.toml")
+    assert devices[0].icon_key == "motorcycle_12v"
 
 
 def test_compact_mac_address_is_normalized() -> None:
@@ -261,6 +344,7 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
                 "name": "BM200 House",
                 "mac": "AA:BB:CC:DD:EE:01",
                 "enabled": True,
+                "icon_key": "car_12v",
             }
         ],
         config_text='[gateway]\nname = "BMGateway"\n',
@@ -289,6 +373,11 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert 'autocomplete="off"' in html
     assert 'spellcheck="false"' in html
     assert 'aria-describedby="device-mac-help"' in html
+    assert "name='battery_family'" in html
+    assert 'name="icon_key"' in html
+    assert "Choose a built-in icon" in html
+    assert "name='battery_profile'" in html
+    assert "Voltage corresponding to power" in html
     assert 'aria-label="Primary"' in html
     assert "control-plane" in html
     assert "api-chip" in html
@@ -318,6 +407,7 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
                 "name": "BM200 House",
                 "mac": "AA:BB:CC:DD:EE:01",
                 "enabled": True,
+                "icon_key": "car_12v",
             }
         ],
         config_text='[gateway]\nname = "BMGateway"\n',
@@ -332,6 +422,44 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
     assert "Device Dashboard" in html
     assert "Operational Surfaces" in html
     assert "Recover Bluetooth Adapter" in html
+
+
+def test_render_battery_html_renders_device_icon() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "ancell_bm200",
+                    "name": "Ancell BM200",
+                    "type": "bm200",
+                    "soc": 91,
+                    "voltage": 13.31,
+                    "temperature": 24.0,
+                    "state": "normal",
+                    "connected": True,
+                    "icon_key": "motorcycle_12v",
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "ancell_bm200",
+                "name": "Ancell BM200",
+                "type": "bm200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+                "icon_key": "motorcycle_12v",
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "device-icon-frame" in html
+    assert 'data-icon-key="motorcycle_12v"' in html
+    assert "Open device" in html
 
 
 def test_chart_points_ignore_error_rows_and_empty_raw_samples() -> None:
@@ -366,6 +494,34 @@ def test_chart_points_ignore_error_rows_and_empty_raw_samples() -> None:
     assert [point["kind"] for point in points] == ["daily", "raw"]
     assert points[-1]["voltage"] == 13.32
     assert points[-1]["soc"] == 92
+
+
+def test_chart_points_include_daily_temperature_rollups() -> None:
+    points = _chart_points(
+        raw_history=[],
+        daily_history=[
+            {
+                "day": "2026-04-18",
+                "samples": 4,
+                "avg_voltage": 13.31,
+                "avg_soc": 91,
+                "avg_temperature": 22.4,
+            }
+        ],
+    )
+
+    assert points == [
+        {
+            "ts": "2026-04-18T12:00:00",
+            "label": "04-18",
+            "kind": "daily",
+            "voltage": 13.31,
+            "soc": 91,
+            "temperature": 22.4,
+            "series": "Series",
+            "series_color": "#4f8df7",
+        }
+    ]
 
 
 def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
@@ -469,6 +625,9 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "Voltage" in html
     assert "SoC" in html
     assert "Temperature" in html
+    assert "1 day" in html
+    assert "7 days" in html
+    assert "2 years" in html
     assert "Valid samples" in html
     assert "Error count" in html
     assert "Average voltage" in html
@@ -509,3 +668,26 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert "No BLE advertisement seen during the latest scan window." in html
     assert "Not visible" in html
     assert "The adapter did not see this monitor in the latest scan." in html
+
+
+def test_render_devices_html_uses_device_battery_profile_labels() -> None:
+    html = render_devices_html(
+        snapshot={"devices": []},
+        devices=[
+            {
+                "id": "ancell_bm200",
+                "type": "bm200",
+                "name": "Ancell BM200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+                "battery": {
+                    "family": "lead_acid",
+                    "profile": "agm",
+                },
+            }
+        ],
+    )
+
+    assert "AGM Battery" in html
+    assert "Lead-Acid Battery" in html
+    assert "Change icon" in html

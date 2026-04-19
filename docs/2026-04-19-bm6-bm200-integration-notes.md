@@ -138,6 +138,59 @@ Verified result:
 - an explicit rollup rebuild is useful after changing the persistence logic so
   existing SQLite history becomes trustworthy again
 
+### 7. BM6 current-state packets include temperature
+
+The first stable `BMGateway` driver pass only extracted:
+
+- voltage
+- SoC
+
+from BM6-family current-state packets.
+
+Verified result:
+
+- the decrypted BM6 payload also includes temperature
+- positive / negative temperature is encoded separately from the voltage field
+- once parsed, temperature can be persisted in the same live snapshots as
+  voltage and SoC
+- long-range temperature charts also require temperature-aware daily rollups,
+  not just recent raw samples
+
+This matters because a chart-first history view will otherwise look broken on
+Temperature even when the device is collecting it.
+
+### 8. Official-app battery taxonomy is richer than the old registry model
+
+The original `BMGateway` registry only had:
+
+- device id
+- type
+- name
+- MAC
+
+Verified from the BM200/BM300-family app UI:
+
+- battery setup starts with a family choice:
+  - lead-acid
+  - lithium
+- lead-acid then branches to:
+  - regular lead-acid
+  - AGM
+  - EFB
+  - GEL
+  - custom
+- lithium then branches to:
+  - lithium
+  - custom
+- custom batteries then branch again to:
+  - intelligent power algorithm
+  - voltage corresponding to power
+- voltage-corresponding custom batteries use an editable 0-100% to voltage
+  table
+
+`BMGateway` now persists that taxonomy in `devices.toml` so the web add-device
+flow can stay aligned with what users already see in the official app.
+
 ## Open Questions
 
 These are still not fully verified.

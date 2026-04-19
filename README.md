@@ -31,11 +31,17 @@ The management UI now ships as a BM300-inspired premium control plane:
 - a card-first management dashboard with gateway stats, actions, API surface,
   Home Assistant contract visibility, and config editing
 - a battery-first landing page at `/` with live device cards and a fleet chart
+- a built-in battery/device icon catalog for the landing-page cards, selected
+  during device registration without uploads or extra assets
 - richer historical fleet overlays and interactive chart tooltips across the
   landing, history, and device pages
+- a richer add-device flow that captures the official battery taxonomy:
+  lead-acid vs lithium, AGM/EFB/GEL/custom, and custom voltage-to-SoC curves
 - dedicated `/devices` and `/settings` pages that repeat the mobile-app style
   journey with gateway-safe content
 - a chart-first history page with segmented Voltage / SoC / Temperature views
+- temperature-aware BM6 history rollups so long-range temperature charts do not
+  disappear outside the recent raw window
 - a richer device detail page with SoC hero, runtime health cards, and calmer
   raw data presentation
 - a management action for manual Bluetooth adapter recovery when live BLE
