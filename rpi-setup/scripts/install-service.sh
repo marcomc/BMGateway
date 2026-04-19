@@ -11,7 +11,11 @@ Options:
   --config-path <path>         Config path. Default: <home>/.config/bm-gateway/config.toml
   --state-dir <path>           State directory. Default: /var/lib/bm-gateway
   --web-host <host>            Web bind host. Default: 0.0.0.0
-  --web-port <port>            Web bind port. Default: 8080
+  --web-port <port>            Web bind port. Default: 80
+  --enable-glances             Install and enable Glances in HA-compatible web mode
+  --glances-bind <host>        Glances bind host. Default: 0.0.0.0
+  --glances-port <port>        Glances bind port. Default: 61208
+  --enable-cockpit             Install and enable Cockpit on HTTPS port 9090
   --disable-web                Do not enable/start the web service
   --disable-home-assistant     Disable MQTT and Home Assistant in the installed config
   --skip-start                 Enable services but do not start or restart them
@@ -29,7 +33,11 @@ project_root="$(CDPATH='' cd -- "$(dirname -- "$0")/../.." && pwd)"
 service_user="${SUDO_USER:-$(id -un)}"
 state_dir="/var/lib/bm-gateway"
 web_host="0.0.0.0"
-web_port="8080"
+web_port="80"
+enable_glances=0
+glances_bind="0.0.0.0"
+glances_port="61208"
+enable_cockpit=0
 enable_web=1
 enable_home_assistant=1
 start_services=1
@@ -55,6 +63,22 @@ while [[ "$#" -gt 0 ]]; do
     --web-port)
       web_port="${2:?missing value for --web-port}"
       shift 2
+      ;;
+    --enable-glances)
+      enable_glances=1
+      shift
+      ;;
+    --glances-bind)
+      glances_bind="${2:?missing value for --glances-bind}"
+      shift 2
+      ;;
+    --glances-port)
+      glances_port="${2:?missing value for --glances-port}"
+      shift 2
+      ;;
+    --enable-cockpit)
+      enable_cockpit=1
+      shift
       ;;
     --disable-web)
       enable_web=0
@@ -92,6 +116,7 @@ devices_path="${config_dir}/devices.toml"
 cli_path="${service_home}/.local/bin/bm-gateway"
 unit_path="/etc/systemd/system/bm-gateway.service"
 web_unit_path="/etc/systemd/system/bm-gateway-web.service"
+glances_unit_path="/etc/systemd/system/glances-web.service"
 
 install -d -m 0755 "${config_dir}" "${state_dir}" /usr/local/bin
 chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
@@ -169,8 +194,8 @@ payload = "\n".join(
         "",
         "[bluetooth]",
         f'adapter = {string_to_toml(bluetooth.get("adapter", "auto"))}',
-        f'scan_timeout_seconds = {int(bluetooth.get("scan_timeout_seconds", 8))}',
-        f'connect_timeout_seconds = {int(bluetooth.get("connect_timeout_seconds", 10))}',
+        f'scan_timeout_seconds = {int(bluetooth.get("scan_timeout_seconds", 15))}',
+        f'connect_timeout_seconds = {int(bluetooth.get("connect_timeout_seconds", 45))}',
         "",
         "[mqtt]",
         f'enabled = {bool_to_toml(bool(mqtt.get("enabled", enable_home_assistant)))}',
@@ -192,6 +217,7 @@ payload = "\n".join(
         f'enabled = {bool_to_toml(bool(web.get("enabled", True)))}',
         f'host = {string_to_toml(web.get("host", web_host))}',
         f'port = {int(web.get("port", web_port))}',
+        f'show_chart_markers = {bool_to_toml(bool(web.get("show_chart_markers", False)))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',
@@ -254,9 +280,11 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=BMGATEWAY_CONFIG=${config_path}
-ExecStart=/usr/local/bin/bm-gateway --config \${BMGATEWAY_CONFIG} web manage --host ${web_host} --port ${web_port} --state-dir ${state_dir}
+ExecStart=/usr/local/bin/bm-gateway --config \${BMGATEWAY_CONFIG} web manage --state-dir ${state_dir}
 Restart=always
 RestartSec=10
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 User=${service_user}
 Group=${service_user}
 WorkingDirectory=${state_dir}
@@ -265,6 +293,37 @@ WorkingDirectory=${state_dir}
 WantedBy=multi-user.target
 EOF
 
+if [[ "${enable_glances}" -eq 1 ]]; then
+  if ! command -v glances >/dev/null 2>&1; then
+    apt-get update
+    apt-get install -y glances
+  fi
+
+  cat >"${glances_unit_path}" <<EOF
+[Unit]
+Description=Glances Web API for Home Assistant
+Documentation=https://glances.readthedocs.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/glances -w --disable-webui -B ${glances_bind} -p ${glances_port}
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+else
+  rm -f "${glances_unit_path}"
+fi
+
+if [[ "${enable_cockpit}" -eq 1 ]] && ! dpkg -s cockpit >/dev/null 2>&1; then
+  apt-get update
+  apt-get install -y cockpit
+fi
+
 systemctl daemon-reload
 systemctl enable bm-gateway.service
 if [[ "${enable_web}" -eq 1 ]]; then
@@ -272,16 +331,35 @@ if [[ "${enable_web}" -eq 1 ]]; then
 else
   systemctl disable --now bm-gateway-web.service || true
 fi
+if [[ "${enable_glances}" -eq 1 ]]; then
+  systemctl enable glances-web.service
+fi
+if [[ "${enable_cockpit}" -eq 1 ]]; then
+  systemctl enable cockpit.socket
+fi
 
 if [[ "${start_services}" -eq 1 ]]; then
   systemctl restart bm-gateway.service
   if [[ "${enable_web}" -eq 1 ]]; then
     systemctl restart bm-gateway-web.service
   fi
+  if [[ "${enable_glances}" -eq 1 ]]; then
+    systemctl restart glances-web.service
+  fi
+  if [[ "${enable_cockpit}" -eq 1 ]]; then
+    systemctl restart cockpit.socket
+  fi
 fi
 
 printf 'Installed runtime service to %s\n' "${unit_path}"
 printf 'Installed web service to %s\n' "${web_unit_path}"
+if [[ "${enable_glances}" -eq 1 ]]; then
+  printf 'Installed Glances service to %s\n' "${glances_unit_path}"
+  printf 'Glances API: http://%s:%s/api/4/status\n' "${glances_bind}" "${glances_port}"
+fi
+if [[ "${enable_cockpit}" -eq 1 ]]; then
+  printf 'Enabled Cockpit socket: https://0.0.0.0:9090/\n'
+fi
 printf 'Config path: %s\n' "${config_path}"
 printf 'Devices path: %s\n' "${devices_path}"
 printf 'State directory: %s\n' "${state_dir}"

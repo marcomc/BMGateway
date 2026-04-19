@@ -233,14 +233,14 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Snapshot JSON file written by `bm-gateway run`.",
     )
-    web_serve.add_argument("--host", type=str, default="0.0.0.0", help="Bind host.")
-    web_serve.add_argument("--port", type=int, default=8080, help="Bind port.")
+    web_serve.add_argument("--host", type=str, default=None, help="Bind host.")
+    web_serve.add_argument("--port", type=int, default=None, help="Bind port.")
     web_manage = web_subparsers.add_parser(
         "manage",
         help="Run the host-managed web interface for status, config, and history.",
     )
-    web_manage.add_argument("--host", type=str, default="0.0.0.0", help="Bind host.")
-    web_manage.add_argument("--port", type=int, default=8080, help="Bind port.")
+    web_manage.add_argument("--host", type=str, default=None, help="Bind host.")
+    web_manage.add_argument("--port", type=int, default=None, help="Bind port.")
     web_manage.add_argument(
         "--state-dir",
         type=Path,
@@ -693,13 +693,32 @@ def _handle_web_render(snapshot_file: Path) -> int:
     return 0
 
 
-def _handle_web_serve(*, snapshot_file: Path, host: str, port: int) -> int:
-    serve_snapshot(host=host, port=port, snapshot_path=snapshot_file)
+def _handle_web_serve(
+    *, config_path: Path, snapshot_file: Path, host: str | None, port: int | None
+) -> int:
+    config = load_config(config_path)
+    resolved_host = host or config.web.host
+    resolved_port = port or config.web.port
+    serve_snapshot(host=resolved_host, port=resolved_port, snapshot_path=snapshot_file)
     return 0
 
 
-def _handle_web_manage(*, config_path: Path, host: str, port: int, state_dir: Path | None) -> int:
-    serve_management(host=host, port=port, config_path=config_path, state_dir=state_dir)
+def _handle_web_manage(
+    *,
+    config_path: Path,
+    host: str | None,
+    port: int | None,
+    state_dir: Path | None,
+) -> int:
+    config = load_config(config_path)
+    resolved_host = host or config.web.host
+    resolved_port = port or config.web.port
+    serve_management(
+        host=resolved_host,
+        port=resolved_port,
+        config_path=config_path,
+        state_dir=state_dir,
+    )
     return 0
 
 
@@ -807,6 +826,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _handle_web_render(args.snapshot_file)
         if args.web_command == "serve":
             return _handle_web_serve(
+                config_path=args.config,
                 snapshot_file=args.snapshot_file,
                 host=args.host,
                 port=args.port,

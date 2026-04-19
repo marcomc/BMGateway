@@ -108,15 +108,20 @@ By default it also:
 
 - installs and starts `bm-gateway.service`
 - installs and starts `bm-gateway-web.service`
-- keeps the management UI on `0.0.0.0:8080`
+- keeps the web UI on `0.0.0.0:80`
 - prints the working management URLs at the end of the run
+- can optionally install and start `glances-web.service` for the Home
+  Assistant Glances integration
 
 Useful options:
 
 - `--disable-web`
 - `--disable-home-assistant`
+- `--enable-glances`
+- `--enable-cockpit`
 - `--skip-services`
 - `--web-port <port>`
+- `--glances-port <port>`
 
 ## Install `uv`
 
@@ -147,6 +152,88 @@ This creates:
 - a user-facing command at `~/.local/bin/bm-gateway`
 - a config template at `~/.config/bm-gateway/config.toml` if missing
 - a devices registry at `~/.config/bm-gateway/devices.toml` if missing
+
+## Optional: Install Glances for Home Assistant
+
+Home Assistant's Glances integration requires a running `glances` instance in
+web-server mode. The Debian package installs a stock `glances.service`, but it
+uses `glances -s -B 127.0.0.1`, which is not the REST API that Home Assistant
+expects.
+
+Install and verify the included `glances-web.service` instead:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y glances
+sudo install -m 0644 rpi-setup/systemd/glances-web.service /etc/systemd/system/glances-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now glances-web.service
+curl -fsS http://127.0.0.1:61208/api/4/status
+```
+
+Expected response:
+
+```json
+{"version":"4.3.1"}
+```
+
+Then, in Home Assistant:
+
+1. Open `Settings > Devices & services`.
+2. Add the `Glances` integration.
+3. Enter the Pi host, for example `bmgateway.local`.
+4. Enter port `61208`.
+
+If you prefer the automated path, the bootstrap and service installers support
+the same flow with:
+
+```bash
+./scripts/bootstrap-install.sh --enable-glances
+```
+
+or, on an already installed host:
+
+```bash
+sudo ./rpi-setup/scripts/install-service.sh --enable-glances
+```
+
+## Optional: Install Cockpit
+
+Cockpit is useful as a separate host-administration console for package,
+service, storage, and network inspection on the Pi. It does not replace the
+`BMGateway` web UI; it complements it on a different port.
+
+On this Raspberry Pi OS `trixie` host, Cockpit is available directly from the
+base repository, so no extra backports setup was needed.
+
+Install and verify it:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cockpit
+sudo systemctl enable --now cockpit.socket
+curl -k -I https://127.0.0.1:9090/
+```
+
+Open:
+
+- [https://bmgateway.local:9090/](https://bmgateway.local:9090/)
+
+Cockpit login uses a local system account and password. SSH keys alone are not
+enough for the web login flow.
+
+If you prefer the automated path, the bootstrap and service installers support
+the same flow with:
+
+```bash
+./scripts/bootstrap-install.sh --enable-cockpit
+```
+
+or:
+
+```bash
+sudo ./rpi-setup/scripts/install-service.sh --enable-cockpit
+```
 
 ## Optional: Make `admin` Passwordless for `sudo`
 
@@ -223,7 +310,8 @@ The installed config keeps:
 - `gateway.reader_mode = "live"`
 - `gateway.poll_interval_seconds = 300`
 - `web.host = "0.0.0.0"`
-- `web.port = 8080`
+- `web.port = 80`
+- `web.show_chart_markers = false`
 
 The devices registry starts empty on purpose so the web UI can be the first
 real configuration surface instead of shipping fake sample hardware.
@@ -275,6 +363,8 @@ This installs:
 - `/home/<user>/.config/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/etc/systemd/system/glances-web.service` when `--enable-glances` is used
+- `cockpit.socket` when `--enable-cockpit` is used
 - `/usr/local/bin/bm-gateway` as a stable systemd-facing symlink
 
 Review the config, then check the service state:
@@ -282,6 +372,8 @@ Review the config, then check the service state:
 ```bash
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
+sudo systemctl status glances-web.service
+sudo systemctl status cockpit.socket
 ```
 
 ## Service and Module Policy for This Project

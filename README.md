@@ -36,7 +36,9 @@ The management UI now ships as a BM300-inspired premium control plane:
 - richer historical fleet overlays and interactive chart tooltips across the
   landing, history, and device pages
 - a richer add-device flow that captures the official battery taxonomy:
-  lead-acid vs lithium, AGM/EFB/GEL/custom, and custom voltage-to-SoC curves
+  lead-acid vs lithium, AGM/EFB/GEL/custom, custom voltage-to-SoC curves,
+  vehicle install type, and real battery metadata such as brand, model,
+  capacity, and production year
 - dedicated `/devices` and `/settings` pages that repeat the mobile-app style
   journey with gateway-safe content
 - a chart-first history page with segmented Voltage / SoC / Temperature views
@@ -173,6 +175,8 @@ That script:
 - clones or updates the repository checkout
 - runs `make install` with the host `python3`
 - installs and starts the runtime and web `systemd` services by default
+- can optionally install a `glances-web.service` companion for Home Assistant
+- can optionally install and enable Cockpit on `https://<host>:9090/`
 - preserves and updates user config under `~/.config/bm-gateway/`
 - prints the management URLs at the end of the run
 
@@ -181,8 +185,12 @@ Supported bootstrap options:
 - `--disable-web` keeps the runtime service but disables the management UI
 - `--disable-home-assistant` disables MQTT and Home Assistant publishing in the
   installed config
+- `--enable-glances` installs and enables a Home Assistant-compatible Glances
+  API service on port `61208`
+- `--enable-cockpit` installs and enables Cockpit on port `9090`
 - `--skip-services` performs only the standalone CLI install
 - `--web-port <port>` changes the management UI port
+- `--glances-port <port>` changes the Glances API port
 
 If you publish the bootstrap script at a reachable URL, the same flow becomes a
 single remote one-liner:
@@ -212,6 +220,12 @@ make install
 - installs a device registry template to
   `~/.config/bm-gateway/devices.toml` if it is missing
 
+In the shipped web UI:
+
+- `/settings` is the read-first overview of current software settings
+- `/gateway` is the edit/configuration surface for gateway-wide settings
+- `/devices` owns device creation and device editing
+
 ### Editable Development Install
 
 ```bash
@@ -219,6 +233,61 @@ make install-dev
 ```
 
 This links the local development environment into `~/.local/bin/bm-gateway`.
+
+## Optional: Glances for Home Assistant
+
+If you want Home Assistant to monitor the Raspberry Pi host itself through the
+official Glances integration, install Glances in web-server mode and expose its
+REST API on the LAN. Home Assistant's Glances integration expects a running
+Glances instance in web-server mode and recommends API version 3+; the current
+packaged Glances 4.x path works with the built-in integration ([Home Assistant
+Glances docs](https://www.home-assistant.io/integrations/glances/)).
+
+The packaged Debian `glances.service` is not enough for that integration,
+because it starts `glances -s -B 127.0.0.1`, which is the server mode, not the
+web API. Use the included `glances-web.service` shape instead:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y glances
+sudo install -m 0644 rpi-setup/systemd/glances-web.service /etc/systemd/system/glances-web.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now glances-web.service
+curl -fsS http://127.0.0.1:61208/api/4/status
+```
+
+If you use the one-line bootstrap, add `--enable-glances` and the installer
+will provision the same service automatically.
+
+## Optional: Cockpit for Host Administration
+
+If you want a general-purpose host administration console on the Pi, Cockpit
+works well alongside `BMGateway`. Cockpit serves its own HTTPS UI on port
+`9090`, separate from the `BMGateway` web UI on port `80`.
+
+On Debian and Raspberry Pi OS, the Cockpit project recommends backports for the
+latest versions, but this Pi currently runs Raspberry Pi OS `trixie`, where
+Cockpit `337-1` is already available in the base repository and installs
+cleanly without extra apt sources ([Cockpit running docs](https://cockpit-project.org/running.html)).
+
+Manual install:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y cockpit
+sudo systemctl enable --now cockpit.socket
+curl -k -I https://127.0.0.1:9090/
+```
+
+Open:
+
+- [https://bmgateway.local:9090/](https://bmgateway.local:9090/)
+
+Cockpit login uses a local system account and password. SSH keys alone are not
+enough for the web login flow.
+
+If you use the one-line bootstrap, add `--enable-cockpit` and the installer
+will install the package and enable `cockpit.socket` automatically.
 
 ## Configuration
 
@@ -330,8 +399,16 @@ bm-gateway web render --snapshot-file ./python/config/data/runtime/latest_snapsh
 Run the host-managed web UI:
 
 ```bash
-bm-gateway --config ./python/config/gateway.toml.example web manage --port 8080
+bm-gateway --config ./python/config/gateway.toml.example web manage
 ```
+
+The web UI defaults to port `80`, keeps chart point markers disabled by
+default, and separates gateway administration under `/gateway` from
+device-specific editing under `/devices/edit?device_id=<id>`. The relevant
+config keys are:
+
+- `web.port`
+- `web.show_chart_markers`
 
 Runtime artifacts written by `run`:
 

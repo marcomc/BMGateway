@@ -200,6 +200,48 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
     assert counts["device_daily_rollups"] == 1
 
 
+def test_build_snapshot_preserves_live_reader_rssi() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        return BM200Measurement(
+            voltage=12.73,
+            soc=58,
+            status_code=2,
+            state="normal",
+            temperature=18.5,
+            rssi=-67,
+        )
+
+    snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
+
+    assert snapshot.devices[0].connected is True
+    assert snapshot.devices[0].rssi == -67
+
+
 def test_build_snapshot_marks_non_bm200_devices_unsupported_in_live_mode() -> None:
     config = AppConfig(
         source_path=Path("/tmp/gateway.toml"),

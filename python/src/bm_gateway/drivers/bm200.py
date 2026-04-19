@@ -6,7 +6,7 @@ import asyncio
 import binascii
 import itertools
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
@@ -35,6 +35,7 @@ class BM200Measurement:
     status_code: int
     state: str
     temperature: float | None = None
+    rssi: int | None = None
 
 
 @dataclass(frozen=True)
@@ -65,7 +66,7 @@ class BM200Transport(Protocol):
         adapter: str,
         timeout_seconds: float,
         scan_timeout_seconds: float,
-    ) -> bytes: ...
+    ) -> tuple[bytes, int | None]: ...
 
 
 class BM200HistoryTransport(Protocol):
@@ -78,6 +79,20 @@ class BM200HistoryTransport(Protocol):
         scan_timeout_seconds: float,
         reference_ts: datetime,
     ) -> list[BM200HistoryReading]: ...
+
+
+def _device_rssi(device: object) -> int | None:
+    direct = getattr(device, "rssi", None)
+    if isinstance(direct, (int, float)):
+        return int(direct)
+    details = getattr(device, "details", None)
+    if isinstance(details, dict):
+        props = details.get("props")
+        if isinstance(props, dict):
+            rssi = props.get("RSSI")
+            if isinstance(rssi, (int, float)):
+                return int(rssi)
+    return None
 
 
 def _create_cipher() -> Any:
@@ -225,7 +240,7 @@ class BleakBM200Transport:
         adapter: str,
         timeout_seconds: float,
         scan_timeout_seconds: float,
-    ) -> bytes:
+    ) -> tuple[bytes, int | None]:
         _ = adapter
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
@@ -254,6 +269,7 @@ class BleakBM200Transport:
             )
             if device is None:
                 continue
+            rssi = _device_rssi(device)
 
             client = BleakClient(device, timeout=min(scan_timeout, remaining))
             try:
@@ -289,7 +305,7 @@ class BleakBM200Transport:
                             if _is_bm200_measurement_packet(
                                 encrypted
                             ) or _is_bm6_measurement_packet(encrypted):
-                                return encrypted
+                                return encrypted, rssi
                     finally:
                         await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
             except BM200TimeoutError:
@@ -447,13 +463,16 @@ async def read_bm200_measurement(
     transport: BM200Transport | None = None,
 ) -> BM200Measurement:
     active_transport = transport or BleakBM200Transport()
-    encrypted = await active_transport.read_voltage_notification(
+    encrypted, rssi = await active_transport.read_voltage_notification(
         address=address,
         adapter=adapter,
         timeout_seconds=timeout_seconds,
         scan_timeout_seconds=scan_timeout_seconds,
     )
-    return parse_voltage_notification(encrypted)
+    measurement = parse_voltage_notification(encrypted)
+    if rssi is None:
+        return measurement
+    return replace(measurement, rssi=rssi)
 
 
 async def read_bm200_history(

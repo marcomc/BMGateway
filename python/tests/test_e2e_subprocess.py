@@ -327,7 +327,8 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
             .decode("utf-8")
         )
         assert "Operational Surfaces" in management_page
-        assert "Device Dashboard" in management_page
+        assert "Edit Settings" in management_page
+        assert "Web Service Settings" in management_page
 
         devices_page = (
             urllib.request.urlopen(f"{base_url}/devices", timeout=RUNTIME_TIMEOUT_SECONDS)
@@ -335,7 +336,7 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
             .decode("utf-8")
         )
         assert "Configured Devices" in devices_page
-        assert "Gateway-ready device registry" in devices_page
+        assert "Register new BM devices directly from the device registry." in devices_page
 
         settings_page = (
             urllib.request.urlopen(f"{base_url}/settings", timeout=RUNTIME_TIMEOUT_SECONDS)
@@ -343,6 +344,7 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
             .decode("utf-8")
         )
         assert "Gateway Settings" in settings_page
+        assert "Edit settings" in settings_page
         assert "Export Data" in settings_page
 
         device_page = (

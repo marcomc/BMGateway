@@ -159,7 +159,52 @@ Verified result:
 This matters because a chart-first history view will otherwise look broken on
 Temperature even when the device is collecting it.
 
-### 8. Official-app battery taxonomy is richer than the old registry model
+### 8. BlueZ RSSI is not always exposed on `BLEDevice.rssi`
+
+During live debugging on the Raspberry Pi Zero 2 W, the device page sometimes
+showed:
+
+- signal quality `Not visible`
+- `0%`
+
+even while the same snapshot reported the monitor as connected and healthy.
+
+Verified result:
+
+- on this BlueZ / Bleak stack, `BLEDevice.rssi` can be `None` even for a
+  successfully discovered monitor
+- the real RSSI was instead present under:
+  - `BLEDevice.details["props"]["RSSI"]`
+- `BMGateway` now preserves that RSSI in the live measurement and snapshot
+  model so signal-quality cards can show an actual grade instead of a false
+  offline/not-visible state
+
+This is a host-stack integration detail, not a BM6 protocol issue, and it is
+easy to miss if debugging only at the UI layer.
+
+### 9. BM200/BM6 status is a discrete device-reported category
+
+During the device-page redesign, it became important to answer a UI question:
+
+- does `Normal` come from an app-side voltage threshold?
+
+Verified result:
+
+- for BM200/BM6 current-state reads, the monitor reports a discrete status code
+  directly
+- in the current mapping used by `BMGateway`, that means:
+  - `0` -> `critical`
+  - `1` -> `low`
+  - `2` -> `normal`
+  - `4` -> `charging`
+  - `8` -> `floating`
+- `BMGateway` should explain this in the UI as a device-reported state band,
+  not as a hidden voltage heuristic invented by the gateway
+
+This matters for trust: users should be able to tell whether a label came from
+the monitor protocol or from an app-side interpretation.
+
+### 10. Official-app battery taxonomy is richer than the old registry model
 
 The original `BMGateway` registry only had:
 

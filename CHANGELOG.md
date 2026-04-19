@@ -74,6 +74,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Device registry battery metadata for lead-acid/lithium profiles, custom
   algorithm selection, and editable voltage-to-SoC curves in the web add-device
   flow.
+- Dedicated device-edit flow with editable device type, battery profile,
+  installation context, and icon selection.
+- Richer device registry metadata for vehicle type plus battery brand, model,
+  capacity, and production year, exposed through both add-device and
+  edit-device web flows.
+- Optional `glances-web.service` install flow plus Raspberry Pi runbook
+  coverage for exposing a Home Assistant-compatible Glances API on the
+  gateway host.
+- Optional Cockpit install flow plus Raspberry Pi runbook coverage for a
+  separate HTTPS host-administration console on port `9090`.
 
 ### Changed
 
@@ -98,6 +108,26 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - History chart controls now use horizontally scrollable mobile rails with
   `Recent raw`, `1 day`, `7 days`, `30 days`, `90 days`, `1 year`, and `2 years`
   ranges instead of wrapping into overlapping pills on narrow screens.
+- Web defaults now bind to port `80`, keep chart point markers disabled by
+  default, and expose both options through config plus the Settings page.
+- Gateway-level administration is now labeled and linked as `Gateway`, while
+  `/devices` now opens a dedicated `/devices/edit` flow instead of redirecting
+  device edits to the gateway page.
+- Signal quality tiles now show a readable BLE grade, percentage, visual bar
+  strength, and the latest RSSI instead of blank placeholder values.
+- The web IA now separates read-only `/settings` from editable `/gateway`,
+  keeps device creation under `/devices`, and replaces the confusing
+  `Gateway` jump buttons with clearer settings-oriented navigation.
+- Battery overview cards now use a stronger BM-style hierarchy with larger SoC
+  numerals, larger battery/device icons, and explicit OK/charging status
+  symbols instead of generic status chips.
+- Live BM200/BM6 reads now preserve scan RSSI in the snapshot/runtime model, so
+  device and devices pages show real BLE signal quality instead of incorrectly
+  falling back to `Not visible` after successful polls.
+- Device detail pages now expose an inline expandable reported-status explainer,
+  showing that BM200/BM6 states are device-reported categories, surfacing the
+  protocol code, and visualizing the discrete status scale in-page instead of
+  only showing a bare `Normal` label.
 
 ### Documented
 

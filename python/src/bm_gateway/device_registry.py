@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 VALID_DEVICE_TYPES = {"bm200", "bm300pro"}
@@ -28,6 +29,19 @@ LITHIUM_PROFILES = {
 CUSTOM_SOC_MODES = {
     "intelligent_algorithm": "Intelligent power algorithm",
     "voltage_corresponding_power": "Voltage corresponding to power",
+}
+VEHICLE_TYPES = {
+    "car": "Car",
+    "motorcycle": "Motorcycle",
+    "van": "Van",
+    "camper": "Camper",
+    "truck": "Truck",
+    "bus": "Bus",
+    "boat": "Boat",
+    "tractor": "Tractor",
+    "atv": "ATV / Quad",
+    "machinery": "Machinery",
+    "other_vehicle": "Other Vehicle",
 }
 ICON_CATALOG = {
     "battery_monitor": "Battery Monitor",
@@ -78,6 +92,12 @@ class Device:
     custom_soc_mode: str = "intelligent_algorithm"
     custom_voltage_curve: tuple[tuple[int, float], ...] = DEFAULT_CUSTOM_CURVE
     icon_key: str = "battery_monitor"
+    installed_in_vehicle: bool = False
+    vehicle_type: str = ""
+    battery_brand: str = ""
+    battery_model: str = ""
+    battery_capacity_ah: float | None = None
+    battery_production_year: int | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -88,6 +108,17 @@ class Device:
             "enabled": self.enabled,
             "icon_key": self.icon_key,
             "icon_label": icon_label(self.icon_key),
+            "installed_in_vehicle": self.installed_in_vehicle,
+            "vehicle_type": self.vehicle_type,
+            "battery_brand": self.battery_brand,
+            "battery_model": self.battery_model,
+            "battery_capacity_ah": self.battery_capacity_ah,
+            "battery_production_year": self.battery_production_year,
+            "vehicle": {
+                "installed": self.installed_in_vehicle,
+                "type": self.vehicle_type,
+                "type_label": vehicle_type_label(self.vehicle_type),
+            },
             "battery": {
                 "family": self.battery_family,
                 "family_label": battery_family_label(self.battery_family),
@@ -105,6 +136,10 @@ class Device:
                     {"percent": percent, "voltage": voltage}
                     for percent, voltage in self.custom_voltage_curve
                 ],
+                "brand": self.battery_brand,
+                "model": self.battery_model,
+                "capacity_ah": self.battery_capacity_ah,
+                "production_year": self.battery_production_year,
             },
         }
 
@@ -120,6 +155,12 @@ def battery_profile_label(*, family: str, profile: str) -> str:
 
 def icon_label(icon_key: str) -> str:
     return ICON_CATALOG.get(icon_key, icon_key.replace("_", " ").title())
+
+
+def vehicle_type_label(vehicle_type: str) -> str:
+    if not vehicle_type:
+        return "Not set"
+    return VEHICLE_TYPES.get(vehicle_type, vehicle_type.replace("_", " ").title())
 
 
 def default_battery_family(device_type: str) -> str:
@@ -224,6 +265,20 @@ def load_device_registry(path: Path) -> list[Device]:
                         ),
                     )
                 ).strip(),
+                installed_in_vehicle=bool(item.get("installed_in_vehicle", False)),
+                vehicle_type=str(item.get("vehicle_type", "")).strip(),
+                battery_brand=str(battery_table.get("brand", "")).strip(),
+                battery_model=str(battery_table.get("model", "")).strip(),
+                battery_capacity_ah=(
+                    float(battery_table["capacity_ah"])
+                    if battery_table.get("capacity_ah") not in (None, "")
+                    else None
+                ),
+                battery_production_year=(
+                    int(battery_table["production_year"])
+                    if battery_table.get("production_year") not in (None, "")
+                    else None
+                ),
             )
         )
     return devices
@@ -241,13 +296,23 @@ def write_device_registry(path: Path, devices: list[Device]) -> None:
                 f"mac = {_toml_string(device.mac)}",
                 f"enabled = {'true' if device.enabled else 'false'}",
                 f"icon_key = {_toml_string(device.icon_key)}",
+                f"installed_in_vehicle = {'true' if device.installed_in_vehicle else 'false'}",
+                f"vehicle_type = {_toml_string(device.vehicle_type)}",
                 "[devices.battery]",
                 f"family = {_toml_string(device.battery_family)}",
                 f"profile = {_toml_string(device.battery_profile)}",
                 f"custom_soc_mode = {_toml_string(device.custom_soc_mode)}",
-                "",
             ]
         )
+        if device.battery_brand:
+            lines.append(f"brand = {_toml_string(device.battery_brand)}")
+        if device.battery_model:
+            lines.append(f"model = {_toml_string(device.battery_model)}")
+        if device.battery_capacity_ah is not None:
+            lines.append(f"capacity_ah = {device.battery_capacity_ah:g}")
+        if device.battery_production_year is not None:
+            lines.append(f"production_year = {device.battery_production_year}")
+        lines.append("")
         for percent, voltage in device.custom_voltage_curve:
             lines.extend(
                 [
@@ -307,6 +372,30 @@ def validate_devices(devices: list[Device]) -> list[str]:
             errors.append(
                 f"device {device.id or '<unknown>'} icon key must be one of "
                 f"{', '.join(sorted(ICON_CATALOG))}"
+            )
+
+        if device.installed_in_vehicle:
+            if device.vehicle_type not in VEHICLE_TYPES:
+                errors.append(
+                    f"device {device.id or '<unknown>'} vehicle_type must be one of "
+                    f"{', '.join(sorted(VEHICLE_TYPES))}"
+                )
+        elif device.vehicle_type:
+            errors.append(
+                f"device {device.id or '<unknown>'} vehicle_type requires "
+                "installed_in_vehicle = true"
+            )
+
+        if device.battery_capacity_ah is not None and device.battery_capacity_ah <= 0:
+            errors.append(f"device {device.id or '<unknown>'} battery.capacity_ah must be positive")
+
+        current_year = date.today().year
+        if device.battery_production_year is not None and not (
+            1950 <= device.battery_production_year <= current_year + 1
+        ):
+            errors.append(
+                f"device {device.id or '<unknown>'} battery.production_year must be between "
+                f"1950 and {current_year + 1}"
             )
 
         if device.battery_profile == "custom" and (

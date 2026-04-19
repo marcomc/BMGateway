@@ -22,6 +22,7 @@ from .device_registry import (
     ICON_CATALOG,
     LEAD_ACID_PROFILES,
     LITHIUM_PROFILES,
+    VEHICLE_TYPES,
     Device,
     battery_family_label,
     battery_profile_label,
@@ -32,6 +33,7 @@ from .device_registry import (
     load_device_registry,
     normalize_mac_address,
     validate_devices,
+    vehicle_type_label,
     write_device_registry,
 )
 from .runtime import database_file_path, recover_adapter, state_file_path
@@ -61,6 +63,22 @@ from .web_ui import (
     summary_card,
     tone_card,
     top_header,
+)
+
+PROTOCOL_STATE_CODES: dict[str, int] = {
+    "critical": 0,
+    "low": 1,
+    "normal": 2,
+    "charging": 4,
+    "floating": 8,
+}
+
+PROTOCOL_STATUS_SCALE: tuple[tuple[str, str, str, str], ...] = (
+    ("critical", "Critical", "Critical reserve or alarm condition.", "error"),
+    ("low", "Low", "Low reserve reported by the monitor.", "warning"),
+    ("normal", "Normal", "Stable battery condition reported by the monitor.", "ok"),
+    ("charging", "Charging", "Active charging reported by the monitor.", "info"),
+    ("floating", "Floating", "Maintenance / float charge reported by the monitor.", "purple"),
 )
 
 
@@ -233,6 +251,37 @@ def _battery_summary(device: dict[str, object]) -> tuple[str, str]:
     return battery_family_label(family), battery_profile_label(family=family, profile=profile)
 
 
+def _battery_metadata_summary(device: dict[str, object]) -> str:
+    battery = device.get("battery")
+    battery_table = battery if isinstance(battery, dict) else {}
+    parts = [
+        str(battery_table.get("brand", "")).strip(),
+        str(battery_table.get("model", "")).strip(),
+    ]
+    capacity = battery_table.get("capacity_ah")
+    year = battery_table.get("production_year")
+    if capacity not in (None, ""):
+        parts.append(f"{capacity} Ah")
+    if year not in (None, ""):
+        parts.append(str(year))
+    summary = " · ".join(part for part in parts if part)
+    return summary or "Battery details not set"
+
+
+def _vehicle_summary(device: dict[str, object]) -> str:
+    vehicle = device.get("vehicle")
+    if isinstance(vehicle, dict):
+        vehicle_type = str(vehicle.get("type", "")).strip()
+        if vehicle_type:
+            return vehicle_type_label(vehicle_type)
+    if bool(device.get("installed_in_vehicle", False)):
+        vehicle_type = str(device.get("vehicle_type", "")).strip()
+        if vehicle_type:
+            return vehicle_type_label(vehicle_type)
+        return "Installed in a vehicle"
+    return "Bench / stationary battery"
+
+
 def _device_icon_key(device: dict[str, object]) -> str:
     icon_key = device.get("icon_key")
     if isinstance(icon_key, str) and icon_key in ICON_CATALOG:
@@ -262,6 +311,130 @@ def _device_icon_markup(device: dict[str, object]) -> str:
     return device_icon(icon_key, label=icon_label(icon_key))
 
 
+def _battery_card_status_markup(device: dict[str, object]) -> str:
+    state = str(device.get("state", "unknown"))
+    kind = _status_kind(
+        state,
+        cast(str | None, device.get("error_code")),
+        bool(device.get("connected", True)),
+    )
+    normalized = state.lower().strip()
+    if normalized == "charging":
+        label = "Charging"
+        status_class = "charging"
+        icon = (
+            '<svg class="battery-card-status-icon" viewBox="0 0 20 20" fill="none" '
+            'xmlns="http://www.w3.org/2000/svg" aria-label="Charging" role="img">'
+            "<path d='M10 1.8a8.2 8.2 0 1 0 0 16.4 8.2 8.2 0 0 0 0-16.4Z' "
+            "stroke='currentColor' stroke-width='1.8'/>"
+            "<path d='M10.9 4.9 7.5 10h2.1l-.5 5 3.4-5.1h-2l.4-5Z' "
+            "fill='currentColor'/>"
+            "</svg>"
+        )
+    elif kind == "ok":
+        label = "Battery OK"
+        status_class = "ok"
+        icon = (
+            '<svg class="battery-card-status-icon" viewBox="0 0 20 20" fill="none" '
+            'xmlns="http://www.w3.org/2000/svg" aria-label="Battery OK" role="img">'
+            "<path d='M10 1.8a8.2 8.2 0 1 0 0 16.4 8.2 8.2 0 0 0 0-16.4Z' "
+            "stroke='currentColor' stroke-width='1.8'/>"
+            "<path d='m6.4 10.4 2.2 2.2 5-5' stroke='currentColor' stroke-width='2.1' "
+            "stroke-linecap='round' stroke-linejoin='round'/>"
+            "</svg>"
+        )
+    elif kind == "offline":
+        label = "Not visible"
+        status_class = "offline"
+        icon = (
+            '<svg class="battery-card-status-icon" viewBox="0 0 20 20" fill="none" '
+            'xmlns="http://www.w3.org/2000/svg" aria-label="Not visible" role="img">'
+            "<circle cx='10' cy='10' r='8.2' stroke='currentColor' stroke-width='1.8'/>"
+            "<path d='M6.4 13.6 13.6 6.4' stroke='currentColor' stroke-width='2.1' "
+            "stroke-linecap='round'/>"
+            "</svg>"
+        )
+    else:
+        label = state.replace("_", " ").title()
+        status_class = kind
+        icon = (
+            '<svg class="battery-card-status-icon" viewBox="0 0 20 20" fill="none" '
+            f'xmlns="http://www.w3.org/2000/svg" aria-label="{html.escape(label)}" role="img">'
+            "<circle cx='10' cy='10' r='8.2' stroke='currentColor' stroke-width='1.8'/>"
+            "<path d='M10 5.7v5.2' stroke='currentColor' stroke-width='2.1' "
+            "stroke-linecap='round'/>"
+            "<circle cx='10' cy='13.8' r='1.1' fill='currentColor'/>"
+            "</svg>"
+        )
+    return (
+        f'<div class="battery-card-status {html.escape(status_class)}">'
+        f"{icon}<span>{html.escape(label)}</span></div>"
+    )
+
+
+def _device_lookup_by_id(
+    devices: list[dict[str, object]] | list[Device],
+) -> dict[str, dict[str, object]]:
+    lookup: dict[str, dict[str, object]] = {}
+    for device in devices:
+        payload = device.to_dict() if isinstance(device, Device) else device
+        if not isinstance(payload, dict):
+            continue
+        device_id = payload.get("id")
+        if isinstance(device_id, str) and device_id:
+            lookup[device_id] = payload
+    return lookup
+
+
+def _merge_snapshot_devices(
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    registry_by_id = _device_lookup_by_id(devices)
+    merged: list[dict[str, object]] = []
+    snapshot_devices = snapshot.get("devices", [])
+    if isinstance(snapshot_devices, list):
+        for runtime in snapshot_devices:
+            if not isinstance(runtime, dict):
+                continue
+            device_id = str(runtime.get("id", ""))
+            registry = registry_by_id.get(device_id, {})
+            merged.append({**registry, **runtime})
+    if merged:
+        return merged
+    return devices
+
+
+def _selected_attr(value: bool) -> str:
+    return " selected" if value else ""
+
+
+def _checked_attr(value: bool) -> str:
+    return " checked" if value else ""
+
+
+def _bool_from_form(form: dict[str, list[str]], key: str) -> bool:
+    return form.get(key, [""])[0].lower() in {"1", "true", "on", "yes"}
+
+
+def _string_from_form(form: dict[str, list[str]], key: str) -> str:
+    return form.get(key, [""])[0].strip()
+
+
+def _optional_float_from_form(form: dict[str, list[str]], key: str) -> float | None:
+    raw = _string_from_form(form, key)
+    if raw == "":
+        return None
+    return float(raw)
+
+
+def _optional_int_from_form(form: dict[str, list[str]], key: str) -> int | None:
+    raw = _string_from_form(form, key)
+    if raw == "":
+        return None
+    return int(raw)
+
+
 def _curve_field_name(percent: int) -> str:
     return f"custom_curve_{percent}"
 
@@ -282,9 +455,13 @@ def _default_curve_pairs() -> list[tuple[int, float]]:
     ]
 
 
-def _curve_rows_html() -> str:
+def _curve_rows_html(
+    curve_pairs: list[tuple[int, float]] | tuple[tuple[int, float], ...] | None = None,
+) -> str:
+    curve_map = dict(curve_pairs or _default_curve_pairs())
     rows: list[str] = []
-    for percent, voltage in _default_curve_pairs():
+    for percent, default_voltage in _default_curve_pairs():
+        voltage = float(curve_map.get(percent, default_voltage))
         rows.append(
             "<div class='curve-grid-row'>"
             f"<label class='settings-label' for='{_curve_field_name(percent)}'>{percent}%</label>"
@@ -294,27 +471,134 @@ def _curve_rows_html() -> str:
     return "".join(rows)
 
 
-def _battery_family_options() -> str:
+def _add_device_form_html() -> str:
+    return (
+        '<form id="add-device" method="post" action="/devices/add" class="two-column-grid" '
+        'data-battery-config-form="true">'
+        '<div><label class="settings-label" for="device-id-input">Device ID</label>'
+        '<input id="device-id-input" type="text" name="device_id" '
+        'autocomplete="off" spellcheck="false" placeholder="bm200_house…" required></div>'
+        '<div><label class="settings-label" for="device-name-input">Name</label>'
+        '<input id="device-name-input" type="text" name="device_name" '
+        'autocomplete="off" placeholder="House Battery…" required></div>'
+        '<div><label class="settings-label" for="device-type-input">Type</label>'
+        '<select id="device-type-input" name="device_type" autocomplete="off">'
+        '<option value="bm200">bm200</option>'
+        '<option value="bm300pro">bm300pro</option></select></div>'
+        '<div><label class="settings-label" '
+        'for="installed-in-vehicle-input">Vehicle install</label>'
+        f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+        '<input id="installed-in-vehicle-input" type="checkbox" name="installed_in_vehicle">'
+        "<span>Installed in a vehicle</span></label></div>"
+        '<div data-vehicle-section><label class="settings-label" '
+        'for="vehicle-type-input">Vehicle type</label>'
+        f'<select id="vehicle-type-input" name="vehicle_type">{_vehicle_type_options()}</select>'
+        "</div>"
+        '<div><label class="settings-label" for="device-mac-input">MAC or serial</label>'
+        '<input id="device-mac-input" type="text" name="device_mac" '
+        'autocomplete="off" spellcheck="false" aria-describedby="device-mac-help" '
+        'placeholder="A1B2C3D4E5F6…" required></div>'
+        '<div id="device-mac-help" style="grid-column:1 / -1" class="muted-note">'
+        "You can paste a compact 12-hex serial such as "
+        "<code>A1B2C3D4E5F6</code>; the UI normalizes it to Bluetooth MAC format."
+        "</div>"
+        '<div class="battery-form-section" style="grid-column:1 / -1">'
+        '<div><div class="settings-label">Battery Support</div>'
+        "<div class='inline-field-help'>"
+        "BM200, BM200 Pro, BM300, and BM300 Pro app families all expose "
+        "lead-acid and lithium setup paths. Lead-acid supports regular, AGM, "
+        "EFB, GEL, and custom. Lithium supports lithium and custom. Custom "
+        "profiles can use the intelligent algorithm or a voltage-to-SoC curve."
+        "</div></div>"
+        "<div><div class='settings-label'>Choose a built-in icon</div>"
+        "<div class='inline-field-help'>"
+        "This icon is used on the Battery Overview and device cards. Pick the "
+        "closest visual identity for the battery or monitor."
+        "</div>"
+        "<div class='icon-picker-grid'>"
+        f"{_icon_picker_options(selected_key='battery_monitor')}"
+        "</div>"
+        "</div>"
+        '<div class="battery-form-grid">'
+        "<div><label class='settings-label' for='battery-family-input'>Battery family</label>"
+        f"<select id='battery-family-input' name='battery_family'>"
+        f"{_battery_family_options()}</select></div>"
+        "<div><label class='settings-label' for='battery-profile-input'>Battery profile</label>"
+        f"<select id='battery-profile-input' name='battery_profile'>"
+        f"{_battery_profile_options()}</select></div>"
+        "<div data-custom-mode-section><label class='settings-label' "
+        "for='custom-soc-mode-input'>Custom battery mode</label>"
+        f"<select id='custom-soc-mode-input' name='custom_soc_mode'>"
+        f"{_custom_mode_options()}</select></div>"
+        "</div>"
+        '<div class="battery-form-grid">'
+        '<div><label class="settings-label" for="battery-brand-input">Battery brand</label>'
+        '<input id="battery-brand-input" type="text" name="battery_brand" '
+        'autocomplete="off" placeholder="Varta, Bosch, Yuasa…"></div>'
+        '<div><label class="settings-label" for="battery-model-input">Battery model</label>'
+        '<input id="battery-model-input" type="text" name="battery_model" '
+        'autocomplete="off" placeholder="Blue Dynamic E44…"></div>'
+        '<div><label class="settings-label" for="battery-capacity-input">Capacity (Ah)</label>'
+        '<input id="battery-capacity-input" type="number" step="0.1" min="0" '
+        'name="battery_capacity_ah" inputmode="decimal" placeholder="95"></div>'
+        '<div><label class="settings-label" for="battery-year-input">Production year</label>'
+        '<input id="battery-year-input" type="number" min="1950" max="2100" '
+        'name="battery_production_year" inputmode="numeric" placeholder="2025"></div>'
+        "</div>"
+        "<div data-custom-curve-section>"
+        '<div class="settings-label">Voltage corresponding to power</div>'
+        "<div class='inline-field-help'>"
+        "This mirrors the official-app custom battery flow. Edit the per-10% "
+        "thresholds if you want a manual SoC curve instead of the intelligent "
+        "algorithm.</div>"
+        f'<div class="curve-grid">{_curve_rows_html()}</div>'
+        "</div>"
+        "</div>"
+        '<div style="grid-column:1 / -1">'
+        f"{button('Add Device and Enable Live Polling', kind='primary')}"
+        "</div>"
+        "</form>"
+    )
+
+
+def _battery_family_options(*, selected_family: str = "lead_acid") -> str:
     return "".join(
-        f"<option value='{html.escape(value)}'>{html.escape(label)}</option>"
+        f"<option value='{html.escape(value)}'"
+        f"{_selected_attr(value == selected_family)}>"
+        f"{html.escape(label)}</option>"
         for value, label in BATTERY_FAMILIES.items()
     )
 
 
-def _battery_profile_options() -> str:
+def _battery_profile_options(*, selected_profile: str = "regular_lead_acid") -> str:
     entries = [("lead_acid", value, label) for value, label in LEAD_ACID_PROFILES.items()] + [
         ("lithium", value, label) for value, label in LITHIUM_PROFILES.items()
     ]
     return "".join(
-        f"<option value='{html.escape(value)}' data-family='{html.escape(family)}'>"
+        f"<option value='{html.escape(value)}' data-family='{html.escape(family)}'"
+        f"{_selected_attr(value == selected_profile)}>"
         f"{html.escape(label)}</option>"
         for family, value, label in entries
     )
 
 
-def _custom_mode_options() -> str:
+def _vehicle_type_options(*, selected_vehicle_type: str = "") -> str:
+    options = [
+        "<option value=''>Select vehicle type</option>",
+        *(
+            f"<option value='{html.escape(value)}'{_selected_attr(value == selected_vehicle_type)}>"
+            f"{html.escape(label)}</option>"
+            for value, label in VEHICLE_TYPES.items()
+        ),
+    ]
+    return "".join(options)
+
+
+def _custom_mode_options(*, selected_mode: str = "intelligent_algorithm") -> str:
     return "".join(
-        f"<option value='{html.escape(value)}'>{html.escape(label)}</option>"
+        f"<option value='{html.escape(value)}'"
+        f"{_selected_attr(value == selected_mode)}>"
+        f"{html.escape(label)}</option>"
         for value, label in CUSTOM_SOC_MODES.items()
     )
 
@@ -326,58 +610,73 @@ def _icon_picker_options(*, selected_key: str = "battery_monitor") -> str:
     )
 
 
+TOGGLE_LABEL_STYLE = "display:flex;justify-content:flex-start;gap:0.55rem;align-items:center"
+
+
 def _battery_form_script() -> str:
     return """
 <script>
 (() => {
-  const form = document.getElementById("add-device");
-  if (!form) {
-    return;
-  }
-  const familySelect = form.querySelector("[name='battery_family']");
-  const profileSelect = form.querySelector("[name='battery_profile']");
-  const modeSelect = form.querySelector("[name='custom_soc_mode']");
-  const modeSection = document.getElementById("custom-soc-mode-section");
-  const curveSection = document.getElementById("custom-curve-section");
-  if (!familySelect || !profileSelect || !modeSelect || !modeSection || !curveSection) {
-    return;
-  }
+  const forms = document.querySelectorAll("[data-battery-config-form='true']");
+  for (const form of forms) {
+    const familySelect = form.querySelector("[name='battery_family']");
+    const profileSelect = form.querySelector("[name='battery_profile']");
+    const modeSelect = form.querySelector("[name='custom_soc_mode']");
+    const installedInVehicle = form.querySelector("[name='installed_in_vehicle']");
+    const vehicleSection = form.querySelector("[data-vehicle-section]");
+    const modeSection = form.querySelector("[data-custom-mode-section]");
+    const curveSection = form.querySelector("[data-custom-curve-section]");
+    if (!familySelect || !profileSelect || !modeSelect || !modeSection || !curveSection) {
+      continue;
+    }
 
-  function syncProfileOptions() {
-    const family = familySelect.value;
-    let selectedVisible = false;
-    for (const option of profileSelect.options) {
-      const visible = option.dataset.family === family;
-      option.hidden = !visible;
-      option.disabled = !visible;
-      if (visible && option.value === profileSelect.value) {
-        selectedVisible = true;
+    function syncProfileOptions() {
+      const family = familySelect.value;
+      let selectedVisible = false;
+      for (const option of profileSelect.options) {
+        const visible = option.dataset.family === family;
+        option.hidden = !visible;
+        option.disabled = !visible;
+        if (visible && option.value === profileSelect.value) {
+          selectedVisible = true;
+        }
+      }
+      if (!selectedVisible) {
+        const fallback = Array.from(profileSelect.options).find((option) => !option.hidden);
+        if (fallback) {
+          profileSelect.value = fallback.value;
+        }
       }
     }
-    if (!selectedVisible) {
-      const fallback = Array.from(profileSelect.options).find((option) => !option.hidden);
-      if (fallback) {
-        profileSelect.value = fallback.value;
-      }
+
+    function syncCustomSections() {
+      const isCustom = profileSelect.value === "custom";
+      modeSection.hidden = !isCustom;
+      const showCurve = isCustom && modeSelect.value === "voltage_corresponding_power";
+      curveSection.hidden = !showCurve;
     }
-  }
 
-  function syncCustomSections() {
-    const isCustom = profileSelect.value === "custom";
-    modeSection.hidden = !isCustom;
-    const showCurve = isCustom && modeSelect.value === "voltage_corresponding_power";
-    curveSection.hidden = !showCurve;
-  }
+    function syncVehicleSection() {
+      if (!vehicleSection || !installedInVehicle) {
+        return;
+      }
+      vehicleSection.hidden = !installedInVehicle.checked;
+    }
 
-  function syncAll() {
-    syncProfileOptions();
-    syncCustomSections();
-  }
+    function syncAll() {
+      syncProfileOptions();
+      syncCustomSections();
+      syncVehicleSection();
+    }
 
-  familySelect.addEventListener("change", syncAll);
-  profileSelect.addEventListener("change", syncCustomSections);
-  modeSelect.addEventListener("change", syncCustomSections);
-  syncAll();
+    familySelect.addEventListener("change", syncAll);
+    profileSelect.addEventListener("change", syncCustomSections);
+    modeSelect.addEventListener("change", syncCustomSections);
+    if (installedInVehicle) {
+      installedInVehicle.addEventListener("change", syncVehicleSection);
+    }
+    syncAll();
+  }
 })();
 </script>
 """
@@ -430,6 +729,142 @@ def _status_kind(state: str, error_code: str | None = None, connected: bool = Tr
     return "ok"
 
 
+def _status_label(state: str, *, connected: bool, error_code: str | None) -> str:
+    normalized = state.lower().strip()
+    if not connected or error_code == "device_not_found" or normalized == "offline":
+        return "Offline"
+    if normalized == "charging":
+        return "Charging"
+    if normalized == "floating":
+        return "Floating"
+    if normalized == "critical":
+        return "Critical"
+    if normalized == "low":
+        return "Low"
+    if normalized == "normal":
+        return "Normal"
+    if normalized == "unsupported":
+        return "Unsupported"
+    if normalized == "disabled":
+        return "Disabled"
+    if normalized == "error" or error_code is not None:
+        return "Error"
+    return normalized.replace("_", " ").title() or "Unknown"
+
+
+def _status_visual_tone(state: str, *, connected: bool, error_code: str | None) -> str:
+    normalized = state.lower().strip()
+    if normalized == "charging":
+        return "info"
+    if normalized == "floating":
+        return "purple"
+    return _status_kind(normalized, error_code=error_code, connected=connected)
+
+
+def _status_scale_markup(
+    *,
+    current_state: str,
+    connected: bool,
+    error_code: str | None,
+) -> str:
+    normalized = current_state.lower().strip()
+    labels = [item[0] for item in PROTOCOL_STATUS_SCALE]
+    try:
+        active_index = labels.index(normalized)
+    except ValueError:
+        active_index = 0
+    marker_percent = ((active_index + 0.5) / len(PROTOCOL_STATUS_SCALE)) * 100.0
+    tone = _status_visual_tone(normalized, connected=connected, error_code=error_code)
+    fill_width = f"{marker_percent:.1f}%"
+    state_label = _status_label(normalized, connected=connected, error_code=error_code)
+    fill_html = (
+        f'<div class="status-scale-fill tone-{html.escape(tone)}" style="width:{fill_width}"></div>'
+    )
+    marker_html = (
+        f'<div class="status-scale-marker tone-{html.escape(tone)}" '
+        f'style="left:{marker_percent:.1f}%"></div>'
+    )
+    segments_html = "".join(
+        (
+            "<div class='status-scale-segment"
+            f" tone-{css_tone}"
+            f"{' active' if key == normalized else ''}"
+            f"{' reached' if index <= active_index else ''}"
+            "'>"
+            f"<span>{html.escape(label)}</span>"
+            "</div>"
+        )
+        for index, (key, label, _description, css_tone) in enumerate(PROTOCOL_STATUS_SCALE)
+    )
+    return (
+        '<div class="status-scale" role="img" '
+        f'aria-label="BM200/BM6 status scale showing {html.escape(state_label)}">'
+        '<div class="status-scale-track">'
+        f"{fill_html}"
+        f"{marker_html}"
+        "</div>"
+        f'<div class="status-scale-labels">{segments_html}</div>'
+        "</div>"
+    )
+
+
+def _device_status_explainer(summary: dict[str, object]) -> str:
+    state = str(summary.get("state", "unknown"))
+    connected = bool(summary.get("connected", False))
+    error_code = cast(str | None, summary.get("error_code"))
+    error_detail = str(summary.get("error_detail", "") or "").strip()
+    label = _status_label(state, connected=connected, error_code=error_code)
+    kind = _status_kind(state, error_code=error_code, connected=connected)
+    normalized = state.lower().strip()
+    protocol_code = PROTOCOL_STATE_CODES.get(normalized)
+    protocol_item = next((item for item in PROTOCOL_STATUS_SCALE if item[0] == normalized), None)
+    voltage = _format_number(summary.get("voltage"), digits=2, suffix=" V")
+    soc = _format_number(summary.get("soc"), digits=0, suffix="%")
+    temperature = _format_number(summary.get("temperature"), digits=1, suffix=" C")
+    protocol_note = (
+        "This monitor reports the battery state directly over BM200/BM6. "
+        "BMGateway does not invent this label from a hidden threshold."
+    )
+    runtime_note = "This state is produced by the gateway runtime instead of the monitor itself."
+    note = protocol_note if protocol_code is not None else runtime_note
+    scale_html = ""
+    description = "Gateway runtime state."
+    if protocol_item is not None:
+        description = protocol_item[2]
+        scale_html = _status_scale_markup(
+            current_state=normalized,
+            connected=connected,
+            error_code=error_code,
+        )
+    elif error_detail:
+        description = error_detail
+    chips: list[str] = []
+    if protocol_code is not None:
+        chips.append(f"<span class='pill-chip'>Protocol code {protocol_code}</span>")
+    chips.append(f"<span class='pill-chip'>Voltage {html.escape(voltage)}</span>")
+    chips.append(f"<span class='pill-chip'>SoC {html.escape(soc)}</span>")
+    if temperature != "-":
+        chips.append(f"<span class='pill-chip'>Temperature {html.escape(temperature)}</span>")
+    chips_html = "".join(chips)
+    return (
+        '<details class="status-explainer">'
+        '<summary class="status-explainer-summary">'
+        "<div>"
+        "<div class='settings-label'>Reported Status</div>"
+        f"<div class='status-explainer-value'>{html.escape(label)}</div>"
+        "</div>"
+        f"{status_badge(label, kind=kind)}"
+        "</summary>"
+        '<div class="status-explainer-body">'
+        f"<p class='status-explainer-copy'>{html.escape(note)}</p>"
+        f"<p class='status-explainer-copy'>{html.escape(description)}</p>"
+        f"<div class='chip-grid status-chip-grid'>{chips_html}</div>"
+        f"{scale_html}"
+        "</div>"
+        "</details>"
+    )
+
+
 def _format_number(value: object, *, digits: int = 2, suffix: str = "") -> str:
     if value is None:
         return "-"
@@ -437,6 +872,55 @@ def _format_number(value: object, *, digits: int = 2, suffix: str = "") -> str:
         formatted = f"{float(value):.{digits}f}" if digits > 0 else f"{int(round(float(value)))}"
         return f"{formatted}{suffix}"
     return f"{value}{suffix}"
+
+
+def _signal_quality(
+    *,
+    rssi: object,
+    connected: bool,
+    error_code: str | None,
+) -> tuple[str, int, int, str]:
+    if not connected or error_code == "device_not_found" or rssi is None:
+        return ("Not visible", 0, 0, "The adapter did not see this monitor in the latest scan.")
+    rssi_value = int(_coerce_float(rssi))
+    percent = round(((rssi_value + 100) / 50) * 100)
+    percent = max(0, min(100, percent))
+    if percent >= 85:
+        grade = "Excellent"
+    elif percent >= 55:
+        grade = "Good"
+    elif percent >= 35:
+        grade = "Fair"
+    else:
+        grade = "Weak"
+    bars = max(1, min(4, (percent + 24) // 25))
+    return (grade, percent, bars, f"RSSI {rssi_value} dBm")
+
+
+def _signal_quality_detail_html(
+    *,
+    rssi: object,
+    connected: bool,
+    error_code: str | None,
+) -> str:
+    grade, percent, bars, rssi_text = _signal_quality(
+        rssi=rssi,
+        connected=connected,
+        error_code=error_code,
+    )
+    bars_markup = "".join(
+        "<span class='active'></span>" if index < bars else "<span></span>" for index in range(4)
+    )
+    return (
+        '<div class="metric-detail-stack">'
+        '<div class="signal-quality-row">'
+        f"<span>{percent}%</span>"
+        f"<span class='signal-bars' aria-label='{html.escape(grade)} {percent}% signal strength'>"
+        f"{bars_markup}</span>"
+        "</div>"
+        f"<div class='subvalue'>{html.escape(rssi_text)}</div>"
+        "</div>"
+    )
 
 
 def _device_runtime_summary(runtime: dict[str, object]) -> tuple[str, str]:
@@ -625,6 +1109,7 @@ def _display_timestamp(value: object) -> str:
 def render_management_html(
     *,
     snapshot: dict[str, object],
+    config: AppConfig,
     storage_summary: dict[str, object],
     devices: list[dict[str, object]],
     config_text: str,
@@ -640,39 +1125,6 @@ def render_management_html(
     gateway_state_topic = html.escape(str(gateway_contract.get("state_topic", "")))
     gateway_discovery_topic = html.escape(str(gateway_contract.get("discovery_topic", "")))
     device_contract_count = len(contract_devices) if isinstance(contract_devices, list) else 0
-    device_cards: list[str] = []
-    snapshot_devices = snapshot.get("devices", [])
-    for index, device in enumerate(snapshot_devices if isinstance(snapshot_devices, list) else []):
-        if not isinstance(device, dict):
-            continue
-        tone = _device_tone(index, str(device.get("state", "")))
-        device_id = str(device.get("id", ""))
-        voltage_text = html.escape(_format_number(device.get("voltage"), digits=2, suffix=" V"))
-        rssi_text = html.escape(str(device.get("rssi", "-")))
-        status = status_badge(
-            str(device.get("state", "unknown")).replace("_", " ").title(),
-            kind=_status_kind(
-                str(device.get("state", "")),
-                cast(str | None, device.get("error_code")),
-                bool(device.get("connected", True)),
-            ),
-        )
-        device_cards.append(
-            tone_card(
-                (
-                    f"<h3>{html.escape(str(device.get('name', device.get('id', 'Unknown'))))}</h3>"
-                    f'<div class="meta">{html.escape(str(device.get("type", "bm200")))}</div>'
-                    f'<div class="hero-soc">{html.escape(str(device.get("soc", "-")))}%</div>'
-                    f'<div class="meta">{voltage_text} / RSSI {rssi_text}</div>'
-                    f'<div style="margin-top:0.7rem">{status}</div>'
-                    '<div class="footer-row">'
-                    f"<a href='/device?device_id={quote(device_id)}'>Open device page</a>"
-                    f"<a href='/history?device_id={quote(device_id)}'>History</a>"
-                    "</div>"
-                ),
-                tone=tone,
-            )
-        )
     api_chips = "".join(
         api_chip(endpoint)
         for endpoint in (
@@ -687,13 +1139,13 @@ def render_management_html(
         )
     )
     header = top_header(
-        title="BMGateway Management",
+        title="Edit Settings",
         subtitle=(
-            "Premium control-plane dashboard for the live gateway. All current "
-            "actions, config editing, device registry flows, storage views, and "
-            "Home Assistant contract surfaces remain active."
+            "Edit gateway-wide behavior, service settings, and the underlying "
+            "configuration files. Device creation and device editing now live "
+            "under Devices."
         ),
-        eyebrow="Control Plane",
+        eyebrow="Configuration",
     )
     overview_cards = (
         '<div class="metrics-grid">'
@@ -747,97 +1199,65 @@ def render_management_html(
         )
         + "</div>"
     )
-    add_device_form = (
-        '<form id="add-device" method="post" action="/devices/add" class="two-column-grid">'
-        '<div><label class="settings-label" for="device-id-input">Device ID</label>'
-        '<input id="device-id-input" type="text" name="device_id" '
-        'autocomplete="off" spellcheck="false" placeholder="bm200_house…" required></div>'
-        '<div><label class="settings-label" for="device-name-input">Name</label>'
-        '<input id="device-name-input" type="text" name="device_name" '
-        'autocomplete="off" placeholder="House Battery…" required></div>'
-        '<div><label class="settings-label" for="device-type-input">Type</label>'
-        '<select id="device-type-input" name="device_type" autocomplete="off">'
-        '<option value="bm200">bm200</option>'
-        '<option value="bm300pro">bm300pro</option></select></div>'
-        '<div><label class="settings-label" for="device-mac-input">MAC or serial</label>'
-        '<input id="device-mac-input" type="text" name="device_mac" '
-        'autocomplete="off" spellcheck="false" aria-describedby="device-mac-help" '
-        'placeholder="A1B2C3D4E5F6…" required></div>'
-        '<div id="device-mac-help" style="grid-column:1 / -1" class="muted-note">'
-        "You can paste a compact 12-hex serial such as "
-        "<code>A1B2C3D4E5F6</code>; the UI normalizes it to Bluetooth MAC format."
-        "</div>"
-        '<div class="battery-form-section" style="grid-column:1 / -1">'
-        '<div><div class="settings-label">Battery Support</div>'
-        "<div class='inline-field-help'>"
-        "BM200, BM200 Pro, BM300, and BM300 Pro app families all expose "
-        "lead-acid and lithium setup paths. Lead-acid supports regular, AGM, "
-        "EFB, GEL, and custom. Lithium supports lithium and custom. Custom "
-        "profiles can use the intelligent algorithm or a voltage-to-SoC curve."
-        "</div></div>"
-        "<div><div class='settings-label'>Choose a built-in icon</div>"
-        "<div class='inline-field-help'>"
-        "This icon is used on the Battery Overview and device cards. Pick the "
-        "closest visual identity for the battery or monitor."
-        "</div>"
-        "<div class='icon-picker-grid'>"
-        f"{_icon_picker_options(selected_key='battery_monitor')}"
-        "</div>"
-        "</div>"
-        '<div class="battery-form-grid">'
-        "<div><label class='settings-label' for='battery-family-input'>Battery family</label>"
-        f"<select id='battery-family-input' name='battery_family'>"
-        f"{_battery_family_options()}</select></div>"
-        "<div><label class='settings-label' for='battery-profile-input'>Battery profile</label>"
-        f"<select id='battery-profile-input' name='battery_profile'>"
-        f"{_battery_profile_options()}</select></div>"
-        "<div id='custom-soc-mode-section'><label class='settings-label' "
-        "for='custom-soc-mode-input'>Custom battery mode</label>"
-        f"<select id='custom-soc-mode-input' name='custom_soc_mode'>"
-        f"{_custom_mode_options()}</select></div>"
-        "</div>"
-        '<div id="custom-curve-section">'
-        '<div class="settings-label">Voltage corresponding to power</div>'
-        "<div class='inline-field-help'>"
-        "This mirrors the official-app custom battery flow. Edit the per-10% "
-        "thresholds if you want a manual SoC curve instead of the intelligent "
-        "algorithm.</div>"
-        f'<div class="curve-grid">{_curve_rows_html()}</div>'
-        "</div>"
-        "</div>"
-        '<div style="grid-column:1 / -1">'
-        f"{button('Add Device and Enable Live Polling', kind='primary')}"
-        "</div>"
-        "</form>"
-    )
-    device_dashboard_html = "".join(device_cards) or "<p>No active device cards yet.</p>"
     body = (
         header
         + banner
         + control_plane
         + section_card(
-            title="Device Dashboard",
+            title="Devices",
             subtitle=(
-                "Live battery cards stay prominent while raw operational details "
-                "remain one click away."
+                "Device creation and editing belong under Devices, not inside "
+                "the gateway-wide configuration page."
             ),
-            body=f'<div class="device-grid">{device_dashboard_html}</div>',
-        )
-        + section_card(
-            title="Add Device",
-            subtitle=(
-                "Register BM devices, normalize compact serials to MAC format, "
-                "capture the official battery taxonomy, and enable live polling."
+            body=(
+                "<div class='inline-actions'>"
+                "<a class='primary-button' href='/devices'>Open Devices</a>"
+                "</div>"
             ),
-            body=add_device_form,
         )
         + section_card(
             title="Configured Devices",
-            subtitle="The registry table remains fully visible for operational clarity.",
+            subtitle="Visible here for context, but edited from the Devices page.",
             body=(
                 '<div class="table-shell"><table><thead><tr><th>ID</th><th>Type</th>'
                 "<th>Name</th><th>MAC</th><th>Profile</th><th>Family</th><th>Enabled</th></tr></thead>"
                 f"<tbody>{_device_table_rows(devices)}</tbody></table></div>"
+            ),
+        )
+        + section_card(
+            title="Web Service Settings",
+            subtitle="Management UI network binding and port selection.",
+            body=(
+                '<form method="post" action="/settings/web">'
+                '<div class="two-column-grid">'
+                '<div><label class="settings-label" for="web-port-input">Web port</label>'
+                f'<input id="web-port-input" type="text" name="web_port" value="{config.web.port}" '
+                'inputmode="numeric" autocomplete="off"></div>'
+                f"{settings_row('Host', html.escape(config.web.host))}"
+                "</div>"
+                '<div style="margin-top:1rem">'
+                f"{button('Save web service settings', kind='primary')}"
+                "</div>"
+                "</form>"
+            ),
+        )
+        + section_card(
+            title="Display Settings",
+            subtitle="Global chart rendering preferences.",
+            body=(
+                '<form method="post" action="/settings/web">'
+                f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+                f'<input id="show-chart-markers-input" type="checkbox" '
+                f'name="show_chart_markers"{_checked_attr(config.web.show_chart_markers)}>'
+                "<span>Show chart point markers</span></label>"
+                "<div class='inline-field-help'>"
+                "Turn point markers back on if you prefer exact sample dots "
+                "over the cleaner default BM-style lines."
+                "</div>"
+                '<div style="margin-top:1rem">'
+                f"{button('Save display settings', kind='primary')}"
+                "</div>"
+                "</form>"
             ),
         )
         + section_card(
@@ -888,12 +1308,11 @@ def render_management_html(
     )
     primary_device_id = _primary_device_id(snapshot, devices)
     return app_document(
-        title="BMGateway Management",
+        title="BMGateway Edit Settings",
         body=body,
         active_nav="management",
         primary_device_id=primary_device_id,
         version_label=version_label,
-        script=_battery_form_script(),
     )
 
 
@@ -903,50 +1322,61 @@ def render_battery_html(
     devices: list[dict[str, object]],
     chart_points: list[dict[str, object]],
     legend: list[tuple[str, str]],
+    show_chart_markers: bool = False,
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
-    snapshot_devices = snapshot.get("devices", [])
+    snapshot_devices = _merge_snapshot_devices(snapshot, devices)
     device_cards: list[str] = []
     tones = ("green", "purple", "blue", "orange")
-    if isinstance(snapshot_devices, list):
-        for index, device in enumerate(snapshot_devices):
-            if not isinstance(device, dict):
-                continue
-            tone = tones[index % len(tones)]
-            device_id = str(device.get("id", ""))
-            voltage_text = html.escape(_format_number(device.get("voltage"), digits=2, suffix=" V"))
-            temperature_text = html.escape(
-                _format_number(device.get("temperature"), digits=1, suffix=" C")
-            )
-            badge = status_badge(
-                str(device.get("state", "unknown")).replace("_", " ").title(),
-                kind=_status_kind(
-                    str(device.get("state", "")),
-                    cast(str | None, device.get("error_code")),
-                    bool(device.get("connected", True)),
+    for index, device in enumerate(snapshot_devices):
+        if not isinstance(device, dict):
+            continue
+        tone = tones[index % len(tones)]
+        device_id = str(device.get("id", ""))
+        voltage_text = html.escape(_format_number(device.get("voltage"), digits=2, suffix="V"))
+        temperature_text = html.escape(
+            _format_number(device.get("temperature"), digits=1, suffix="°C")
+        )
+        icon_key = _device_icon_key(device)
+        device_name_text = html.escape(str(device.get("name", device_id)))
+        soc_text = html.escape(str(device.get("soc", "-")))
+        reading_text = f"{voltage_text} {temperature_text}"
+        hero_icon = device_icon(
+            icon_key,
+            label=icon_label(icon_key),
+            frame_class="hero-device-icon",
+        )
+        vehicle_text = html.escape(_vehicle_summary(device))
+        battery_summary = _battery_metadata_summary(device)
+        battery_meta_html = (
+            ""
+            if battery_summary == "Battery details not set"
+            else f"<div class='meta battery-card-meta-extra'>{html.escape(battery_summary)}</div>"
+        )
+        status_line = _battery_card_status_markup(device)
+        device_cards.append(
+            tone_card(
+                (
+                    "<div class='device-card-head battery-card-head'>"
+                    f"{hero_icon}"
+                    "<div class='device-card-copy battery-card-copy'>"
+                    f"<div class='meta meta-name'>{device_name_text}</div>"
+                    f"<div class='meta meta-context'>{vehicle_text}</div>"
+                    f"<div class='hero-soc hero-soc-battery'>{soc_text}%</div>"
+                    f"<div class='meta battery-card-reading'>{reading_text}</div>"
+                    f"{status_line}"
+                    f"{battery_meta_html}"
+                    "<div class='footer-row'>"
+                    f"<a href='/device?device_id={quote(device_id)}'>Open device</a>"
+                    "</div>"
+                    "</div>"
+                    "</div>"
                 ),
+                tone=tone,
+                extra_class="battery-overview-card",
             )
-            device_cards.append(
-                tone_card(
-                    (
-                        "<div class='device-card-head'>"
-                        f"{_device_icon_markup(device)}"
-                        "<div class='device-card-copy'>"
-                        f"<div class='meta'>{html.escape(str(device.get('name', device_id)))}</div>"
-                        f"<div class='meta'>{html.escape(str(device.get('type', 'bm200')))}</div>"
-                        f"<div class='hero-soc'>{html.escape(str(device.get('soc', '-')))}%</div>"
-                        f"<div class='meta'>{voltage_text} / {temperature_text}</div>"
-                        f"<div style='margin-top:0.65rem'>{badge}</div>"
-                        "<div class='footer-row'>"
-                        f"<a href='/device?device_id={quote(device_id)}'>Open device</a>"
-                        "</div>"
-                        "</div>"
-                        "</div>"
-                    ),
-                    tone=tone,
-                )
-            )
+        )
     add_card = tone_card(
         (
             "<div style='display:flex;min-height:198px;align-items:center;justify-content:center;"
@@ -968,7 +1398,7 @@ def render_battery_html(
             eyebrow="Battery",
             right=(
                 '<div class="hero-actions">'
-                '<a class="secondary-button" href="/management">Management</a>'
+                '<a class="secondary-button" href="/settings">Settings</a>'
                 "</div>"
             ),
         )
@@ -1007,6 +1437,7 @@ def render_battery_html(
             default_range="30",
             default_metric="soc",
             legend=legend or [("No devices", "#95a3b8")],
+            show_markers=show_chart_markers,
         )
     )
     return app_document(
@@ -1023,6 +1454,7 @@ def render_devices_html(
     *,
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
+    message: str = "",
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
@@ -1037,6 +1469,7 @@ def render_devices_html(
         runtime = snapshot_devices.get(device_id, {})
         runtime_state = str(runtime.get("state", ""))
         runtime_error_code = cast(str | None, runtime.get("error_code"))
+        connected = bool(runtime.get("connected", False))
         tone = _device_tone(index, runtime_state)
         icon_key = _device_icon_key(device)
         status_value, status_subvalue = _device_runtime_summary(runtime)
@@ -1046,16 +1479,21 @@ def render_devices_html(
             tone=tone,
             subvalue=status_subvalue,
         )
-        signal_value = f"{runtime.get('rssi')} dBm" if runtime.get("rssi") is not None else "-"
-        signal_subvalue = "Last seen adapter RSSI"
-        if runtime_error_code == "device_not_found":
-            signal_value = "Not visible"
-            signal_subvalue = "The adapter did not see this monitor in the latest scan."
+        signal_grade, signal_percent, _bars, signal_rssi_text = _signal_quality(
+            rssi=runtime.get("rssi"),
+            connected=connected,
+            error_code=runtime_error_code,
+        )
         signal_tile = metric_tile(
-            label="Signal",
-            value=signal_value,
+            label="Signal Quality",
+            value=signal_grade,
             tone="blue",
-            subvalue=signal_subvalue,
+            subvalue=signal_rssi_text,
+            detail_html=_signal_quality_detail_html(
+                rssi=runtime.get("rssi"),
+                connected=connected,
+                error_code=runtime_error_code,
+            ),
         )
         family_label, profile_label = _battery_summary(device)
         battery_type = html.escape(profile_label)
@@ -1063,9 +1501,10 @@ def render_devices_html(
             "Enabled" if bool(device.get("enabled", False)) else "Disabled",
             kind="ok" if bool(device.get("enabled", False)) else "offline",
         )
-        device_type_text = html.escape(str(device.get("type", "bm200")))
         device_name_text = html.escape(str(device.get("name", device_id)))
         device_mac_text = html.escape(str(device.get("mac", "")))
+        vehicle_text = html.escape(_vehicle_summary(device))
+        battery_text = html.escape(_battery_metadata_summary(device))
         cards.append(
             section_card(
                 body=(
@@ -1074,12 +1513,14 @@ def render_devices_html(
                     "<div class='device-card-head'>"
                     f"{device_icon(icon_key, label=icon_label(icon_key))}"
                     "<div class='device-card-copy'>"
-                    f"<div class='settings-label'>{device_type_text}</div>"
+                    f"<div class='settings-label'>{vehicle_text}</div>"
                     f"<div class='section-title'>{device_name_text}</div>"
                     f"<div class='muted-note'>Serial / MAC: {device_mac_text}</div>"
+                    f"<div class='muted-note'>{battery_text}</div>"
                     "</div>"
                     "</div>"
-                    f"<a class='ghost-button' href='/management'>Edit</a>"
+                    "<a class='ghost-button' "
+                    f"href='/devices/edit?device_id={quote(device_id)}'>Edit</a>"
                     "</div>"
                     "<div class='two-column-grid'>"
                     f"{state_tile}"
@@ -1090,20 +1531,15 @@ def render_devices_html(
                     f"<div class='muted-note'>{html.escape(family_label)}</div>"
                     f"{enabled_badge}"
                     "</div>"
-                    "<details style='margin-top:1rem'>"
-                    "<summary class='settings-label'>Change icon</summary>"
-                    "<form method='post' action='/devices/icon' style='margin-top:0.9rem'>"
-                    f"<input type='hidden' name='device_id' value='{html.escape(device_id)}'>"
-                    "<div class='icon-picker-grid'>"
-                    f"{_icon_picker_options(selected_key=icon_key)}"
+                    f"<div class='footer-row' style='margin-top:1rem'>"
+                    f"<span class='muted-note'>{signal_percent}%</span>"
+                    f"<a href='/devices/edit?device_id={quote(device_id)}'>Edit device settings</a>"
                     "</div>"
-                    f"<div style='margin-top:0.85rem'>{button('Save icon', kind='secondary')}</div>"
-                    "</form>"
-                    "</details>"
                 ),
                 classes=f"tone-card {tone}",
             )
         )
+    banner = banner_strip(html.escape(message), kind="warning") if message else ""
     body = (
         top_header(
             title="Devices",
@@ -1114,10 +1550,11 @@ def render_devices_html(
             eyebrow="Devices",
             right=(
                 '<div class="hero-actions">'
-                '<a class="secondary-button" href="/management">Management</a>'
+                '<a class="secondary-button" href="/settings">Settings</a>'
                 "</div>"
             ),
         )
+        + banner
         + section_card(
             title="Configured Devices",
             subtitle="Gateway-ready device registry",
@@ -1125,8 +1562,8 @@ def render_devices_html(
         )
         + section_card(
             title="Add Device",
-            subtitle="Use the existing live add-device flow from the management surface.",
-            body="<a class='primary-button' href='/management#add-device'>Add Device</a>",
+            subtitle="Register new BM devices directly from the device registry.",
+            body=_add_device_form_html(),
         )
     )
     return app_document(
@@ -1135,6 +1572,172 @@ def render_devices_html(
         active_nav="devices",
         primary_device_id=primary_device_id,
         version_label=version_label,
+    )
+
+
+def render_edit_device_html(*, device: dict[str, object], message: str = "") -> str:
+    device_id = str(device.get("id", ""))
+    battery = device.get("battery")
+    battery_table = battery if isinstance(battery, dict) else {}
+    family = str(
+        battery_table.get("family", default_battery_family(str(device.get("type", "bm200"))))
+    )
+    profile = str(
+        battery_table.get(
+            "profile",
+            default_battery_profile(str(device.get("type", "bm200")), family),
+        )
+    )
+    custom_soc_mode = str(battery_table.get("custom_soc_mode", "intelligent_algorithm"))
+    custom_curve = battery_table.get("custom_voltage_curve", [])
+    curve_pairs = [
+        (
+            int(_coerce_float(cast(dict[str, object], row).get("percent", 0))),
+            _coerce_float(cast(dict[str, object], row).get("voltage", 0.0)),
+        )
+        for row in cast(list[object], custom_curve)
+        if isinstance(row, dict)
+    ]
+    icon_key = str(device.get("icon_key", _device_icon_key(device)))
+    installed_in_vehicle = bool(device.get("installed_in_vehicle", False))
+    vehicle_table = device.get("vehicle")
+    vehicle_type = ""
+    if isinstance(vehicle_table, dict):
+        vehicle_type = str(vehicle_table.get("type", ""))
+    if not vehicle_type:
+        vehicle_type = str(device.get("vehicle_type", ""))
+    battery_brand = html.escape(str(battery_table.get("brand", "")))
+    battery_model = html.escape(str(battery_table.get("model", "")))
+    battery_capacity_ah = battery_table.get("capacity_ah")
+    battery_production_year = battery_table.get("production_year")
+    battery_capacity_text = (
+        "" if battery_capacity_ah in (None, "") else html.escape(str(battery_capacity_ah))
+    )
+    battery_year_text = (
+        "" if battery_production_year in (None, "") else html.escape(str(battery_production_year))
+    )
+    device_name = html.escape(str(device.get("name", "")))
+    device_mac = html.escape(str(device.get("mac", "")))
+    device_type = str(device.get("type", "bm200"))
+    device_type_options = (
+        f'<option value="bm200"{_selected_attr(device_type == "bm200")}>bm200</option>'
+        f'<option value="bm300pro"{_selected_attr(device_type == "bm300pro")}>bm300pro</option>'
+    )
+    family_options = _battery_family_options(selected_family=family)
+    profile_options = _battery_profile_options(selected_profile=profile)
+    custom_mode_options = _custom_mode_options(selected_mode=custom_soc_mode)
+    vehicle_type_options = _vehicle_type_options(selected_vehicle_type=vehicle_type)
+    banner = banner_strip(html.escape(message), kind="warning") if message else ""
+    body = (
+        top_header(
+            title="Edit Device",
+            subtitle=(
+                "Update the registry metadata, battery profile, icon, and "
+                "installation context for this monitor."
+            ),
+            eyebrow="Devices",
+            right=(
+                '<div class="hero-actions">'
+                '<a class="secondary-button" href="/devices">Devices</a>'
+                '<a class="secondary-button" href="/settings">Settings</a>'
+                "</div>"
+            ),
+        )
+        + banner
+        + section_card(
+            title=str(device.get("name", device_id)),
+            subtitle=f"Registry ID: {device_id}",
+            body=(
+                '<form method="post" action="/devices/update" class="two-column-grid" '
+                'data-battery-config-form="true">'
+                f'<input type="hidden" name="device_id" value="{html.escape(device_id)}">'
+                '<div><label class="settings-label" for="edit-device-name-input">Name</label>'
+                f'<input id="edit-device-name-input" type="text" '
+                f'name="device_name" value="{device_name}" '
+                'autocomplete="off" required></div>'
+                '<div><label class="settings-label" for="edit-device-type-input">Type</label>'
+                '<select id="edit-device-type-input" name="device_type" autocomplete="off">'
+                f"{device_type_options}"
+                "</select></div>"
+                '<div><label class="settings-label" '
+                'for="edit-device-mac-input">MAC or serial</label>'
+                f'<input id="edit-device-mac-input" type="text" '
+                f'name="device_mac" value="{device_mac}" '
+                'autocomplete="off" spellcheck="false" required></div>'
+                '<div><label class="settings-label" '
+                'for="edit-installed-in-vehicle-input">Vehicle install</label>'
+                f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+                f'<input id="edit-installed-in-vehicle-input" type="checkbox" '
+                f'name="installed_in_vehicle"{_checked_attr(installed_in_vehicle)}>'
+                "<span>Installed in a vehicle</span></label></div>"
+                '<div data-vehicle-section><label class="settings-label" '
+                'for="edit-vehicle-type-input">Vehicle type</label>'
+                f'<select id="edit-vehicle-type-input" name="vehicle_type">'
+                f"{vehicle_type_options}</select>"
+                "</div>"
+                '<div class="battery-form-section" style="grid-column:1 / -1">'
+                "<div><div class='settings-label'>Battery Support</div>"
+                "<div class='inline-field-help'>"
+                "Edit the same battery taxonomy exposed by the official app, "
+                "including custom curves."
+                "</div></div>"
+                "<div><div class='settings-label'>Choose a built-in icon</div>"
+                "<div class='icon-picker-grid'>"
+                f"{_icon_picker_options(selected_key=icon_key)}"
+                "</div></div>"
+                "<div class='battery-form-grid'>"
+                "<div><label class='settings-label' "
+                "for='edit-battery-family-input'>Battery family</label>"
+                f"<select id='edit-battery-family-input' "
+                f"name='battery_family'>{family_options}</select></div>"
+                "<div><label class='settings-label' "
+                "for='edit-battery-profile-input'>Battery profile</label>"
+                f"<select id='edit-battery-profile-input' "
+                f"name='battery_profile'>{profile_options}</select></div>"
+                "<div data-custom-mode-section><label class='settings-label' "
+                "for='edit-custom-soc-mode-input'>Custom battery mode</label>"
+                f"<select id='edit-custom-soc-mode-input' "
+                f"name='custom_soc_mode'>{custom_mode_options}</select></div>"
+                "</div>"
+                '<div class="battery-form-grid">'
+                '<div><label class="settings-label" '
+                'for="edit-battery-brand-input">Battery brand</label>'
+                f'<input id="edit-battery-brand-input" type="text" '
+                f'name="battery_brand" value="{battery_brand}" '
+                'autocomplete="off"></div>'
+                '<div><label class="settings-label" '
+                'for="edit-battery-model-input">Battery model</label>'
+                f'<input id="edit-battery-model-input" type="text" '
+                f'name="battery_model" value="{battery_model}" '
+                'autocomplete="off"></div>'
+                '<div><label class="settings-label" '
+                'for="edit-battery-capacity-input">Capacity (Ah)</label>'
+                f'<input id="edit-battery-capacity-input" type="number" step="0.1" '
+                f'min="0" name="battery_capacity_ah" inputmode="decimal" '
+                f'value="{battery_capacity_text}"></div>'
+                '<div><label class="settings-label" '
+                'for="edit-battery-year-input">Production year</label>'
+                f'<input id="edit-battery-year-input" type="number" min="1950" max="2100" '
+                f'name="battery_production_year" inputmode="numeric" '
+                f'value="{battery_year_text}"></div>'
+                "</div>"
+                "<div data-custom-curve-section>"
+                '<div class="settings-label">Voltage corresponding to power</div>'
+                f'<div class="curve-grid">{_curve_rows_html(tuple(curve_pairs))}</div>'
+                "</div>"
+                "</div>"
+                f'<div style="grid-column:1 / -1">{button("Save Device", kind="primary")}</div>'
+                "</form>"
+            ),
+        )
+    )
+    return app_document(
+        title=f"Edit Device {device_id}",
+        body=body,
+        active_nav="devices",
+        primary_device_id=device_id,
+        version_label=display_version(),
+        script=_battery_form_script(),
     )
 
 
@@ -1170,32 +1773,51 @@ def render_settings_html(
         top_header(
             title="Settings",
             subtitle=(
-                "Gateway-safe settings adapted from the BM300 app. Unsupported "
-                "vehicle-only features are intentionally excluded."
+                "Read the current software configuration first, then jump into "
+                "the dedicated edit surface if you want to change it."
             ),
             eyebrow="Settings",
             right=(
                 '<div class="hero-actions">'
-                '<a class="secondary-button" href="/management">Advanced Config</a>'
+                '<a class="primary-button" href="/gateway">Edit settings</a>'
                 "</div>"
             ),
         )
         + section_card(
             title="Gateway Settings",
-            subtitle="Live settings summary",
+            subtitle="Current runtime and integration summary",
             body=(
                 f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
                 + settings_row("Live polling", config.gateway.reader_mode)
                 + settings_row("Poll interval", f"{config.gateway.poll_interval_seconds} seconds")
                 + settings_row("MQTT / Home Assistant", mqtt_ha_enabled)
-                + settings_row("Web interface", web_enabled)
                 + settings_row("Raw retention", f"{config.retention.raw_retention_days} days")
                 + settings_row("Daily rollup retention", daily_retention)
             ),
         )
         + section_card(
-            title="Device Alerts",
-            subtitle="Gateway-side adaptations of the BM300 settings rhythm.",
+            title="Web Service",
+            subtitle="Current management UI binding",
+            body=(
+                settings_row("Web interface", web_enabled)
+                + settings_row("Configured port", str(config.web.port))
+                + settings_row("Configured host", config.web.host)
+            ),
+        )
+        + section_card(
+            title="Display Settings",
+            subtitle="Current chart rendering preferences",
+            body=(
+                settings_row(
+                    "Chart point markers",
+                    "Enabled" if config.web.show_chart_markers else "Disabled",
+                )
+                + settings_row("Default style", "Clean BM-style lines")
+            ),
+        )
+        + section_card(
+            title="Alerts",
+            subtitle="Read-only backend support status",
             body=(
                 settings_row("Daily power notification", "Not implemented in backend yet")
                 + settings_row("Low voltage alarm", "Back-end threshold support missing")
@@ -1204,10 +1826,21 @@ def render_settings_html(
             ),
         )
         + section_card(
+            title="Actions",
+            subtitle="Open the dedicated editing surfaces",
+            body=(
+                '<div class="inline-actions">'
+                '<a class="primary-button" href="/gateway">Edit settings</a>'
+                '<a class="secondary-button" href="/devices">Manage devices</a>'
+                "</div>"
+            ),
+        )
+        + section_card(
             title="Links",
             subtitle="Operational entry points",
             body=(
-                settings_row("Export Data", "Use CLI history commands")
+                settings_row("Configuration editor", "/gateway")
+                + settings_row("Export Data", "Use CLI history commands")
                 + settings_row("Unit / Currency", "Not applicable to BMGateway")
                 + settings_row("Language", "English")
             ),
@@ -1231,6 +1864,7 @@ def render_device_html(
     yearly_history: list[dict[str, object]],
     analytics: dict[str, object],
     device_summary: dict[str, object] | None = None,
+    show_chart_markers: bool = False,
 ) -> str:
     version_label = display_version()
     summary = _device_summary_from_history(
@@ -1282,6 +1916,13 @@ def render_device_html(
     temperature = _format_number(summary.get("temperature"), digits=1, suffix=" C")
     soc = _format_number(summary.get("soc"), digits=0, suffix="%")
     rssi = summary.get("rssi")
+    signal_grade, signal_percent, _signal_bars, signal_rssi_text = _signal_quality(
+        rssi=rssi,
+        connected=bool(summary.get("connected", False)),
+        error_code=cast(str | None, summary.get("error_code")),
+    )
+    vehicle_text = html.escape(_vehicle_summary(summary))
+    battery_meta_text = html.escape(_battery_metadata_summary(summary))
     chart_id = f"device-chart-{quote(device_id)}".replace("%", "")
     soc_percent = min(max(_coerce_float(summary.get("soc"), 0.0), 0.0), 100.0)
     gauge_degrees = soc_percent * 3.6
@@ -1289,8 +1930,8 @@ def render_device_html(
         top_header(
             title=f"{summary.get('name', device_id)}",
             subtitle=(
-                f"Device detail for {device_id}. Real history, live runtime "
-                "status, and gateway-focused health signals."
+                f"Device detail for {device_id}. {vehicle_text}. Real history, "
+                "live runtime status, and gateway-focused health signals."
             ),
             eyebrow="Battery Detail",
             right=(
@@ -1339,9 +1980,14 @@ def render_device_html(
         )
         + metric_tile(
             label="Signal Quality",
-            value=f"{rssi} dBm" if rssi is not None else "-",
+            value=signal_grade,
             tone="orange",
-            subvalue="Gateway-side BLE quality indicator",
+            subvalue=signal_rssi_text,
+            detail_html=_signal_quality_detail_html(
+                rssi=rssi,
+                connected=bool(summary.get("connected", False)),
+                error_code=cast(str | None, summary.get("error_code")),
+            ),
         )
         + metric_tile(
             label="Battery Health",
@@ -1356,9 +2002,11 @@ def render_device_html(
                 "These cards replace BM300 vehicle actions with gateway-relevant operational state."
             ),
             body=(
-                '<div class="metrics-grid">'
+                _device_status_explainer(summary)
+                + '<div class="metrics-grid">'
                 + summary_card("Last Seen", _display_timestamp(summary.get("last_seen", "unknown")))
-                + summary_card("Driver Status", html.escape(str(summary.get("state", "unknown"))))
+                + summary_card("Vehicle", vehicle_text)
+                + summary_card("Battery Metadata", battery_meta_text)
                 + summary_card(
                     "Error Code",
                     html.escape(str(summary.get("error_code", "None"))),
@@ -1396,6 +2044,7 @@ def render_device_html(
             default_range="30",
             default_metric="voltage",
             legend=[(str(summary.get("name", device_id)), "#17c45a")],
+            show_markers=show_chart_markers,
         )
         + section_card(
             title="Trend Windows",
@@ -1439,6 +2088,7 @@ def render_history_html(
     raw_history: list[dict[str, object]],
     daily_history: list[dict[str, object]],
     monthly_history: list[dict[str, object]],
+    show_chart_markers: bool = False,
 ) -> str:
     version_label = display_version()
     sections = _render_history_sections(
@@ -1504,6 +2154,7 @@ def render_history_html(
             default_range="30",
             default_metric="soc",
             legend=[(device_id, "#4f8df7")],
+            show_markers=show_chart_markers,
         )
         + sections
     )
@@ -1675,6 +2326,12 @@ def add_device_from_form(
     custom_soc_mode: str = "intelligent_algorithm",
     custom_voltage_curve: tuple[tuple[int, float], ...] | None = None,
     icon_key: str | None = None,
+    installed_in_vehicle: bool = False,
+    vehicle_type: str = "",
+    battery_brand: str = "",
+    battery_model: str = "",
+    battery_capacity_ah: float | None = None,
+    battery_production_year: int | None = None,
 ) -> list[str]:
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
@@ -1701,6 +2358,12 @@ def add_device_from_form(
                     battery_profile=resolved_profile.strip(),
                 )
             ).strip(),
+            installed_in_vehicle=installed_in_vehicle,
+            vehicle_type=vehicle_type.strip() if installed_in_vehicle else "",
+            battery_brand=battery_brand.strip(),
+            battery_model=battery_model.strip(),
+            battery_capacity_ah=battery_capacity_ah,
+            battery_production_year=battery_production_year,
         )
     )
     errors = validate_devices(devices)
@@ -1719,14 +2382,50 @@ def add_device_from_form(
     return []
 
 
-def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> list[str]:
+def update_device_from_form(
+    *,
+    config_path: Path,
+    device_id: str,
+    device_type: str,
+    device_name: str,
+    device_mac: str,
+    battery_family: str,
+    battery_profile: str,
+    custom_soc_mode: str,
+    custom_voltage_curve: tuple[tuple[int, float], ...],
+    icon_key: str,
+    installed_in_vehicle: bool,
+    vehicle_type: str,
+    battery_brand: str,
+    battery_model: str,
+    battery_capacity_ah: float | None,
+    battery_production_year: int | None,
+) -> list[str]:
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
     updated_devices: list[Device] = []
     found = False
     for device in devices:
         if device.id == device_id:
-            updated_devices.append(replace(device, icon_key=icon_key.strip()))
+            updated_devices.append(
+                replace(
+                    device,
+                    type=device_type.strip(),
+                    name=device_name.strip(),
+                    mac=normalize_mac_address(device_mac),
+                    battery_family=battery_family.strip(),
+                    battery_profile=battery_profile.strip(),
+                    custom_soc_mode=custom_soc_mode.strip(),
+                    custom_voltage_curve=custom_voltage_curve,
+                    icon_key=icon_key.strip(),
+                    installed_in_vehicle=installed_in_vehicle,
+                    vehicle_type=vehicle_type.strip() if installed_in_vehicle else "",
+                    battery_brand=battery_brand.strip(),
+                    battery_model=battery_model.strip(),
+                    battery_capacity_ah=battery_capacity_ah,
+                    battery_production_year=battery_production_year,
+                )
+            )
             found = True
         else:
             updated_devices.append(device)
@@ -1736,6 +2435,56 @@ def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> l
     if errors:
         return errors
     write_device_registry(config.device_registry_path, updated_devices)
+    return []
+
+
+def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> list[str]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    target = next((device for device in devices if device.id == device_id), None)
+    if target is None:
+        return [f"device {device_id} was not found"]
+    return update_device_from_form(
+        config_path=config_path,
+        device_id=device_id,
+        device_type=target.type,
+        device_name=target.name,
+        device_mac=target.mac,
+        battery_family=target.battery_family,
+        battery_profile=target.battery_profile,
+        custom_soc_mode=target.custom_soc_mode,
+        custom_voltage_curve=target.custom_voltage_curve,
+        icon_key=icon_key,
+        installed_in_vehicle=target.installed_in_vehicle,
+        vehicle_type=target.vehicle_type,
+        battery_brand=target.battery_brand,
+        battery_model=target.battery_model,
+        battery_capacity_ah=target.battery_capacity_ah,
+        battery_production_year=target.battery_production_year,
+    )
+
+
+def update_web_preferences(
+    *,
+    config_path: Path,
+    web_port: int,
+    show_chart_markers: bool,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        web=replace(
+            config.web,
+            port=web_port,
+            show_chart_markers=show_chart_markers,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
     return []
 
 
@@ -1918,6 +2667,7 @@ def serve_management(
                     ),
                     analytics=fetch_degradation_report(database_path, device_id=device_id),
                     device_summary=snapshot_device,
+                    show_chart_markers=config.web.show_chart_markers,
                 )
                 self._send_html(html)
                 return
@@ -1938,13 +2688,36 @@ def serve_management(
                         device_id=device_id,
                         limit=24,
                     ),
+                    show_chart_markers=config.web.show_chart_markers,
                 )
                 self._send_html(html)
                 return
 
             if parsed.path == "/devices":
-                html = render_devices_html(snapshot=snapshot, devices=serialized_devices)
+                message = parse_qs(parsed.query).get("message", [""])[0]
+                html = render_devices_html(
+                    snapshot=snapshot,
+                    devices=serialized_devices,
+                    message=message,
+                )
                 self._send_html(html)
+                return
+
+            if parsed.path == "/devices/edit":
+                params = parse_qs(parsed.query)
+                device_id = params.get("device_id", [""])[0]
+                device = next(
+                    (item for item in serialized_devices if str(item.get("id", "")) == device_id),
+                    None,
+                )
+                if device is None:
+                    self._send_html(
+                        render_devices_html(snapshot=snapshot, devices=serialized_devices),
+                        status=404,
+                    )
+                    return
+                message = parse_qs(parsed.query).get("message", [""])[0]
+                self._send_html(render_edit_device_html(device=device, message=message))
                 return
 
             if parsed.path == "/settings":
@@ -1956,11 +2729,12 @@ def serve_management(
                 self._send_html(html)
                 return
 
-            if parsed.path == "/management":
+            if parsed.path in {"/management", "/gateway"}:
                 config_text, devices_text = _config_and_registry_texts(config_path)
                 message = parse_qs(parsed.query).get("message", [""])[0]
                 html = render_management_html(
                     snapshot=snapshot,
+                    config=config,
                     storage_summary=fetch_storage_summary(database_path),
                     devices=serialized_devices,
                     config_text=config_text,
@@ -1980,6 +2754,7 @@ def serve_management(
                 devices=serialized_devices,
                 chart_points=battery_chart_points,
                 legend=battery_legend,
+                show_chart_markers=config.web.show_chart_markers,
             )
             self._send_html(html)
 
@@ -2000,6 +2775,7 @@ def serve_management(
                 if errors:
                     html = render_management_html(
                         snapshot={"devices": []},
+                        config=load_config(config_path),
                         storage_summary={
                             "counts": {
                                 "gateway_snapshots": 0,
@@ -2018,7 +2794,7 @@ def serve_management(
                     return
 
                 self.send_response(303)
-                self.send_header("Location", "/management?message=Configuration%20saved")
+                self.send_header("Location", "/gateway?message=Configuration%20saved")
                 self.end_headers()
                 return
 
@@ -2034,18 +2810,22 @@ def serve_management(
                     custom_soc_mode=form.get("custom_soc_mode", ["intelligent_algorithm"])[0],
                     custom_voltage_curve=_parse_custom_curve_from_form(form),
                     icon_key=form.get("icon_key", ["battery_monitor"])[0],
+                    installed_in_vehicle=_bool_from_form(form, "installed_in_vehicle"),
+                    vehicle_type=_string_from_form(form, "vehicle_type"),
+                    battery_brand=_string_from_form(form, "battery_brand"),
+                    battery_model=_string_from_form(form, "battery_model"),
+                    battery_capacity_ah=_optional_float_from_form(form, "battery_capacity_ah"),
+                    battery_production_year=_optional_int_from_form(
+                        form,
+                        "battery_production_year",
+                    ),
                 )
                 if errors:
-                    config_text, devices_text = _config_and_registry_texts(config_path)
-                    config, snapshot, database_path = self._load_current()
+                    config, snapshot, _database_path = self._load_current()
                     configured_devices = load_device_registry(config.device_registry_path)
-                    html = render_management_html(
+                    html = render_devices_html(
                         snapshot=snapshot,
-                        storage_summary=fetch_storage_summary(database_path),
                         devices=[device.to_dict() for device in configured_devices],
-                        config_text=config_text,
-                        devices_text=devices_text,
-                        contract=build_contract(config, configured_devices),
                         message="Validation failed: " + "; ".join(errors),
                     )
                     self._send_html(html, status=400)
@@ -2055,7 +2835,92 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/management?" + urlencode({"message": "Device added. Live polling enabled."}),
+                    "/devices?" + urlencode({"message": "Device added. Live polling enabled."}),
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/devices/update":
+                errors = update_device_from_form(
+                    config_path=config_path,
+                    device_id=form.get("device_id", [""])[0],
+                    device_type=form.get("device_type", ["bm200"])[0],
+                    device_name=form.get("device_name", [""])[0],
+                    device_mac=form.get("device_mac", [""])[0],
+                    battery_family=form.get("battery_family", ["lead_acid"])[0],
+                    battery_profile=form.get("battery_profile", ["regular_lead_acid"])[0],
+                    custom_soc_mode=form.get("custom_soc_mode", ["intelligent_algorithm"])[0],
+                    custom_voltage_curve=_parse_custom_curve_from_form(form),
+                    icon_key=form.get("icon_key", ["battery_monitor"])[0],
+                    installed_in_vehicle=_bool_from_form(form, "installed_in_vehicle"),
+                    vehicle_type=_string_from_form(form, "vehicle_type"),
+                    battery_brand=_string_from_form(form, "battery_brand"),
+                    battery_model=_string_from_form(form, "battery_model"),
+                    battery_capacity_ah=_optional_float_from_form(form, "battery_capacity_ah"),
+                    battery_production_year=_optional_int_from_form(
+                        form,
+                        "battery_production_year",
+                    ),
+                )
+                if errors:
+                    config = load_config(config_path)
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    device_id = form.get("device_id", [""])[0]
+                    device = next(
+                        (item.to_dict() for item in configured_devices if item.id == device_id),
+                        {
+                            "id": device_id,
+                            "type": form.get("device_type", ["bm200"])[0],
+                            "name": form.get("device_name", [""])[0],
+                            "mac": form.get("device_mac", [""])[0],
+                            "icon_key": form.get("icon_key", ["battery_monitor"])[0],
+                            "installed_in_vehicle": _bool_from_form(form, "installed_in_vehicle"),
+                            "vehicle": {
+                                "installed": _bool_from_form(form, "installed_in_vehicle"),
+                                "type": _string_from_form(form, "vehicle_type"),
+                            },
+                            "battery": {
+                                "family": form.get("battery_family", ["lead_acid"])[0],
+                                "profile": form.get("battery_profile", ["regular_lead_acid"])[0],
+                                "custom_soc_mode": form.get(
+                                    "custom_soc_mode", ["intelligent_algorithm"]
+                                )[0],
+                                "brand": _string_from_form(form, "battery_brand"),
+                                "model": _string_from_form(form, "battery_model"),
+                                "capacity_ah": _optional_float_from_form(
+                                    form,
+                                    "battery_capacity_ah",
+                                ),
+                                "production_year": _optional_int_from_form(
+                                    form,
+                                    "battery_production_year",
+                                ),
+                                "custom_voltage_curve": [
+                                    {"percent": percent, "voltage": voltage}
+                                    for percent, voltage in _parse_custom_curve_from_form(form)
+                                ],
+                            },
+                        },
+                    )
+                    self._send_html(
+                        render_edit_device_html(
+                            device=device,
+                            message="Validation failed: " + "; ".join(errors),
+                        ),
+                        status=400,
+                    )
+                    return
+
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/devices/edit?"
+                    + urlencode(
+                        {
+                            "device_id": form.get("device_id", [""])[0],
+                            "message": "Device saved",
+                        }
+                    ),
                 )
                 self.end_headers()
                 return
@@ -2081,13 +2946,60 @@ def serve_management(
                 self.end_headers()
                 return
 
+            if parsed.path == "/settings/web":
+                try:
+                    web_port = int(form.get("web_port", ["80"])[0])
+                except ValueError:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_management_html(
+                            snapshot=snapshot,
+                            config=config,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            devices=[device.to_dict() for device in configured_devices],
+                            config_text=_read_text(config_path),
+                            devices_text=_read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: web port must be numeric",
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_web_preferences(
+                    config_path=config_path,
+                    web_port=web_port,
+                    show_chart_markers=_bool_from_form(form, "show_chart_markers"),
+                )
+                if errors:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_management_html(
+                            snapshot=snapshot,
+                            config=config,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            devices=[device.to_dict() for device in configured_devices],
+                            config_text=_read_text(config_path),
+                            devices_text=_read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header("Location", "/gateway?" + urlencode({"message": "Settings saved"}))
+                self.end_headers()
+                return
+
             if parsed.path == "/actions/run-once":
                 completed = run_once_via_cli(config_path, state_dir=state_dir)
                 message = "Run completed" if completed.returncode == 0 else "Run failed"
                 if completed.stderr:
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)
-                self.send_header("Location", "/management?" + urlencode({"message": message}))
+                self.send_header("Location", "/gateway?" + urlencode({"message": message}))
                 self.end_headers()
                 return
 
@@ -2098,7 +3010,7 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/management?" + urlencode({"message": "Bluetooth adapter recovery triggered"}),
+                    "/gateway?" + urlencode({"message": "Bluetooth adapter recovery triggered"}),
                 )
                 self.end_headers()
                 return
@@ -2113,7 +3025,7 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/management?" + urlencode({"message": "History pruned"}),
+                    "/gateway?" + urlencode({"message": "History pruned"}),
                 )
                 self.end_headers()
                 return

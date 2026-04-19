@@ -262,7 +262,7 @@ def build_snapshot(
                 voltage=measurement.voltage,
                 soc=measurement.soc,
                 temperature=measurement.temperature,
-                rssi=None,
+                rssi=measurement.rssi,
                 state=measurement.state,
                 error_code=None,
                 error_detail=None,

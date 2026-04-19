@@ -11,11 +11,14 @@ Options:
   --ref <git-ref>                 Optional branch, tag, or commit to checkout after update
   --disable-web                   Do not enable the management web service
   --disable-home-assistant        Disable MQTT and Home Assistant in the installed config
+  --enable-glances                Install and enable a Glances API service for Home Assistant
+  --enable-cockpit                Install and enable Cockpit on HTTPS port 9090
   --service-user <name>           User that owns the services and config. Default: current user
   --skip-apt                      Skip apt package installation
   --skip-uv                       Skip uv bootstrap
   --skip-services                 Skip systemd service installation and startup
-  --web-port <port>               Management web port. Default: 8080
+  --web-port <port>               Management web port. Default: 80
+  --glances-port <port>           Glances API port. Default: 61208
   --help                          Show this help text
 EOF
 }
@@ -31,7 +34,10 @@ skip_uv=0
 install_services=1
 enable_web=1
 enable_home_assistant=1
-web_port="8080"
+enable_glances=0
+enable_cockpit=0
+web_port="80"
+glances_port="61208"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -67,12 +73,24 @@ while [[ "$#" -gt 0 ]]; do
       enable_home_assistant=0
       shift
       ;;
+    --enable-glances)
+      enable_glances=1
+      shift
+      ;;
+    --enable-cockpit)
+      enable_cockpit=1
+      shift
+      ;;
     --service-user)
       service_user="${2:?missing value for --service-user}"
       shift 2
       ;;
     --web-port)
       web_port="${2:?missing value for --web-port}"
+      shift 2
+      ;;
+    --glances-port)
+      glances_port="${2:?missing value for --glances-port}"
       shift 2
       ;;
     --help)
@@ -101,7 +119,14 @@ fi
 
 if [[ "${skip_apt}" -eq 0 ]]; then
   sudo apt-get update
-  sudo apt-get install -y bluetooth bluez curl git make python3 python3-venv
+  apt_packages=(bluetooth bluez curl git make python3 python3-venv)
+  if [[ "${enable_glances}" -eq 1 ]]; then
+    apt_packages+=(glances)
+  fi
+  if [[ "${enable_cockpit}" -eq 1 ]]; then
+    apt_packages+=(cockpit)
+  fi
+  sudo apt-get install -y "${apt_packages[@]}"
 fi
 
 if [[ "${skip_uv}" -eq 0 ]] && ! command -v uv >/dev/null 2>&1; then
@@ -140,6 +165,12 @@ if [[ "${install_services}" -eq 1 ]]; then
   if [[ "${enable_home_assistant}" -eq 0 ]]; then
     service_args+=(--disable-home-assistant)
   fi
+  if [[ "${enable_glances}" -eq 1 ]]; then
+    service_args+=(--enable-glances --glances-port "${glances_port}")
+  fi
+  if [[ "${enable_cockpit}" -eq 1 ]]; then
+    service_args+=(--enable-cockpit)
+  fi
   sudo bash "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"
 fi
 
@@ -156,4 +187,18 @@ if [[ "${install_services}" -eq 1 ]] && [[ "${enable_web}" -eq 1 ]]; then
     printf 'Web UI (IP): http://%s:%s/\n' "${primary_ip}" "${web_port}"
   fi
   printf 'Next step: open the Web UI and add your Bluetooth devices to start monitoring.\n'
+fi
+if [[ "${install_services}" -eq 1 ]] && [[ "${enable_glances}" -eq 1 ]]; then
+  printf 'Glances API: http://%s:%s/api/4/status\n' "${bonjour_name}" "${glances_port}"
+  if [[ -n "${primary_ip}" ]]; then
+    printf 'Glances API (IP): http://%s:%s/api/4/status\n' "${primary_ip}" "${glances_port}"
+  fi
+  printf 'Home Assistant: add the Glances integration with host %s and port %s.\n' "${bonjour_name}" "${glances_port}"
+fi
+if [[ "${install_services}" -eq 1 ]] && [[ "${enable_cockpit}" -eq 1 ]]; then
+  printf 'Cockpit: https://%s:9090/\n' "${bonjour_name}"
+  if [[ -n "${primary_ip}" ]]; then
+    printf 'Cockpit (IP): https://%s:9090/\n' "${primary_ip}"
+  fi
+  printf 'Cockpit login uses a system account password, not only SSH keys.\n'
 fi

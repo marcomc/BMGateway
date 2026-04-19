@@ -67,10 +67,24 @@ official BM200/BM300 app flow:
 - custom battery mode: intelligent algorithm or voltage-to-SoC curve
 - built-in icon selection for the battery overview cards, including car,
   motorcycle, chemistry-specific, and custom battery monitor visuals
+- `installed_in_vehicle = true|false` to separate battery chemistry from
+  installation context
+- `vehicle_type` for vehicle-installed batteries, including car, motorcycle,
+  van, camper, truck, bus, boat, tractor, ATV, and machinery profiles
+- optional battery metadata for `brand`, `model`, `capacity_ah`, and
+  `production_year`
 
 The CLI can inspect raw history, daily rollups, monthly summaries, and storage
 retention stats directly, and it now exposes yearly summaries plus degradation
 comparison windows.
+
+The web UI now defaults to:
+
+- `web.port = 80`
+- `web.show_chart_markers = false`
+
+The gateway/admin surface lives under `/gateway`, while `/devices/edit` is the
+dedicated device-configuration flow.
 
 ## Notes
 

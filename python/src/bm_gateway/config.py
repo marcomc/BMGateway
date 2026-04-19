@@ -51,7 +51,8 @@ class HomeAssistantConfig:
 class WebConfig:
     enabled: bool = True
     host: str = "0.0.0.0"
-    port: int = 8080
+    port: int = 80
+    show_chart_markers: bool = False
 
 
 @dataclass(frozen=True)
@@ -124,6 +125,7 @@ class AppConfig:
                 "enabled": self.web.enabled,
                 "host": self.web.host,
                 "port": self.web.port,
+                "show_chart_markers": self.web.show_chart_markers,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -208,6 +210,7 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"enabled = {_bool_to_toml(config.web.enabled)}",
             f"host = {_string_to_toml(config.web.host)}",
             f"port = {config.web.port}",
+            f"show_chart_markers = {_bool_to_toml(config.web.show_chart_markers)}",
             "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
@@ -259,7 +262,8 @@ def load_config(path: Path) -> AppConfig:
     web = WebConfig(
         enabled=bool(web_table.get("enabled", True)),
         host=str(web_table.get("host", "0.0.0.0")),
-        port=int(web_table.get("port", 8080)),
+        port=int(web_table.get("port", 80)),
+        show_chart_markers=bool(web_table.get("show_chart_markers", False)),
     )
     retention = RetentionConfig(
         raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
@@ -302,6 +306,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("home_assistant.gateway_device_id must not be empty")
     if config.web.port <= 0:
         errors.append("web.port must be greater than zero")
+    if config.web.port > 65535:
+        errors.append("web.port must be less than or equal to 65535")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:

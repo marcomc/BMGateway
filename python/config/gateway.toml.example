@@ -35,7 +35,8 @@ gateway_device_id = "bm_gateway"
 [web]
 enabled = true
 host = "0.0.0.0"
-port = 8080
+port = 80
+show_chart_markers = false
 
 [retention]
 raw_retention_days = 180

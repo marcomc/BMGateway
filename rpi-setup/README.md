@@ -13,6 +13,7 @@ Current contents:
 - `ansible/` for provisioning automation
 - `examples/imager/` for first-boot payload examples
 - `systemd/` for the runtime unit
+- `systemd/glances-web.service` as the Home Assistant-compatible Glances API unit
 - `scripts/` for install and update helpers
 - `../scripts/bootstrap-install.sh` for one-line host bootstrap onto the Pi
 - `../scripts/dev-deploy.sh` for syncing the current checkout to an existing
@@ -36,6 +37,8 @@ The one-line bootstrap now installs the full appliance by default:
 - standalone CLI runtime
 - runtime service
 - management web service
+- optional Glances API service for Home Assistant
+- optional Cockpit HTTPS host administration on port `9090`
 - live-ready config with an empty device registry
 
 For repeat development deploys to an already bootstrapped host, use:

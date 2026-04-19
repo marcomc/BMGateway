@@ -7,7 +7,13 @@
 # mac = "A1:B2:C3:D4:E5:F6"
 # enabled = true
 # icon_key = "lead_acid_battery"
+# installed_in_vehicle = false
+# vehicle_type = ""
 # [devices.battery]
 # family = "lead_acid"
 # profile = "regular_lead_acid"
 # custom_soc_mode = "intelligent_algorithm"
+# brand = "Varta"
+# model = "Silver Dynamic"
+# capacity_ah = 95
+# production_year = 2025

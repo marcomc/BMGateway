@@ -7,13 +7,16 @@ from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.web import (
+    _add_device_form_html,
     _chart_points,
     add_device_from_form,
     build_run_once_command,
     render_device_html,
     render_devices_html,
+    render_edit_device_html,
     render_history_html,
     render_management_html,
+    render_settings_html,
     update_config_from_text,
     update_device_icon,
 )
@@ -145,6 +148,12 @@ def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_p
         device_name="Ancell BM200",
         device_mac="A1B2C3D4E5F6",
         icon_key="motorcycle_12v",
+        installed_in_vehicle=True,
+        vehicle_type="motorcycle",
+        battery_brand="Yuasa",
+        battery_model="YTX20L-BS",
+        battery_capacity_ah=18.0,
+        battery_production_year=2025,
     )
 
     assert errors == []
@@ -153,6 +162,11 @@ def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_p
     assert config.gateway.reader_mode == "live"
     assert devices[0].mac == "A1:B2:C3:D4:E5:F6"
     assert devices[0].icon_key == "motorcycle_12v"
+    assert devices[0].vehicle_type == "motorcycle"
+    assert devices[0].battery_brand == "Yuasa"
+    assert devices[0].battery_model == "YTX20L-BS"
+    assert devices[0].battery_capacity_ah == 18.0
+    assert devices[0].battery_production_year == 2025
 
 
 def test_add_device_from_form_writes_toml_safe_strings(tmp_path: Path) -> None:
@@ -317,8 +331,10 @@ def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> Non
 
 
 def test_render_management_html_includes_contract_and_storage_sections() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
     html = render_management_html(
         snapshot={"generated_at": "2026-04-17T20:00:00+02:00", "devices": []},
+        config=config,
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
@@ -364,20 +380,13 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert "Storage Summary" in html
     assert "/api/ha/contract" in html
     assert "Prune History Using Retention Settings" in html
-    assert "Add Device and Enable Live Polling" in html
+    assert "Edit Settings" in html
+    assert "Web Service Settings" in html
+    assert "Display Settings" in html
+    assert "Open Devices" in html
     assert 'href="#main-content"' in html
     assert 'id="main-content"' in html
     assert 'aria-live="polite"' in html
-    assert 'for="device-id-input"' in html
-    assert 'id="device-id-input"' in html
-    assert 'autocomplete="off"' in html
-    assert 'spellcheck="false"' in html
-    assert 'aria-describedby="device-mac-help"' in html
-    assert "name='battery_family'" in html
-    assert 'name="icon_key"' in html
-    assert "Choose a built-in icon" in html
-    assert "name='battery_profile'" in html
-    assert "Voltage corresponding to power" in html
     assert 'aria-label="Primary"' in html
     assert "control-plane" in html
     assert "api-chip" in html
@@ -387,11 +396,13 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
 
 
 def test_render_management_html_includes_analytics_and_device_links() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
     html = render_management_html(
         snapshot={
             "generated_at": "2026-04-17T20:00:00+02:00",
             "devices": [{"id": "bm200_house", "name": "BM200 House"}],
         },
+        config=config,
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
@@ -416,12 +427,29 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
         message="ok",
     )
 
-    assert "/device?device_id=bm200_house" in html
     assert "/api/analytics?device_id=" in html
     assert "Gateway Overview" in html
-    assert "Device Dashboard" in html
     assert "Operational Surfaces" in html
     assert "Recover Bluetooth Adapter" in html
+    assert "Open Devices" in html
+
+
+def test_render_settings_html_is_summary_first_with_edit_link() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={"devices": []},
+        devices=[],
+    )
+
+    assert "Gateway Settings" in html
+    assert "Web Service" in html
+    assert "Display Settings" in html
+    assert "Alerts" in html
+    assert "Edit settings" in html
+    assert 'href="/gateway"' in html
+    assert "Save display settings" not in html
+    assert "Save web service settings" not in html
 
 
 def test_render_battery_html_renders_device_icon() -> None:
@@ -459,7 +487,49 @@ def test_render_battery_html_renders_device_icon() -> None:
 
     assert "device-icon-frame" in html
     assert 'data-icon-key="motorcycle_12v"' in html
+    assert "device-icon-frame hero-device-icon" in html
+    assert "hero-soc hero-soc-battery" in html
+    assert "battery-card-status" in html
+    assert "Battery OK" in html
     assert "Open device" in html
+
+
+def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "bm_charging",
+                    "name": "Charging Battery",
+                    "type": "bm200",
+                    "soc": 100,
+                    "voltage": 14.36,
+                    "temperature": 19.0,
+                    "state": "charging",
+                    "connected": True,
+                    "icon_key": "lithium_battery",
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "bm_charging",
+                "name": "Charging Battery",
+                "type": "bm200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+                "icon_key": "lithium_battery",
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "Charging" in html
+    assert "battery-card-status charging" in html
+    assert 'aria-label="Charging"' in html
 
 
 def test_chart_points_ignore_error_rows_and_empty_raw_samples() -> None:
@@ -577,8 +647,21 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
     assert "Historical Chart" in html
     assert "Battery Health" in html
     assert "Signal Quality" in html
+    assert "Good" in html
+    assert "58%" in html
+    assert "RSSI -71 dBm" in html
     assert "Last Seen" in html
     assert "Runtime Status" in html
+    assert "Reported Status" in html
+    assert "This monitor reports the battery state directly over BM200/BM6." in html
+    assert "Protocol code 2" in html
+    assert "Critical" in html
+    assert "Low" in html
+    assert "Normal" in html
+    assert "Charging" in html
+    assert "Floating" in html
+    assert "status-explainer" in html
+    assert "status-scale-fill" in html
     assert '<a class="secondary-button" href="/">Battery</a>' in html
     assert 'aria-current="page"' in html
     assert "hero-shell" in html
@@ -668,6 +751,7 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert "No BLE advertisement seen during the latest scan window." in html
     assert "Not visible" in html
     assert "The adapter did not see this monitor in the latest scan." in html
+    assert "/devices/edit?device_id=ancell_bm200" in html
 
 
 def test_render_devices_html_uses_device_battery_profile_labels() -> None:
@@ -690,4 +774,75 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
 
     assert "AGM Battery" in html
     assert "Lead-Acid Battery" in html
-    assert "Change icon" in html
+    assert "/devices/edit?device_id=ancell_bm200" in html
+
+
+def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
+    html = _add_device_form_html()
+
+    assert 'name="installed_in_vehicle"' in html
+    assert 'name="vehicle_type"' in html
+    assert ">Car<" in html
+    assert ">Truck<" in html
+    assert ">Bus<" in html
+    assert ">ATV / Quad<" in html
+    assert 'name="battery_brand"' in html
+    assert 'name="battery_model"' in html
+    assert 'name="battery_capacity_ah"' in html
+    assert 'name="battery_production_year"' in html
+
+
+def test_render_edit_device_html_prefills_device_fields() -> None:
+    html = render_edit_device_html(
+        device={
+            "id": "ancell_bm200",
+            "type": "bm200",
+            "name": "Ancell BM200",
+            "mac": "3C:AB:72:82:86:EA",
+            "enabled": True,
+            "icon_key": "motorcycle_12v",
+            "installed_in_vehicle": True,
+            "vehicle": {"installed": True, "type": "motorcycle"},
+            "battery": {
+                "family": "lead_acid",
+                "profile": "agm",
+                "custom_soc_mode": "intelligent_algorithm",
+                "brand": "Yuasa",
+                "model": "YTX20L-BS",
+                "capacity_ah": 18.0,
+                "production_year": 2025,
+                "custom_voltage_curve": [
+                    {"percent": 100, "voltage": 12.9},
+                    {"percent": 0, "voltage": 11.9},
+                ],
+            },
+        },
+        message="",
+    )
+
+    assert "Edit Device" in html
+    assert 'action="/devices/update"' in html
+    assert 'name="device_id"' in html
+    assert 'value="ancell_bm200"' in html
+    assert 'name="device_type"' in html
+    assert "AGM Battery" in html
+    assert 'name="installed_in_vehicle"' in html
+    assert "checked" in html
+    assert 'value="motorcycle_12v"' in html
+    assert 'name="vehicle_type"' in html
+    assert "Yuasa" in html
+    assert "YTX20L-BS" in html
+    assert 'name="battery_capacity_ah"' in html
+    assert 'name="battery_production_year"' in html
+
+
+def test_bottom_nav_renders_generated_icons() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "nav-icon" in html
+    assert "nav-label" in html

@@ -1,0 +1,14 @@
+[Unit]
+Description=Glances Web API for Home Assistant
+Documentation=https://glances.readthedocs.io/
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/glances -w --disable-webui -B 0.0.0.0 -p 61208
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

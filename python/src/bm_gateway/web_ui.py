@@ -344,6 +344,37 @@ details summary::-webkit-details-marker { display: none; }
   line-height: 1.05;
   font-variant-numeric: tabular-nums;
 }
+.metric-detail-stack {
+  display: grid;
+  gap: 0.32rem;
+  margin-top: 0.6rem;
+}
+.signal-quality-row {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+.signal-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 0.2rem;
+  height: 1rem;
+}
+.signal-bars span {
+  width: 0.28rem;
+  border-radius: 999px;
+  background: rgba(82, 96, 113, 0.24);
+}
+.signal-bars span.active {
+  background: var(--accent-green);
+}
+.signal-bars span:nth-child(1) { height: 0.34rem; }
+.signal-bars span:nth-child(2) { height: 0.52rem; }
+.signal-bars span:nth-child(3) { height: 0.72rem; }
+.signal-bars span:nth-child(4) { height: 0.9rem; }
 .metric-tile.blue { background: var(--accent-blue-soft); }
 .metric-tile.green { background: #d9f4e8; }
 .metric-tile.purple { background: #eddcfb; }
@@ -378,6 +409,10 @@ details summary::-webkit-details-marker { display: none; }
   align-items: flex-start;
   gap: 0.9rem;
 }
+.battery-card-head {
+  gap: 1rem;
+  align-items: flex-start;
+}
 .device-card-copy {
   min-width: 0;
   flex: 1 1 auto;
@@ -396,6 +431,68 @@ details summary::-webkit-details-marker { display: none; }
   font-size: clamp(2.5rem, 6vw, 3.5rem);
   font-weight: 800;
   font-variant-numeric: tabular-nums;
+}
+.battery-overview-card {
+  min-height: 300px;
+  padding: 1.15rem;
+}
+.battery-overview-card .meta-name {
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.08;
+}
+.battery-overview-card .meta-context {
+  margin-top: 0.15rem;
+  font-size: 0.88rem;
+}
+.battery-overview-card .hero-soc-battery {
+  margin: 0.45rem 0 0.28rem;
+  color: var(--text-primary);
+  font-size: clamp(3.5rem, 9vw, 5rem);
+  font-weight: 800;
+  line-height: 0.92;
+  letter-spacing: -0.045em;
+  font-variant-numeric: tabular-nums;
+}
+.battery-overview-card .battery-card-reading {
+  color: var(--text-primary);
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+.battery-overview-card .battery-card-meta-extra {
+  margin-top: 0.24rem;
+  font-size: 0.84rem;
+}
+.battery-card-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin-top: 0.55rem;
+  color: var(--text-secondary);
+  font-size: 0.96rem;
+  font-weight: 700;
+}
+.battery-card-status.ok { color: var(--state-ok); }
+.battery-card-status.charging { color: var(--accent-blue); }
+.battery-card-status.warning { color: var(--state-warning); }
+.battery-card-status.error { color: var(--state-error); }
+.battery-card-status.offline { color: var(--state-offline); }
+.battery-card-status-icon {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+}
+.hero-device-icon {
+  flex: 0 0 clamp(88px, 18vw, 112px);
+  width: clamp(88px, 18vw, 112px);
+  height: clamp(88px, 18vw, 112px);
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.62);
+}
+.hero-device-icon .device-icon-svg {
+  width: clamp(58px, 12vw, 76px);
+  height: clamp(58px, 12vw, 76px);
 }
 .device-card .meta {
   color: var(--text-secondary);
@@ -461,6 +558,111 @@ details summary::-webkit-details-marker { display: none; }
 .status-badge.warning { background: rgba(245, 158, 11, 0.12); color: var(--state-warning); }
 .status-badge.error { background: rgba(239, 68, 68, 0.12); color: var(--state-error); }
 .status-badge.offline { background: rgba(149, 163, 184, 0.18); color: var(--state-offline); }
+.status-explainer {
+  margin-bottom: 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,253,0.95));
+  box-shadow: var(--shadow-card);
+}
+.status-explainer-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem;
+}
+.status-explainer-value {
+  margin-top: 0.2rem;
+  font-size: 1.35rem;
+  font-weight: 800;
+}
+.status-explainer-body {
+  display: grid;
+  gap: 0.9rem;
+  padding: 0 1rem 1rem;
+}
+.status-explainer-copy {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.status-chip-grid {
+  gap: 0.7rem;
+}
+.status-scale {
+  display: grid;
+  gap: 0.75rem;
+}
+.status-scale-track {
+  position: relative;
+  min-height: 22px;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+  background: rgba(221, 229, 240, 0.55);
+}
+.status-scale-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: var(--radius-pill);
+  opacity: 0.85;
+}
+.status-scale-fill.tone-ok { background: linear-gradient(90deg, rgba(23, 196, 90, 0.72), rgba(23, 196, 90, 0.9)); }
+.status-scale-fill.tone-warning { background: linear-gradient(90deg, rgba(245, 158, 11, 0.72), rgba(245, 158, 11, 0.9)); }
+.status-scale-fill.tone-error { background: linear-gradient(90deg, rgba(239, 68, 68, 0.72), rgba(239, 68, 68, 0.9)); }
+.status-scale-fill.tone-info { background: linear-gradient(90deg, rgba(79, 141, 247, 0.72), rgba(79, 141, 247, 0.9)); }
+.status-scale-fill.tone-purple { background: linear-gradient(90deg, rgba(155, 120, 255, 0.72), rgba(155, 120, 255, 0.9)); }
+.status-scale-marker {
+  position: absolute;
+  top: 50%;
+  width: 16px;
+  height: 16px;
+  border: 3px solid #fff;
+  border-radius: 999px;
+  box-shadow: var(--shadow-card);
+  transform: translate(-50%, -50%);
+}
+.status-scale-marker.tone-ok { background: var(--accent-green); }
+.status-scale-marker.tone-warning { background: #f59e0b; }
+.status-scale-marker.tone-error { background: #ef4444; }
+.status-scale-marker.tone-info { background: #4f8df7; }
+.status-scale-marker.tone-purple { background: #9b78ff; }
+.status-scale-labels {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.status-scale-segment {
+  display: grid;
+  gap: 0.3rem;
+  justify-items: center;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.status-scale-segment span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  width: 100%;
+  border-radius: 999px;
+  padding: 0.4rem 0.45rem;
+  border: 1px solid rgba(215, 224, 234, 0.95);
+  background: rgba(255, 255, 255, 0.9);
+}
+.status-scale-segment.reached span {
+  color: var(--text-primary);
+}
+.status-scale-segment.active span {
+  box-shadow: var(--shadow-card);
+  transform: translateY(-1px);
+}
+.status-scale-segment.tone-ok span { background: rgba(23, 196, 90, 0.1); }
+.status-scale-segment.tone-warning span { background: rgba(245, 158, 11, 0.12); }
+.status-scale-segment.tone-error span { background: rgba(239, 68, 68, 0.12); }
+.status-scale-segment.tone-info span { background: rgba(79, 141, 247, 0.12); }
+.status-scale-segment.tone-purple span { background: rgba(155, 120, 255, 0.14); }
 .banner-strip {
   display: flex;
   align-items: flex-start;
@@ -857,6 +1059,29 @@ details summary::-webkit-details-marker { display: none; }
   font-size: 0.82rem;
   font-weight: 700;
 }
+.nav-icon {
+  width: 24px;
+  height: 24px;
+  color: currentColor;
+}
+.nav-icon .stroke-main {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.3;
+}
+.nav-icon .fill-main {
+  fill: currentColor;
+  fill-opacity: 0.14;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+.nav-label {
+  line-height: 1;
+}
 .nav-link.active { color: var(--accent-green); }
 .nav-link:hover { text-decoration: none; color: var(--text-primary); }
 @media (prefers-reduced-motion: reduce) {
@@ -880,6 +1105,16 @@ details summary::-webkit-details-marker { display: none; }
   .page-shell { padding: 1rem 0.8rem 5.8rem; }
   .top-header { padding: 1.1rem; }
   .section-card { padding: 1rem; }
+  .battery-overview-card {
+    min-height: 272px;
+  }
+  .status-explainer-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .status-scale-labels {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .history-controls {
     justify-items: stretch;
   }
@@ -967,12 +1202,14 @@ def metric_tile(
     value: str,
     tone: str = "blue",
     subvalue: str = "",
+    detail_html: str = "",
 ) -> str:
     subvalue_html = f'<div class="subvalue">{html.escape(subvalue)}</div>' if subvalue else ""
     return (
         f'<div class="metric-tile {html.escape(tone)}">'
         f'<div class="label">{html.escape(label)}</div>'
         f'<div class="value">{html.escape(value)}</div>'
+        f"{detail_html}"
         f"{subvalue_html}"
         "</div>"
     )
@@ -1011,15 +1248,17 @@ def banner_strip(message: str, *, kind: str = "warning", trailing: str = "") -> 
     )
 
 
-def tone_card(body: str, *, tone: str) -> str:
-    return f'<article class="tone-card {html.escape(tone)}">{body}</article>'
+def tone_card(body: str, *, tone: str, extra_class: str = "") -> str:
+    class_name = _join_classes("tone-card", html.escape(tone), extra_class)
+    return f'<article class="{class_name}">{body}</article>'
 
 
-def device_icon(icon_key: str, *, label: str) -> str:
+def device_icon(icon_key: str, *, label: str, frame_class: str = "") -> str:
     safe_key = html.escape(icon_key)
     safe_label = html.escape(label)
+    class_name = _join_classes("device-icon-frame", frame_class)
     return (
-        f'<div class="device-icon-frame" data-icon-key="{safe_key}" aria-hidden="true">'
+        f'<div class="{class_name}" data-icon-key="{safe_key}" aria-hidden="true">'
         f"{_device_icon_svg(icon_key, label=safe_label)}"
         "</div>"
     )
@@ -1132,11 +1371,45 @@ def bottom_nav(active_nav: str, *, primary_device_id: str = "") -> str:
         classes = "nav-link active" if active_nav == item_id else "nav-link"
         current = ' aria-current="page"' if active_nav == item_id else ""
         links.append(
-            f'<a class="{classes}" href="{href}"{current}><span>{html.escape(label)}</span></a>'
+            f'<a class="{classes}" href="{href}"{current}>'
+            f"{_nav_icon(item_id, label=label)}"
+            f'<span class="nav-label">{html.escape(label)}</span>'
+            "</a>"
         )
     return (
         '<nav class="bottom-nav" aria-label="Primary">'
         f'<div class="bottom-nav-inner">{"".join(links)}</div></nav>'
+    )
+
+
+def _nav_icon(item_id: str, *, label: str) -> str:
+    if item_id == "battery":
+        body = """
+<rect class="fill-main" x="6" y="8" width="12" height="10" rx="2.2"/>
+<path class="stroke-main" d="M10 8V6h4v2m-2 2v6"/>
+<path class="stroke-main" d="M15 10h4v6a2 2 0 01-2 2h-2"/>
+"""
+    elif item_id == "history":
+        body = """
+<path class="stroke-main" d="M5 18h14"/>
+<path class="stroke-main" d="M7 18V7h10v11"/>
+<path class="stroke-main" d="M9 14l2-2 2 1 3-4"/>
+"""
+    elif item_id == "devices":
+        body = """
+<rect class="stroke-main" x="5.5" y="6.5" width="14" height="3.5" rx="1.2"/>
+<rect class="stroke-main" x="5.5" y="11.5" width="14" height="3.5" rx="1.2"/>
+<rect class="stroke-main" x="5.5" y="16.5" width="14" height="3.5" rx="1.2"/>
+"""
+    else:
+        body = """
+<circle class="stroke-main" cx="12" cy="12" r="3.5"/>
+<path class="stroke-main" d="M12 4.5v2.2m0 10.6v2.2M4.5 12h2.2m10.6 0h2.2M6.9 6.9l1.6 1.6m7 7l1.6 1.6m0-10.2l-1.6 1.6m-7 7l-1.6 1.6"/>
+"""
+    return (
+        '<svg class="nav-icon" viewBox="0 0 24 24" fill="none" '
+        'xmlns="http://www.w3.org/2000/svg" role="img" aria-hidden="true">'
+        f"<title>{html.escape(label)}</title>{body}</svg>"
     )
 
 
@@ -1150,6 +1423,7 @@ def chart_card(
     default_range: str,
     default_metric: str,
     legend: list[tuple[str, str]],
+    show_markers: bool = False,
 ) -> str:
     points_json = html.escape(json.dumps(points, separators=(",", ":")))
     legend_html = "".join(
@@ -1193,7 +1467,9 @@ def chart_card(
         "</div>"
         "</div>"
         f'<div class="chart-legend">{legend_html}</div>'
-        f'<div class="chart-frame" id="{html.escape(chart_id)}" data-chart-points="{points_json}">'
+        f'<div class="chart-frame" id="{html.escape(chart_id)}" '
+        f'data-chart-points="{points_json}" '
+        f'data-show-markers="{str(show_markers).lower()}">'
         '<div class="chart-tooltip" aria-hidden="true"></div>'
         "</div>"
         f'<div class="chart-meta" id="{html.escape(chart_id)}-meta"></div>'
@@ -1274,7 +1550,7 @@ def chart_script(*chart_ids: str) -> str:
       : Math.max((maxValue - minValue) * 0.18, 1.5);
     return {{ min: minValue - padding, max: maxValue + padding }};
   }}
-  function buildSvg(points, metric, chartId) {{
+  function buildSvg(points, metric, chartId, showMarkers) {{
     const usable = points.filter((point) => typeof point[metric] === "number");
     if (usable.length === 0) {{
       return {{
@@ -1370,7 +1646,9 @@ def chart_script(*chart_ids: str) -> str:
         const lineSvg = segment.length > 1
           ? `<polyline fill="none" stroke="${{series.color}}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" points="${{line}}" />`
           : "";
-        const dotsSvg = segment.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4.5" fill="#ffffff" stroke="${{series.color}}" stroke-width="3" />`).join("");
+        const dotsSvg = showMarkers
+          ? segment.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4.5" fill="#ffffff" stroke="${{series.color}}" stroke-width="3" />`).join("")
+          : "";
         return `${{areaSvg}}${{lineSvg}}${{dotsSvg}}`;
       }}).join("");
       return {{
@@ -1425,12 +1703,13 @@ def chart_script(*chart_ids: str) -> str:
     }}
     const rangeButtons = Array.from(card.querySelectorAll("[data-range]"));
     const metricButtons = Array.from(card.querySelectorAll("[data-metric]"));
+    const showMarkers = frame.dataset.showMarkers === "true";
     let currentRange = rangeButtons.find((button) => button.classList.contains("active"))?.dataset.range || "30";
     let currentMetric = metricButtons.find((button) => button.classList.contains("active"))?.dataset.metric || "voltage";
     function render() {{
       const points = pickRange(allPoints, currentRange);
       const tooltip = frame.querySelector(".chart-tooltip");
-      const chart = buildSvg(points, currentMetric, id);
+      const chart = buildSvg(points, currentMetric, id, showMarkers);
       frame.innerHTML = chart.svg;
       if (tooltip) {{
         frame.appendChild(tooltip);
