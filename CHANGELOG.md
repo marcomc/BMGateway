@@ -118,6 +118,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The web IA now separates read-only `/settings` from editable `/gateway`,
   keeps device creation under `/devices`, and replaces the confusing
   `Gateway` jump buttons with clearer settings-oriented navigation.
+- Gateway web/display preference saves now preserve untouched values instead of
+  resetting the other setting when one split form is submitted.
+- `make dev-deploy` now preserves existing optional Glances and Cockpit host
+  services instead of silently dropping them on a routine application refresh.
 - Battery overview cards now use a stronger BM-style hierarchy with larger SoC
   numerals, larger battery/device icons, and explicit OK/charging status
   symbols instead of generic status chips.

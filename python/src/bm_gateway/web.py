@@ -1229,6 +1229,7 @@ def render_management_html(
             subtitle="Management UI network binding and port selection.",
             body=(
                 '<form method="post" action="/settings/web">'
+                '<input type="hidden" name="settings_section" value="web">'
                 '<div class="two-column-grid">'
                 '<div><label class="settings-label" for="web-port-input">Web port</label>'
                 f'<input id="web-port-input" type="text" name="web_port" value="{config.web.port}" '
@@ -1246,6 +1247,7 @@ def render_management_html(
             subtitle="Global chart rendering preferences.",
             body=(
                 '<form method="post" action="/settings/web">'
+                '<input type="hidden" name="settings_section" value="display">'
                 f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
                 f'<input id="show-chart-markers-input" type="checkbox" '
                 f'name="show_chart_markers"{_checked_attr(config.web.show_chart_markers)}>'
@@ -2467,16 +2469,20 @@ def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> l
 def update_web_preferences(
     *,
     config_path: Path,
-    web_port: int,
-    show_chart_markers: bool,
+    web_port: int | None,
+    show_chart_markers: bool | None,
 ) -> list[str]:
     config = load_config(config_path)
+    resolved_port = config.web.port if web_port is None else web_port
+    resolved_show_chart_markers = (
+        config.web.show_chart_markers if show_chart_markers is None else show_chart_markers
+    )
     updated = replace(
         config,
         web=replace(
             config.web,
-            port=web_port,
-            show_chart_markers=show_chart_markers,
+            port=resolved_port,
+            show_chart_markers=resolved_show_chart_markers,
         ),
     )
     from .config import validate_config
@@ -2947,9 +2953,32 @@ def serve_management(
                 return
 
             if parsed.path == "/settings/web":
-                try:
-                    web_port = int(form.get("web_port", ["80"])[0])
-                except ValueError:
+                settings_section = form.get("settings_section", [""])[0]
+                web_port: int | None = None
+                show_chart_markers: bool | None = None
+                if settings_section == "web":
+                    try:
+                        web_port = int(form.get("web_port", ["80"])[0])
+                    except ValueError:
+                        config, snapshot, current_database_path = self._load_current()
+                        configured_devices = load_device_registry(config.device_registry_path)
+                        self._send_html(
+                            render_management_html(
+                                snapshot=snapshot,
+                                config=config,
+                                storage_summary=fetch_storage_summary(current_database_path),
+                                devices=[device.to_dict() for device in configured_devices],
+                                config_text=_read_text(config_path),
+                                devices_text=_read_text(config.device_registry_path),
+                                contract=build_contract(config, configured_devices),
+                                message="Validation failed: web port must be numeric",
+                            ),
+                            status=400,
+                        )
+                        return
+                elif settings_section == "display":
+                    show_chart_markers = _bool_from_form(form, "show_chart_markers")
+                else:
                     config, snapshot, current_database_path = self._load_current()
                     configured_devices = load_device_registry(config.device_registry_path)
                     self._send_html(
@@ -2961,7 +2990,7 @@ def serve_management(
                             config_text=_read_text(config_path),
                             devices_text=_read_text(config.device_registry_path),
                             contract=build_contract(config, configured_devices),
-                            message="Validation failed: web port must be numeric",
+                            message="Validation failed: unknown settings section",
                         ),
                         status=400,
                     )
@@ -2969,7 +2998,7 @@ def serve_management(
                 errors = update_web_preferences(
                     config_path=config_path,
                     web_port=web_port,
-                    show_chart_markers=_bool_from_form(form, "show_chart_markers"),
+                    show_chart_markers=show_chart_markers,
                 )
                 if errors:
                     config, snapshot, current_database_path = self._load_current()

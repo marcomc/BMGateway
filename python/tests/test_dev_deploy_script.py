@@ -79,7 +79,11 @@ def test_dev_deploy_script_syncs_checkout_and_refreshes_services(tmp_path: Path)
     assert "--exclude .git" in commands
     assert "admin@example.com:/home/admin/BMGateway-dev/" in commands
     assert 'make install "PYTHON_VERSION=${python_path}"' in commands
-    assert 'install-service.sh --user "${remote_user}"' in commands
+    assert "systemctl is-active --quiet glances-web.service" in commands
+    assert "service_args+=(--enable-glances)" in commands
+    assert "systemctl is-active --quiet cockpit.socket" in commands
+    assert "service_args+=(--enable-cockpit)" in commands
+    assert 'install-service.sh "${service_args[@]}"' in commands
 
 
 def test_dev_deploy_script_accepts_remote_dir_override(tmp_path: Path) -> None:

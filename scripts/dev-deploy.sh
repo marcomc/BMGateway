@@ -95,5 +95,14 @@ cd "${remote_dir}"
 command -v uv >/dev/null 2>&1 || { echo 'uv not found on remote host' >&2; exit 1; }
 python_path="$(command -v python3)"
 make install "PYTHON_VERSION=${python_path}"
-sudo bash ./rpi-setup/scripts/install-service.sh --user "${remote_user}"
+service_args=(--user "${remote_user}")
+if sudo systemctl is-active --quiet glances-web.service \
+  || sudo systemctl is-enabled glances-web.service >/dev/null 2>&1; then
+  service_args+=(--enable-glances)
+fi
+if sudo systemctl is-active --quiet cockpit.socket \
+  || sudo systemctl is-enabled cockpit.socket >/dev/null 2>&1; then
+  service_args+=(--enable-cockpit)
+fi
+sudo bash ./rpi-setup/scripts/install-service.sh "${service_args[@]}"
 EOF

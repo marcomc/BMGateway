@@ -19,6 +19,7 @@ from bm_gateway.web import (
     render_settings_html,
     update_config_from_text,
     update_device_icon,
+    update_web_preferences,
 )
 
 
@@ -312,6 +313,134 @@ def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
     assert devices[0].icon_key == "motorcycle_12v"
 
 
+def test_update_web_preferences_preserves_existing_port_when_only_display_changes(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 300",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "live"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 15",
+                "connect_timeout_seconds = 45",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 9091",
+                "show_chart_markers = false",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    errors = update_web_preferences(
+        config_path=config_path,
+        web_port=None,
+        show_chart_markers=True,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.web.port == 9091
+    assert config.web.show_chart_markers is True
+
+
+def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 300",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "live"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 15",
+                "connect_timeout_seconds = 45",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 80",
+                "show_chart_markers = true",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    errors = update_web_preferences(
+        config_path=config_path,
+        web_port=8088,
+        show_chart_markers=None,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.web.port == 8088
+    assert config.web.show_chart_markers is True
+
+
 def test_compact_mac_address_is_normalized() -> None:
     assert normalize_mac_address("A1B2C3D4E5F6") == "A1:B2:C3:D4:E5:F6"
 
@@ -391,6 +520,8 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert "control-plane" in html
     assert "api-chip" in html
     assert "config-grid" in html
+    assert 'name="settings_section" value="web"' in html
+    assert 'name="settings_section" value="display"' in html
     assert __version__ in html
     assert "build" in html
 
