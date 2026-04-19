@@ -209,6 +209,7 @@ details summary::-webkit-details-marker { display: none; }
   margin: 0;
   font-size: clamp(2rem, 4vw, 2.8rem);
   line-height: 1.02;
+  text-wrap: balance;
 }
 .top-header p {
   margin: 0.4rem 0 0;
@@ -266,6 +267,7 @@ details summary::-webkit-details-marker { display: none; }
 .section-title {
   margin: 0;
   font-size: 1.28rem;
+  text-wrap: balance;
 }
 .section-subtitle {
   margin-top: 0.35rem;
@@ -300,6 +302,7 @@ details summary::-webkit-details-marker { display: none; }
   font-size: clamp(1.8rem, 5vw, 2.5rem);
   font-weight: 800;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 .summary-card .subvalue,
 .metric-tile .subvalue {
@@ -316,6 +319,7 @@ details summary::-webkit-details-marker { display: none; }
   font-size: clamp(1.7rem, 4vw, 2.4rem);
   font-weight: 800;
   line-height: 1.05;
+  font-variant-numeric: tabular-nums;
 }
 .metric-tile.blue { background: var(--accent-blue-soft); }
 .metric-tile.green { background: #d9f4e8; }
@@ -359,6 +363,7 @@ details summary::-webkit-details-marker { display: none; }
   margin: 0.7rem 0 0.4rem;
   font-size: clamp(2.5rem, 6vw, 3.5rem);
   font-weight: 800;
+  font-variant-numeric: tabular-nums;
 }
 .device-card .meta {
   color: var(--text-secondary);
@@ -548,6 +553,7 @@ details summary::-webkit-details-marker { display: none; }
   margin-top: 0.85rem;
   color: var(--text-secondary);
   font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
 }
 .hero-shell {
   display: grid;
@@ -592,6 +598,7 @@ details summary::-webkit-details-marker { display: none; }
   font-size: clamp(3.4rem, 8vw, 5.4rem);
   font-weight: 800;
   line-height: 1;
+  font-variant-numeric: tabular-nums;
 }
 .hero-aside {
   display: grid;

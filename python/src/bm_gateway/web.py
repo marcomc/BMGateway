@@ -477,7 +477,8 @@ def render_management_html(
         '<option value="bm300pro">bm300pro</option></select></div>'
         '<div><label class="settings-label" for="device-mac-input">MAC or serial</label>'
         '<input id="device-mac-input" type="text" name="device_mac" '
-        'autocomplete="off" spellcheck="false" placeholder="A1B2C3D4E5F6…" required></div>'
+        'autocomplete="off" spellcheck="false" aria-describedby="device-mac-help" '
+        'placeholder="A1B2C3D4E5F6…" required></div>'
         '<div id="device-mac-help" style="grid-column:1 / -1" class="muted-note">'
         "You can paste a compact 12-hex serial such as "
         "<code>A1B2C3D4E5F6</code>; the UI normalizes it to Bluetooth MAC format."

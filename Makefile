@@ -23,7 +23,7 @@ MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs pyt
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-deps install-deps sync install install-dev install-link install-config uninstall lint test check run ha-export web-render clean
+.PHONY: help check-deps install-deps sync install install-dev install-link install-config uninstall lint test check run ha-export web-render dev-deploy clean
 
 help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##" } /^[a-zA-Z_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -119,6 +119,12 @@ ha-export: sync ## Export Home Assistant discovery examples from the shipped con
 
 web-render: sync ## Render the shipped snapshot to HTML
 	@"$(UV)" run "$(CLI_NAME)" web render --snapshot-file python/config/data/runtime/latest_snapshot.json
+
+dev-deploy: ## Sync the current checkout to a remote host and refresh services
+	@test -n "$(TARGET)" || { echo "TARGET is required. Usage: make dev-deploy TARGET=admin@host"; exit 1; }
+	@args=(--target "$(TARGET)"); \
+	if [ -n "$(REMOTE_DIR)" ]; then args+=(--remote-dir "$(REMOTE_DIR)"); fi; \
+	./scripts/dev-deploy.sh "$${args[@]}"
 
 clean: ## Remove local development artifacts
 	rm -rf "$(VENV)" .pytest_cache .mypy_cache .ruff_cache build dist "$(PYTHON_SRC)"/*.egg-info *.egg-info

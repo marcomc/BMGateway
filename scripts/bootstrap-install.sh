@@ -89,11 +89,11 @@ done
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
-if [[ -d "${script_repo_dir}/.git" ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
+if [[ -e "${script_repo_dir}/.git" ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
   repo_dir="${script_repo_dir}"
 fi
 
-if [[ -z "${repo_url}" ]] && [[ ! -d "${repo_dir}/.git" ]]; then
+if [[ -z "${repo_url}" ]] && [[ ! -e "${repo_dir}/.git" ]]; then
   printf 'Missing required --repo-url argument\n' >&2
   usage >&2
   exit 1
@@ -114,7 +114,7 @@ fi
 
 mkdir -p "$(dirname "${repo_dir}")"
 
-if [[ -d "${repo_dir}/.git" ]]; then
+if [[ -e "${repo_dir}/.git" ]]; then
   if [[ -n "${repo_url}" ]] && [[ "${repo_dir}" != "${script_repo_dir}" ]]; then
     git -C "${repo_dir}" fetch --all --tags --prune
     git -C "${repo_dir}" pull --ff-only

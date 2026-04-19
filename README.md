@@ -10,6 +10,7 @@
 - [Configuration](#configuration)
 - [Usage](#usage)
 - [Development](#development)
+- [Deployment](#deployment)
 - [Roadmap](#roadmap)
 - [License](#license)
 
@@ -357,12 +358,48 @@ make lint
 make run
 ```
 
+Remote development deployment:
+
+```bash
+make dev-deploy TARGET=admin@host
+```
+
+That command syncs the current checkout to the remote host, runs
+`make install`, and refreshes the runtime and web services with
+`rpi-setup/scripts/install-service.sh`.
+
 The automated test suite now covers:
 
 - direct CLI invocation through `bm-gateway`
 - module invocation through `python -m bm_gateway`
 - subprocess-driven fake-device runtime flows
 - HTTP checks for `web serve` and `web manage`
+
+## Deployment
+
+For a repository-backed Raspberry Pi install, use the documented bootstrap flow:
+
+```bash
+./scripts/bootstrap-install.sh
+```
+
+For iterative development deployments to an already bootstrapped host, use:
+
+```bash
+make dev-deploy TARGET=admin@host
+```
+
+Optional override:
+
+```bash
+make dev-deploy TARGET=admin@host REMOTE_DIR=/srv/bm-gateway-dev
+```
+
+The dev deploy path:
+
+- syncs the current local checkout with `rsync`
+- runs `make install` on the remote host with its local `python3`
+- refreshes `bm-gateway.service` and `bm-gateway-web.service`
 
 ## Roadmap
 

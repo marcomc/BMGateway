@@ -38,6 +38,10 @@ At the start of every new AI agent chat for this repository, read:
 - Keep Raspberry Pi setup documentation and automation under `rpi-setup/`.
 - Keep web interface code and notes under `web/`.
 - Keep the CLI contract aligned with `home-assistant/contract.md`.
+- For remote development deployments, use
+  `make dev-deploy TARGET=admin@host` from the repository root.
+- Keep remote dev deploy guidance generic in repo docs; do not commit personal
+  hostnames.
 
 ## Quality Gates
 
@@ -59,14 +63,6 @@ Expected checks:
 - Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
 - Remove completed items from `TODO.md` when they ship.
 - Update config documentation when adding or changing config keys.
-- Whenever battery-monitor device work reveals new verified behavior,
-  diagnostics, protocol details, hardware interactions, or runtime tuning that
-  was not already captured in the consulted upstream/community sources, write a
-  developer-facing note under `docs/`.
-- In those notes, clearly separate:
-  - externally sourced knowledge already known in the community
-  - project-specific verified findings from BMGateway work
-  - remaining hypotheses or unverified observations
 
 ## Release Hygiene
 

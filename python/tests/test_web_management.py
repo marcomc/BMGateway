@@ -278,6 +278,15 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert "/api/ha/contract" in html
     assert "Prune History Using Retention Settings" in html
     assert "Add Device and Enable Live Polling" in html
+    assert 'href="#main-content"' in html
+    assert 'id="main-content"' in html
+    assert 'aria-live="polite"' in html
+    assert 'for="device-id-input"' in html
+    assert 'id="device-id-input"' in html
+    assert 'autocomplete="off"' in html
+    assert 'spellcheck="false"' in html
+    assert 'aria-describedby="device-mac-help"' in html
+    assert 'aria-label="Primary"' in html
     assert "control-plane" in html
     assert "api-chip" in html
     assert "config-grid" in html

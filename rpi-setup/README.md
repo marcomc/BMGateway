@@ -15,6 +15,8 @@ Current contents:
 - `systemd/` for the runtime unit
 - `scripts/` for install and update helpers
 - `../scripts/bootstrap-install.sh` for one-line host bootstrap onto the Pi
+- `../scripts/dev-deploy.sh` for syncing the current checkout to an existing
+  development host
 
 macOS helpers now include:
 
@@ -35,5 +37,11 @@ The one-line bootstrap now installs the full appliance by default:
 - runtime service
 - management web service
 - live-ready config with an empty device registry
+
+For repeat development deploys to an already bootstrapped host, use:
+
+```bash
+make dev-deploy TARGET=admin@host
+```
 
 Stabilize the manual setup first, then translate it into Ansible.

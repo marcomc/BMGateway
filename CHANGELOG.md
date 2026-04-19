@@ -64,6 +64,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - BM300-style battery landing page plus dedicated devices and settings routes,
   giving the web app a full product journey instead of only admin-centric
   pages.
+- Remote development deployment now supports
+  `make dev-deploy TARGET=admin@host` for syncing the current checkout to an
+  already bootstrapped host and refreshing the runtime/web services.
 
 ### Changed
 
@@ -71,13 +74,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   of shipping sample hardware into the installed user config.
 - Raspberry Pi service install now renders units for the active user and
   installs a stable `/usr/local/bin/bm-gateway` symlink for systemd.
-- Live BM200/BM6 polling now uses the configured scan timeout, proactively
-  sends the BM6 poll request after notifications are armed, retries once per
-  connection window, and preserves the last BLE exception instead of collapsing
-  intermittent BlueZ failures into blank `unexpected_error` rows.
-- Default Bluetooth timing in example and generated config now uses a more
-  conservative `15s` scan window and `45s` overall connect budget for
-  BM6-family devices.
 
 ### Documented
 
