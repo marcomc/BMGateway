@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Protocol
 
-from bleak import BleakClient
+from bleak import BleakClient, BleakScanner
 from Crypto.Cipher import AES
 
 BM200_NOTIFY_CHARACTERISTIC = "0000fff4-0000-1000-8000-00805f9b34fb"
@@ -200,7 +200,11 @@ class BleakBM200Transport:
         def notification_handler(_: object, data: bytearray) -> None:
             queue.put_nowait(bytes(data))
 
-        client = BleakClient(address, timeout=timeout_seconds, device=address)
+        device = await BleakScanner.find_device_by_address(address, timeout=timeout_seconds)
+        if device is None:
+            raise BleakDeviceNotFoundError(address)
+
+        client = BleakClient(device, timeout=timeout_seconds)
         async with client:
             await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
             try:
@@ -252,6 +256,10 @@ def _is_bm6_measurement_packet(encrypted: bytes) -> bool:
         and plaintext.startswith(bytes.fromhex("d15507"))
         and plaintext[3] != 0xFF
     )
+
+
+class BleakDeviceNotFoundError(BM200Error):
+    """Raised when a scanned device cannot be resolved before connecting."""
 
 
 async def read_bm200_measurement(

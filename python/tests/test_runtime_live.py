@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from bm_gateway.config import (
     AppConfig,
     BluetoothConfig,
@@ -165,3 +166,44 @@ def test_build_snapshot_marks_non_bm200_devices_unsupported_in_live_mode() -> No
     assert snapshot.devices_online == 0
     assert snapshot.devices[0].state == "unsupported"
     assert snapshot.devices[0].error_code == "unsupported_device_type"
+
+
+def test_build_snapshot_powers_on_adapter_before_live_polling(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+    calls: list[list[str]] = []
+
+    def fake_run(command: list[str], **_kwargs: object) -> None:
+        calls.append(command)
+
+    def fake_reader(device: Device, adapter: str) -> BM200Measurement:
+        assert device.id == "bm200_house"
+        assert adapter == "hci0"
+        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
+
+    monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
+    monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
+
+    snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
+
+    assert calls == [["bluetoothctl", "power", "on"]]
+    assert snapshot.devices_online == 1

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from time import sleep
@@ -147,6 +149,20 @@ def _read_live_bm200(device: Device, adapter: str) -> BM200Measurement:
     )
 
 
+def _ensure_adapter_ready(adapter: str) -> None:
+    # Best-effort power-on before polling. This keeps the service resilient on
+    # boards where BlueZ starts with the controller present but powered off.
+    _ = adapter
+    if shutil.which("bluetoothctl") is None:
+        return
+    subprocess.run(
+        ["bluetoothctl", "power", "on"],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 def build_snapshot(
     config: AppConfig,
     devices: list[Device],
@@ -157,6 +173,10 @@ def build_snapshot(
     adapter = _active_adapter(config)
     readings: list[DeviceReading] = []
     live_reader = bm200_reader or _read_live_bm200
+    if config.gateway.reader_mode == "live" and any(
+        device.enabled and device.type == "bm200" for device in devices
+    ):
+        _ensure_adapter_ready(adapter)
 
     for device in devices:
         if not device.enabled:

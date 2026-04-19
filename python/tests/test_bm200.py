@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import asyncio
+from typing import Callable
+
+import pytest
 from bm_gateway.drivers.bm200 import (
+    BleakBM200Transport,
+    BleakDeviceNotFoundError,
     BM200Measurement,
     decrypt_bm6_payload,
     decrypt_payload,
@@ -74,3 +80,84 @@ def test_decrypt_bm6_payload_reverses_encrypt_bm6_payload() -> None:
     encrypted = encrypt_bm6_payload(plaintext)
 
     assert decrypt_bm6_payload(encrypted) == plaintext
+
+
+def test_bleak_transport_scans_before_connecting(monkeypatch: pytest.MonkeyPatch) -> None:
+    scanned_device = object()
+    encrypted = encrypt_bm6_payload(bytes.fromhex("d1550700170064053c0000000102ffff"))
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float) -> None:
+            assert device is scanned_device
+            assert timeout == 5.0
+            self._callback: Callable[[object | None, bytearray], None] | None = None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            self._callback = callback
+
+        async def write_gatt_char(self, _char: str, _data: bytes, response: bool) -> None:
+            assert response is False
+            assert self._callback is not None
+            self._callback(None, bytearray(encrypted))
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(address: str, timeout: float) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout == 5.0
+        return scanned_device
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm200.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm200.BleakClient", FakeClient)
+
+    transport = BleakBM200Transport()
+    payload = asyncio.run(
+        transport.read_voltage_notification(
+            address="AA:BB:CC:DD:EE:FF",
+            adapter="hci0",
+            timeout_seconds=5.0,
+        )
+    )
+
+    assert parse_voltage_notification(payload).voltage == 13.4
+
+
+def test_bleak_transport_raises_when_device_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    async def fake_find_device_by_address(address: str, timeout: float) -> None:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout == 5.0
+        return None
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm200.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+
+    transport = BleakBM200Transport()
+    with pytest.raises(BleakDeviceNotFoundError):
+        asyncio.run(
+            transport.read_voltage_notification(
+                address="AA:BB:CC:DD:EE:FF",
+                adapter="hci0",
+                timeout_seconds=5.0,
+            )
+        )
