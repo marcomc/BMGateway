@@ -10,3 +10,6 @@ dist/
 htmlcov/
 *.egg-info/
 python/config/data/
+output/images/
+*.img
+*.img.xz
