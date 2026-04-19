@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.web import (
@@ -290,6 +291,8 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert "control-plane" in html
     assert "api-chip" in html
     assert "config-grid" in html
+    assert __version__ in html
+    assert "build" in html
 
 
 def test_render_management_html_includes_analytics_and_device_links() -> None:

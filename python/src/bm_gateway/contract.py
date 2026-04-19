@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import cast
 
+from . import __version__
 from .config import AppConfig
 from .device_registry import Device
 
@@ -69,9 +70,9 @@ def build_discovery_payloads(
         "dev": {
             "ids": config.home_assistant.gateway_device_id,
             "name": config.gateway.name,
-            "sw": "0.1.0",
+            "sw": __version__,
         },
-        "o": {"name": config.gateway.name, "sw": "0.1.0"},
+        "o": {"name": config.gateway.name, "sw": __version__},
         "cmps": {
             entity: {
                 "p": "sensor",
@@ -91,9 +92,9 @@ def build_discovery_payloads(
                 "ids": device.id,
                 "name": device.name,
                 "mdl": device.type,
-                "sw": "0.1.0",
+                "sw": __version__,
             },
-            "o": {"name": config.gateway.name, "sw": "0.1.0"},
+            "o": {"name": config.gateway.name, "sw": __version__},
             "cmps": {
                 entity: {
                     "p": "sensor",

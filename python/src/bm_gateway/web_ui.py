@@ -19,9 +19,15 @@ def app_document(
     body: str,
     active_nav: str = "battery",
     primary_device_id: str = "",
+    version_label: str = "",
     head_extra: str = "",
     script: str = "",
 ) -> str:
+    version_badge = (
+        f'<div class="app-version-badge" translate="no">{html.escape(version_label)}</div>'
+        if version_label
+        else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -35,6 +41,7 @@ def app_document(
   </head>
   <body>
     <div class="app-shell">
+      {version_badge}
       <a class="skip-link" href="#main-content">Skip to main content</a>
       <main class="page-shell" id="main-content">
         {body}
@@ -128,6 +135,22 @@ textarea:focus-visible {
   color: #fff;
   transform: translateY(-200%);
   transition: transform 120ms ease;
+}
+.app-version-badge {
+  position: fixed;
+  top: 1rem;
+  right: 1rem;
+  z-index: 30;
+  padding: 0.42rem 0.72rem;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-card);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  backdrop-filter: blur(10px);
 }
 .skip-link:hover {
   text-decoration: none;
@@ -680,6 +703,14 @@ details summary::-webkit-details-marker { display: none; }
   .page-shell { padding: 1rem 0.8rem 5.8rem; }
   .top-header { padding: 1.1rem; }
   .section-card { padding: 1rem; }
+  .app-version-badge {
+    top: 0.75rem;
+    right: 0.75rem;
+    max-width: calc(100vw - 1.5rem);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 """
 

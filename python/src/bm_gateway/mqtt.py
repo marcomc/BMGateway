@@ -9,6 +9,7 @@ from typing import Any, Protocol, cast
 import paho.mqtt.client as mqtt
 from paho.mqtt.client import MQTTMessageInfo
 
+from . import __version__
 from .config import AppConfig
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device
@@ -59,7 +60,7 @@ def build_publish_operations(
             "topic": str(gateway["state_topic"]),
             "payload": json.dumps(
                 {
-                    "version": "0.1.0",
+                    "version": __version__,
                     "uptime": config.gateway.poll_interval_seconds,
                     "active_adapter": snapshot.active_adapter,
                     "running": True,

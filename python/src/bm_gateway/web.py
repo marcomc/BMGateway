@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import cast
 from urllib.parse import parse_qs, quote, urlencode, urlparse
 
+from . import __build_timestamp__, __version__, display_version
 from .config import AppConfig, load_config, write_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import (
@@ -50,7 +51,16 @@ from .web_ui import (
 )
 
 
+def _snapshot_with_version(snapshot: dict[str, object]) -> dict[str, object]:
+    payload = dict(snapshot)
+    payload["version"] = __version__
+    payload["build"] = __build_timestamp__.isoformat(timespec="seconds")
+    payload["display_version"] = display_version()
+    return payload
+
+
 def render_snapshot_html(snapshot: dict[str, object]) -> str:
+    snapshot = _snapshot_with_version(snapshot)
     devices = snapshot.get("devices", [])
     device_items = []
     for device in devices if isinstance(devices, list) else []:
@@ -74,6 +84,7 @@ def render_snapshot_html(snapshot: dict[str, object]) -> str:
     devices_total = html.escape(str(snapshot.get("devices_total", 0)))
     mqtt_connected = html.escape(str(snapshot.get("mqtt_connected", False)))
     generated_at = html.escape(str(snapshot.get("generated_at", "unknown")))
+    version_label = html.escape(str(snapshot.get("display_version", __version__)))
     return f"""<!doctype html>
 <html lang="en">
   <head>
@@ -101,6 +112,7 @@ def render_snapshot_html(snapshot: dict[str, object]) -> str:
   <body>
     <h1>BMGateway</h1>
     <p>Generated at <code>{generated_at}</code></p>
+    <p>Version <code>{version_label}</code></p>
     <div class="grid">
       <div class="card"><strong>Gateway</strong><br>{gateway_name}</div>
       <div class="card"><strong>Adapter</strong><br>{adapter}</div>
@@ -352,6 +364,7 @@ def render_management_html(
     contract: dict[str, object],
     message: str = "",
 ) -> str:
+    version_label = display_version()
     banner = banner_strip(html.escape(message), kind="warning") if message else ""
     counts = cast(dict[str, object], storage_summary.get("counts", {}))
     gateway_contract = cast(dict[str, object], contract.get("gateway", {}))
@@ -570,6 +583,7 @@ def render_management_html(
         body=body,
         active_nav="management",
         primary_device_id=primary_device_id,
+        version_label=version_label,
     )
 
 
@@ -578,6 +592,7 @@ def render_battery_html(
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
 ) -> str:
+    version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
     snapshot_devices = snapshot.get("devices", [])
     device_cards: list[str] = []
@@ -685,6 +700,7 @@ def render_battery_html(
         body=body,
         active_nav="battery",
         primary_device_id=primary_device_id,
+        version_label=version_label,
         script=chart_script(chart_id),
     )
 
@@ -694,6 +710,7 @@ def render_devices_html(
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
 ) -> str:
+    version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
     snapshot_devices = {
         str(device.get("id", "")): device
@@ -784,6 +801,7 @@ def render_devices_html(
         body=body,
         active_nav="devices",
         primary_device_id=primary_device_id,
+        version_label=version_label,
     )
 
 
@@ -793,6 +811,7 @@ def render_settings_html(
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
 ) -> str:
+    version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
     device_tabs = (
         "".join(
@@ -866,6 +885,7 @@ def render_settings_html(
         body=body,
         active_nav="settings",
         primary_device_id=primary_device_id,
+        version_label=version_label,
     )
 
 
@@ -879,6 +899,7 @@ def render_device_html(
     analytics: dict[str, object],
     device_summary: dict[str, object] | None = None,
 ) -> str:
+    version_label = display_version()
     summary = _device_summary_from_history(
         device_id=device_id,
         raw_history=raw_history,
@@ -1066,6 +1087,7 @@ def render_device_html(
         title=f"{device_id} Device",
         body=body,
         active_nav="device",
+        version_label=version_label,
         script=chart_script(chart_id),
     )
 
@@ -1077,6 +1099,7 @@ def render_history_html(
     daily_history: list[dict[str, object]],
     monthly_history: list[dict[str, object]],
 ) -> str:
+    version_label = display_version()
     sections = _render_history_sections(
         raw_history=raw_history,
         daily_history=daily_history,
@@ -1139,6 +1162,7 @@ def render_history_html(
         title=f"{escaped_device_id} History",
         body=body,
         active_nav="history",
+        version_label=version_label,
         script=chart_script(chart_id),
     )
 
@@ -1354,7 +1378,9 @@ def serve_snapshot(*, host: str, port: int, snapshot_path: Path) -> None:
         def do_GET(self) -> None:  # noqa: N802
             snapshot = load_snapshot(snapshot_path)
             if self.path == "/api/status":
-                payload = json.dumps(snapshot, indent=2, sort_keys=True).encode("utf-8")
+                payload = json.dumps(
+                    _snapshot_with_version(snapshot), indent=2, sort_keys=True
+                ).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")
                 self.send_header("Content-Length", str(len(payload)))
@@ -1423,7 +1449,7 @@ def serve_management(
                 return
 
             if parsed.path == "/api/status":
-                self._send_json(snapshot)
+                self._send_json(_snapshot_with_version(snapshot))
                 return
             if parsed.path == "/api/devices":
                 self._send_json({"devices": serialized_devices})
