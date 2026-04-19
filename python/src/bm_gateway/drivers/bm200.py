@@ -195,47 +195,67 @@ class BleakBM200Transport:
     async def read_voltage_notification(
         self, *, address: str, adapter: str, timeout_seconds: float
     ) -> bytes:
-        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise BleakDeviceNotFoundError(address)
 
-        def notification_handler(_: object, data: bytearray) -> None:
-            queue.put_nowait(bytes(data))
+            queue: asyncio.Queue[bytes] = asyncio.Queue()
 
-        device = await BleakScanner.find_device_by_address(address, timeout=timeout_seconds)
-        if device is None:
-            raise BleakDeviceNotFoundError(address)
+            def notification_handler(
+                _: object,
+                data: bytearray,
+                *,
+                notification_queue: asyncio.Queue[bytes] = queue,
+            ) -> None:
+                notification_queue.put_nowait(bytes(data))
 
-        client = BleakClient(device, timeout=timeout_seconds)
-        async with client:
-            await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
+            device = await BleakScanner.find_device_by_address(
+                address,
+                timeout=min(4.0, remaining),
+            )
+            if device is None:
+                continue
+
+            client = BleakClient(device, timeout=min(10.0, remaining))
             try:
-                loop = asyncio.get_running_loop()
-                deadline = loop.time() + timeout_seconds
-                bm6_request_sent = False
-                while True:
-                    remaining = deadline - loop.time()
-                    if remaining <= 0:
-                        raise BM200TimeoutError(address)
+                async with client:
+                    await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
                     try:
-                        encrypted = await asyncio.wait_for(
-                            queue.get(),
-                            timeout=min(2.0, remaining),
-                        )
-                    except TimeoutError as exc:
-                        if bm6_request_sent:
-                            raise BM200TimeoutError(address) from exc
-                        await client.write_gatt_char(
-                            BM200_WRITE_CHARACTERISTIC,
-                            encrypt_bm6_payload(BM6_POLL_PLAINTEXT),
-                            response=False,
-                        )
-                        bm6_request_sent = True
-                        continue
-                    if _is_bm200_measurement_packet(encrypted) or _is_bm6_measurement_packet(
-                        encrypted
-                    ):
-                        return encrypted
-            finally:
-                await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
+                        bm6_request_sent = False
+                        while True:
+                            remaining = deadline - loop.time()
+                            if remaining <= 0:
+                                raise BM200TimeoutError(address)
+                            try:
+                                encrypted = await asyncio.wait_for(
+                                    queue.get(),
+                                    timeout=min(2.0, remaining),
+                                )
+                            except TimeoutError as exc:
+                                if bm6_request_sent:
+                                    raise BM200TimeoutError(address) from exc
+                                await client.write_gatt_char(
+                                    BM200_WRITE_CHARACTERISTIC,
+                                    encrypt_bm6_payload(BM6_POLL_PLAINTEXT),
+                                    response=False,
+                                )
+                                bm6_request_sent = True
+                                continue
+                            if _is_bm200_measurement_packet(
+                                encrypted
+                            ) or _is_bm6_measurement_packet(encrypted):
+                                return encrypted
+                    finally:
+                        await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
+            except BM200TimeoutError:
+                raise
+            except Exception:
+                # The device was seen but failed to connect cleanly in this
+                # window. Retry discovery until the overall deadline expires.
+                continue
 
 
 def _is_bm200_measurement_packet(encrypted: bytes) -> bool:

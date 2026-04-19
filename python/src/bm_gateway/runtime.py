@@ -21,7 +21,7 @@ from .drivers.bm200 import (
 )
 from .models import DeviceReading, GatewaySnapshot
 
-BM200Reader = Callable[[Device, str], BM200Measurement]
+BM200Reader = Callable[[Device, str, float], BM200Measurement]
 
 
 def _active_adapter(config: AppConfig) -> str:
@@ -139,12 +139,12 @@ def _build_error_reading(
     )
 
 
-def _read_live_bm200(device: Device, adapter: str) -> BM200Measurement:
+def _read_live_bm200(device: Device, adapter: str, timeout_seconds: float) -> BM200Measurement:
     return asyncio.run(
         read_bm200_measurement(
             address=device.mac,
             adapter=adapter,
-            timeout_seconds=10,
+            timeout_seconds=timeout_seconds,
         )
     )
 
@@ -196,7 +196,11 @@ def build_snapshot(
             continue
 
         try:
-            measurement = live_reader(device, adapter)
+            measurement = live_reader(
+                device,
+                adapter,
+                float(config.bluetooth.connect_timeout_seconds),
+            )
         except Exception as error:
             readings.append(
                 _build_error_reading(
