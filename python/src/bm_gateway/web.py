@@ -1975,6 +1975,17 @@ def render_settings_html(
                 body=overview_cards,
             )
         )
+        + (
+            ""
+            if edit_mode
+            else section_card(
+                title="Actions",
+                subtitle=(
+                    "Run the collector, prune retained history, and inspect the live JSON APIs."
+                ),
+                body=actions_body,
+            )
+        )
         + section_card(
             title="Gateway Settings",
             subtitle="Current runtime and integration summary",
@@ -1994,17 +2005,6 @@ def render_settings_html(
             title="Bluetooth",
             subtitle="Adapter selection and BLE timeout tuning.",
             body=bluetooth_section_body,
-        )
-        + (
-            ""
-            if edit_mode
-            else section_card(
-                title="Actions",
-                subtitle=(
-                    "Run the collector, prune retained history, and inspect the live JSON APIs."
-                ),
-                body=actions_body,
-            )
         )
         + (
             ""
@@ -2047,8 +2047,20 @@ def render_settings_html(
             body=(
                 settings_row("Config path", str(config.source_path))
                 + settings_row("Device registry path", str(config.device_registry_path))
-                + settings_row("config.toml", config_text or "")
-                + settings_row("devices.toml", devices_text or "")
+                + '<div class="config-grid">'
+                + (
+                    '<div><label class="settings-label" '
+                    'for="config-toml-readonly">config.toml</label>'
+                )
+                + '<textarea id="config-toml-readonly" readonly spellcheck="false">'
+                + f"{html.escape(config_text or '')}</textarea></div>"
+                + (
+                    '<div><label class="settings-label" '
+                    'for="devices-toml-readonly">devices.toml</label>'
+                )
+                + '<textarea id="devices-toml-readonly" readonly spellcheck="false">'
+                + f"{html.escape(devices_text or '')}</textarea></div>"
+                + "</div>"
             ),
         )
     return app_document(

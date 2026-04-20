@@ -770,6 +770,17 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Home Assistant Contract" in html
     assert "Storage Summary" in html
     assert "Configuration Files" in html
+    assert 'id="config-toml-readonly"' in html
+    assert 'id="devices-toml-readonly"' in html
+    assert "readonly" in html
+    assert html.index('section-title">Gateway Overview') < html.index('section-title">Actions')
+    assert html.index('section-title">Actions') < html.index('section-title">Gateway Settings')
+    assert html.index('section-title">Gateway Settings') < html.index(
+        'section-title">Home Assistant Contract'
+    )
+    assert html.index('section-title">Home Assistant Contract') < html.index(
+        'section-title">Storage Summary'
+    )
 
 
 def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
