@@ -27,8 +27,6 @@ main CLI.
 - Preserve the existing working runtime and Home Assistant behavior.
 - Keep the web interface optional at install and runtime.
 - Avoid code duplication between runtime and web surfaces.
-- Keep backward compatibility for existing `bm-gateway web ...` usage during
-  the migration.
 - Make the repository documentation clearer and less repetitive.
 
 ## Non-Goals
@@ -45,7 +43,7 @@ main CLI.
 | Shared core | Config loading, device registry, BLE drivers, runtime snapshots, SQLite persistence, MQTT publishing, Home Assistant contract, archive sync |
 | Runtime executable | `bm-gateway` for `config`, `devices`, `ha`, `history`, and `run` |
 | Web executable | `bm-gateway-web` for the optional management UI and snapshot rendering |
-| Compatibility layer | Keep `bm-gateway web render`, `bm-gateway web serve`, and `bm-gateway web manage` working while the dedicated web executable becomes the primary interface |
+| Compatibility layer | None. The dedicated web executable is now the only supported web entrypoint. |
 
 ## Repository Boundaries
 
@@ -108,7 +106,6 @@ Documentation should follow a single-source-of-truth rule:
 
 - add this architecture document
 - add a dedicated `bm-gateway-web` executable
-- keep `bm-gateway web ...` as a compatibility alias
 - update service units and install flows to use the dedicated web executable
 
 ### Phase 2: Clarify packaging and operations
@@ -133,7 +130,6 @@ Documentation should follow a single-source-of-truth rule:
 ## Acceptance Criteria
 
 - `bm-gateway-web` exists as a dedicated installed executable
-- `bm-gateway web manage` still works
 - service installation uses `bm-gateway-web` for the web unit
 - root and component docs no longer duplicate the same installation narrative
 - obsolete scaffold material is removed
@@ -141,9 +137,6 @@ Documentation should follow a single-source-of-truth rule:
 
 ## Rollback Safety
 
-This migration is intentionally compatibility-first:
-
 - the main package name stays `bm-gateway`
 - `python -m bm_gateway` stays supported
-- the old web subcommands remain valid during the transition
 - runtime data formats and config file structure stay unchanged

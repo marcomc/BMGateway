@@ -30,7 +30,6 @@ The live project architecture is:
 - shared core code in `python/src/bm_gateway/`
 - runtime and Home Assistant surface through `bm-gateway`
 - optional web surface through `bm-gateway-web`
-- compatibility retained for `bm-gateway web ...` during the migration
 
 This keeps config, BLE, SQLite, MQTT, and Home Assistant logic in one place
 instead of maintaining separate Python products with duplicated behavior.

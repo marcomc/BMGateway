@@ -93,7 +93,7 @@ def test_main_without_args_prints_focused_help(capsys: pytest.CaptureFixture[str
     assert "devices" in captured.out
     assert "ha" in captured.out
     assert "run" in captured.out
-    assert "web" in captured.out
+    assert "web" not in captured.out
 
 
 def test_config_show_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
@@ -229,9 +229,35 @@ def test_run_once_writes_snapshot_and_emits_json(
     assert (state_dir / "runtime" / "latest_snapshot.json").exists()
 
 
-def test_web_render_outputs_html_from_snapshot(
+def test_bm_gateway_main_help_does_not_advertise_web_commands(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    result = cli.main(["--help"])
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert "bm-gateway-web" not in captured.out
+    assert "  web " not in captured.out
+
+
+def test_removed_web_command_falls_back_to_main_help(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["web"])
+
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 2
+    assert "invalid choice: 'web'" in captured.err
+
+
+def test_bm_gateway_web_render_outputs_html_from_snapshot(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
+    from bm_gateway.web_cli import main as web_main
+
     config_path, _devices_path = _write_example_files(tmp_path)
     state_dir = tmp_path / "state"
     cli.main(
@@ -246,9 +272,8 @@ def test_web_render_outputs_html_from_snapshot(
         ]
     )
 
-    result = cli.main(
+    result = web_main(
         [
-            "web",
             "render",
             "--snapshot-file",
             str(state_dir / "runtime" / "latest_snapshot.json"),

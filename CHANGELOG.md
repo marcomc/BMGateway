@@ -8,8 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- Dedicated `bm-gateway-web` executable for the optional management UI, while
-  keeping `bm-gateway web ...` as a compatibility path.
+- Dedicated `bm-gateway-web` executable for the optional management UI.
 - Initial project scaffold generated from `python-cli-template`.
 - Mono-repo layout with first-class `python/`, `home-assistant/`,
   `rpi-setup/`, and `web/` components.

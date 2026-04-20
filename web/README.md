@@ -5,7 +5,6 @@ This directory documents the web product boundary for `BMGateway`.
 ## Current Role
 
 - the shipped web executable is `bm-gateway-web`
-- the compatibility alias is `bm-gateway web ...`
 - the implementation lives in `python/src/bm_gateway/web.py` and
   `python/src/bm_gateway/web_ui.py`
 - the shared-core decision avoids a second Python codebase with duplicated

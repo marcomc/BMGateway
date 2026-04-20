@@ -35,7 +35,6 @@ from .state_store import (
     prune_history,
     write_snapshot,
 )
-from .web_cli import run_web_command
 
 
 def format_main_help() -> str:
@@ -51,7 +50,6 @@ def format_main_help() -> str:
             "  ha       Render the Home Assistant MQTT contract",
             "  history  Inspect persisted and imported device history",
             "  run      Execute the gateway runtime and persist snapshots",
-            "  web      Compatibility alias for bm-gateway-web",
             "",
             "Run `bm-gateway <command> --help` for command-specific help.",
         ]
@@ -216,36 +214,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="Override the base directory used for runtime state files.",
     )
 
-    web_parser = subparsers.add_parser("web", help="Render or serve the latest snapshot.")
-    web_subparsers = web_parser.add_subparsers(dest="web_command")
-    web_render = web_subparsers.add_parser("render", help="Render HTML for a snapshot file.")
-    web_render.add_argument(
-        "--snapshot-file",
-        type=Path,
-        required=True,
-        help="Snapshot JSON file written by `bm-gateway run`.",
-    )
-    web_serve = web_subparsers.add_parser("serve", help="Serve HTML and JSON status pages.")
-    web_serve.add_argument(
-        "--snapshot-file",
-        type=Path,
-        required=True,
-        help="Snapshot JSON file written by `bm-gateway run`.",
-    )
-    web_serve.add_argument("--host", type=str, default=None, help="Bind host.")
-    web_serve.add_argument("--port", type=int, default=None, help="Bind port.")
-    web_manage = web_subparsers.add_parser(
-        "manage",
-        help="Run the host-managed web interface for status, config, and history.",
-    )
-    web_manage.add_argument("--host", type=str, default=None, help="Bind host.")
-    web_manage.add_argument("--port", type=int, default=None, help="Bind port.")
-    web_manage.add_argument(
-        "--state-dir",
-        type=Path,
-        default=None,
-        help="Override the base directory used for runtime state files.",
-    )
     return parser
 
 
@@ -784,29 +752,6 @@ def main(argv: Sequence[str] | None = None) -> int:
             as_json=bool(args.json),
             state_dir=args.state_dir,
         )
-
-    if args.command == "web":
-        if args.web_command == "render":
-            return run_web_command(
-                "render",
-                snapshot_file=args.snapshot_file,
-            )
-        if args.web_command == "serve":
-            return run_web_command(
-                "serve",
-                config_path=args.config,
-                snapshot_file=args.snapshot_file,
-                host=args.host,
-                port=args.port,
-            )
-        if args.web_command == "manage":
-            return run_web_command(
-                "manage",
-                config_path=args.config,
-                host=args.host,
-                port=args.port,
-                state_dir=args.state_dir,
-            )
 
     print(format_main_help())
     return 0

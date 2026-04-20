@@ -47,6 +47,22 @@ At the start of every new AI agent chat for this repository, read:
 - Keep remote dev deploy guidance generic in repo docs; do not commit personal
   hostnames.
 
+## Live Validation Rules
+
+- This project currently has no separate live development environment.
+- Treat the main gateway host as the only real integration target for live
+  validation.
+- For changes that can affect appliance behavior, deploy to the gateway and
+  verify there after local checks pass.
+
+Practical deployment rule:
+
+| Change type | Deploy every time? |
+| --- | --- |
+| Docs only | No |
+| Pure unit-test/internal refactor with full local coverage | Usually no |
+| Anything touching CLI behavior, packaging, `systemd`, install scripts, web entrypoints, config handling, BLE/runtime, MQTT, or persistence | Yes |
+
 ## Quality Gates
 
 Use `make check` as the default maintainer validation command.
@@ -67,6 +83,15 @@ Expected checks:
 - Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
 - Remove completed items from `TODO.md` when they ship.
 - Update config documentation when adding or changing config keys.
+- When code changes add, remove, or materially alter functionality or
+  operational behavior, update the relevant documentation without waiting for a
+  separate user request.
+- Prefer a single canonical document per topic and link to it instead of
+  duplicating the same guidance across multiple files.
+- Keep documentation organized according to project standards: place new
+  information in the most appropriate canonical document, maintain sensible
+  grouping and section hierarchy, and move or reshape content when the current
+  location or structure is no longer the best fit.
 
 ## Release Hygiene
 

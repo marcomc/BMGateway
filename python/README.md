@@ -35,12 +35,6 @@ This directory contains the packaged Python implementation for `BMGateway`.
 - `serve --snapshot-file <path>`
 - `render --snapshot-file <path>`
 
-Compatibility is retained for:
-
-- `bm-gateway web render`
-- `bm-gateway web serve`
-- `bm-gateway web manage`
-
 ## Runtime Modes
 
 - `gateway.reader_mode = "fake"` keeps the deterministic development reader
@@ -93,5 +87,5 @@ The device registry supports:
 - the runtime supports both fake and live `bm200` polling paths
 - live `bm200` history retrieval is not wired yet, so long-term history is
   still built from per-cycle state snapshots
-- subprocess coverage exercises `bm-gateway`, `bm-gateway-web`,
-  `python -m bm_gateway`, and the compatibility `web` subcommands
+- subprocess coverage exercises `bm-gateway`, `bm-gateway-web`, and
+  `python -m bm_gateway`

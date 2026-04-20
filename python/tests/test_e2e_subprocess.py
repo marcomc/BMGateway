@@ -224,7 +224,7 @@ def test_console_script_runs_fake_runtime_end_to_end(tmp_path: Path) -> None:
     assert history_payload[0]["samples"] == 1
 
 
-def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) -> None:
+def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) -> None:
     config_path = _write_example_files(tmp_path)
     state_dir = tmp_path / "state"
 
@@ -245,7 +245,7 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
     serve_port = _pick_free_port()
     serve_process = subprocess.Popen(
         [
-            *(_module_command(config_path, "web", "serve")),
+            *(_web_script_command(config_path, "serve")),
             "--snapshot-file",
             str(snapshot_path),
             "--host",
@@ -271,7 +271,7 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
     manage_port = _pick_free_port()
     manage_process = subprocess.Popen(
         [
-            *(_module_command(config_path, "web", "manage")),
+            *(_web_script_command(config_path)),
             "--host",
             "127.0.0.1",
             "--port",
