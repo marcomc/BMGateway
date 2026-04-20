@@ -3,55 +3,40 @@
 ## Table of Contents
 
 - [Overview](#overview)
+- [Architecture](#architecture)
 - [Repository Structure](#repository-structure)
-- [Components](#components)
-- [Requirements](#requirements)
-- [Installation](#installation)
-- [Configuration](#configuration)
-- [Usage](#usage)
+- [Quick Start](#quick-start)
+- [Documentation](#documentation)
 - [Development](#development)
-- [Deployment](#deployment)
 - [Roadmap](#roadmap)
 - [License](#license)
 
 ## Overview
 
-`BMGateway` is a mono-repo for a Raspberry Pi based battery monitor gateway.
+`BMGateway` is a Raspberry Pi battery monitor gateway built as one shared
+Python codebase with two executables:
 
-The repository is scaffolded from the shared Python CLI template, then extended
-into four first-class parts:
+- `bm-gateway` for configuration, runtime collection, history inspection, and
+  Home Assistant publishing
+- `bm-gateway-web` for the optional local management web interface
 
-- a packaged Python CLI and service layer
-- Home Assistant integration assets
-- Raspberry Pi setup and operations guidance
-- a web interface area for the local UI
+The web UI is additive, not required. A runtime-only install is still a valid
+and supported appliance shape when you only need CLI access plus Home Assistant.
 
-The management UI now ships as a BM300-inspired premium control plane:
+## Architecture
 
-- a card-first management dashboard with gateway stats, actions, API surface,
-  Home Assistant contract visibility, and config editing
-- a battery-first landing page at `/` with live device cards and a fleet chart
-- a built-in battery/device icon catalog for the landing-page cards, selected
-  during device registration without uploads or extra assets
-- richer historical fleet overlays and interactive chart tooltips across the
-  landing, history, and device pages
-- a richer add-device flow that captures the official battery taxonomy:
-  lead-acid vs lithium, AGM/EFB/GEL/custom, custom voltage-to-SoC curves,
-  vehicle install type, and real battery metadata such as brand, model,
-  capacity, and production year
-- dedicated `/devices` and `/settings` pages that repeat the mobile-app style
-  journey with gateway-safe content
-- a chart-first history page with segmented Voltage / SoC / Temperature views
-- temperature-aware BM6 history rollups so long-range temperature charts do not
-  disappear outside the recent raw window
-- a richer device detail page with SoC hero, runtime health cards, and calmer
-  raw data presentation
-- a management action for manual Bluetooth adapter recovery when live BLE
-  polling needs operator intervention
+The live project architecture is:
 
-The earlier ChatGPT research informed the problem space, but this repository
-structure follows the local project template standards rather than that
-exploratory draft layout.
+- shared core code in `python/src/bm_gateway/`
+- runtime and Home Assistant surface through `bm-gateway`
+- optional web surface through `bm-gateway-web`
+- compatibility retained for `bm-gateway web ...` during the migration
+
+This keeps config, BLE, SQLite, MQTT, and Home Assistant logic in one place
+instead of maintaining separate Python products with duplicated behavior.
+
+The authoritative boundary and migration decision lives in
+[docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md).
 
 ## Repository Structure
 
@@ -66,438 +51,96 @@ exploratory draft layout.
 ├── home-assistant/
 ├── pyproject.toml
 ├── python/
-│   ├── config/
-│   ├── src/
-│   └── tests/
 ├── rpi-setup/
 ├── scripts/
 └── web/
 ```
 
-## Components
+- `python/` contains the packaged application, tests, and example config
+- `home-assistant/` contains the MQTT contract and exported assets
+- `rpi-setup/` contains Raspberry Pi install, service, and operations guidance
+- `web/` contains web product notes and boundary documentation
+- `docs/` contains cross-cutting architecture, specs, and research
 
-### `python/`
+## Quick Start
 
-Contains the packaged Python application:
-
-- `python/src/bm_gateway/` for importable code
-- `python/tests/` for test coverage
-- `python/config/` for example config and schema artifacts
-- CLI commands for config validation, device inspection, and Home Assistant
-  contract rendering
-- fake-reader runtime, snapshot persistence, MQTT publishing, and a simple
-  built-in web status layer
-- live `bm200` BLE polling, SQLite persistence, and classified device errors
-- history inspection, storage stats, and retention pruning commands
-- yearly summaries, degradation comparison windows, and richer MQTT
-  availability semantics
-
-The CLI entry point remains `bm-gateway`, and `python -m bm_gateway` remains a
-supported module entry point through the root packaging configuration.
-
-### `home-assistant/`
-
-Contains Home Assistant facing artifacts such as:
-
-- the MQTT topic and entity contract
-- exportable discovery payload examples
-- package snippets and dashboard definitions
-
-### `rpi-setup/`
-
-Contains Raspberry Pi setup and deployment guidance:
-
-- a manual setup guide for the currently used Raspberry Pi gateway hardware
-- a macOS Raspberry Pi Imager CLI provisioning guide
-- an Ansible area for later automation
-- service installation and operational notes
-
-### `web/`
-
-Contains the host-run management web interface plan and assets.
-
-The current Python component ships:
-
-- a simple snapshot/status web server
-- a separate host-run management web interface via `bm-gateway web manage`
-- premium management, history, and device pages built on the existing live
-  server-rendered routes and APIs
-
-For Raspberry Pi deployment, the active recommendation is a separate Python
-process under `systemd`, not Docker. See
-`docs/research/2026-04-17-pi3b-web-and-os-research.md` for the earlier Pi 3B
-research baseline.
-
-## Requirements
-
-For development:
-
-- Python `3.11`
-- `uv`
-- `make`
-- `markdownlint`
-- `shellcheck`
-
-For the runtime target:
-
-- the currently audited hardware is a Raspberry Pi `Model B Rev 2` with USB
-  Wi-Fi and USB Bluetooth dongles
-- a Raspberry Pi `3B`, `3B+`, `Zero W`, `Zero 2 W`, `4`, `400`, or `5` is the
-  preferred baseline if you want integrated Wi-Fi and Bluetooth
-- a Bluetooth adapter with BLE central support
-- enough storage for SQLite history retention
-
-Important hardware note:
-
-- classic-only Bluetooth adapters are not sufficient for BM200 monitoring
-- the audited USB dongle `0a12:0001` from Cambridge Silicon Radio powered on
-  correctly, but exposed only BR/EDR and no BLE central role, so it could not
-  scan or connect to BM200 devices
-
-## Installation
-
-For Raspberry Pi or any other host install, the intended target is
-`make install`, not `make install-dev`.
-
-### One-Liner Bootstrap
-
-If you already have a checkout of this repository on the target machine, the
-shortest supported install path is:
-
-```bash
-./scripts/bootstrap-install.sh
-```
-
-That script:
-
-- installs apt prerequisites
-- installs `uv` if it is missing
-- clones or updates the repository checkout
-- runs `make install` with the host `python3`
-- installs and starts the runtime and web `systemd` services by default
-- can optionally install a `glances-web.service` companion for Home Assistant
-- can optionally install and enable Cockpit on `https://<host>:9090/`
-- preserves and updates user config under `~/.config/bm-gateway/`
-- prints the management URLs at the end of the run
-
-Supported bootstrap options:
-
-- `--disable-web` keeps the runtime service but disables the management UI
-- `--disable-home-assistant` disables MQTT and Home Assistant publishing in the
-  installed config
-- `--enable-glances` installs and enables a Home Assistant-compatible Glances
-  API service on port `61208`
-- `--enable-cockpit` installs and enables Cockpit on port `9090`
-- `--skip-services` performs only the standalone CLI install
-- `--web-port <port>` changes the management UI port
-- `--glances-port <port>` changes the Glances API port
-
-If you publish the bootstrap script at a reachable URL, the same flow becomes a
-single remote one-liner:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/bootstrap-install.sh | bash -s -- --repo-url https://github.com/marcomc/BMGateway.git
-```
-
-### Manual Install
-
-Clone the repository and install the standalone CLI runtime:
-
-```bash
-git clone https://github.com/marcomc/BMGateway.git
-cd BMGateway
-make install
-```
-
-`make install`:
-
-- creates a standalone virtual environment in
-  `~/.local/share/bm-gateway/venv`
-- installs the packaged CLI into that runtime from the repository root
-- links `bm-gateway` into `~/.local/bin/bm-gateway`
-- installs a config template to `~/.config/bm-gateway/config.toml` if it is
-  missing
-- installs a device registry template to
-  `~/.config/bm-gateway/devices.toml` if it is missing
-
-In the shipped web UI:
-
-- `/settings` is the read-first overview of current software settings
-- `/gateway` is the edit/configuration surface for gateway-wide settings
-- `/devices` owns device creation and device editing
-
-### Editable Development Install
+### Local Development
 
 ```bash
 make install-dev
-```
-
-This links the local development environment into `~/.local/bin/bm-gateway`.
-
-## Optional: Glances for Home Assistant
-
-If you want Home Assistant to monitor the Raspberry Pi host itself through the
-official Glances integration, install Glances in web-server mode and expose its
-REST API on the LAN. Home Assistant's Glances integration expects a running
-Glances instance in web-server mode and recommends API version 3+; the current
-packaged Glances 4.x path works with the built-in integration ([Home Assistant
-Glances docs](https://www.home-assistant.io/integrations/glances/)).
-
-The packaged Debian `glances.service` is not enough for that integration,
-because it starts `glances -s -B 127.0.0.1`, which is the server mode, not the
-web API. Use the included `glances-web.service` shape instead:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y glances
-sudo install -m 0644 rpi-setup/systemd/glances-web.service /etc/systemd/system/glances-web.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now glances-web.service
-curl -fsS http://127.0.0.1:61208/api/4/status
-```
-
-If you use the one-line bootstrap, add `--enable-glances` and the installer
-will provision the same service automatically.
-
-## Optional: Cockpit for Host Administration
-
-If you want a general-purpose host administration console on the Pi, Cockpit
-works well alongside `BMGateway`. Cockpit serves its own HTTPS UI on port
-`9090`, separate from the `BMGateway` web UI on port `80`.
-
-On Debian and Raspberry Pi OS, the Cockpit project recommends backports for the
-latest versions, but this Pi currently runs Raspberry Pi OS `trixie`, where
-Cockpit `337-1` is already available in the base repository and installs
-cleanly without extra apt sources ([Cockpit running docs](https://cockpit-project.org/running.html)).
-
-Manual install:
-
-```bash
-sudo apt-get update
-sudo apt-get install -y cockpit
-sudo systemctl enable --now cockpit.socket
-curl -k -I https://127.0.0.1:9090/
-```
-
-Open:
-
-- [https://bmgateway.local:9090/](https://bmgateway.local:9090/)
-
-Cockpit login uses a local system account and password. SSH keys alone are not
-enough for the web login flow.
-
-If you use the one-line bootstrap, add `--enable-cockpit` and the installer
-will install the package and enable `cockpit.socket` automatically.
-
-## Configuration
-
-The Python CLI reads optional config from:
-
-- `~/.config/bm-gateway/config.toml`
-- or a file passed with `--config`
-
-Start from the example files in `python/config/`:
-
-- `python/config/config.toml.example`
-- `python/config/devices.toml`
-- `python/config/devices.toml.example`
-- `python/config/gateway.toml.example`
-- `python/config/config.schema.json`
-
-The key runtime switch is `gateway.reader_mode`:
-
-- `fake` keeps the deterministic development reader
-- `live` enables explicit BLE polling for `bm200` devices
-
-The default polling baseline is intentionally low-frequency:
-
-- `gateway.poll_interval_seconds = 300`
-- this means one collection cycle every 5 minutes by default
-- tighter intervals are allowed, but they are an explicit opt-in for
-  troubleshooting or short-term monitoring, not the project default
-
-The key retention settings are:
-
-- `retention.raw_retention_days`
-- `retention.daily_retention_days`
-
-## Usage
-
-Show the focused CLI help:
-
-```bash
-bm-gateway
-```
-
-Inspect the resolved configuration:
-
-```bash
-bm-gateway config show
-bm-gateway --config ./python/config/gateway.toml.example config show --json
-python -m bm_gateway config show
-```
-
-Validate the config and registry:
-
-```bash
 bm-gateway --config ./python/config/gateway.toml.example config validate
-```
-
-Inspect configured devices:
-
-```bash
-bm-gateway --config ./python/config/gateway.toml.example devices list --json
-```
-
-Render the Home Assistant contract:
-
-```bash
-bm-gateway --config ./python/config/gateway.toml.example ha contract --json
-```
-
-Export Home Assistant discovery payload examples:
-
-```bash
-bm-gateway --config ./python/config/gateway.toml.example ha discovery --output-dir ./home-assistant/discovery
-```
-
-Inspect persisted history:
-
-```bash
-bm-gateway --config ./python/config/gateway.toml.example history daily --device-id bm200_house --json
-bm-gateway --config ./python/config/gateway.toml.example history monthly --device-id bm200_house --json
-bm-gateway --config ./python/config/gateway.toml.example history yearly --device-id bm200_house --json
-bm-gateway --config ./python/config/gateway.toml.example history compare --device-id bm200_house --json
-bm-gateway --config ./python/config/gateway.toml.example history stats --json
-bm-gateway --config ./python/config/gateway.toml.example history prune
-```
-
-Run the fake-reader runtime once and persist a snapshot:
-
-```bash
 bm-gateway --config ./python/config/gateway.toml.example run --once --dry-run --json
+bm-gateway-web --config ./python/config/gateway.toml.example --host 127.0.0.1 --port 8080
 ```
 
-Enable real BM200 polling by setting `gateway.reader_mode = "live"` in the
-config, then run:
+### Raspberry Pi Appliance Install
 
-```bash
-bm-gateway --config ./python/config/gateway.toml.example run --once --json
-```
-
-The project default is a 5-minute polling interval because this is a battery
-gateway, not a real-time telemetry stream. That reduces BLE churn, lowers
-device wakeups, and fits weaker Raspberry Pi hardware better. If you need
-short-interval diagnostics, lower `gateway.poll_interval_seconds` explicitly.
-
-Render HTML from the latest snapshot:
-
-```bash
-bm-gateway web render --snapshot-file ./python/config/data/runtime/latest_snapshot.json
-```
-
-Run the host-managed web UI:
-
-```bash
-bm-gateway --config ./python/config/gateway.toml.example web manage
-```
-
-The web UI defaults to port `80`, keeps chart point markers disabled by
-default, and separates gateway administration under `/gateway` from
-device-specific editing under `/devices/edit?device_id=<id>`. The relevant
-config keys are:
-
-- `web.port`
-- `web.show_chart_markers`
-
-Runtime artifacts written by `run`:
-
-- `.../runtime/latest_snapshot.json`
-- `.../runtime/gateway.db`
-
-Per-device payloads now include:
-
-- `state`
-- `error_code`
-- `error_detail`
-
-The database keeps:
-
-- raw per-cycle readings with pruning
-- daily device rollups for long-term comparison
-- monthly summaries derived from daily rollups
-- yearly summaries and degradation comparison windows derived from daily rollups
-
-## Development
-
-Sync the environment and run the default quality gate:
-
-```bash
-make check
-```
-
-Common commands:
-
-```bash
-make sync
-make test
-make lint
-make run
-```
-
-Remote development deployment:
-
-```bash
-make dev-deploy TARGET=admin@host
-```
-
-That command syncs the current checkout to the remote host, runs
-`make install`, and refreshes the runtime and web services with
-`rpi-setup/scripts/install-service.sh`.
-
-The automated test suite now covers:
-
-- direct CLI invocation through `bm-gateway`
-- module invocation through `python -m bm_gateway`
-- subprocess-driven fake-device runtime flows
-- HTTP checks for `web serve` and `web manage`
-
-## Deployment
-
-For a repository-backed Raspberry Pi install, use the documented bootstrap flow:
+If the repository is already present on the target host:
 
 ```bash
 ./scripts/bootstrap-install.sh
 ```
 
-For iterative development deployments to an already bootstrapped host, use:
+That bootstrap path installs the standalone runtime, config templates, runtime
+service, and optional web service. For the full appliance flow, service options,
+and host operations details, use
+[rpi-setup/manual-setup.md](rpi-setup/manual-setup.md).
+
+### Runtime and Web Commands
+
+- `bm-gateway config validate`
+- `bm-gateway devices list`
+- `bm-gateway ha contract`
+- `bm-gateway run --once --dry-run --json`
+- `bm-gateway history stats --json`
+- `bm-gateway-web --config /path/to/config.toml`
+- `bm-gateway-web serve --snapshot-file /path/to/latest_snapshot.json`
+- `bm-gateway-web render --snapshot-file /path/to/latest_snapshot.json`
+
+## Documentation
+
+Use one canonical source per topic:
+
+| Topic | Canonical doc |
+| --- | --- |
+| Architecture and migration plan | [docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md) |
+| Documentation index | [docs/README.md](docs/README.md) |
+| Runtime and packaged Python component | [python/README.md](python/README.md) |
+| Home Assistant MQTT contract | [home-assistant/contract.md](home-assistant/contract.md) |
+| Raspberry Pi appliance install | [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md) |
+| Raspberry Pi Imager CLI flow | [rpi-setup/macos-imager-cli.md](rpi-setup/macos-imager-cli.md) |
+| Hardware audit and service tuning | [rpi-setup/hardware-audit.md](rpi-setup/hardware-audit.md) |
+| Web product boundary | [web/README.md](web/README.md) |
+
+## Development
+
+Primary maintainer commands:
 
 ```bash
+make check
+make install-dev
 make dev-deploy TARGET=admin@host
 ```
 
-Optional override:
+`make check` runs:
 
-```bash
-make dev-deploy TARGET=admin@host REMOTE_DIR=/srv/bm-gateway-dev
-```
-
-The dev deploy path:
-
-- syncs the current local checkout with `rsync`
-- runs `make install` on the remote host with its local `python3`
-- refreshes `bm-gateway.service` and `bm-gateway-web.service`
+- `uv run pytest -q`
+- `uv run ruff check python/src python/tests`
+- `uv run ruff format --check python/src python/tests`
+- `uv run mypy python/src python/tests`
+- repo Markdown linting
+- shell script linting
 
 ## Roadmap
 
-- Extend live Bluetooth support beyond the current BM200 implementation.
-- Complete live BM200 history retrieval and persist decoded history packets.
-- Add yearly degradation summaries on top of the existing daily and monthly rollups.
-- Extend the Home Assistant assets under `home-assistant/`.
-- Expand the Raspberry Pi setup guide into automation under `rpi-setup/ansible/`.
-- Grow the host-run management web UI beyond the current config, contract,
-  storage, analytics, and history views.
+See [TODO.md](TODO.md) for the active backlog. Current themes are:
+
+- BM200 live history retrieval
+- BM300 Pro support decisioning
+- richer degradation analytics
+- Home Assistant/MQTT resilience improvements
+- web security and hardening follow-up
 
 ## License
 
-This project is released under the MIT License. See [LICENSE](LICENSE).
+[MIT](LICENSE)

@@ -114,6 +114,7 @@ config_path="${config_path:-${service_home}/.config/bm-gateway/config.toml}"
 config_dir="$(dirname "${config_path}")"
 devices_path="${config_dir}/devices.toml"
 cli_path="${service_home}/.local/bin/bm-gateway"
+web_cli_path="${service_home}/.local/bin/bm-gateway-web"
 unit_path="/etc/systemd/system/bm-gateway.service"
 web_unit_path="/etc/systemd/system/bm-gateway-web.service"
 glances_unit_path="/etc/systemd/system/glances-web.service"
@@ -122,6 +123,7 @@ install -d -m 0755 "${config_dir}" "${state_dir}" /usr/local/bin
 chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
+ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
 
 if [[ ! -f "${config_path}" ]]; then
   install -m 0644 "${project_root}/python/config/config.toml.example" "${config_path}"
@@ -280,7 +282,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=BMGATEWAY_CONFIG=${config_path}
-ExecStart=/usr/local/bin/bm-gateway --config \${BMGATEWAY_CONFIG} web manage --state-dir ${state_dir}
+ExecStart=/usr/local/bin/bm-gateway-web --config \${BMGATEWAY_CONFIG} --state-dir ${state_dir}
 Restart=always
 RestartSec=10
 AmbientCapabilities=CAP_NET_BIND_SERVICE

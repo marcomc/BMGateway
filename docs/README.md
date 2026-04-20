@@ -3,6 +3,13 @@
 This repository keeps the shared Python CLI template standards at the root, then
 adapts them for a broader mono-repo.
 
+## Documentation Index
+
+- [Architecture: Shared Core, Separate Runtime and Web Executables](architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)
+- [BM6 / BM200 Integration Notes](2026-04-19-bm6-bm200-integration-notes.md)
+- [Pi 3B Web and OS Research](research/2026-04-17-pi3b-web-and-os-research.md)
+- [Foundation Spec](specs/2026-04-17-foundation-spec.md)
+
 ## Included Defaults
 
 - `uv` for Python environment and package management

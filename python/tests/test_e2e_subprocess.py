@@ -141,6 +141,10 @@ def _script_command(config_path: Path, *args: str) -> list[str]:
     return ["uv", "run", "bm-gateway", "--config", str(config_path), *args]
 
 
+def _web_script_command(config_path: Path, *args: str) -> list[str]:
+    return ["uv", "run", "bm-gateway-web", "--config", str(config_path), *args]
+
+
 def test_module_entrypoint_runs_fake_runtime_end_to_end(tmp_path: Path) -> None:
     config_path = _write_example_files(tmp_path)
     state_dir = tmp_path / "state"
@@ -409,6 +413,57 @@ def test_web_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_path: Path) 
         prune_status, prune_response = _http_post_form(f"{base_url}/actions/prune-history", {})
         assert prune_status == 200
         assert "History pruned" in prune_response
+    finally:
+        manage_process.terminate()
+        manage_process.wait(timeout=5)
+
+
+def test_dedicated_web_console_script_runs_management_ui(tmp_path: Path) -> None:
+    config_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+
+    run_once = _run_command(
+        _module_command(
+            config_path,
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+        ),
+        cwd=tmp_path,
+    )
+    assert run_once.returncode == 0, run_once.stderr
+
+    manage_port = _pick_free_port()
+    manage_process = subprocess.Popen(
+        [
+            *(_web_script_command(config_path)),
+            "--state-dir",
+            str(state_dir),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(manage_port),
+        ],
+        cwd=tmp_path,
+        env=_runtime_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        base_url = f"http://127.0.0.1:{manage_port}"
+        _wait_for_http(f"{base_url}/api/status")
+        status_payload = _http_json(f"{base_url}/api/status")
+        assert isinstance(status_payload, dict)
+        assert status_payload["devices_online"] == 1
+        settings_page = (
+            urllib.request.urlopen(f"{base_url}/settings", timeout=RUNTIME_TIMEOUT_SECONDS)
+            .read()
+            .decode("utf-8")
+        )
+        assert "Gateway Settings" in settings_page
     finally:
         manage_process.terminate()
         manage_process.wait(timeout=5)

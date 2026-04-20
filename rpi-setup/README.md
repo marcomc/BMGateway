@@ -28,9 +28,12 @@ The install helper now places:
 
 - `~/.config/bm-gateway/config.toml`
 - `~/.config/bm-gateway/devices.toml`
+- `~/.local/bin/bm-gateway`
+- `~/.local/bin/bm-gateway-web`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
 - `/usr/local/bin/bm-gateway`
+- `/usr/local/bin/bm-gateway-web`
 
 The one-line bootstrap now installs the full appliance by default:
 

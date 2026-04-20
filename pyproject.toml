@@ -28,6 +28,7 @@ dev = [
 
 [project.scripts]
 bm-gateway = "bm_gateway.cli:main"
+bm-gateway-web = "bm_gateway.web_cli:main"
 
 [tool.setuptools.package-dir]
 "" = "python/src"

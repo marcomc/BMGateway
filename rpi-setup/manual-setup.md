@@ -140,7 +140,7 @@ git clone https://github.com/marcomc/BMGateway.git
 cd BMGateway
 ```
 
-## Install the CLI
+## Install the Executables
 
 ```bash
 make install
@@ -150,6 +150,7 @@ This creates:
 
 - a standalone runtime under `~/.local/share/bm-gateway/venv`
 - a user-facing command at `~/.local/bin/bm-gateway`
+- a user-facing web command at `~/.local/bin/bm-gateway-web`
 - a config template at `~/.config/bm-gateway/config.toml` if missing
 - a devices registry at `~/.config/bm-gateway/devices.toml` if missing
 

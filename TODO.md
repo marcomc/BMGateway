@@ -14,6 +14,11 @@
   failure paths.
 - Add editable gateway-safe settings forms and multi-device comparative
   filtering on top of the new premium battery/history/devices/settings UI.
+- Decide the web hardening plan: authentication, firewall guidance, and whether
+  LAN exposure should stay the default long term.
+- Revisit whether to add a dedicated local development environment; for now,
+  treat the main gateway host as the only live validation target for hobby
+  development and use it carefully for production-adjacent testing.
 - Add integration tests that exercise the example config files end-to-end.
 - Revisit Docker only for 64-bit deployment targets if containerization becomes
   operationally useful again.

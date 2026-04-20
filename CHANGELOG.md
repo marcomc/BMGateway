@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Dedicated `bm-gateway-web` executable for the optional management UI, while
+  keeping `bm-gateway web ...` as a compatibility path.
 - Initial project scaffold generated from `python-cli-template`.
 - Mono-repo layout with first-class `python/`, `home-assistant/`,
   `rpi-setup/`, and `web/` components.
@@ -87,6 +89,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Standalone and development installs now link both `bm-gateway` and
+  `bm-gateway-web`, and the web `systemd` service now launches the dedicated
+  web executable directly.
+- Documentation now treats the root `README.md` as overview-only, with
+  architecture, Raspberry Pi setup, and component details maintained in their
+  canonical docs instead of repeated across files.
 - Runtime appliance config now uses a live-ready empty device registry instead
   of shipping sample hardware into the installed user config.
 - Raspberry Pi service install now renders units for the active user and

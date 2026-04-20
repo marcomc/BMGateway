@@ -31,12 +31,11 @@ from .state_store import (
     fetch_recent_history,
     fetch_storage_summary,
     fetch_yearly_history,
-    load_snapshot,
     persist_snapshot,
     prune_history,
     write_snapshot,
 )
-from .web import render_snapshot_html, serve_management, serve_snapshot
+from .web_cli import run_web_command
 
 
 def format_main_help() -> str:
@@ -52,7 +51,7 @@ def format_main_help() -> str:
             "  ha       Render the Home Assistant MQTT contract",
             "  history  Inspect persisted and imported device history",
             "  run      Execute the gateway runtime and persist snapshots",
-            "  web      Render, serve, or manage the web interface",
+            "  web      Compatibility alias for bm-gateway-web",
             "",
             "Run `bm-gateway <command> --help` for command-specific help.",
         ]
@@ -687,41 +686,6 @@ def _handle_history_prune(
     return 0
 
 
-def _handle_web_render(snapshot_file: Path) -> int:
-    snapshot = load_snapshot(snapshot_file)
-    print(render_snapshot_html(snapshot))
-    return 0
-
-
-def _handle_web_serve(
-    *, config_path: Path, snapshot_file: Path, host: str | None, port: int | None
-) -> int:
-    config = load_config(config_path)
-    resolved_host = host or config.web.host
-    resolved_port = port or config.web.port
-    serve_snapshot(host=resolved_host, port=resolved_port, snapshot_path=snapshot_file)
-    return 0
-
-
-def _handle_web_manage(
-    *,
-    config_path: Path,
-    host: str | None,
-    port: int | None,
-    state_dir: Path | None,
-) -> int:
-    config = load_config(config_path)
-    resolved_host = host or config.web.host
-    resolved_port = port or config.web.port
-    serve_management(
-        host=resolved_host,
-        port=resolved_port,
-        config_path=config_path,
-        state_dir=state_dir,
-    )
-    return 0
-
-
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv) if argv is not None else sys.argv[1:]
     if not args_list or args_list == ["--help"] or args_list == ["-h"]:
@@ -823,16 +787,21 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "web":
         if args.web_command == "render":
-            return _handle_web_render(args.snapshot_file)
+            return run_web_command(
+                "render",
+                snapshot_file=args.snapshot_file,
+            )
         if args.web_command == "serve":
-            return _handle_web_serve(
+            return run_web_command(
+                "serve",
                 config_path=args.config,
                 snapshot_file=args.snapshot_file,
                 host=args.host,
                 port=args.port,
             )
         if args.web_command == "manage":
-            return _handle_web_manage(
+            return run_web_command(
+                "manage",
                 config_path=args.config,
                 host=args.host,
                 port=args.port,

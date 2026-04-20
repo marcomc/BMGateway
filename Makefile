@@ -5,11 +5,13 @@ PYTHON_VERSION ?= 3.11
 VENV ?= .venv
 PROJECT_NAME ?= BMGateway
 CLI_NAME ?= bm-gateway
+WEB_CLI_NAME ?= bm-gateway-web
 PACKAGE_NAME ?= bm_gateway
 CONFIG_NAME ?= bm-gateway
 PREFIX ?= $(HOME)/.local
 BINDIR ?= $(PREFIX)/bin
 INSTALL_PATH ?= $(BINDIR)/$(CLI_NAME)
+WEB_INSTALL_PATH ?= $(BINDIR)/$(WEB_CLI_NAME)
 APP_HOME ?= $(HOME)/.local/share/$(CLI_NAME)
 APP_VENV ?= $(APP_HOME)/venv
 APP_PYTHON ?= $(APP_VENV)/bin/python
@@ -70,13 +72,17 @@ install: install-deps ## Install a standalone user-facing runtime
 install-dev: check-deps sync ## Link the dev environment CLI into ~/.local/bin
 	@mkdir -p "$(BINDIR)"
 	@ln -sf "$(abspath $(VENV)/bin/$(CLI_NAME))" "$(INSTALL_PATH)"
+	@ln -sf "$(abspath $(VENV)/bin/$(WEB_CLI_NAME))" "$(WEB_INSTALL_PATH)"
 	@$(MAKE) install-config
 	@echo "Installed editable dev CLI at $(INSTALL_PATH)"
+	@echo "Installed editable dev web CLI at $(WEB_INSTALL_PATH)"
 
 install-link: ## Link the standalone runtime CLI into ~/.local/bin
 	@mkdir -p "$(BINDIR)"
 	@ln -sf "$(APP_VENV)/bin/$(CLI_NAME)" "$(INSTALL_PATH)"
+	@ln -sf "$(APP_VENV)/bin/$(WEB_CLI_NAME)" "$(WEB_INSTALL_PATH)"
 	@echo "Installed $(CLI_NAME) -> $(INSTALL_PATH)"
+	@echo "Installed $(WEB_CLI_NAME) -> $(WEB_INSTALL_PATH)"
 
 install-config: ## Install the example config file if missing
 	@mkdir -p "$(CONFIG_DIR)"

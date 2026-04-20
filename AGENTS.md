@@ -5,10 +5,12 @@
 - Project name: `BMGateway`
 - Python package: `bm_gateway`
 - Installed CLI: `bm-gateway`
+- Installed web CLI: `bm-gateway-web`
 - Module entry point: `python -m bm_gateway`
 - Default user config path: `~/.config/bm-gateway/config.toml`
 - Default standalone runtime path: `~/.local/share/bm-gateway/venv`
 - Default user-facing binary path: `~/.local/bin/bm-gateway`
+- Default user-facing web binary path: `~/.local/bin/bm-gateway-web`
 - Repository shape: mono-repo with first-class `python/`, `home-assistant/`,
   `rpi-setup/`, and `web/` directories
 
@@ -23,8 +25,9 @@ At the start of every new AI agent chat for this repository, read:
 5. `TODO.md`
 6. `python/README.md`
 7. `docs/specs/2026-04-17-foundation-spec.md`
-8. `home-assistant/contract.md`
-9. `rpi-setup/manual-setup.md`
+8. `docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md`
+9. `home-assistant/contract.md`
+10. `rpi-setup/manual-setup.md`
 
 ## Development Rules
 
@@ -36,7 +39,8 @@ At the start of every new AI agent chat for this repository, read:
 - Preserve the standalone install behavior of `make install`.
 - Keep Home Assistant assets under `home-assistant/`.
 - Keep Raspberry Pi setup documentation and automation under `rpi-setup/`.
-- Keep web interface code and notes under `web/`.
+- Keep shared web implementation code under `python/src/bm_gateway/`.
+- Keep web product notes and non-packaged web assets under `web/`.
 - Keep the CLI contract aligned with `home-assistant/contract.md`.
 - For remote development deployments, use
   `make dev-deploy TARGET=admin@host` from the repository root.

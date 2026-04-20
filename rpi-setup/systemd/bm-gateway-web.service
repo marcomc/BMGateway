@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=BMGATEWAY_CONFIG=/etc/bm-gateway/config.toml
-ExecStart=/usr/local/bin/bm-gateway --config ${BMGATEWAY_CONFIG} web manage
+ExecStart=/usr/local/bin/bm-gateway-web --config ${BMGATEWAY_CONFIG}
 Restart=always
 RestartSec=10
 AmbientCapabilities=CAP_NET_BIND_SERVICE
