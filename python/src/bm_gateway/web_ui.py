@@ -704,6 +704,16 @@ details summary::-webkit-details-marker { display: none; }
   color: var(--text-secondary);
   text-align: right;
 }
+.settings-control {
+  flex: 0 1 360px;
+  width: min(100%, 360px);
+}
+.settings-control .settings-value {
+  text-align: left;
+}
+.settings-control .inline-field-help {
+  margin-top: 0.4rem;
+}
 .primary-button,
 .secondary-button,
 .ghost-button {
@@ -1237,6 +1247,18 @@ def settings_row(label: str, value: str) -> str:
         '<div class="settings-row">'
         f'<div class="settings-label">{html.escape(label)}</div>'
         f'<div class="settings-value">{html.escape(value)}</div>'
+        "</div>"
+    )
+
+
+def settings_control_row(label: str, control_html: str, *, help_text: str = "") -> str:
+    help_markup = (
+        f'<div class="inline-field-help">{html.escape(help_text)}</div>' if help_text else ""
+    )
+    return (
+        '<div class="settings-row">'
+        f'<div class="settings-label">{html.escape(label)}</div>'
+        f'<div class="settings-control">{control_html}{help_markup}</div>'
         "</div>"
     )
 

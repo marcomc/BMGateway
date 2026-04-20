@@ -330,7 +330,7 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
             .read()
             .decode("utf-8")
         )
-        assert "Operational Surfaces" in management_page
+        assert "Operational Surfaces" not in management_page
         assert "Done" in management_page
         assert "Web Service" in management_page
 

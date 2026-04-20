@@ -143,6 +143,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   settings surface now merges summary and edit tasks into `/settings` with an
   explicit edit mode instead of splitting users between `/settings` and
   `/gateway`.
+- Settings edit mode now uses inline row controls instead of stacked summary
+  values plus separate forms, and it exposes editable gateway name/timezone,
+  web host/enablement, and Bluetooth adapter/timeout settings directly in the
+  web UI.
+- The Bluetooth adapter selector now uses the host's detected adapters instead
+  of a free-text field and highlights missing / absent adapters in the
+  settings UI.
 
 ### Documented
 

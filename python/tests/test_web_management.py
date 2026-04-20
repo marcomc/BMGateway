@@ -9,6 +9,7 @@ from bm_gateway.device_registry import load_device_registry, normalize_mac_addre
 from bm_gateway.web import (
     _add_device_form_html,
     _chart_points,
+    _discover_bluetooth_adapters,
     add_device_from_form,
     build_run_once_command,
     render_add_device_html,
@@ -18,8 +19,10 @@ from bm_gateway.web import (
     render_history_html,
     render_management_html,
     render_settings_html,
+    update_bluetooth_preferences,
     update_config_from_text,
     update_device_icon,
+    update_gateway_preferences,
     update_web_preferences,
 )
 
@@ -92,6 +95,121 @@ def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: 
     assert config.web.port == 8090
     assert config.retention.raw_retention_days == 120
     assert devices[0].id == "bm200_house"
+
+
+def test_update_gateway_preferences_persists_runtime_and_integration_settings(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 300",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "fake"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 8",
+                "connect_timeout_seconds = 10",
+                "",
+                "[mqtt]",
+                "enabled = true",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "secret"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = true",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 8080",
+                "show_chart_markers = false",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_gateway_preferences(
+        config_path=config_path,
+        gateway_name="BMGateway",
+        timezone="Europe/Rome",
+        reader_mode="live",
+        poll_interval_seconds=600,
+        mqtt_enabled=False,
+        home_assistant_enabled=False,
+        raw_retention_days=90,
+        daily_retention_days=30,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.gateway.reader_mode == "live"
+    assert config.gateway.poll_interval_seconds == 600
+    assert config.mqtt.enabled is False
+    assert config.home_assistant.enabled is False
+    assert config.retention.raw_retention_days == 90
+    assert config.retention.daily_retention_days == 30
+
+
+def test_update_bluetooth_preferences_persists_adapter_and_timeouts(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_bluetooth_preferences(
+        config_path=config_path,
+        adapter="hci1",
+        scan_timeout_seconds=20,
+        connect_timeout_seconds=60,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.bluetooth.adapter == "hci1"
+    assert config.bluetooth.scan_timeout_seconds == 20
+    assert config.bluetooth.connect_timeout_seconds == 60
+
+
+def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_gateway_preferences(
+        config_path=config_path,
+        gateway_name="BMGateway",
+        timezone="Europe/Rome",
+        reader_mode="fake",
+        poll_interval_seconds=0,
+        mqtt_enabled=True,
+        home_assistant_enabled=True,
+        raw_retention_days=0,
+        daily_retention_days=-1,
+    )
+
+    assert "gateway.poll_interval_seconds must be greater than zero" in errors
+    assert "retention.raw_retention_days must be greater than zero" in errors
+    assert "retention.daily_retention_days must be zero or greater" in errors
 
 
 def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_path: Path) -> None:
@@ -368,6 +486,8 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
 
     errors = update_web_preferences(
         config_path=config_path,
+        web_enabled=None,
+        web_host=None,
         web_port=None,
         show_chart_markers=True,
     )
@@ -376,6 +496,71 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
     config = load_config(config_path)
     assert config.web.port == 9091
     assert config.web.show_chart_markers is True
+
+
+def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 300",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "live"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 15",
+                "connect_timeout_seconds = 45",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "0.0.0.0"',
+                "port = 9091",
+                "show_chart_markers = false",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    errors = update_web_preferences(
+        config_path=config_path,
+        web_enabled=False,
+        web_host="127.0.0.1",
+        web_port=8088,
+        show_chart_markers=None,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.web.enabled is False
+    assert config.web.host == "127.0.0.1"
+    assert config.web.port == 8088
 
 
 def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
@@ -432,6 +617,8 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
 
     errors = update_web_preferences(
         config_path=config_path,
+        web_enabled=None,
+        web_host=None,
         web_port=8088,
         show_chart_markers=None,
     )
@@ -505,22 +692,22 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
         message="Configuration saved",
     )
 
-    assert "Home Assistant Contract" in html
-    assert "Storage Summary" in html
-    assert "/api/ha/contract" in html
-    assert "Prune History Using Retention Settings" in html
+    assert "Home Assistant Contract" not in html
+    assert "Storage Summary" not in html
+    assert "/api/ha/contract" not in html
+    assert "Prune History Using Retention Settings" not in html
     assert "Done" in html
     assert "Web Service" in html
     assert "Display Settings" in html
-    assert "Configuration Files" in html
+    assert "Save gateway settings" in html
+    assert "Configuration Files" not in html
     assert 'href="#main-content"' in html
     assert 'id="main-content"' in html
     assert 'aria-live="polite"' in html
     assert 'aria-label="Primary"' in html
-    assert "api-chip" in html
-    assert "config-grid" in html
     assert 'name="settings_section" value="web"' in html
     assert 'name="settings_section" value="display"' in html
+    assert 'action="/settings/gateway"' in html
     assert __version__ in html
     assert "build" in html
 
@@ -557,11 +744,11 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
         message="ok",
     )
 
-    assert "/api/analytics?device_id=" in html
-    assert "Gateway Overview" in html
-    assert "Operational Surfaces" in html
-    assert "Recover Bluetooth Adapter" in html
-    assert "Configuration Files" in html
+    assert "/api/analytics?device_id=" not in html
+    assert "Gateway Overview" not in html
+    assert "Operational Surfaces" not in html
+    assert "Recover Bluetooth Adapter" not in html
+    assert "Save gateway settings" in html
 
 
 def test_render_settings_html_is_summary_first_with_edit_link() -> None:
@@ -579,9 +766,10 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
-    assert "Configuration Files" not in html
     assert "Run One Collection Cycle" in html
-    assert "Manage devices" not in html
+    assert "Home Assistant Contract" in html
+    assert "Storage Summary" in html
+    assert "Configuration Files" in html
 
 
 def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
@@ -612,19 +800,70 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     )
 
     assert "Gateway Settings" in html
+    assert "Gateway Overview" not in html
     assert "Web Service" in html
     assert "Display Settings" in html
-    assert "Configuration Files" in html
+    assert "Save gateway settings" in html
     assert "Save web service settings" in html
     assert "Save display settings" in html
-    assert "Validate and Save" in html
-    assert "Home Assistant Contract" in html
-    assert "Storage Summary" in html
-    assert "Run One Collection Cycle" in html
-    assert "Recover Bluetooth Adapter" in html
-    assert "Manage devices" not in html
-    assert "Open Devices" not in html
+    assert 'name="gateway_name"' in html
+    assert 'name="timezone"' in html
+    assert 'name="web_host"' in html
+    assert 'name="web_enabled"' in html
+    assert 'name="bluetooth_adapter"' in html
+    assert 'name="scan_timeout_seconds"' in html
+    assert 'name="connect_timeout_seconds"' in html
+    assert "Configuration Files" not in html
+    assert "Home Assistant Contract" not in html
+    assert "Storage Summary" not in html
+    assert "Run One Collection Cycle" not in html
+    assert "Recover Bluetooth Adapter" not in html
     assert 'href="/settings"' in html
+
+
+def test_discover_bluetooth_adapters_reads_sysfs_entries(tmp_path: Path) -> None:
+    hci0 = tmp_path / "hci0"
+    hci0.mkdir()
+    (hci0 / "address").write_text("AA:BB:CC:DD:EE:FF\n", encoding="utf-8")
+    (hci0 / "name").write_text("Primary Adapter\n", encoding="utf-8")
+    (tmp_path / "rfkill0").mkdir()
+
+    adapters = _discover_bluetooth_adapters(tmp_path)
+
+    assert adapters == [
+        {
+            "name": "hci0",
+            "address": "AA:BB:CC:DD:EE:FF",
+            "alias": "Primary Adapter",
+        }
+    ]
+
+
+def test_render_settings_html_edit_mode_highlights_missing_bluetooth_adapter() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        detected_bluetooth_adapters=[],
+    )
+
+    assert "No Bluetooth adapters detected on this host." in html
+    assert '<option value="auto"' in html
+
+
+def test_render_settings_html_edit_mode_marks_configured_adapter_missing() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        detected_bluetooth_adapters=[{"name": "hci0", "address": "", "alias": "hci0"}],
+    )
+
+    assert "Detected adapters: hci0." in html
 
 
 def test_render_battery_html_renders_device_icon() -> None:

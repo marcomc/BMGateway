@@ -58,6 +58,7 @@ from .web_ui import (
     icon_picker_option,
     metric_tile,
     section_card,
+    settings_control_row,
     settings_row,
     status_badge,
     summary_card,
@@ -80,6 +81,31 @@ PROTOCOL_STATUS_SCALE: tuple[tuple[str, str, str, str], ...] = (
     ("charging", "Charging", "Active charging reported by the monitor.", "info"),
     ("floating", "Floating", "Maintenance / float charge reported by the monitor.", "purple"),
 )
+
+
+def _read_sysfs_value(path: Path) -> str:
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8").strip()
+
+
+def _discover_bluetooth_adapters(
+    sysfs_root: Path = Path("/sys/class/bluetooth"),
+) -> list[dict[str, str]]:
+    if not sysfs_root.exists():
+        return []
+    adapters: list[dict[str, str]] = []
+    for entry in sorted(sysfs_root.iterdir()):
+        if not entry.is_dir() or not entry.name.startswith("hci"):
+            continue
+        adapters.append(
+            {
+                "name": entry.name,
+                "address": _read_sysfs_value(entry / "address"),
+                "alias": _read_sysfs_value(entry / "name") or entry.name,
+            }
+        )
+    return adapters
 
 
 def _snapshot_with_version(snapshot: dict[str, object]) -> dict[str, object]:
@@ -1593,6 +1619,7 @@ def render_settings_html(
     config_text: str | None = None,
     devices_text: str | None = None,
     contract: dict[str, object] | None = None,
+    detected_bluetooth_adapters: list[dict[str, str]] | None = None,
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
@@ -1606,6 +1633,11 @@ def render_settings_html(
         "devices": [],
     }
     contract = contract or {}
+    detected_bluetooth_adapters = (
+        _discover_bluetooth_adapters()
+        if detected_bluetooth_adapters is None
+        else detected_bluetooth_adapters
+    )
     device_tabs = (
         "".join(
             (
@@ -1616,9 +1648,6 @@ def render_settings_html(
             for device in devices
         )
         or "<span class='pill-chip'>No devices configured</span>"
-    )
-    mqtt_ha_enabled = (
-        "enabled" if config.mqtt.enabled and config.home_assistant.enabled else "disabled"
     )
     web_enabled = f"{config.web.host}:{config.web.port}" if config.web.enabled else "disabled"
     daily_retention = (
@@ -1632,6 +1661,24 @@ def render_settings_html(
     gateway_state_topic = html.escape(str(gateway_contract.get("state_topic", "")))
     gateway_discovery_topic = html.escape(str(gateway_contract.get("discovery_topic", "")))
     device_contract_count = len(contract_devices) if isinstance(contract_devices, list) else 0
+    detected_adapter_names = [
+        str(adapter.get("name", ""))
+        for adapter in detected_bluetooth_adapters
+        if str(adapter.get("name", ""))
+    ]
+    configured_adapter_present = (
+        config.bluetooth.adapter == "auto" or config.bluetooth.adapter in detected_adapter_names
+    )
+    adapter_status = (
+        "No Bluetooth adapters detected"
+        if not detected_adapter_names
+        else (
+            f"Configured adapter {config.bluetooth.adapter} is missing"
+            if not configured_adapter_present
+            else "Adapter detected"
+        )
+    )
+    detected_adapter_summary = ", ".join(detected_adapter_names) or "No adapters detected"
     api_chips = "".join(
         api_chip(endpoint)
         for endpoint in (
@@ -1685,41 +1732,220 @@ def render_settings_html(
     )
     web_section_body = (
         settings_row("Web interface", web_enabled)
-        + settings_row("Configured port", str(config.web.port))
         + settings_row("Configured host", config.web.host)
+        + settings_row("Configured port", str(config.web.port))
     )
     display_section_body = settings_row(
         "Chart point markers",
         "Enabled" if config.web.show_chart_markers else "Disabled",
-    ) + settings_row("Default style", "Clean BM-style lines")
-    if edit_mode:
-        web_section_body += (
-            '<form method="post" action="/settings/web" style="margin-top:1rem">'
-            '<input type="hidden" name="settings_section" value="web">'
-            '<div class="two-column-grid">'
-            '<div><label class="settings-label" for="web-port-input">Web port</label>'
-            f'<input id="web-port-input" type="text" name="web_port" value="{config.web.port}" '
-            'inputmode="numeric" autocomplete="off"></div>'
-            f"{settings_row('Host', html.escape(config.web.host))}"
-            "</div>"
-            '<div style="margin-top:1rem">'
-            f"{button('Save web service settings', kind='primary')}"
-            "</div>"
-            "</form>"
+    )
+    bluetooth_section_body = (
+        settings_row("Adapter", config.bluetooth.adapter)
+        + settings_row("Detected adapters", detected_adapter_summary)
+        + settings_row("Adapter status", adapter_status)
+        + settings_row("Scan timeout", f"{config.bluetooth.scan_timeout_seconds} seconds")
+        + settings_row("Connect timeout", f"{config.bluetooth.connect_timeout_seconds} seconds")
+    )
+    gateway_section_body = (
+        f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
+        + settings_row("Gateway name", config.gateway.name)
+        + settings_row("Timezone", config.gateway.timezone)
+        + settings_row("Live polling", config.gateway.reader_mode)
+        + settings_row("Poll interval", f"{config.gateway.poll_interval_seconds} seconds")
+        + settings_row("MQTT", "Enabled" if config.mqtt.enabled else "Disabled")
+        + settings_row(
+            "Home Assistant",
+            "Enabled" if config.home_assistant.enabled else "Disabled",
         )
-        display_section_body += (
-            '<form method="post" action="/settings/web" style="margin-top:1rem">'
+        + settings_row("Raw retention", f"{config.retention.raw_retention_days} days")
+        + settings_row("Daily rollup retention", daily_retention)
+    )
+    if edit_mode:
+        gateway_section_body = (
+            '<form method="post" action="/settings/gateway">'
+            + f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
+            + settings_control_row(
+                "Gateway name",
+                (
+                    f'<input id="gateway-name-input" type="text" name="gateway_name" '
+                    f'value="{html.escape(config.gateway.name)}" autocomplete="off">'
+                ),
+            )
+            + settings_control_row(
+                "Timezone",
+                (
+                    f'<input id="timezone-input" type="text" name="timezone" '
+                    f'value="{html.escape(config.gateway.timezone)}" autocomplete="off">'
+                ),
+            )
+            + settings_control_row(
+                "Live polling",
+                (
+                    '<select id="reader-mode-input" name="reader_mode" autocomplete="off">'
+                    f'<option value="fake"{_selected_attr(config.gateway.reader_mode == "fake")}>'
+                    "fake</option>"
+                    f'<option value="live"{_selected_attr(config.gateway.reader_mode == "live")}>'
+                    "live</option>"
+                    "</select>"
+                ),
+            )
+            + settings_control_row(
+                "Poll interval",
+                (
+                    f'<input id="poll-interval-input" type="text" name="poll_interval_seconds" '
+                    f'value="{config.gateway.poll_interval_seconds}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+            )
+            + settings_control_row(
+                "MQTT",
+                (
+                    f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+                    f'<input type="checkbox" name="mqtt_enabled"'
+                    f"{_checked_attr(config.mqtt.enabled)}>"
+                    "<span>Enable MQTT publishing</span></label>"
+                ),
+            )
+            + settings_control_row(
+                "Home Assistant",
+                (
+                    f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="home_assistant_enabled"'
+                    f"{_checked_attr(config.home_assistant.enabled)}>"
+                    "<span>Enable Home Assistant contract</span></label>"
+                ),
+            )
+            + settings_control_row(
+                "Raw retention",
+                (
+                    f'<input id="raw-retention-input" type="text" name="raw_retention_days" '
+                    f'value="{config.retention.raw_retention_days}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+            )
+            + settings_control_row(
+                "Daily rollup retention",
+                (
+                    f'<input id="daily-retention-input" type="text" name="daily_retention_days" '
+                    f'value="{config.retention.daily_retention_days}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save gateway settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
+        web_section_body = (
+            '<form method="post" action="/settings/web">'
+            '<input type="hidden" name="settings_section" value="web">'
+            + settings_control_row(
+                "Web interface",
+                (
+                    f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+                    f'<input type="checkbox" name="web_enabled"{_checked_attr(config.web.enabled)}>'
+                    "<span>Enable web interface</span></label>"
+                ),
+            )
+            + settings_control_row(
+                "Host",
+                (
+                    f'<input id="web-host-input" type="text" name="web_host" '
+                    f'value="{html.escape(config.web.host)}" autocomplete="off">'
+                ),
+            )
+            + settings_control_row(
+                "Port",
+                (
+                    f'<input id="web-port-input" type="text" name="web_port" '
+                    f'value="{config.web.port}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save web service settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
+        display_section_body = (
+            '<form method="post" action="/settings/web">'
             '<input type="hidden" name="settings_section" value="display">'
-            f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
-            f'<input id="show-chart-markers-input" type="checkbox" '
-            f'name="show_chart_markers"{_checked_attr(config.web.show_chart_markers)}>'
-            "<span>Show chart point markers</span></label>"
-            "<div class='inline-field-help'>"
-            "Turn point markers back on if you prefer exact sample dots "
-            "over the cleaner default BM-style lines."
-            "</div>"
-            f'<div style="margin-top:1rem">{button("Save display settings", kind="primary")}</div>'
-            "</form>"
+            + settings_control_row(
+                "Chart point markers",
+                (
+                    f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+                    f'<input id="show-chart-markers-input" type="checkbox" '
+                    f'name="show_chart_markers"{_checked_attr(config.web.show_chart_markers)}>'
+                    "<span>Show chart point markers</span></label>"
+                ),
+                help_text=(
+                    "Turn point markers back on if you prefer exact sample dots "
+                    "over the cleaner default BM-style lines."
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save display settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
+        bluetooth_section_body = (
+            '<form method="post" action="/settings/bluetooth">'
+            + settings_control_row(
+                "Adapter",
+                (
+                    '<select id="bluetooth-adapter-input" name="bluetooth_adapter" '
+                    'autocomplete="off">'
+                    f'<option value="auto"{_selected_attr(config.bluetooth.adapter == "auto")}>'
+                    "Auto</option>"
+                    + "".join(
+                        (
+                            f'<option value="{html.escape(name)}"'
+                            f"{_selected_attr(config.bluetooth.adapter == name)}>"
+                            f"{html.escape(name)}</option>"
+                        )
+                        for name in detected_adapter_names
+                    )
+                    + (
+                        ""
+                        if config.bluetooth.adapter == "auto" or configured_adapter_present
+                        else (
+                            f'<option value="{html.escape(config.bluetooth.adapter)}" selected>'
+                            f"{html.escape(config.bluetooth.adapter)} (missing)</option>"
+                        )
+                    )
+                    + "</select>"
+                ),
+                help_text=(
+                    "No Bluetooth adapters detected on this host."
+                    if not detected_adapter_names
+                    else (
+                        f"Configured adapter {config.bluetooth.adapter} is not currently present."
+                        if not configured_adapter_present
+                        else f"Detected adapters: {detected_adapter_summary}."
+                    )
+                ),
+            )
+            + settings_control_row(
+                "Scan timeout",
+                (
+                    f'<input id="scan-timeout-input" type="text" name="scan_timeout_seconds" '
+                    f'value="{config.bluetooth.scan_timeout_seconds}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+            )
+            + settings_control_row(
+                "Connect timeout",
+                (
+                    f'<input id="connect-timeout-input" type="text" '
+                    f'name="connect_timeout_seconds" '
+                    f'value="{config.bluetooth.connect_timeout_seconds}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save bluetooth settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
         )
     body = (
         top_header(
@@ -1740,22 +1966,19 @@ def render_settings_html(
             ),
         )
         + banner
-        + section_card(
-            title="Gateway Overview",
-            subtitle="Operational Surfaces",
-            body=overview_cards,
+        + (
+            ""
+            if edit_mode
+            else section_card(
+                title="Gateway Overview",
+                subtitle="Operational Surfaces",
+                body=overview_cards,
+            )
         )
         + section_card(
             title="Gateway Settings",
             subtitle="Current runtime and integration summary",
-            body=(
-                f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
-                + settings_row("Live polling", config.gateway.reader_mode)
-                + settings_row("Poll interval", f"{config.gateway.poll_interval_seconds} seconds")
-                + settings_row("MQTT / Home Assistant", mqtt_ha_enabled)
-                + settings_row("Raw retention", f"{config.retention.raw_retention_days} days")
-                + settings_row("Daily rollup retention", daily_retention)
-            ),
+            body=gateway_section_body,
         )
         + section_card(
             title="Web Service",
@@ -1768,55 +1991,64 @@ def render_settings_html(
             body=display_section_body,
         )
         + section_card(
-            title="Actions",
-            subtitle="Run the collector, prune retained history, and inspect the live JSON APIs.",
-            body=actions_body,
+            title="Bluetooth",
+            subtitle="Adapter selection and BLE timeout tuning.",
+            body=bluetooth_section_body,
         )
-        + section_card(
-            title="Home Assistant Contract",
-            subtitle=(
-                "Keep the MQTT surface easy to scan without losing the exact "
-                "state and discovery topics."
-            ),
-            body=(
-                settings_row("Gateway state topic", gateway_state_topic)
-                + settings_row("Gateway discovery topic", gateway_discovery_topic)
-                + settings_row("Device discovery payloads", str(device_contract_count))
-            ),
+        + (
+            ""
+            if edit_mode
+            else section_card(
+                title="Actions",
+                subtitle=(
+                    "Run the collector, prune retained history, and inspect the live JSON APIs."
+                ),
+                body=actions_body,
+            )
         )
-        + section_card(
-            title="Storage Summary",
-            subtitle=(
-                "Recent raw samples and long-term rollups stay available, but "
-                "the page emphasizes storage posture first."
-            ),
-            body=(
-                '<div class="table-shell"><table><thead><tr><th>Device</th><th>Raw samples</th>'
-                "<th>Raw first</th><th>Raw last</th>"
-                "<th>Daily days</th><th>Daily first</th><th>Daily last</th></tr></thead>"
-                f"<tbody>{_storage_rows(storage_summary)}</tbody></table></div>"
-            ),
+        + (
+            ""
+            if edit_mode
+            else section_card(
+                title="Home Assistant Contract",
+                subtitle=(
+                    "Keep the MQTT surface easy to scan without losing the exact "
+                    "state and discovery topics."
+                ),
+                body=(
+                    settings_row("Gateway state topic", gateway_state_topic)
+                    + settings_row("Gateway discovery topic", gateway_discovery_topic)
+                    + settings_row("Device discovery payloads", str(device_contract_count))
+                ),
+            )
+        )
+        + (
+            ""
+            if edit_mode
+            else section_card(
+                title="Storage Summary",
+                subtitle=(
+                    "Recent raw samples and long-term rollups stay available, but "
+                    "the page emphasizes storage posture first."
+                ),
+                body=(
+                    '<div class="table-shell"><table><thead><tr><th>Device</th><th>Raw samples</th>'
+                    "<th>Raw first</th><th>Raw last</th>"
+                    "<th>Daily days</th><th>Daily first</th><th>Daily last</th></tr></thead>"
+                    f"<tbody>{_storage_rows(storage_summary)}</tbody></table></div>"
+                ),
+            )
         )
     )
-    if edit_mode:
+    if not edit_mode:
         body += section_card(
             title="Configuration Files",
-            subtitle=(
-                "The CLI and the web UI remain complementary: both edit the "
-                "same config.toml and devices.toml files."
-            ),
+            subtitle="Reference paths and raw configuration snapshots.",
             body=(
-                '<form method="post" action="/config">'
-                '<div class="config-grid">'
-                '<div><label class="settings-label" for="config-toml-input">config.toml</label>'
-                f'<textarea id="config-toml-input" name="config_toml" autocomplete="off" '
-                f'spellcheck="false">{html.escape(config_text or "")}</textarea></div>'
-                '<div><label class="settings-label" for="devices-toml-input">devices.toml</label>'
-                f'<textarea id="devices-toml-input" name="devices_toml" autocomplete="off" '
-                f'spellcheck="false">{html.escape(devices_text or "")}</textarea></div>'
-                "</div>"
-                f'<div style="margin-top:1rem">{button("Validate and Save", kind="primary")}</div>'
-                "</form>"
+                settings_row("Config path", str(config.source_path))
+                + settings_row("Device registry path", str(config.device_registry_path))
+                + settings_row("config.toml", config_text or "")
+                + settings_row("devices.toml", devices_text or "")
             ),
         )
     return app_document(
@@ -2440,10 +2672,14 @@ def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> l
 def update_web_preferences(
     *,
     config_path: Path,
+    web_enabled: bool | None,
+    web_host: str | None,
     web_port: int | None,
     show_chart_markers: bool | None,
 ) -> list[str]:
     config = load_config(config_path)
+    resolved_enabled = config.web.enabled if web_enabled is None else web_enabled
+    resolved_host = config.web.host if web_host is None else web_host
     resolved_port = config.web.port if web_port is None else web_port
     resolved_show_chart_markers = (
         config.web.show_chart_markers if show_chart_markers is None else show_chart_markers
@@ -2452,8 +2688,81 @@ def update_web_preferences(
         config,
         web=replace(
             config.web,
+            enabled=resolved_enabled,
+            host=resolved_host,
             port=resolved_port,
             show_chart_markers=resolved_show_chart_markers,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
+def update_gateway_preferences(
+    *,
+    config_path: Path,
+    gateway_name: str,
+    timezone: str,
+    reader_mode: str,
+    poll_interval_seconds: int,
+    mqtt_enabled: bool,
+    home_assistant_enabled: bool,
+    raw_retention_days: int,
+    daily_retention_days: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        gateway=replace(
+            config.gateway,
+            name=gateway_name,
+            timezone=timezone,
+            reader_mode=reader_mode,
+            poll_interval_seconds=poll_interval_seconds,
+        ),
+        mqtt=replace(
+            config.mqtt,
+            enabled=mqtt_enabled,
+        ),
+        home_assistant=replace(
+            config.home_assistant,
+            enabled=home_assistant_enabled,
+        ),
+        retention=replace(
+            config.retention,
+            raw_retention_days=raw_retention_days,
+            daily_retention_days=daily_retention_days,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
+def update_bluetooth_preferences(
+    *,
+    config_path: Path,
+    adapter: str,
+    scan_timeout_seconds: int,
+    connect_timeout_seconds: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        bluetooth=replace(
+            config.bluetooth,
+            adapter=adapter,
+            scan_timeout_seconds=scan_timeout_seconds,
+            connect_timeout_seconds=connect_timeout_seconds,
         ),
     )
     from .config import validate_config
@@ -2931,8 +3240,122 @@ def serve_management(
                 self.end_headers()
                 return
 
+            if parsed.path == "/settings/gateway":
+                try:
+                    poll_interval_seconds = int(form.get("poll_interval_seconds", ["300"])[0])
+                    raw_retention_days = int(form.get("raw_retention_days", ["180"])[0])
+                    daily_retention_days = int(form.get("daily_retention_days", ["0"])[0])
+                except ValueError:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=_read_text(config_path),
+                            devices_text=_read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: settings values must be numeric",
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_gateway_preferences(
+                    config_path=config_path,
+                    gateway_name=form.get("gateway_name", ["BMGateway"])[0],
+                    timezone=form.get("timezone", ["Europe/Rome"])[0],
+                    reader_mode=form.get("reader_mode", ["fake"])[0],
+                    poll_interval_seconds=poll_interval_seconds,
+                    mqtt_enabled=_bool_from_form(form, "mqtt_enabled"),
+                    home_assistant_enabled=_bool_from_form(form, "home_assistant_enabled"),
+                    raw_retention_days=raw_retention_days,
+                    daily_retention_days=daily_retention_days,
+                )
+                if errors:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=_read_text(config_path),
+                            devices_text=_read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/bluetooth":
+                try:
+                    scan_timeout_seconds = int(form.get("scan_timeout_seconds", ["15"])[0])
+                    connect_timeout_seconds = int(form.get("connect_timeout_seconds", ["45"])[0])
+                except ValueError:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=_read_text(config_path),
+                            devices_text=_read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: bluetooth values must be numeric",
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_bluetooth_preferences(
+                    config_path=config_path,
+                    adapter=form.get("bluetooth_adapter", ["auto"])[0],
+                    scan_timeout_seconds=scan_timeout_seconds,
+                    connect_timeout_seconds=connect_timeout_seconds,
+                )
+                if errors:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=_read_text(config_path),
+                            devices_text=_read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
             if parsed.path == "/settings/web":
                 settings_section = form.get("settings_section", [""])[0]
+                web_enabled: bool | None = None
+                web_host: str | None = None
                 web_port: int | None = None
                 show_chart_markers: bool | None = None
                 if settings_section == "web":
@@ -2955,6 +3378,8 @@ def serve_management(
                             status=400,
                         )
                         return
+                    web_enabled = _bool_from_form(form, "web_enabled")
+                    web_host = form.get("web_host", ["0.0.0.0"])[0]
                 elif settings_section == "display":
                     show_chart_markers = _bool_from_form(form, "show_chart_markers")
                 else:
@@ -2976,6 +3401,8 @@ def serve_management(
                     return
                 errors = update_web_preferences(
                     config_path=config_path,
+                    web_enabled=web_enabled,
+                    web_host=web_host,
                     web_port=web_port,
                     show_chart_markers=show_chart_markers,
                 )
