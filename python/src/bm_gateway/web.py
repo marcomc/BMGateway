@@ -1117,204 +1117,16 @@ def render_management_html(
     contract: dict[str, object],
     message: str = "",
 ) -> str:
-    version_label = display_version()
-    banner = banner_strip(html.escape(message), kind="warning") if message else ""
-    counts = cast(dict[str, object], storage_summary.get("counts", {}))
-    gateway_contract = cast(dict[str, object], contract.get("gateway", {}))
-    contract_devices = cast(list[object], contract.get("devices", []))
-    gateway_state_topic = html.escape(str(gateway_contract.get("state_topic", "")))
-    gateway_discovery_topic = html.escape(str(gateway_contract.get("discovery_topic", "")))
-    device_contract_count = len(contract_devices) if isinstance(contract_devices, list) else 0
-    api_chips = "".join(
-        api_chip(endpoint)
-        for endpoint in (
-            "/api/status",
-            "/api/config",
-            "/api/devices",
-            "/api/ha/contract",
-            "/api/ha/discovery",
-            "/api/storage",
-            "/api/analytics?device_id=<id>",
-            "/api/history?device_id=<id>&kind=daily",
-        )
-    )
-    header = top_header(
-        title="Edit Settings",
-        subtitle=(
-            "Edit gateway-wide behavior, service settings, and the underlying "
-            "configuration files. Device creation and device editing now live "
-            "under Devices."
-        ),
-        eyebrow="Configuration",
-    )
-    overview_cards = (
-        '<div class="metrics-grid">'
-        + summary_card(
-            "Latest snapshot",
-            _display_timestamp(snapshot.get("generated_at", "missing")),
-            subvalue=f"Gateway: {html.escape(str(snapshot.get('gateway_name', 'BMGateway')))}",
-        )
-        + summary_card(
-            "Gateway snapshots",
-            str(counts.get("gateway_snapshots", 0)),
-            subvalue=(
-                f"Devices online: {snapshot.get('devices_online', 0)} / "
-                f"{snapshot.get('devices_total', 0)}"
-            ),
-        )
-        + summary_card(
-            "Raw / rollups",
-            f"{counts.get('device_readings', 0)} / {counts.get('device_daily_rollups', 0)}",
-            subvalue=f"MQTT connected: {snapshot.get('mqtt_connected', False)}",
-        )
-        + "</div>"
-    )
-    actions_body = (
-        '<div class="inline-actions">'
-        '<form method="post" action="/actions/run-once">'
-        f"{button('Run One Collection Cycle', kind='primary')}"
-        "</form>"
-        '<form method="post" action="/actions/recover-bluetooth">'
-        f"{button('Recover Bluetooth Adapter', kind='secondary')}"
-        "</form>"
-        '<form method="post" action="/actions/prune-history">'
-        f"{button('Prune History Using Retention Settings', kind='secondary')}"
-        "</form>"
-        "</div>"
-        '<div style="margin-top:1rem" class="chip-grid">'
-        f"{api_chips}"
-        "</div>"
-    )
-    control_plane = (
-        '<div class="control-plane">'
-        + section_card(
-            title="Gateway Overview",
-            subtitle="Operational Surfaces",
-            body=overview_cards,
-        )
-        + section_card(
-            title="Actions",
-            subtitle="Run the collector, prune retained history, and inspect the live JSON APIs.",
-            body=actions_body,
-        )
-        + "</div>"
-    )
-    body = (
-        header
-        + banner
-        + control_plane
-        + section_card(
-            title="Devices",
-            subtitle=(
-                "Device creation and editing belong under Devices, not inside "
-                "the gateway-wide configuration page."
-            ),
-            body=(
-                "<div class='inline-actions'>"
-                "<a class='primary-button' href='/devices'>Open Devices</a>"
-                "</div>"
-            ),
-        )
-        + section_card(
-            title="Configured Devices",
-            subtitle="Visible here for context, but edited from the Devices page.",
-            body=(
-                '<div class="table-shell"><table><thead><tr><th>ID</th><th>Type</th>'
-                "<th>Name</th><th>MAC</th><th>Profile</th><th>Family</th><th>Enabled</th></tr></thead>"
-                f"<tbody>{_device_table_rows(devices)}</tbody></table></div>"
-            ),
-        )
-        + section_card(
-            title="Web Service Settings",
-            subtitle="Management UI network binding and port selection.",
-            body=(
-                '<form method="post" action="/settings/web">'
-                '<input type="hidden" name="settings_section" value="web">'
-                '<div class="two-column-grid">'
-                '<div><label class="settings-label" for="web-port-input">Web port</label>'
-                f'<input id="web-port-input" type="text" name="web_port" value="{config.web.port}" '
-                'inputmode="numeric" autocomplete="off"></div>'
-                f"{settings_row('Host', html.escape(config.web.host))}"
-                "</div>"
-                '<div style="margin-top:1rem">'
-                f"{button('Save web service settings', kind='primary')}"
-                "</div>"
-                "</form>"
-            ),
-        )
-        + section_card(
-            title="Display Settings",
-            subtitle="Global chart rendering preferences.",
-            body=(
-                '<form method="post" action="/settings/web">'
-                '<input type="hidden" name="settings_section" value="display">'
-                f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
-                f'<input id="show-chart-markers-input" type="checkbox" '
-                f'name="show_chart_markers"{_checked_attr(config.web.show_chart_markers)}>'
-                "<span>Show chart point markers</span></label>"
-                "<div class='inline-field-help'>"
-                "Turn point markers back on if you prefer exact sample dots "
-                "over the cleaner default BM-style lines."
-                "</div>"
-                '<div style="margin-top:1rem">'
-                f"{button('Save display settings', kind='primary')}"
-                "</div>"
-                "</form>"
-            ),
-        )
-        + section_card(
-            title="Home Assistant Contract",
-            subtitle=(
-                "Keep the MQTT surface easy to scan without losing the exact "
-                "state and discovery topics."
-            ),
-            body=(
-                settings_row("Gateway state topic", gateway_state_topic)
-                + settings_row("Gateway discovery topic", gateway_discovery_topic)
-                + settings_row("Device discovery payloads", str(device_contract_count))
-            ),
-        )
-        + section_card(
-            title="Storage Summary",
-            subtitle=(
-                "Recent raw samples and long-term rollups stay available, but "
-                "the page emphasizes storage posture first."
-            ),
-            body=(
-                '<div class="table-shell"><table><thead><tr><th>Device</th><th>Raw samples</th>'
-                "<th>Raw first</th><th>Raw last</th>"
-                "<th>Daily days</th><th>Daily first</th><th>Daily last</th></tr></thead>"
-                f"<tbody>{_storage_rows(storage_summary)}</tbody></table></div>"
-            ),
-        )
-        + section_card(
-            title="Configuration",
-            subtitle=(
-                "The CLI and the web UI remain complementary: both edit the "
-                "same config.toml and devices.toml files."
-            ),
-            body=(
-                '<form method="post" action="/config">'
-                '<div class="config-grid">'
-                '<div><label class="settings-label" for="config-toml-input">config.toml</label>'
-                f'<textarea id="config-toml-input" name="config_toml" autocomplete="off" '
-                f'spellcheck="false">{html.escape(config_text)}</textarea></div>'
-                '<div><label class="settings-label" for="devices-toml-input">devices.toml</label>'
-                f'<textarea id="devices-toml-input" name="devices_toml" autocomplete="off" '
-                f'spellcheck="false">{html.escape(devices_text)}</textarea></div>'
-                "</div>"
-                f'<div style="margin-top:1rem">{button("Validate and Save", kind="primary")}</div>'
-                "</form>"
-            ),
-        )
-    )
-    primary_device_id = _primary_device_id(snapshot, devices)
-    return app_document(
-        title="BMGateway Edit Settings",
-        body=body,
-        active_nav="management",
-        primary_device_id=primary_device_id,
-        version_label=version_label,
+    return render_settings_html(
+        config=config,
+        snapshot=snapshot,
+        devices=devices,
+        edit_mode=True,
+        message=message,
+        storage_summary=storage_summary,
+        config_text=config_text,
+        devices_text=devices_text,
+        contract=contract,
     )
 
 
@@ -1384,7 +1196,7 @@ def render_battery_html(
             "<div style='display:flex;min-height:198px;align-items:center;justify-content:center;"
             "font-size:4rem;color:var(--accent-orange);font-weight:300'>+</div>"
             "<div class='meta' style='text-align:center'>"
-            "<a href='/devices'>Add Device</a>"
+            "<a href='/devices/new'>Add Device</a>"
             "</div>"
         ),
         tone="orange",
@@ -1408,7 +1220,7 @@ def render_battery_html(
             "Bluetooth device status is shown directly on each card. Classic-only "
             "or unavailable BLE adapters remain visible as controlled warnings.",
             kind="warning",
-            trailing="<a class='secondary-button' href='/devices'>Add Device</a>",
+            trailing="<a class='secondary-button' href='/devices/new'>Add Device</a>",
         )
         + section_card(
             title="Battery Overview",
@@ -1552,7 +1364,7 @@ def render_devices_html(
             eyebrow="Devices",
             right=(
                 '<div class="hero-actions">'
-                '<a class="secondary-button" href="/settings">Settings</a>'
+                '<a class="primary-button" href="/devices/new">Add Device</a>'
                 "</div>"
             ),
         )
@@ -1560,12 +1372,7 @@ def render_devices_html(
         + section_card(
             title="Configured Devices",
             subtitle="Gateway-ready device registry",
-            body="".join(cards),
-        )
-        + section_card(
-            title="Add Device",
-            subtitle="Register new BM devices directly from the device registry.",
-            body=_add_device_form_html(),
+            body="".join(cards) or "<div class='muted-note'>No devices configured yet.</div>",
         )
     )
     return app_document(
@@ -1574,6 +1381,38 @@ def render_devices_html(
         active_nav="devices",
         primary_device_id=primary_device_id,
         version_label=version_label,
+    )
+
+
+def render_add_device_html(*, message: str = "") -> str:
+    banner = banner_strip(html.escape(message), kind="warning") if message else ""
+    body = (
+        top_header(
+            title="Add Device",
+            subtitle=(
+                "Register a new BM device without the configured-device list getting in the way."
+            ),
+            eyebrow="Devices",
+            right=(
+                '<div class="hero-actions">'
+                '<a class="secondary-button" href="/devices">Back to devices</a>'
+                "</div>"
+            ),
+        )
+        + banner
+        + section_card(
+            title="New Device",
+            subtitle="Register new BM devices directly from the device registry.",
+            body=_add_device_form_html(),
+        )
+    )
+    return app_document(
+        title="BMGateway Add Device",
+        body=body,
+        active_nav="devices",
+        primary_device_id="",
+        version_label=display_version(),
+        script=_battery_form_script(),
     )
 
 
@@ -1748,9 +1587,25 @@ def render_settings_html(
     config: AppConfig,
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
+    edit_mode: bool = False,
+    message: str = "",
+    storage_summary: dict[str, object] | None = None,
+    config_text: str | None = None,
+    devices_text: str | None = None,
+    contract: dict[str, object] | None = None,
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
+    banner = banner_strip(html.escape(message), kind="warning") if message else ""
+    storage_summary = storage_summary or {
+        "counts": {
+            "gateway_snapshots": 0,
+            "device_readings": 0,
+            "device_daily_rollups": 0,
+        },
+        "devices": [],
+    }
+    contract = contract or {}
     device_tabs = (
         "".join(
             (
@@ -1771,19 +1626,124 @@ def render_settings_html(
         if config.retention.daily_retention_days == 0
         else f"{config.retention.daily_retention_days} days"
     )
+    counts = cast(dict[str, object], storage_summary.get("counts", {}))
+    gateway_contract = cast(dict[str, object], contract.get("gateway", {}))
+    contract_devices = cast(list[object], contract.get("devices", []))
+    gateway_state_topic = html.escape(str(gateway_contract.get("state_topic", "")))
+    gateway_discovery_topic = html.escape(str(gateway_contract.get("discovery_topic", "")))
+    device_contract_count = len(contract_devices) if isinstance(contract_devices, list) else 0
+    api_chips = "".join(
+        api_chip(endpoint)
+        for endpoint in (
+            "/api/status",
+            "/api/config",
+            "/api/devices",
+            "/api/ha/contract",
+            "/api/ha/discovery",
+            "/api/storage",
+            "/api/analytics?device_id=<id>",
+            "/api/history?device_id=<id>&kind=daily",
+        )
+    )
+    overview_cards = (
+        '<div class="metrics-grid">'
+        + summary_card(
+            "Latest snapshot",
+            _display_timestamp(snapshot.get("generated_at", "missing")),
+            subvalue=f"Gateway: {html.escape(str(snapshot.get('gateway_name', 'BMGateway')))}",
+        )
+        + summary_card(
+            "Gateway snapshots",
+            str(counts.get("gateway_snapshots", 0)),
+            subvalue=(
+                f"Devices online: {snapshot.get('devices_online', 0)} / "
+                f"{snapshot.get('devices_total', 0)}"
+            ),
+        )
+        + summary_card(
+            "Raw / rollups",
+            f"{counts.get('device_readings', 0)} / {counts.get('device_daily_rollups', 0)}",
+            subvalue=f"MQTT connected: {snapshot.get('mqtt_connected', False)}",
+        )
+        + "</div>"
+    )
+    actions_body = (
+        '<div class="inline-actions">'
+        '<form method="post" action="/actions/run-once">'
+        f"{button('Run One Collection Cycle', kind='primary')}"
+        "</form>"
+        '<form method="post" action="/actions/recover-bluetooth">'
+        f"{button('Recover Bluetooth Adapter', kind='secondary')}"
+        "</form>"
+        '<form method="post" action="/actions/prune-history">'
+        f"{button('Prune History Using Retention Settings', kind='secondary')}"
+        "</form>"
+        "</div>"
+        '<div style="margin-top:1rem" class="chip-grid">'
+        f"{api_chips}"
+        "</div>"
+    )
+    web_section_body = (
+        settings_row("Web interface", web_enabled)
+        + settings_row("Configured port", str(config.web.port))
+        + settings_row("Configured host", config.web.host)
+    )
+    display_section_body = settings_row(
+        "Chart point markers",
+        "Enabled" if config.web.show_chart_markers else "Disabled",
+    ) + settings_row("Default style", "Clean BM-style lines")
+    if edit_mode:
+        web_section_body += (
+            '<form method="post" action="/settings/web" style="margin-top:1rem">'
+            '<input type="hidden" name="settings_section" value="web">'
+            '<div class="two-column-grid">'
+            '<div><label class="settings-label" for="web-port-input">Web port</label>'
+            f'<input id="web-port-input" type="text" name="web_port" value="{config.web.port}" '
+            'inputmode="numeric" autocomplete="off"></div>'
+            f"{settings_row('Host', html.escape(config.web.host))}"
+            "</div>"
+            '<div style="margin-top:1rem">'
+            f"{button('Save web service settings', kind='primary')}"
+            "</div>"
+            "</form>"
+        )
+        display_section_body += (
+            '<form method="post" action="/settings/web" style="margin-top:1rem">'
+            '<input type="hidden" name="settings_section" value="display">'
+            f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
+            f'<input id="show-chart-markers-input" type="checkbox" '
+            f'name="show_chart_markers"{_checked_attr(config.web.show_chart_markers)}>'
+            "<span>Show chart point markers</span></label>"
+            "<div class='inline-field-help'>"
+            "Turn point markers back on if you prefer exact sample dots "
+            "over the cleaner default BM-style lines."
+            "</div>"
+            f'<div style="margin-top:1rem">{button("Save display settings", kind="primary")}</div>'
+            "</form>"
+        )
     body = (
         top_header(
             title="Settings",
             subtitle=(
-                "Read the current software configuration first, then jump into "
-                "the dedicated edit surface if you want to change it."
+                "Read the current gateway configuration first, then unlock the "
+                "same page when you want to edit it."
             ),
             eyebrow="Settings",
             right=(
                 '<div class="hero-actions">'
-                '<a class="primary-button" href="/gateway">Edit settings</a>'
-                "</div>"
+                + (
+                    '<a class="secondary-button" href="/settings">Done</a>'
+                    if edit_mode
+                    else '<a class="primary-button" href="/settings?edit=1">Edit settings</a>'
+                )
+                + "</div>"
             ),
+        )
+        + banner
+        + section_card(
+            title="Gateway Overview",
+            subtitle="Operational Surfaces",
+            body=overview_cards,
         )
         + section_card(
             title="Gateway Settings",
@@ -1800,54 +1760,65 @@ def render_settings_html(
         + section_card(
             title="Web Service",
             subtitle="Current management UI binding",
-            body=(
-                settings_row("Web interface", web_enabled)
-                + settings_row("Configured port", str(config.web.port))
-                + settings_row("Configured host", config.web.host)
-            ),
+            body=web_section_body,
         )
         + section_card(
             title="Display Settings",
             subtitle="Current chart rendering preferences",
-            body=(
-                settings_row(
-                    "Chart point markers",
-                    "Enabled" if config.web.show_chart_markers else "Disabled",
-                )
-                + settings_row("Default style", "Clean BM-style lines")
-            ),
-        )
-        + section_card(
-            title="Alerts",
-            subtitle="Read-only backend support status",
-            body=(
-                settings_row("Daily power notification", "Not implemented in backend yet")
-                + settings_row("Low voltage alarm", "Back-end threshold support missing")
-                + settings_row("Power alarm", "Back-end threshold support missing")
-                + settings_row("Export-ready history", "Available through CLI / database")
-            ),
+            body=display_section_body,
         )
         + section_card(
             title="Actions",
-            subtitle="Open the dedicated editing surfaces",
+            subtitle="Run the collector, prune retained history, and inspect the live JSON APIs.",
+            body=actions_body,
+        )
+        + section_card(
+            title="Home Assistant Contract",
+            subtitle=(
+                "Keep the MQTT surface easy to scan without losing the exact "
+                "state and discovery topics."
+            ),
             body=(
-                '<div class="inline-actions">'
-                '<a class="primary-button" href="/gateway">Edit settings</a>'
-                '<a class="secondary-button" href="/devices">Manage devices</a>'
-                "</div>"
+                settings_row("Gateway state topic", gateway_state_topic)
+                + settings_row("Gateway discovery topic", gateway_discovery_topic)
+                + settings_row("Device discovery payloads", str(device_contract_count))
             ),
         )
         + section_card(
-            title="Links",
-            subtitle="Operational entry points",
+            title="Storage Summary",
+            subtitle=(
+                "Recent raw samples and long-term rollups stay available, but "
+                "the page emphasizes storage posture first."
+            ),
             body=(
-                settings_row("Configuration editor", "/gateway")
-                + settings_row("Export Data", "Use CLI history commands")
-                + settings_row("Unit / Currency", "Not applicable to BMGateway")
-                + settings_row("Language", "English")
+                '<div class="table-shell"><table><thead><tr><th>Device</th><th>Raw samples</th>'
+                "<th>Raw first</th><th>Raw last</th>"
+                "<th>Daily days</th><th>Daily first</th><th>Daily last</th></tr></thead>"
+                f"<tbody>{_storage_rows(storage_summary)}</tbody></table></div>"
             ),
         )
     )
+    if edit_mode:
+        body += section_card(
+            title="Configuration Files",
+            subtitle=(
+                "The CLI and the web UI remain complementary: both edit the "
+                "same config.toml and devices.toml files."
+            ),
+            body=(
+                '<form method="post" action="/config">'
+                '<div class="config-grid">'
+                '<div><label class="settings-label" for="config-toml-input">config.toml</label>'
+                f'<textarea id="config-toml-input" name="config_toml" autocomplete="off" '
+                f'spellcheck="false">{html.escape(config_text or "")}</textarea></div>'
+                '<div><label class="settings-label" for="devices-toml-input">devices.toml</label>'
+                f'<textarea id="devices-toml-input" name="devices_toml" autocomplete="off" '
+                f'spellcheck="false">{html.escape(devices_text or "")}</textarea></div>'
+                "</div>"
+                f'<div style="margin-top:1rem">{button("Validate and Save", kind="primary")}</div>'
+                "</form>"
+            ),
+        )
     return app_document(
         title="BMGateway Settings",
         body=body,
@@ -2709,6 +2680,11 @@ def serve_management(
                 self._send_html(html)
                 return
 
+            if parsed.path == "/devices/new":
+                message = parse_qs(parsed.query).get("message", [""])[0]
+                self._send_html(render_add_device_html(message=message))
+                return
+
             if parsed.path == "/devices/edit":
                 params = parse_qs(parsed.query)
                 device_id = params.get("device_id", [""])[0]
@@ -2727,26 +2703,33 @@ def serve_management(
                 return
 
             if parsed.path == "/settings":
+                params = parse_qs(parsed.query)
                 html = render_settings_html(
                     config=config,
                     snapshot=snapshot,
                     devices=serialized_devices,
+                    edit_mode=params.get("edit", ["0"])[0] == "1",
+                    message=params.get("message", [""])[0],
+                    storage_summary=fetch_storage_summary(database_path),
+                    config_text=_read_text(config_path),
+                    devices_text=_read_text(config.device_registry_path),
+                    contract=contract,
                 )
                 self._send_html(html)
                 return
 
             if parsed.path in {"/management", "/gateway"}:
-                config_text, devices_text = _config_and_registry_texts(config_path)
                 message = parse_qs(parsed.query).get("message", [""])[0]
-                html = render_management_html(
+                html = render_settings_html(
                     snapshot=snapshot,
                     config=config,
-                    storage_summary=fetch_storage_summary(database_path),
                     devices=serialized_devices,
-                    config_text=config_text,
-                    devices_text=devices_text,
-                    contract=contract,
+                    edit_mode=True,
                     message=message,
+                    storage_summary=fetch_storage_summary(database_path),
+                    config_text=_read_text(config_path),
+                    devices_text=_read_text(config.device_registry_path),
+                    contract=contract,
                 )
                 self._send_html(html)
                 return
@@ -2800,7 +2783,7 @@ def serve_management(
                     return
 
                 self.send_response(303)
-                self.send_header("Location", "/gateway?message=Configuration%20saved")
+                self.send_header("Location", "/settings?edit=1&message=Configuration%20saved")
                 self.end_headers()
                 return
 
@@ -2827,14 +2810,10 @@ def serve_management(
                     ),
                 )
                 if errors:
-                    config, snapshot, _database_path = self._load_current()
-                    configured_devices = load_device_registry(config.device_registry_path)
-                    html = render_devices_html(
-                        snapshot=snapshot,
-                        devices=[device.to_dict() for device in configured_devices],
-                        message="Validation failed: " + "; ".join(errors),
+                    self._send_html(
+                        render_add_device_html(message="Validation failed: " + "; ".join(errors)),
+                        status=400,
                     )
-                    self._send_html(html, status=400)
                     return
 
                 run_once_via_cli(config_path, state_dir=state_dir)
@@ -3018,7 +2997,9 @@ def serve_management(
                     )
                     return
                 self.send_response(303)
-                self.send_header("Location", "/gateway?" + urlencode({"message": "Settings saved"}))
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
                 self.end_headers()
                 return
 
@@ -3028,7 +3009,9 @@ def serve_management(
                 if completed.stderr:
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)
-                self.send_header("Location", "/gateway?" + urlencode({"message": message}))
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
                 self.end_headers()
                 return
 
@@ -3039,7 +3022,8 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/gateway?" + urlencode({"message": "Bluetooth adapter recovery triggered"}),
+                    "/settings?"
+                    + urlencode({"edit": "1", "message": "Bluetooth adapter recovery triggered"}),
                 )
                 self.end_headers()
                 return
@@ -3054,7 +3038,7 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/gateway?" + urlencode({"message": "History pruned"}),
+                    "/settings?" + urlencode({"edit": "1", "message": "History pruned"}),
                 )
                 self.end_headers()
                 return

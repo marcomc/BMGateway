@@ -15,8 +15,12 @@ This directory documents the web product boundary for `BMGateway`.
 The optional web process serves:
 
 - `/` for the battery-first landing page
-- `/management` and `/gateway` for operational and configuration actions
-- `/history`, `/device`, `/devices`, and `/settings` for the main product flow
+- `/settings` for the unified settings surface, with `?edit=1` enabling edit
+  mode
+- `/history`, `/device`, `/devices`, and `/devices/new` for the main product
+  flow
+- `/management` and `/gateway` as compatibility aliases that currently open the
+  editable settings mode
 
 Primary launch command:
 

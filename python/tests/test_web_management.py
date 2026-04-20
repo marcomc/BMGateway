@@ -11,6 +11,7 @@ from bm_gateway.web import (
     _chart_points,
     add_device_from_form,
     build_run_once_command,
+    render_add_device_html,
     render_device_html,
     render_devices_html,
     render_edit_device_html,
@@ -504,20 +505,18 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
         message="Configuration saved",
     )
 
-    assert "Configured Devices" in html
     assert "Home Assistant Contract" in html
     assert "Storage Summary" in html
     assert "/api/ha/contract" in html
     assert "Prune History Using Retention Settings" in html
-    assert "Edit Settings" in html
-    assert "Web Service Settings" in html
+    assert "Done" in html
+    assert "Web Service" in html
     assert "Display Settings" in html
-    assert "Open Devices" in html
+    assert "Configuration Files" in html
     assert 'href="#main-content"' in html
     assert 'id="main-content"' in html
     assert 'aria-live="polite"' in html
     assert 'aria-label="Primary"' in html
-    assert "control-plane" in html
     assert "api-chip" in html
     assert "config-grid" in html
     assert 'name="settings_section" value="web"' in html
@@ -562,7 +561,7 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
     assert "Gateway Overview" in html
     assert "Operational Surfaces" in html
     assert "Recover Bluetooth Adapter" in html
-    assert "Open Devices" in html
+    assert "Configuration Files" in html
 
 
 def test_render_settings_html_is_summary_first_with_edit_link() -> None:
@@ -576,11 +575,56 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Gateway Settings" in html
     assert "Web Service" in html
     assert "Display Settings" in html
-    assert "Alerts" in html
     assert "Edit settings" in html
-    assert 'href="/gateway"' in html
+    assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
+    assert "Configuration Files" not in html
+    assert "Run One Collection Cycle" in html
+    assert "Manage devices" not in html
+
+
+def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={"generated_at": "2026-04-17T20:00:00+02:00", "devices": []},
+        devices=[],
+        edit_mode=True,
+        message="Settings saved",
+        storage_summary={
+            "counts": {
+                "gateway_snapshots": 3,
+                "device_readings": 30,
+                "device_daily_rollups": 10,
+            },
+            "devices": [],
+        },
+        config_text='[gateway]\nname = "BMGateway"\n',
+        devices_text="",
+        contract={
+            "gateway": {
+                "state_topic": "bm_gateway/gateway/state",
+                "discovery_topic": "homeassistant/device/bm_gateway/config",
+            },
+            "devices": [],
+        },
+    )
+
+    assert "Gateway Settings" in html
+    assert "Web Service" in html
+    assert "Display Settings" in html
+    assert "Configuration Files" in html
+    assert "Save web service settings" in html
+    assert "Save display settings" in html
+    assert "Validate and Save" in html
+    assert "Home Assistant Contract" in html
+    assert "Storage Summary" in html
+    assert "Run One Collection Cycle" in html
+    assert "Recover Bluetooth Adapter" in html
+    assert "Manage devices" not in html
+    assert "Open Devices" not in html
+    assert 'href="/settings"' in html
 
 
 def test_render_battery_html_renders_device_icon() -> None:
@@ -883,6 +927,8 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert "Not visible" in html
     assert "The adapter did not see this monitor in the latest scan." in html
     assert "/devices/edit?device_id=ancell_bm200" in html
+    assert 'href="/devices/new"' in html
+    assert "Register new BM devices directly from the device registry." not in html
 
 
 def test_render_devices_html_uses_device_battery_profile_labels() -> None:
@@ -906,6 +952,20 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
     assert "AGM Battery" in html
     assert "Lead-Acid Battery" in html
     assert "/devices/edit?device_id=ancell_bm200" in html
+    assert "Add Device" in html
+    assert "Configured Devices" in html
+    assert "Serial / MAC" in html
+
+
+def test_render_add_device_html_is_dedicated_creation_surface() -> None:
+    html = render_add_device_html(message="Validation failed")
+
+    assert "Add Device" in html
+    assert "Register a new BM device without the configured-device list getting in the way." in html
+    assert 'action="/devices/add"' in html
+    assert 'href="/devices"' in html
+    assert "Configured Devices" not in html
+    assert "Edit device settings" not in html
 
 
 def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
