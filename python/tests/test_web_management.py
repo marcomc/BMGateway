@@ -913,10 +913,13 @@ def test_render_battery_html_renders_device_icon() -> None:
     assert "device-icon-frame" in html
     assert 'data-icon-key="motorcycle_12v"' in html
     assert "device-icon-frame hero-device-icon" in html
-    assert "hero-soc hero-soc-battery" in html
+    assert "battery-card-gauge" in html
+    assert "battery-card-gauge-value" in html
     assert "battery-card-status" in html
     assert "Battery OK" in html
-    assert "Open device" in html
+    assert "Device Details" in html
+    assert "Open device" not in html
+    assert "All" in html
 
 
 def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
@@ -1134,7 +1137,8 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
         monthly_history=[],
     )
 
-    assert "&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; History" in html
+    assert "<h1>History</h1>" in html
+    assert "&quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; History" not in html
     assert 'bm200_house"><script>alert(1)</script> History' not in html
     assert "Voltage" in html
     assert "SoC" in html
@@ -1142,12 +1146,14 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "1 day" in html
     assert "7 days" in html
     assert "2 years" in html
+    assert "All" in html
     assert "Valid samples" in html
     assert "Error count" in html
     assert "Average voltage" in html
     assert "Average SoC" in html
     assert "history-controls" in html
-    assert '<a class="secondary-button" href="/">Battery</a>' in html
+    assert '<a class="secondary-button" href="/">Battery</a>' not in html
+    assert "Device Detail" not in html
     assert 'aria-current="page"' in html
     assert "&quot;series&quot;:&quot;bm200_house" in html
 
@@ -1172,14 +1178,14 @@ def test_render_history_html_shows_device_selector_and_quick_switch_links() -> N
 
     assert "History Device" in html
     assert "Switch the history surface between configured batteries" in html
-    assert 'action="/history"' in html
-    assert 'name="device_id"' in html
-    assert 'value="bm200_house" selected' in html
-    assert 'value="starter_battery"' in html
+    assert 'action="/history"' not in html
+    assert 'name="device_id"' not in html
     assert 'href="/history?device_id=bm200_house"' in html
     assert 'href="/history?device_id=starter_battery"' in html
     assert 'aria-current="page"' in html
-    assert "Open History" in html
+    assert "Open History" not in html
+    assert "Configured batteries" not in html
+    assert "history-device-card" in html
 
 
 def test_render_history_html_handles_no_configured_devices() -> None:

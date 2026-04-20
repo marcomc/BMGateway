@@ -324,6 +324,7 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         )
         assert "BMGateway Battery" in battery_page
         assert "Add Device" in battery_page
+        assert "All" in battery_page
 
         management_page = (
             urllib.request.urlopen(f"{base_url}/management", timeout=RUNTIME_TIMEOUT_SECONDS)
@@ -374,15 +375,16 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         assert "Average voltage" in history_page
         assert "Temperature" in history_page
         assert "History Device" in history_page
-        assert "Open History" in history_page
+        assert "Current History View" in history_page
         assert 'href="/history?device_id=bm200_house"' in history_page
+        assert "All" in history_page
 
         default_history_page = (
             urllib.request.urlopen(f"{base_url}/history", timeout=RUNTIME_TIMEOUT_SECONDS)
             .read()
             .decode("utf-8")
         )
-        assert "bm200_house History" in default_history_page
+        assert "<h1>History</h1>" in default_history_page
         assert "History Device" in default_history_page
 
         connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")

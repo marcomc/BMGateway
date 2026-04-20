@@ -141,58 +141,53 @@ def _history_device_selector_html(
             ),
         )
 
-    options_html = "".join(
-        (
-            f'<option value="{html.escape(str(device.get("id", "")))}"'
-            f"{' selected' if str(device.get('id', '')) == selected_device_id else ''}>"
-            f"{html.escape(_device_label(device))}</option>"
-        )
-        for device in configured_devices
-    )
-    quick_switch_links: list[str] = []
-    for device in configured_devices:
+    tones = ("green", "purple", "blue", "orange")
+    device_cards: list[str] = []
+    for index, device in enumerate(configured_devices):
         device_id = str(device.get("id", ""))
         is_selected = device_id == selected_device_id
-        class_name = "primary-button" if is_selected else "secondary-button"
+        icon_key = _device_icon_key(device)
+        current_text = "Current History View" if is_selected else "Open Device History"
         aria_current = ' aria-current="page"' if is_selected else ""
-        label = html.escape(str(device.get("name") or device.get("id") or "Unknown device"))
-        quick_switch_links.append(
-            f'<a class="{class_name}" href="/history?device_id={quote(device_id)}"{aria_current}>'
-            f"{label}</a>"
+        device_cards.append(
+            f'<a class="history-device-card tone-card {tones[index % len(tones)]}'
+            f'{" selected" if is_selected else ""}" href="/history?device_id={quote(device_id)}"'
+            f"{aria_current}>"
+            "<div class='device-card-head battery-card-head'>"
+            f"{device_icon(icon_key, label=icon_label(icon_key), frame_class='hero-device-icon')}"
+            "<div class='device-card-copy battery-card-copy'>"
+            f"<div class='meta meta-name'>{html.escape(str(device.get('name') or device_id))}</div>"
+            f"<div class='meta meta-context'>{html.escape(device_id)}</div>"
+            f"<div class='meta history-device-current'>{html.escape(current_text)}</div>"
+            "</div>"
+            "</div>"
+            "</a>"
         )
-    quick_switch_html = "".join(quick_switch_links)
-    selected_device = next(
-        (
-            device
-            for device in configured_devices
-            if str(device.get("id", "")) == selected_device_id
-        ),
-        None,
-    )
-    selected_summary = (
-        _device_label(selected_device) if selected_device is not None else selected_device_id
-    )
-    select_html = (
-        '<select id="history-device-id" name="device_id" autocomplete="off">'
-        f"{options_html}</select>"
-    )
     return section_card(
         title="History Device",
         subtitle="Switch the history surface between configured batteries.",
-        body=(
-            '<div class="metrics-grid">'
-            + summary_card("Showing", selected_summary or "Unknown device")
-            + summary_card("Configured batteries", str(len(configured_devices)))
-            + "</div>"
-            '<form class="inline-actions" method="get" action="/history">'
-            '<div class="settings-control">'
-            '<label class="settings-label" for="history-device-id">Battery</label>'
-            f"{select_html}"
-            "</div>"
-            f"{button('Open History', kind='primary')}"
-            "</form>"
-            f'<div class="chip-grid">{quick_switch_html}</div>'
-        ),
+        body=f'<div class="device-grid history-device-grid">{"".join(device_cards)}</div>',
+    )
+
+
+def _soc_gauge_markup(*, soc_value: object, compact: bool = False) -> str:
+    soc_percent = min(max(_coerce_float(soc_value, 0.0), 0.0), 100.0)
+    gauge_degrees = soc_percent * 3.6
+    soc_text = html.escape(_format_number(soc_percent, digits=0, suffix="%"))
+    gauge_class = "battery-card-gauge" if compact else "soc-gauge"
+    content_class = "battery-card-gauge-content" if compact else "soc-gauge-content"
+    label_class = "battery-card-gauge-label" if compact else "soc-gauge-label"
+    value_class = "battery-card-gauge-value" if compact else "soc-gauge-value"
+    label_text = "Charge" if compact else "SoC"
+    return (
+        f'<div class="{gauge_class}" style="background: conic-gradient(var(--accent-green) '
+        f"0deg {gauge_degrees}deg, rgba(191, 207, 198, 0.55) "
+        f'{gauge_degrees}deg 360deg);">'
+        f'<div class="{content_class}">'
+        f'<div class="{label_class}">{label_text}</div>'
+        f'<div class="{value_class}">{soc_text}</div>'
+        "</div>"
+        "</div>"
     )
 
 
@@ -1260,7 +1255,6 @@ def render_battery_html(
         )
         icon_key = _device_icon_key(device)
         device_name_text = html.escape(str(device.get("name", device_id)))
-        soc_text = html.escape(str(device.get("soc", "-")))
         reading_text = f"{voltage_text} {temperature_text}"
         hero_icon = device_icon(
             icon_key,
@@ -1280,15 +1274,16 @@ def render_battery_html(
                 (
                     "<div class='device-card-head battery-card-head'>"
                     f"{hero_icon}"
+                    f"{_soc_gauge_markup(soc_value=device.get('soc'), compact=True)}"
                     "<div class='device-card-copy battery-card-copy'>"
                     f"<div class='meta meta-name'>{device_name_text}</div>"
                     f"<div class='meta meta-context'>{vehicle_text}</div>"
-                    f"<div class='hero-soc hero-soc-battery'>{soc_text}%</div>"
                     f"<div class='meta battery-card-reading'>{reading_text}</div>"
                     f"{status_line}"
                     f"{battery_meta_html}"
                     "<div class='footer-row'>"
-                    f"<a href='/device?device_id={quote(device_id)}'>Open device</a>"
+                    f'<a class="secondary-button" href="/device?device_id={quote(device_id)}">'
+                    "Device Details</a>"
                     "</div>"
                     "</div>"
                     "</div>"
@@ -1353,6 +1348,7 @@ def render_battery_html(
                 ("90", "90 days"),
                 ("365", "1 year"),
                 ("730", "2 years"),
+                ("all", "All"),
             ),
             default_range="30",
             default_metric="soc",
@@ -2211,7 +2207,6 @@ def render_device_html(
     )
     voltage = _format_number(summary.get("voltage"), digits=2, suffix=" V")
     temperature = _format_number(summary.get("temperature"), digits=1, suffix=" C")
-    soc = _format_number(summary.get("soc"), digits=0, suffix="%")
     rssi = summary.get("rssi")
     signal_grade, signal_percent, _signal_bars, signal_rssi_text = _signal_quality(
         rssi=rssi,
@@ -2221,8 +2216,6 @@ def render_device_html(
     vehicle_text = html.escape(_vehicle_summary(summary))
     battery_meta_text = html.escape(_battery_metadata_summary(summary))
     chart_id = f"device-chart-{quote(device_id)}".replace("%", "")
-    soc_percent = min(max(_coerce_float(summary.get("soc"), 0.0), 0.0), 100.0)
-    gauge_degrees = soc_percent * 3.6
     body = (
         top_header(
             title=f"{summary.get('name', device_id)}",
@@ -2252,13 +2245,8 @@ def render_device_html(
             ),
             body=(
                 '<div class="soc-gauge-card">'
-                f'<div class="soc-gauge" style="background: conic-gradient(var(--accent-green) '
-                f"0deg {gauge_degrees}deg, rgba(191, 207, 198, 0.55) "
-                f'{gauge_degrees}deg 360deg);">'
-                '<div class="soc-gauge-content">'
-                '<div class="soc-gauge-label">SoC</div>'
-                f'<div class="soc-gauge-value">{html.escape(soc)}</div>'
-                "</div></div></div>"
+                f"{_soc_gauge_markup(soc_value=summary.get('soc'))}"
+                "</div>"
             ),
             classes="hero-shell-primary",
         )
@@ -2337,6 +2325,7 @@ def render_device_html(
                 ("90", "90 days"),
                 ("365", "1 year"),
                 ("730", "2 years"),
+                ("all", "All"),
             ),
             default_range="30",
             default_metric="voltage",
@@ -2399,17 +2388,9 @@ def render_history_html(
     chart_id = f"history-chart-{quote(device_id)}".replace("%", "")
     body = (
         top_header(
-            title=f"{device_id or 'Gateway'} History",
-            subtitle=(
-                "Chart-first history dashboard with calmer hierarchy: key "
-                "metrics and switchable trend views first, raw tables second."
-            ),
+            title="History",
+            subtitle=("Chart-first history dashboard with calmer hierarchy."),
             eyebrow="History",
-            right=(
-                '<div class="hero-actions"><a class="secondary-button" href="/">Battery</a>'
-                f'<a class="secondary-button" href="/device?device_id={quote(device_id)}">'
-                "Device Detail</a></div>"
-            ),
         )
         + _history_device_selector_html(
             configured_devices=configured_devices,
@@ -2452,6 +2433,7 @@ def render_history_html(
                 ("90", "90 days"),
                 ("365", "1 year"),
                 ("730", "2 years"),
+                ("all", "All"),
             ),
             default_range="30",
             default_metric="soc",

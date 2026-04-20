@@ -413,6 +413,23 @@ details summary::-webkit-details-marker { display: none; }
   gap: 1rem;
   align-items: flex-start;
 }
+.history-device-card {
+  display: block;
+  min-height: 170px;
+  color: inherit;
+  text-decoration: none;
+}
+.history-device-card:hover {
+  text-decoration: none;
+}
+.history-device-card.selected {
+  box-shadow: var(--shadow-elevated);
+}
+.history-device-current {
+  margin-top: 0.7rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
 .device-card-copy {
   min-width: 0;
   flex: 1 1 auto;
@@ -436,6 +453,43 @@ details summary::-webkit-details-marker { display: none; }
   min-height: 300px;
   padding: 1.15rem;
 }
+.battery-card-gauge {
+  position: relative;
+  flex: 0 0 112px;
+  width: 112px;
+  aspect-ratio: 1 / 1;
+  border-radius: 50%;
+  box-shadow: var(--shadow-glow);
+}
+.battery-card-gauge::after {
+  content: "";
+  position: absolute;
+  inset: 12%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 50%, #ffffff 0%, #ffffff 56%, #eff8f1 57%, #f8fbff 100%);
+}
+.battery-card-gauge-content {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+}
+.battery-card-gauge-label {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+.battery-card-gauge-value {
+  font-size: clamp(1.8rem, 5vw, 2.5rem);
+  font-weight: 800;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
 .battery-overview-card .meta-name {
   color: var(--text-primary);
   font-size: 1rem;
@@ -446,16 +500,8 @@ details summary::-webkit-details-marker { display: none; }
   margin-top: 0.15rem;
   font-size: 0.88rem;
 }
-.battery-overview-card .hero-soc-battery {
-  margin: 0.45rem 0 0.28rem;
-  color: var(--text-primary);
-  font-size: clamp(3.5rem, 9vw, 5rem);
-  font-weight: 800;
-  line-height: 0.92;
-  letter-spacing: -0.045em;
-  font-variant-numeric: tabular-nums;
-}
 .battery-overview-card .battery-card-reading {
+  margin-top: 0.55rem;
   color: var(--text-primary);
   font-size: 1.05rem;
   font-weight: 600;
@@ -1118,6 +1164,10 @@ details summary::-webkit-details-marker { display: none; }
   .battery-overview-card {
     min-height: 272px;
   }
+  .battery-card-gauge {
+    flex-basis: 96px;
+    width: 96px;
+  }
   .status-explainer-summary {
     align-items: flex-start;
     flex-direction: column;
@@ -1458,6 +1508,7 @@ def chart_card(
     range_buttons = "".join(
         (
             f'<button type="button" data-range="{html.escape(value)}" '
+            f'data-range-label="{html.escape(label)}" '
             f'class="{"active" if value == default_range else ""}">'
             f"{html.escape(label)}</button>"
         )
@@ -1542,6 +1593,9 @@ def chart_script(*chart_ids: str) -> str:
     if (rangeValue === "raw") {{
       return points.filter((point) => point.kind === "raw");
     }}
+    if (rangeValue === "all") {{
+      return points;
+    }}
     const days = parseInt(rangeValue, 10);
     if (Number.isNaN(days)) {{
       return points;
@@ -1556,6 +1610,38 @@ def chart_script(*chart_ids: str) -> str:
       const parsed = parseTime(point.ts);
       return parsed !== null && parsed >= cutoff;
     }});
+  }}
+  function describeWindow(rangeValue, rangeLabel) {{
+    if (rangeValue === "all") {{
+      return "All retained history";
+    }}
+    if (rangeValue === "raw") {{
+      return rangeLabel || "Recent raw";
+    }}
+    return rangeLabel || "Selected range";
+  }}
+  function summarizeCoverage(points, metric) {{
+    const usable = points.filter((point) => typeof point[metric] === "number");
+    const timestamps = usable.map((point) => parseTime(point.ts)).filter((point) => point !== null);
+    if (timestamps.length === 0) {{
+      return "No retained history for this metric";
+    }}
+    const earliest = Math.min(...timestamps);
+    const latest = Math.max(...timestamps);
+    const spanMs = Math.max(latest - earliest, 0);
+    if (spanMs < 36 * 60 * 60 * 1000) {{
+      return "Less than 1 day available";
+    }}
+    const spanDays = Math.max(1, Math.round(spanMs / (24 * 60 * 60 * 1000)));
+    if (spanDays < 45) {{
+      return `${{spanDays}} days available`;
+    }}
+    const spanMonths = Math.max(1, Math.round(spanDays / 30));
+    if (spanMonths < 24) {{
+      return `${{spanMonths}} months available`;
+    }}
+    const spanYears = Math.max(1, Math.round(spanDays / 365));
+    return `${{spanYears}} years available`;
   }}
   function metricBounds(metric, values) {{
     if (metric === "soc") {{
@@ -1572,11 +1658,11 @@ def chart_script(*chart_ids: str) -> str:
       : Math.max((maxValue - minValue) * 0.18, 1.5);
     return {{ min: minValue - padding, max: maxValue + padding }};
   }}
-  function buildSvg(points, metric, chartId, showMarkers) {{
+  function buildSvg(points, metric, chartId, showMarkers, windowLabel) {{
     const usable = points.filter((point) => typeof point[metric] === "number");
     if (usable.length === 0) {{
       return {{
-        svg: '<div class="chart-empty">No ' + METRICS[metric].label + ' data available in this range.</div>',
+        svg: '<div class="chart-empty">No ' + METRICS[metric].label + ' data available for ' + windowLabel + '.</div>',
         coords: [],
         width: 960,
         height: 360,
@@ -1730,23 +1816,38 @@ def chart_script(*chart_ids: str) -> str:
     let currentMetric = metricButtons.find((button) => button.classList.contains("active"))?.dataset.metric || "voltage";
     function render() {{
       const points = pickRange(allPoints, currentRange);
+      const activeRangeButton = rangeButtons.find((button) => button.dataset.range === currentRange);
+      const rangeLabel = activeRangeButton?.dataset.rangeLabel || currentRange;
+      const windowLabel = describeWindow(currentRange, rangeLabel);
       const tooltip = frame.querySelector(".chart-tooltip");
-      const chart = buildSvg(points, currentMetric, id, showMarkers);
+      const chart = buildSvg(points, currentMetric, id, showMarkers, windowLabel);
       frame.innerHTML = chart.svg;
       if (tooltip) {{
         frame.appendChild(tooltip);
       }}
       const usable = points.filter((point) => typeof point[currentMetric] === "number");
+      const allUsable = allPoints.filter((point) => typeof point[currentMetric] === "number");
+      const coverageLabel = summarizeCoverage(allPoints, currentMetric);
       if (usable.length === 0) {{
-        meta.innerHTML = '<span>No usable samples</span>';
+        meta.innerHTML = [
+          `<span>Window: ${{windowLabel}}</span>`,
+          `<span>No usable ${{METRICS[currentMetric].label.toLowerCase()}} samples in this range</span>`,
+          `<span>${{coverageLabel}}</span>`
+        ].join("");
         return;
       }}
       const values = usable.map((point) => point[currentMetric]);
       const average = values.reduce((sum, value) => sum + value, 0) / values.length;
+      const usesAllAvailable = currentRange !== "all" && currentRange !== "raw" && usable.length === allUsable.length;
+      const coverageSummary = usesAllAvailable
+        ? `Showing all available history (${{coverageLabel}})`
+        : coverageLabel;
       meta.innerHTML = [
+        `<span>Window: ${{windowLabel}}</span>`,
         `<span>${{METRICS[currentMetric].label}} samples: ${{usable.length}}</span>`,
         `<span>Average: ${{METRICS[currentMetric].format(average)}}</span>`,
-        `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`
+        `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
+        `<span>${{coverageSummary}}</span>`
       ].join("");
       const overlay = frame.querySelector(".chart-overlay");
       if (overlay && chart.coords.length > 0) {{

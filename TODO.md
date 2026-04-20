@@ -55,17 +55,7 @@
     and explicit arrow controls for pointer devices
   - ensure the layout remains visually balanced for one, two, three, four, and
     many-device scenarios
-
-- [ ] Audit and extend fleet trend range handling.
-  The longer time-range controls on the fleet trend widget may be failing
-  silently or may simply lack data. That ambiguity needs to be resolved, and
-  the control set should include an `All` range.
-  Actions:
-  - verify whether `30 days`, `90 days`, `1 year`, and `2 years` fail because
-    of missing data or because of a chart-range bug
-  - add explicit empty-state messaging when a selected range has no usable data
-  - fix any range-selection or data-window logic that prevents valid long-range
-    data from rendering
-  - add an `All` range that shows the full retained history, regardless of the
-    number of years available
-  - add regression coverage for short, long, and all-history range selection
+  - redesign the battery tile so the state-of-charge circle becomes the primary
+    square visual container, with the monitored-device icon, label, and charge
+    percentage integrated inside that larger gauge instead of split across
+    separate card regions

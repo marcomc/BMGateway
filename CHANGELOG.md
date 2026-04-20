@@ -88,6 +88,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Explicit device selection on the History page, including configured-device
   quick switching, first-device fallback for `/history`, and a no-devices
   empty state instead of an ambiguous blank history view.
+- The History page now uses a simpler product-style header, card-based battery
+  switching instead of redundant dropdown controls, and the battery overview
+  cards now use tappable `Device Details` buttons plus an inline SoC gauge.
+- Fleet, device, and history charts now include an `All` range and clearer
+  window/coverage messaging, so longer ranges explain when they are simply
+  showing all retained history instead of appearing broken or unchanged.
 
 ### Changed
 
