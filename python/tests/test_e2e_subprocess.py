@@ -467,3 +467,52 @@ def test_dedicated_web_console_script_runs_management_ui(tmp_path: Path) -> None
     finally:
         manage_process.terminate()
         manage_process.wait(timeout=5)
+
+
+def test_dedicated_web_console_script_serves_snapshot_file(tmp_path: Path) -> None:
+    config_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+
+    run_once = _run_command(
+        _module_command(
+            config_path,
+            "run",
+            "--once",
+            "--dry-run",
+            "--state-dir",
+            str(state_dir),
+        ),
+        cwd=tmp_path,
+    )
+    assert run_once.returncode == 0, run_once.stderr
+
+    serve_port = _pick_free_port()
+    serve_process = subprocess.Popen(
+        [
+            *(_web_script_command(config_path, "serve")),
+            "--snapshot-file",
+            str(state_dir / "runtime" / "latest_snapshot.json"),
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(serve_port),
+        ],
+        cwd=tmp_path,
+        env=_runtime_env(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        base_url = f"http://127.0.0.1:{serve_port}"
+        _wait_for_http(f"{base_url}/api/status")
+        status_payload = _http_json(f"{base_url}/api/status")
+        assert isinstance(status_payload, dict)
+        assert status_payload["devices_online"] == 1
+        battery_page = (
+            urllib.request.urlopen(base_url, timeout=RUNTIME_TIMEOUT_SECONDS).read().decode("utf-8")
+        )
+        assert "BMGateway Status" in battery_page
+    finally:
+        serve_process.terminate()
+        serve_process.wait(timeout=5)

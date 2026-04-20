@@ -78,8 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def _normalize_args(args_list: list[str]) -> list[str]:
-    if args_list and args_list[0] in {"manage", "serve", "render"}:
+    commands = {"manage", "serve", "render"}
+    if args_list and args_list[0] in commands:
         return args_list
+    for index, value in enumerate(args_list):
+        if value in commands:
+            return [value, *args_list[:index], *args_list[index + 1 :]]
     return ["manage", *args_list]
 
 
