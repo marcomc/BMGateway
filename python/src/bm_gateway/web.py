@@ -116,6 +116,86 @@ def _snapshot_with_version(snapshot: dict[str, object]) -> dict[str, object]:
     return payload
 
 
+def _device_label(device: dict[str, object]) -> str:
+    name = str(device.get("name", "")).strip()
+    device_id = str(device.get("id", "")).strip()
+    if name and device_id and name != device_id:
+        return f"{name} ({device_id})"
+    return name or device_id or "Unknown device"
+
+
+def _history_device_selector_html(
+    *,
+    configured_devices: list[dict[str, object]],
+    selected_device_id: str,
+) -> str:
+    if not configured_devices:
+        return section_card(
+            title="No Devices Configured",
+            subtitle="Add a battery monitor before using the history dashboard.",
+            body=(
+                "<div class='inline-actions'>"
+                '<a class="primary-button" href="/devices/new">Add Device</a>'
+                '<a class="secondary-button" href="/devices">Configured Devices</a>'
+                "</div>"
+            ),
+        )
+
+    options_html = "".join(
+        (
+            f'<option value="{html.escape(str(device.get("id", "")))}"'
+            f"{' selected' if str(device.get('id', '')) == selected_device_id else ''}>"
+            f"{html.escape(_device_label(device))}</option>"
+        )
+        for device in configured_devices
+    )
+    quick_switch_links: list[str] = []
+    for device in configured_devices:
+        device_id = str(device.get("id", ""))
+        is_selected = device_id == selected_device_id
+        class_name = "primary-button" if is_selected else "secondary-button"
+        aria_current = ' aria-current="page"' if is_selected else ""
+        label = html.escape(str(device.get("name") or device.get("id") or "Unknown device"))
+        quick_switch_links.append(
+            f'<a class="{class_name}" href="/history?device_id={quote(device_id)}"{aria_current}>'
+            f"{label}</a>"
+        )
+    quick_switch_html = "".join(quick_switch_links)
+    selected_device = next(
+        (
+            device
+            for device in configured_devices
+            if str(device.get("id", "")) == selected_device_id
+        ),
+        None,
+    )
+    selected_summary = (
+        _device_label(selected_device) if selected_device is not None else selected_device_id
+    )
+    select_html = (
+        '<select id="history-device-id" name="device_id" autocomplete="off">'
+        f"{options_html}</select>"
+    )
+    return section_card(
+        title="History Device",
+        subtitle="Switch the history surface between configured batteries.",
+        body=(
+            '<div class="metrics-grid">'
+            + summary_card("Showing", selected_summary or "Unknown device")
+            + summary_card("Configured batteries", str(len(configured_devices)))
+            + "</div>"
+            '<form class="inline-actions" method="get" action="/history">'
+            '<div class="settings-control">'
+            '<label class="settings-label" for="history-device-id">Battery</label>'
+            f"{select_html}"
+            "</div>"
+            f"{button('Open History', kind='primary')}"
+            "</form>"
+            f'<div class="chip-grid">{quick_switch_html}</div>'
+        ),
+    )
+
+
 def render_snapshot_html(snapshot: dict[str, object]) -> str:
     snapshot = _snapshot_with_version(snapshot)
     devices = snapshot.get("devices", [])
@@ -2302,6 +2382,7 @@ def render_device_html(
 def render_history_html(
     *,
     device_id: str,
+    configured_devices: list[dict[str, object]],
     raw_history: list[dict[str, object]],
     daily_history: list[dict[str, object]],
     monthly_history: list[dict[str, object]],
@@ -2318,7 +2399,7 @@ def render_history_html(
     chart_id = f"history-chart-{quote(device_id)}".replace("%", "")
     body = (
         top_header(
-            title=f"{device_id} History",
+            title=f"{device_id or 'Gateway'} History",
             subtitle=(
                 "Chart-first history dashboard with calmer hierarchy: key "
                 "metrics and switchable trend views first, raw tables second."
@@ -2329,6 +2410,10 @@ def render_history_html(
                 f'<a class="secondary-button" href="/device?device_id={quote(device_id)}">'
                 "Device Detail</a></div>"
             ),
+        )
+        + _history_device_selector_html(
+            configured_devices=configured_devices,
+            selected_device_id=device_id,
         )
         + section_card(
             title="Summary",
@@ -2972,19 +3057,42 @@ def serve_management(
 
             if parsed.path == "/history":
                 params = parse_qs(parsed.query)
-                device_id = params.get("device_id", [""])[0]
+                requested_device_id = params.get("device_id", [""])[0]
+                available_device_ids = [
+                    str(item.get("id", ""))
+                    for item in serialized_devices
+                    if str(item.get("id", "")).strip()
+                ]
+                device_id = requested_device_id
+                if not device_id and available_device_ids:
+                    device_id = available_device_ids[0]
+                elif device_id and device_id not in available_device_ids and available_device_ids:
+                    device_id = available_device_ids[0]
                 html = render_history_html(
                     device_id=device_id,
-                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=576),
-                    daily_history=fetch_daily_history(
-                        database_path,
-                        device_id=device_id,
-                        limit=730,
+                    configured_devices=serialized_devices,
+                    raw_history=(
+                        fetch_recent_history(database_path, device_id=device_id, limit=576)
+                        if device_id
+                        else []
                     ),
-                    monthly_history=fetch_monthly_history(
-                        database_path,
-                        device_id=device_id,
-                        limit=24,
+                    daily_history=(
+                        fetch_daily_history(
+                            database_path,
+                            device_id=device_id,
+                            limit=730,
+                        )
+                        if device_id
+                        else []
+                    ),
+                    monthly_history=(
+                        fetch_monthly_history(
+                            database_path,
+                            device_id=device_id,
+                            limit=24,
+                        )
+                        if device_id
+                        else []
                     ),
                     show_chart_markers=config.web.show_chart_markers,
                 )

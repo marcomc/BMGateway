@@ -85,6 +85,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   gateway host.
 - Optional Cockpit install flow plus Raspberry Pi runbook coverage for a
   separate HTTPS host-administration console on port `9090`.
+- Explicit device selection on the History page, including configured-device
+  quick switching, first-device fallback for `/history`, and a no-devices
+  empty state instead of an ambiguous blank history view.
 
 ### Changed
 

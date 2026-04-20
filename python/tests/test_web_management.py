@@ -1104,6 +1104,12 @@ def test_redirect_message_query_round_trips_special_characters() -> None:
 def test_render_history_html_escapes_device_id_in_title() -> None:
     html = render_history_html(
         device_id='bm200_house"><script>alert(1)</script>',
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+            }
+        ],
         raw_history=[
             {
                 "ts": "2026-04-17T20:00:00+02:00",
@@ -1144,6 +1150,51 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert '<a class="secondary-button" href="/">Battery</a>' in html
     assert 'aria-current="page"' in html
     assert "&quot;series&quot;:&quot;bm200_house" in html
+
+
+def test_render_history_html_shows_device_selector_and_quick_switch_links() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+            },
+            {
+                "id": "starter_battery",
+                "name": "Starter Battery",
+            },
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "History Device" in html
+    assert "Switch the history surface between configured batteries" in html
+    assert 'action="/history"' in html
+    assert 'name="device_id"' in html
+    assert 'value="bm200_house" selected' in html
+    assert 'value="starter_battery"' in html
+    assert 'href="/history?device_id=bm200_house"' in html
+    assert 'href="/history?device_id=starter_battery"' in html
+    assert 'aria-current="page"' in html
+    assert "Open History" in html
+
+
+def test_render_history_html_handles_no_configured_devices() -> None:
+    html = render_history_html(
+        device_id="",
+        configured_devices=[],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "No Devices Configured" in html
+    assert "Add a battery monitor before using the history dashboard." in html
+    assert 'href="/devices/new"' in html
+    assert "History Device" not in html
 
 
 def test_render_devices_html_explains_offline_device_not_found_state() -> None:
@@ -1280,6 +1331,7 @@ def test_render_edit_device_html_prefills_device_fields() -> None:
 def test_bottom_nav_renders_generated_icons() -> None:
     html = render_history_html(
         device_id="bm200_house",
+        configured_devices=[],
         raw_history=[],
         daily_history=[],
         monthly_history=[],

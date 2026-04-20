@@ -69,16 +69,3 @@
   - add an `All` range that shows the full retained history, regardless of the
     number of years available
   - add regression coverage for short, long, and all-history range selection
-
-- [ ] Improve history-page device selection and navigation clarity.
-  The history view should make it obvious how to switch between monitored
-  batteries instead of appearing locked to a single device.
-  Actions:
-  - verify the current behavior when more than one configured battery exists
-  - if device switching is missing or unclear, add an explicit device selector
-    at the top of the history page
-  - choose a selector pattern that scales to larger fleets, such as pills,
-    segmented buttons, or a compact dropdown plus quick navigation
-  - ensure that switching devices updates all history charts, summaries, and
-    tables consistently
-  - add regression coverage for multi-device history navigation
