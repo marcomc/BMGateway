@@ -104,10 +104,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fleet Trend, History, and Device Detail charts now support previous/next
   range paging plus direct drag/pan interaction with mouse or touch, so the
   current day window can be moved backward or forward naturally.
+- Fleet Trend legends are now clickable, so each device series can be toggled
+  on or off while comparing historical overlays.
 - Battery overview cards now show a clear red `Unable to connect` state when
   the live snapshot reports `device_not_found`, instead of the softer
   `No recent sample` wording, while Fleet Trend continues to show retained
   historical data separately from live connectivity.
+- Battery overview cards now render at a smaller scale, with tighter
+  proportions and larger icon glyphs inside the device badges.
 - Device add/edit now accepts non-MAC serial-style identifiers in the `MAC or
   serial` field instead of rejecting them as invalid Bluetooth addresses.
   capacity, and production year, exposed through both add-device and

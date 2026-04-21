@@ -456,10 +456,11 @@ def chart_card(
 ) -> str:
     points_json = html.escape(json.dumps(points, separators=(",", ":")))
     legend_html = "".join(
-        '<span class="legend-item">'
+        '<button type="button" class="legend-item active" '
+        f'data-series-label="{html.escape(label)}" aria-pressed="true">'
         f'<span class="legend-swatch" style="background:{html.escape(color)}"></span>'
-        f"{html.escape(label)}"
-        "</span>"
+        f'<span class="legend-label">{html.escape(label)}</span>'
+        "</button>"
         for label, color in legend
     )
     range_buttons = "".join(

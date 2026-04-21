@@ -442,9 +442,13 @@
     }}
     const rangeButtons = Array.from(card.querySelectorAll("[data-range]"));
     const metricButtons = Array.from(card.querySelectorAll("[data-metric]"));
+    const legendButtons = Array.from(card.querySelectorAll("[data-series-label]"));
     const showMarkers = frame.dataset.showMarkers === "true";
     let currentRange = rangeButtons.find((button) => button.classList.contains("active"))?.dataset.range || "30";
     let currentMetric = metricButtons.find((button) => button.classList.contains("active"))?.dataset.metric || "voltage";
+    let visibleSeries = new Set(
+      legendButtons.map((button) => button.dataset.seriesLabel).filter((label) => Boolean(label))
+    );
     let currentWindowEnd = null;
     let currentChart = null;
     let currentWindow = null;
@@ -483,8 +487,18 @@
         nextButton.disabled = !currentWindow?.canNext;
       }}
     }}
+    function updateLegendState() {{
+      for (const button of legendButtons) {{
+        const label = button.dataset.seriesLabel || "";
+        const isVisible = visibleSeries.has(label);
+        button.classList.toggle("active", isVisible);
+        button.classList.toggle("inactive", !isVisible);
+        button.setAttribute("aria-pressed", String(isVisible));
+      }}
+    }}
     function render(focusClientX = null) {{
-      const windowState = pickRange(allPoints, currentRange, currentWindowEnd);
+      const filteredPoints = allPoints.filter((point) => visibleSeries.has(point.series || "Series"));
+      const windowState = pickRange(filteredPoints, currentRange, currentWindowEnd);
       currentWindow = windowState;
       currentWindowEnd = windowState.effectiveEnd;
       const points = windowState.points;
@@ -496,11 +510,13 @@
       canvas.innerHTML = chart.svg;
       updateNavigationState();
       const usable = points.filter((point) => typeof point[currentMetric] === "number");
-      const allUsable = allPoints.filter((point) => typeof point[currentMetric] === "number");
-      const coverageLabel = summarizeCoverage(allPoints, currentMetric);
+      const allUsable = filteredPoints.filter((point) => typeof point[currentMetric] === "number");
+      const coverageLabel = summarizeCoverage(filteredPoints, currentMetric);
+      const visibleCount = visibleSeries.size;
       if (usable.length === 0) {{
         meta.innerHTML = [
           `<span>Window: ${{windowLabel}}</span>`,
+          `<span>Visible devices: ${{visibleCount}}</span>`,
           `<span>No usable ${{METRICS[currentMetric].label.toLowerCase()}} samples in this range</span>`,
           `<span>${{coverageLabel}}</span>`
         ].join("");
@@ -515,6 +531,7 @@
         : coverageLabel;
       meta.innerHTML = [
         `<span>Window: ${{windowLabel}}</span>`,
+        `<span>Visible devices: ${{visibleCount}}</span>`,
         `<span>${{METRICS[currentMetric].label}} samples: ${{usable.length}}</span>`,
         `<span>Average: ${{METRICS[currentMetric].format(average)}}</span>`,
         `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
@@ -568,6 +585,25 @@
           candidate.classList.toggle("active", candidate === button);
         }}
         centerButtonInRail(button, "smooth");
+        requestRender();
+      }});
+    }}
+    for (const button of legendButtons) {{
+      button.addEventListener("click", () => {{
+        const label = button.dataset.seriesLabel || "";
+        if (!label) {{
+          return;
+        }}
+        const isVisible = visibleSeries.has(label);
+        if (isVisible && visibleSeries.size === 1) {{
+          return;
+        }}
+        if (isVisible) {{
+          visibleSeries.delete(label);
+        }} else {{
+          visibleSeries.add(label);
+        }}
+        updateLegendState();
         requestRender();
       }});
     }}
@@ -666,6 +702,7 @@
         hideTooltip(frame);
       }}
     }});
+    updateLegendState();
     render();
     const centerActiveControls = (behavior = "auto") => {{
       centerButtonInRail(

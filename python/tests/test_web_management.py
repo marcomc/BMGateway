@@ -133,6 +133,11 @@ def test_chart_script_supports_range_paging_and_drag_panning() -> None:
     assert "function clampWindowEnd(requestedEnd, *, earliest, latest, duration)" in script
     assert 'data-chart-nav="previous"' in script
     assert "function pageRange(direction)" in script
+    assert "let visibleSeries = new Set(" in script
+    assert "function updateLegendState()" in script
+    assert 'button.dataset.seriesLabel || ""' in script
+    assert "visibleSeries.delete(label);" in script
+    assert "visibleSeries.add(label);" in script
     assert 'previousButton.addEventListener("click", () => pageRange(-1));' in script
     assert 'nextButton.addEventListener("click", () => pageRange(1));' in script
     assert 'frame.addEventListener("pointerdown", (event) => {' in script
@@ -163,6 +168,9 @@ def test_chart_card_markup_includes_side_navigation_buttons() -> None:
     assert 'class="chart-nav-arrow previous"' in html
     assert 'class="chart-nav-arrow next"' in html
     assert 'class="chart-canvas"' in html
+    assert 'class="legend-item active"' in html
+    assert 'data-series-label="No devices"' in html
+    assert 'aria-pressed="true"' in html
 
 
 def test_restart_system_service_uses_non_interactive_sudo(monkeypatch: MonkeyPatch) -> None:
