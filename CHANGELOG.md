@@ -89,6 +89,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Battery overview cards now show a clear red `Unable to connect` state when
+  the live snapshot reports `device_not_found`, instead of the softer
+  `No recent sample` wording, while Fleet Trend continues to show retained
+  historical data separately from live connectivity.
 - Device add/edit now accepts non-MAC serial-style identifiers in the `MAC or
   serial` field instead of rejecting them as invalid Bluetooth addresses.
   capacity, and production year, exposed through both add-device and
@@ -130,6 +134,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   page-rendering module, mutation/actions module, and packaged CSS/JS assets,
   reducing duplication between request handling and HTML generation while
   making the shipped web layer lighter to maintain.
+- Battery overview paging now honors the full `2 / 4 / 6 / 8` visible-card
+  model by using a `4x2` layout for eight-card pages, and configured devices
+  that are missing from the latest runtime snapshot still remain visible on
+  the Battery page instead of disappearing until the next collection cycle.
 - Overview color selection now shows a live color preview beside the control,
   and the vehicle taxonomy now includes scooter and electric-bike installs.
 

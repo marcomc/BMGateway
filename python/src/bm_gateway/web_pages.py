@@ -251,7 +251,9 @@ def _overview_layout_dimensions(card_count: int) -> tuple[int, int]:
         return 2, 1
     if card_count <= 4:
         return 2, 2
-    return 3, 2
+    if card_count <= 6:
+        return 3, 2
+    return 4, 2
 
 
 def _chunk_overview_cards(
@@ -545,10 +547,12 @@ def _device_badge_stack_markup(
 
 def _battery_card_status_markup(device: dict[str, object], *, inline: bool = False) -> str:
     state = str(device.get("state", "unknown"))
+    error_code = str(device.get("error_code") or "").strip() or None
+    connected = bool(device.get("connected", True))
     kind = _status_kind(
         state,
-        cast(str | None, device.get("error_code")),
-        bool(device.get("connected", True)),
+        error_code,
+        connected,
     )
     normalized = state.lower().strip()
     if normalized == "charging":
@@ -561,6 +565,18 @@ def _battery_card_status_markup(device: dict[str, object], *, inline: bool = Fal
             "stroke='currentColor' stroke-width='1.8'/>"
             "<path d='M10.9 4.9 7.5 10h2.1l-.5 5 3.4-5.1h-2l.4-5Z' "
             "fill='currentColor'/>"
+            "</svg>"
+        )
+    elif error_code == "device_not_found" or (normalized == "offline" and not connected):
+        label = "Unable to connect"
+        status_class = "error"
+        icon = (
+            '<svg class="battery-card-status-icon" viewBox="0 0 20 20" fill="none" '
+            'xmlns="http://www.w3.org/2000/svg" aria-label="Unable to connect" role="img">'
+            "<circle cx='10' cy='10' r='8.2' stroke='currentColor' stroke-width='1.8'/>"
+            "<path d='M10 5.7v5.2' stroke='currentColor' stroke-width='2.1' "
+            "stroke-linecap='round'/>"
+            "<circle cx='10' cy='13.8' r='1.1' fill='currentColor'/>"
             "</svg>"
         )
     elif kind == "ok":
@@ -625,6 +641,7 @@ def _merge_snapshot_devices(
 ) -> list[dict[str, object]]:
     registry_by_id = _device_lookup_by_id(devices)
     merged: list[dict[str, object]] = []
+    seen_ids: set[str] = set()
     snapshot_devices = snapshot.get("devices", [])
     if isinstance(snapshot_devices, list):
         for runtime in snapshot_devices:
@@ -633,7 +650,13 @@ def _merge_snapshot_devices(
             device_id = str(runtime.get("id", ""))
             registry = registry_by_id.get(device_id, {})
             merged.append({**runtime, **registry})
+            if device_id:
+                seen_ids.add(device_id)
     if merged:
+        for device in devices:
+            device_id = str(device.get("id", ""))
+            if device_id and device_id not in seen_ids:
+                merged.append(device)
         return merged
     return devices
 

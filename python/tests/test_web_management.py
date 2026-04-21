@@ -1675,6 +1675,94 @@ def test_render_battery_html_marks_single_page_card_count() -> None:
     assert "battery-overview-page is-single-page page-one-card" in html
 
 
+def test_render_battery_html_uses_four_by_two_layout_for_eight_visible_cards() -> None:
+    from bm_gateway.web import render_battery_html
+
+    snapshot_devices = [
+        {
+            "id": f"battery_{index}",
+            "name": f"Battery {index}",
+            "type": "bm200",
+            "soc": 80 + index,
+            "voltage": 13.1 + (index * 0.01),
+            "temperature": 22.0,
+            "state": "normal",
+            "connected": True,
+            "icon_key": "lithium_battery",
+        }
+        for index in range(1, 9)
+    ]
+    registry_devices = [
+        {
+            "id": device["id"],
+            "name": device["name"],
+            "type": "bm200",
+            "mac": f"AA:BB:CC:DD:EE:{index:02d}",
+            "enabled": True,
+            "icon_key": "lithium_battery",
+        }
+        for index, device in enumerate(snapshot_devices, start=1)
+    ]
+
+    html = render_battery_html(
+        snapshot={"devices": snapshot_devices},
+        devices=registry_devices,
+        chart_points=[],
+        legend=[],
+        visible_device_limit=8,
+    )
+
+    assert 'class="battery-overview-page is-single-page page-multi-cards"' in html
+    assert "--overview-columns: 4;" in html
+    assert "--overview-rows: 2;" in html
+    assert 'class="battery-overview-controls"' not in html
+
+
+def test_render_battery_html_keeps_registry_only_devices_visible() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "live_device",
+                    "name": "Live Device",
+                    "type": "bm200",
+                    "soc": 87,
+                    "voltage": 13.2,
+                    "temperature": 24.0,
+                    "state": "normal",
+                    "connected": True,
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "live_device",
+                "name": "Live Device",
+                "type": "bm200",
+                "mac": "AA:BB:CC:DD:EE:01",
+                "enabled": True,
+                "icon_key": "lithium_battery",
+            },
+            {
+                "id": "pending_device",
+                "name": "Pending Device",
+                "type": "bm200",
+                "mac": "AA:BB:CC:DD:EE:02",
+                "enabled": True,
+                "icon_key": "lithium_battery",
+            },
+        ],
+        chart_points=[],
+        legend=[],
+        visible_device_limit=4,
+    )
+
+    assert "Live Device" in html
+    assert "Pending Device" in html
+
+
 def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
     from bm_gateway.web import render_battery_html
 
@@ -1711,6 +1799,46 @@ def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
     assert "Charging" in html
     assert "battery-card-status battery-card-status-inline charging" in html
     assert 'aria-label="Charging"' in html
+
+
+def test_render_battery_html_shows_connection_failure_as_red_warning() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "bm_offline",
+                    "name": "Offline Battery",
+                    "type": "bm200",
+                    "soc": 0,
+                    "voltage": 0.0,
+                    "temperature": None,
+                    "state": "offline",
+                    "connected": False,
+                    "error_code": "device_not_found",
+                    "error_detail": "No BLE advertisement seen during the scan window.",
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "bm_offline",
+                "name": "Offline Battery",
+                "type": "bm200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+                "icon_key": "lithium_battery",
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "Unable to connect" in html
+    assert "battery-card-status battery-card-status-inline error" in html
+    assert 'aria-label="Unable to connect"' in html
+    assert "No recent sample" not in html
 
 
 def test_chart_points_ignore_error_rows_and_empty_raw_samples() -> None:
