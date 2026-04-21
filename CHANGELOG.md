@@ -118,6 +118,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Battery overview cards now place stacked automatic badges beside the device
   identity, keep the SoC circle clear of badge overlap, and use stronger dark
   mode gauge contrast on both the battery overview and device detail pages.
+- The web implementation is now split more cleanly into a service entrypoint,
+  page-rendering module, mutation/actions module, and packaged CSS/JS assets,
+  reducing duplication between request handling and HTML generation while
+  making the shipped web layer lighter to maintain.
 - Overview color selection now shows a live color preview beside the control,
   and the vehicle taxonomy now includes scooter and electric-bike installs.
 

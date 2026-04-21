@@ -5,6 +5,11 @@ This directory contains the packaged Python implementation for `BMGateway`.
 ## Layout
 
 - `src/bm_gateway/` contains shared core, runtime CLI, and web executable code
+- `src/bm_gateway/web.py` is the HTTP/service entrypoint for the web process
+- `src/bm_gateway/web_pages.py` contains page rendering and HTML composition
+- `src/bm_gateway/web_actions.py` contains web-driven config and registry updates
+- `src/bm_gateway/web_ui.py` contains reusable server-rendered UI primitives
+- `src/bm_gateway/web_assets.py` loads packaged CSS/JS assets from `src/bm_gateway/assets/`
 - `tests/` contains Python test coverage
 - `config/` contains example config and schema artifacts
 

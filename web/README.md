@@ -5,8 +5,11 @@ This directory documents the web product boundary for `BMGateway`.
 ## Current Role
 
 - the shipped web executable is `bm-gateway-web`
-- the implementation lives in `python/src/bm_gateway/web.py` and
-  `python/src/bm_gateway/web_ui.py`
+- the HTTP/service entrypoint lives in `python/src/bm_gateway/web.py`
+- page composition lives in `python/src/bm_gateway/web_pages.py`
+- settings/device mutation helpers live in `python/src/bm_gateway/web_actions.py`
+- reusable HTML primitives live in `python/src/bm_gateway/web_ui.py`
+- packaged web assets live in `python/src/bm_gateway/assets/`
 - the shared-core decision avoids a second Python codebase with duplicated
   config, runtime, and persistence logic
 
