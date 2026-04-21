@@ -86,9 +86,11 @@ def render_battery_html(
                     f"{gauge_markup}"
                     "</div>"
                     "<div class='footer-row'>"
-                    f'<a class="secondary-button" href="/device?device_id={quote(device_id)}">'
-                    "Device Details</a>"
-                    "</div>"
+                    + (
+                        '<a class="secondary-button battery-card-action" '
+                        f'href="/device?device_id={quote(device_id)}">Device Details</a>'
+                        "</div>"
+                    )
                 ),
                 tone=color_key,
                 extra_class="battery-overview-card",

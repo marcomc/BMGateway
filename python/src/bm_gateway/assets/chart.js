@@ -46,7 +46,7 @@
   function formatDetailLabel(timestamp) {{
     return AXIS_FORMATTERS.detail.format(new Date(timestamp));
   }}
-  function clampWindowEnd(requestedEnd, *, earliest, latest, duration) {{
+  function clampWindowEnd(requestedEnd, {{ earliest, latest, duration }}) {{
     if (duration === null || latest === null || earliest === null) {{
       return latest;
     }}

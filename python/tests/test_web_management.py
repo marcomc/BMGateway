@@ -130,7 +130,7 @@ def test_chart_script_supports_range_paging_and_drag_panning() -> None:
     script = chart_script("history-chart")
 
     assert "function rangeDurationMs(rangeValue)" in script
-    assert "function clampWindowEnd(requestedEnd, *, earliest, latest, duration)" in script
+    assert "function clampWindowEnd(requestedEnd, { earliest, latest, duration })" in script
     assert 'data-chart-nav="previous"' in script
     assert "function pageRange(direction)" in script
     assert "let visibleSeries = new Set(" in script
@@ -1535,13 +1535,13 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "background: var(--bg-surface);" in css
     assert ".banner-strip {" in css
     assert "@media (max-width: 640px)" in css
-    assert "width: 132px;" in css
-    assert "width: 38px;" in css
-    assert "height: 38px;" in css
-    assert "flex: 0 0 38px;" in css
-    assert "inline-size: 38px;" in css
-    assert "block-size: 38px;" in css
-    assert "max-inline-size: 38px;" in css
+    assert "width: 90px;" in css
+    assert "width: 34px;" in css
+    assert "height: 34px;" in css
+    assert "flex: 0 0 34px;" in css
+    assert "inline-size: 34px;" in css
+    assert "block-size: 34px;" in css
+    assert "max-inline-size: 34px;" in css
     assert "overflow: hidden;" in css
     assert ".device-icon-frame.history-device-badge {" in css
     assert "inline-size: 40px;" in css
@@ -1552,9 +1552,9 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "height: 34px;" in css
     assert "width: 30px;" in css
     assert "height: 30px;" in css
-    assert "font-size: clamp(1.8rem, 4.4vw, 2.55rem);" in css
-    assert "font-size: 0.72rem;" in css
-    assert "font-size: 0.74rem;" in css
+    assert "font-size: clamp(1.2rem, 2.5vw, 1.7rem);" in css
+    assert "font-size: 0.54rem;" in css
+    assert "font-size: 0.52rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
     assert ".battery-overview-page.is-single-page.page-two-cards," in css
 

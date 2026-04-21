@@ -733,8 +733,8 @@ details summary::-webkit-details-marker { display: none; }
   font-variant-numeric: tabular-nums;
 }
 .battery-overview-card {
-  min-height: 154px;
-  padding: 0.68rem;
+  min-height: 126px;
+  padding: 0.56rem;
 }
 .battery-overview-controls {
   display: flex;
@@ -774,31 +774,31 @@ details summary::-webkit-details-marker { display: none; }
   width: auto;
   max-width: 100%;
   flex: none;
-  grid-template-columns: repeat(var(--overview-columns), minmax(148px, 188px));
+  grid-template-columns: repeat(var(--overview-columns), minmax(138px, 174px));
 }
 .battery-overview-page.is-single-page.page-two-cards {
   justify-content: flex-start;
   margin: 0;
-  grid-template-columns: repeat(2, minmax(148px, 188px));
+  grid-template-columns: repeat(2, minmax(138px, 174px));
 }
 .battery-overview-page.is-single-page.page-one-card {
   justify-content: flex-start;
   margin: 0;
-  grid-template-columns: minmax(148px, 188px);
+  grid-template-columns: minmax(138px, 174px);
 }
 .battery-card-top {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
-  gap: 0.55rem;
+  gap: 0.42rem;
 }
 .battery-tile-hero {
   display: grid;
   place-items: center;
   width: 100%;
-  margin: 0.35rem auto 0.45rem;
-  min-height: 102px;
-  padding: 0.1rem 0.15rem;
+  margin: 0.2rem auto 0.28rem;
+  min-height: 84px;
+  padding: 0;
 }
 .battery-tile-hero .battery-card-gauge {
   box-shadow: var(--shadow-elevated);
@@ -807,11 +807,11 @@ details summary::-webkit-details-marker { display: none; }
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: 0.35rem;
+  gap: 0.24rem;
   flex: 0 0 auto;
 }
 .device-badge-stack.compact {
-  gap: 0.35rem;
+  gap: 0.24rem;
 }
 .device-badge-stack .badge-placeholder {
   visibility: hidden;
@@ -844,31 +844,31 @@ details summary::-webkit-details-marker { display: none; }
   stroke: var(--card-accent, var(--badge-accent-stroke));
 }
 .battery-tile-icon {
-  flex: 0 0 40px;
-  flex-basis: 40px;
-  inline-size: 40px;
-  block-size: 40px;
-  width: 40px;
-  height: 40px;
-  min-width: 40px;
-  min-height: 40px;
-  max-width: 40px;
-  max-height: 40px;
-  min-inline-size: 40px;
-  min-block-size: 40px;
-  max-inline-size: 40px;
-  max-block-size: 40px;
+  flex: 0 0 34px;
+  flex-basis: 34px;
+  inline-size: 34px;
+  block-size: 34px;
+  width: 34px;
+  height: 34px;
+  min-width: 34px;
+  min-height: 34px;
+  max-width: 34px;
+  max-height: 34px;
+  min-inline-size: 34px;
+  min-block-size: 34px;
+  max-inline-size: 34px;
+  max-block-size: 34px;
   align-self: flex-start;
   overflow: hidden;
 }
 .battery-tile-icon .device-icon-svg {
-  width: 34px;
-  height: 34px;
+  width: 30px;
+  height: 30px;
 }
 .battery-card-gauge {
   position: relative;
-  flex: 0 0 108px;
-  width: 108px;
+  flex: 0 0 90px;
+  width: 90px;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
   box-shadow: 0 0 34px var(--card-accent-glow);
@@ -894,20 +894,20 @@ details summary::-webkit-details-marker { display: none; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.16rem;
-  padding: 0.68rem;
+  gap: 0.1rem;
+  padding: 0.52rem;
   text-align: center;
   color: var(--gauge-text-strong);
 }
 .battery-card-gauge-label {
   color: var(--gauge-text-soft);
-  font-size: 0.6rem;
+  font-size: 0.52rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 .battery-card-gauge-value {
-  font-size: clamp(1.45rem, 3.2vw, 2rem);
+  font-size: clamp(1.2rem, 2.5vw, 1.7rem);
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -915,7 +915,7 @@ details summary::-webkit-details-marker { display: none; }
 .battery-card-copy {
   display: flex;
   flex-direction: column;
-  gap: 0.14rem;
+  gap: 0.08rem;
   align-items: flex-start;
   text-align: left;
 }
@@ -930,23 +930,23 @@ details summary::-webkit-details-marker { display: none; }
 }
 .battery-overview-card .meta-name {
   color: var(--text-primary);
-  font-size: 0.82rem;
+  font-size: 0.74rem;
   font-weight: 700;
   line-height: 1.08;
-  max-width: 14ch;
+  max-width: 13ch;
 }
 .battery-overview-card .meta-context {
-  font-size: 0.72rem;
-  max-width: 14ch;
+  font-size: 0.64rem;
+  max-width: 13ch;
 }
 .battery-overview-card .battery-card-reading {
   color: var(--text-primary);
-  font-size: 0.78rem;
+  font-size: 0.68rem;
   font-weight: 600;
 }
 .battery-overview-card .battery-card-meta-extra {
-  font-size: 0.68rem;
-  max-width: 14ch;
+  font-size: 0.6rem;
+  max-width: 13ch;
 }
 .battery-card-status {
   display: inline-flex;
@@ -958,7 +958,7 @@ details summary::-webkit-details-marker { display: none; }
 }
 .battery-card-status-inline {
   margin-top: 0;
-  font-size: 0.62rem;
+  font-size: 0.54rem;
   line-height: 1.1;
 }
 .battery-card-status.ok { color: var(--state-ok); }
@@ -967,8 +967,8 @@ details summary::-webkit-details-marker { display: none; }
 .battery-card-status.error { color: var(--state-error); }
 .battery-card-status.offline { color: var(--state-offline); }
 .battery-card-status-icon {
-  width: 18px;
-  height: 18px;
+  width: 14px;
+  height: 14px;
   flex: 0 0 auto;
 }
 .hero-device-icon {
@@ -997,6 +997,11 @@ details summary::-webkit-details-marker { display: none; }
 .battery-overview-card .footer-row {
   justify-content: center;
   margin-top: auto;
+}
+.battery-card-action {
+  padding: 0.48rem 0.72rem;
+  border-radius: 14px;
+  font-size: 0.68rem;
 }
 .device-icon-frame {
   display: grid;
@@ -1859,53 +1864,57 @@ details summary::-webkit-details-marker { display: none; }
     flex: 1 1 0;
   }
   .battery-card-top {
-    gap: 0.45rem;
+    gap: 0.36rem;
   }
   .device-badge-stack {
-    gap: 0.32rem;
+    gap: 0.22rem;
   }
   .battery-card-gauge {
-    flex-basis: 98px;
-    width: 98px;
+    flex-basis: 84px;
+    width: 84px;
   }
   .battery-tile-hero {
-    min-height: 98px;
-    margin: 0.28rem auto 0.25rem;
+    min-height: 84px;
+    margin: 0.16rem auto 0.18rem;
   }
   .battery-tile-icon {
-    flex: 0 0 34px;
-    flex-basis: 34px;
-    inline-size: 34px;
-    block-size: 34px;
-    width: 34px;
-    height: 34px;
-    min-width: 34px;
-    min-height: 34px;
-    max-width: 34px;
-    max-height: 34px;
-    min-inline-size: 34px;
-    min-block-size: 34px;
-    max-inline-size: 34px;
-    max-block-size: 34px;
+    flex: 0 0 30px;
+    flex-basis: 30px;
+    inline-size: 30px;
+    block-size: 30px;
+    width: 30px;
+    height: 30px;
+    min-width: 30px;
+    min-height: 30px;
+    max-width: 30px;
+    max-height: 30px;
+    min-inline-size: 30px;
+    min-block-size: 30px;
+    max-inline-size: 30px;
+    max-block-size: 30px;
     aspect-ratio: 1 / 1;
-    border-radius: 12px;
+    border-radius: 10px;
     align-self: flex-start;
     overflow: hidden;
   }
   .battery-tile-icon .device-icon-svg {
-    width: 28px;
-    height: 28px;
+    width: 26px;
+    height: 26px;
   }
   .battery-card-copy {
-    gap: 0.1rem;
+    gap: 0.06rem;
   }
   .battery-overview-card .meta-name {
-    font-size: 0.78rem;
+    font-size: 0.7rem;
   }
   .battery-overview-card .meta-context,
   .battery-overview-card .battery-card-reading,
   .battery-overview-card .battery-card-meta-extra {
-    font-size: 0.66rem;
+    font-size: 0.58rem;
+  }
+  .battery-card-action {
+    padding: 0.4rem 0.62rem;
+    font-size: 0.62rem;
   }
   .history-device-grid {
     display: flex;

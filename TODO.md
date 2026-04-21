@@ -22,9 +22,6 @@
 - Add integration tests that exercise the example config files end-to-end.
 - Revisit Docker only for 64-bit deployment targets if containerization becomes
   operationally useful again.
-- Revisit the battery overview after a second real device is added, so the new
-  multi-device layout can be judged against live hardware instead of only the
-  current single-device gateway state.
 
 ## Propositions
 
