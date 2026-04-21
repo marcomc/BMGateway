@@ -154,7 +154,12 @@
     const seriesBuckets = new Map();
     coords.forEach((point) => {{
       const key = `${{point.series}}|${{point.seriesColor}}`;
-      const bucket = seriesBuckets.get(key) || {{ label: point.series, color: point.seriesColor, points: [] }};
+      const bucket = seriesBuckets.get(key) || {{
+        label: point.series,
+        color: point.seriesColor,
+        points: [],
+        order: seriesBuckets.size,
+      }};
       bucket.points.push(point);
       seriesBuckets.set(key, bucket);
     }});
@@ -190,7 +195,8 @@
       }}
       return segments;
     }};
-    const seriesLayers = Array.from(seriesBuckets.values()).map((series, seriesIndex) => {{
+    const bucketList = Array.from(seriesBuckets.values());
+    const seriesLayers = bucketList.map((series, seriesIndex) => {{
       const segments = segmentSeries(series.points);
       const gradientId = `${{chartId}}-${{metric}}-gradient-${{seriesIndex}}`;
       const segmentSvg = segments.map((segment) => {{
@@ -218,6 +224,7 @@
     return {{
       svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="22" fill="${{chartSurface}}"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
       coords,
+      seriesBuckets: bucketList,
       metric,
       width,
       height,
@@ -226,21 +233,88 @@
       overlayId,
     }};
   }}
-  function showTooltip(frame, chart, index) {{
+  function tooltipEntriesForX(chart, targetX) {{
+    const threshold = Math.max(
+      18,
+      ((chart.width - chart.padLeft - chart.padRight) * 0.04),
+    );
+    const entries = chart.seriesBuckets.map((series) => {{
+      let bestPoint = null;
+      let bestDistance = Infinity;
+      for (const point of series.points) {{
+        const distance = Math.abs(point.x - targetX);
+        if (distance < bestDistance) {{
+          bestDistance = distance;
+          bestPoint = point;
+        }}
+      }}
+      if (!bestPoint || bestDistance > threshold) {{
+        return null;
+      }}
+      return {{
+        series: series.label,
+        color: series.color,
+        order: series.order,
+        point: bestPoint,
+        distance: bestDistance,
+      }};
+    }}).filter((entry) => entry !== null);
+    if (entries.length > 0) {{
+      return entries.sort((left, right) => left.order - right.order);
+    }}
+    if (chart.coords.length === 0) {{
+      return [];
+    }}
+    let fallback = chart.coords[0];
+    let fallbackDistance = Infinity;
+    for (const point of chart.coords) {{
+      const distance = Math.abs(point.x - targetX);
+      if (distance < fallbackDistance) {{
+        fallback = point;
+        fallbackDistance = distance;
+      }}
+    }}
+    return [{{
+      series: fallback.series,
+      color: fallback.seriesColor,
+      order: 0,
+      point: fallback,
+      distance: fallbackDistance,
+    }}];
+  }}
+  function showTooltip(frame, chart, targetX) {{
     const tooltip = frame.querySelector(".chart-tooltip");
     const crosshair = frame.querySelector(".chart-crosshair");
     if (!tooltip || !crosshair || chart.coords.length === 0) {{
       return;
     }}
-    const point = chart.coords[Math.max(0, Math.min(index, chart.coords.length - 1))];
-    const timestamp = parseTime(point.ts) ?? 0;
-    crosshair.setAttribute("x1", point.x.toFixed(1));
-    crosshair.setAttribute("x2", point.x.toFixed(1));
-    crosshair.setAttribute("stroke", point.seriesColor || METRICS[chart.metric].color);
-    tooltip.innerHTML = `<div class="tooltip-label">${{point.series}}</div><div class="tooltip-value">${{METRICS[chart.metric].format(point.value)}}</div><div class="tooltip-detail">${{formatDetailLabel(timestamp)}}</div>`;
+    const entries = tooltipEntriesForX(chart, targetX);
+    if (entries.length === 0) {{
+      return;
+    }}
+    const primary = entries.reduce((best, current) => (
+      current.distance < best.distance ? current : best
+    ));
+    const timestamp = parseTime(primary.point.ts) ?? 0;
+    crosshair.setAttribute("x1", primary.point.x.toFixed(1));
+    crosshair.setAttribute("x2", primary.point.x.toFixed(1));
+    crosshair.setAttribute("stroke", primary.color || METRICS[chart.metric].color);
+    const rows = entries.map((entry) => (
+      `<div class="tooltip-series-row">`
+      + `<span class="tooltip-series-label">`
+      + `<span class="tooltip-series-swatch" style="background:${{entry.color}}"></span>`
+      + `${{entry.series}}`
+      + `</span>`
+      + `<span class="tooltip-series-value">${{METRICS[chart.metric].format(entry.point.value)}}</span>`
+      + `</div>`
+    )).join("");
+    tooltip.innerHTML = (
+      `<div class="tooltip-detail">${{formatDetailLabel(timestamp)}}</div>`
+      + `<div class="tooltip-series-list">${{rows}}</div>`
+    );
     tooltip.classList.add("visible");
-    tooltip.style.left = `${{(point.x / chart.width) * 100}}%`;
-    tooltip.style.top = `${{(point.y / chart.height) * 100}}%`;
+    tooltip.style.left = `${{(primary.point.x / chart.width) * 100}}%`;
+    tooltip.style.top = `${{(Math.min(...entries.map((entry) => entry.point.y)) / chart.height) * 100}}%`;
   }}
   function hideTooltip(frame) {{
     const tooltip = frame.querySelector(".chart-tooltip");
@@ -322,37 +396,32 @@
       ].join("");
       const overlay = frame.querySelector(".chart-overlay");
       if (overlay && chart.coords.length > 0) {{
-        const pointIndexFromEvent = (event) => {{
+        const targetXFromEvent = (event) => {{
           const bounds = overlay.getBoundingClientRect();
           const relativeX = Math.max(0, Math.min(event.clientX - bounds.left, bounds.width));
-          const targetX = chart.padLeft + ((relativeX / bounds.width) * (chart.width - chart.padLeft - chart.padRight));
-          let bestIndex = 0;
-          let bestDistance = Infinity;
-          chart.coords.forEach((point, index) => {{
-            const distance = Math.abs(point.x - targetX);
-            if (distance < bestDistance) {{
-              bestDistance = distance;
-              bestIndex = index;
-            }}
-          }});
-          return bestIndex;
+          return chart.padLeft + (
+            (relativeX / bounds.width) * (chart.width - chart.padLeft - chart.padRight)
+          );
         }};
-        const move = (event) => showTooltip(frame, chart, pointIndexFromEvent(event));
+        const move = (event) => showTooltip(frame, chart, targetXFromEvent(event));
         overlay.addEventListener("mousemove", move);
-        overlay.addEventListener("mouseenter", () => showTooltip(frame, chart, chart.coords.length - 1));
+        overlay.addEventListener(
+          "mouseenter",
+          () => showTooltip(frame, chart, chart.coords[chart.coords.length - 1].x),
+        );
         overlay.addEventListener("mouseleave", () => hideTooltip(frame));
         overlay.addEventListener("touchstart", (event) => {{
           if (event.touches.length > 0) {{
-            showTooltip(frame, chart, pointIndexFromEvent(event.touches[0]));
+            showTooltip(frame, chart, targetXFromEvent(event.touches[0]));
           }}
         }}, {{ passive: true }});
         overlay.addEventListener("touchmove", (event) => {{
           if (event.touches.length > 0) {{
-            showTooltip(frame, chart, pointIndexFromEvent(event.touches[0]));
+            showTooltip(frame, chart, targetXFromEvent(event.touches[0]));
           }}
         }}, {{ passive: true }});
         overlay.addEventListener("touchend", () => hideTooltip(frame));
-        showTooltip(frame, chart, chart.coords.length - 1);
+        showTooltip(frame, chart, chart.coords[chart.coords.length - 1].x);
       }}
     }}
     for (const button of rangeButtons) {{

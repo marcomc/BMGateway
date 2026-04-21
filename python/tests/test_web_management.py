@@ -118,6 +118,17 @@ def test_chart_script_centers_active_controls_in_scroll_rail() -> None:
     assert 'window.addEventListener("load", () => {' in script
 
 
+def test_chart_script_renders_multi_series_tooltip_rows() -> None:
+    script = chart_script("history-chart")
+
+    assert "function tooltipEntriesForX(chart, targetX)" in script
+    assert "chart.seriesBuckets.map((series) => {" in script
+    assert 'class="tooltip-series-row"' in script
+    assert 'class="tooltip-series-swatch"' in script
+    assert 'class="tooltip-series-value"' in script
+    assert "const rows = entries.map((entry) => (" in script
+
+
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
     tmp_path: Path,
 ) -> None:
@@ -509,7 +520,7 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 5",
+                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -528,13 +539,15 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
         show_chart_markers=True,
         visible_device_limit=None,
         appearance=None,
+        default_chart_range=None,
+        default_chart_metric=None,
     )
 
     assert errors == []
     config = load_config(config_path)
     assert config.web.port == 9091
     assert config.web.show_chart_markers is True
-    assert config.web.visible_device_limit == 5
+    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -> None:
@@ -577,7 +590,7 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 5",
+                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -594,8 +607,10 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
         web_host="127.0.0.1",
         web_port=8088,
         show_chart_markers=None,
-        visible_device_limit=3,
+        visible_device_limit=4,
         appearance=None,
+        default_chart_range=None,
+        default_chart_metric=None,
     )
 
     assert errors == []
@@ -603,7 +618,7 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
     assert config.web.enabled is False
     assert config.web.host == "127.0.0.1"
     assert config.web.port == 8088
-    assert config.web.visible_device_limit == 3
+    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
@@ -648,7 +663,7 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
                 'host = "0.0.0.0"',
                 "port = 80",
                 "show_chart_markers = true",
-                "visible_device_limit = 5",
+                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -667,13 +682,15 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
         show_chart_markers=None,
         visible_device_limit=None,
         appearance=None,
+        default_chart_range=None,
+        default_chart_metric=None,
     )
 
     assert errors == []
     config = load_config(config_path)
     assert config.web.port == 8088
     assert config.web.show_chart_markers is True
-    assert config.web.visible_device_limit == 5
+    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
@@ -716,7 +733,7 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 5",
+                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -735,6 +752,8 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
         show_chart_markers=None,
         visible_device_limit=None,
         appearance="dark",
+        default_chart_range=None,
+        default_chart_metric=None,
     )
 
     assert errors == []
@@ -742,7 +761,35 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
     assert config.web.appearance == "dark"
 
 
-def test_settings_display_post_persists_appearance_and_visible_limit(tmp_path: Path) -> None:
+def test_update_web_preferences_persists_chart_defaults(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_web_preferences(
+        config_path=config_path,
+        web_enabled=None,
+        web_host=None,
+        web_port=None,
+        show_chart_markers=None,
+        visible_device_limit=None,
+        appearance=None,
+        default_chart_range="90",
+        default_chart_metric="temperature",
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.web.default_chart_range == "90"
+    assert config.web.default_chart_metric == "temperature"
+
+
+def test_settings_display_post_persists_appearance_visible_limit_and_chart_defaults(
+    tmp_path: Path,
+) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.toml"
     config_path.write_text(
@@ -773,7 +820,9 @@ def test_settings_display_post_persists_appearance_and_visible_limit(tmp_path: P
             {
                 "settings_section": "display",
                 "show_chart_markers": "on",
-                "visible_device_limit": "3",
+                "visible_device_limit": "4",
+                "default_chart_range": "90",
+                "default_chart_metric": "temperature",
                 "appearance": "dark",
             }
         ).encode("utf-8"),
@@ -785,7 +834,9 @@ def test_settings_display_post_persists_appearance_and_visible_limit(tmp_path: P
 
     config = load_config(config_path)
     assert config.web.appearance == "dark"
-    assert config.web.visible_device_limit == 3
+    assert config.web.visible_device_limit == 4
+    assert config.web.default_chart_range == "90"
+    assert config.web.default_chart_metric == "temperature"
 
 
 def test_compact_mac_address_is_normalized() -> None:
@@ -952,6 +1003,20 @@ def test_render_settings_html_summary_shows_appearance() -> None:
     assert "System" in html
 
 
+def test_render_settings_html_summary_shows_chart_defaults() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        web=replace(config.web, default_chart_range="7", default_chart_metric="soc"),
+    )
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "Default chart range" in html
+    assert "7 days" in html
+    assert "Default chart metric" in html
+    assert "State of Charge" in html
+
+
 def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     html = render_settings_html(
@@ -1014,6 +1079,20 @@ def test_render_settings_html_edit_mode_shows_appearance_options() -> None:
     assert '<option value="light"' in html
     assert '<option value="dark"' in html
     assert '<option value="system"' in html
+
+
+def test_render_settings_html_edit_mode_shows_chart_default_options() -> None:
+    html = render_settings_html(
+        config=load_config(Path("python/config/config.toml.example")),
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+    )
+
+    assert 'name="default_chart_range"' in html
+    assert 'name="default_chart_metric"' in html
+    assert '<option value="7" selected>' in html
+    assert '<option value="soc" selected>' in html
 
 
 def test_discover_bluetooth_adapters_reads_sysfs_entries(tmp_path: Path) -> None:
@@ -1134,6 +1213,20 @@ def test_render_battery_html_threads_appearance_to_document_root() -> None:
     assert 'data-theme-preference="dark"' in html
 
 
+def test_render_battery_html_defaults_chart_to_seven_days_and_soc() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={"devices": []},
+        devices=[],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert 'data-range="7" data-range-label="7 days" class="active"' in html
+    assert 'data-metric="soc" class="active"' in html
+
+
 def test_render_battery_html_uses_shared_icon_badge_markup() -> None:
     from bm_gateway.web import render_battery_html
 
@@ -1172,6 +1265,41 @@ def test_render_battery_html_uses_shared_icon_badge_markup() -> None:
     assert "battery-card-badge" in html
     assert "battery-tile-icon" in html
     assert "badge-placeholder" in html
+
+
+def test_render_battery_html_prefers_registry_name_over_stale_snapshot_name() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "ancell_bm200",
+                    "name": "Ancell BM200",
+                    "type": "bm200",
+                    "soc": 91,
+                    "voltage": 13.31,
+                    "temperature": 24.0,
+                    "state": "normal",
+                    "connected": True,
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "ancell_bm200",
+                "name": "NLP5",
+                "type": "bm200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "NLP5" in html
+    assert "Ancell BM200" not in html
 
 
 def test_render_battery_html_places_badge_outside_gauge_and_identity_below() -> None:
@@ -1410,6 +1538,21 @@ def test_render_history_html_threads_appearance_to_document_root() -> None:
     assert 'data-theme-preference="dark"' in html
 
 
+def test_render_history_html_respects_saved_chart_defaults() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+        default_chart_range="90",
+        default_chart_metric="temperature",
+    )
+
+    assert 'data-range="90" data-range-label="90 days" class="active"' in html
+    assert 'data-metric="temperature" class="active"' in html
+
+
 def test_render_history_html_reserves_second_badge_slot_for_non_vehicle_devices() -> None:
     html = render_history_html(
         device_id="bench_battery",
@@ -1481,11 +1624,11 @@ def test_render_battery_html_pages_cards_by_visible_device_limit() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=3,
+        visible_device_limit=4,
     )
 
     assert html.count('class="battery-overview-page page-multi-cards"') == 2
-    assert 'class="battery-overview-page page-one-card"' in html
+    assert 'class="battery-overview-page page-one-card"' not in html
     assert "--overview-columns: 2;" in html
     assert "--overview-rows: 2;" in html
     assert "Battery 7" in html
@@ -1526,7 +1669,7 @@ def test_render_battery_html_marks_single_page_card_count() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=5,
+        visible_device_limit=4,
     )
 
     assert "battery-overview-page is-single-page page-one-card" in html

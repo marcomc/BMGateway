@@ -58,3 +58,5 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
 
     assert config.web.port == 80
     assert config.web.show_chart_markers is False
+    assert config.web.default_chart_range == "7"
+    assert config.web.default_chart_metric == "soc"

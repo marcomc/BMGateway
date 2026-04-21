@@ -1144,6 +1144,7 @@ details summary::-webkit-details-marker { display: none; }
   justify-content: space-between;
   gap: 1rem;
   padding: 0.95rem 1rem;
+  margin-bottom: 1rem;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
   background: linear-gradient(
@@ -1404,8 +1405,40 @@ details summary::-webkit-details-marker { display: none; }
   font-weight: 800;
 }
 .chart-tooltip .tooltip-detail {
-  margin-top: 0.2rem;
   color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.chart-tooltip .tooltip-series-list {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+.chart-tooltip .tooltip-series-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+.chart-tooltip .tooltip-series-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-width: 0;
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.chart-tooltip .tooltip-series-swatch {
+  width: 0.72rem;
+  height: 0.72rem;
+  flex: 0 0 0.72rem;
+  border-radius: 999px;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--text-primary) 14%, transparent);
+}
+.chart-tooltip .tooltip-series-value {
+  flex: 0 0 auto;
+  font-size: 1rem;
+  font-weight: 800;
 }
 .hero-shell {
   display: grid;

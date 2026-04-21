@@ -64,6 +64,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - BM300-inspired premium redesign for the server-rendered management, history,
   and device pages, including reusable UI primitives, calmer operational
   hierarchy, and interactive metric/range charts backed by live gateway data.
+- Fleet and history chart hover tooltips now show all device values present at
+  the hovered point, and Battery overview cards now prefer saved registry names
+  over stale runtime snapshot names.
+- Web display settings now control the default chart range and chart metric for
+  Battery, History, and Device Detail pages, with `7 days` as the shipped
+  default range.
+- Battery overview display settings now use visible-card limits of `2`, `4`,
+  `6`, or `8` to match the current overview layout model.
 - BM300-style battery landing page plus dedicated devices and settings routes,
   giving the web app a full product journey instead of only admin-centric
   pages.

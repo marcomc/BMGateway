@@ -717,7 +717,7 @@ def _merge_snapshot_devices(
                 continue
             device_id = str(runtime.get("id", ""))
             registry = registry_by_id.get(device_id, {})
-            merged.append({**registry, **runtime})
+            merged.append({**runtime, **registry})
     if merged:
         return merged
     return devices
@@ -1504,8 +1504,10 @@ def render_battery_html(
     chart_points: list[dict[str, object]],
     legend: list[tuple[str, str]],
     show_chart_markers: bool = False,
-    visible_device_limit: int = 5,
+    visible_device_limit: int = 4,
     appearance: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
@@ -1652,8 +1654,8 @@ def render_battery_html(
                 ("730", "2 years"),
                 ("all", "All"),
             ),
-            default_range="30",
-            default_metric="soc",
+            default_range=default_chart_range,
+            default_metric=default_chart_metric,
             legend=legend or [("No devices", "#95a3b8")],
             show_markers=show_chart_markers,
         )
@@ -2160,6 +2162,27 @@ def render_settings_html(
         )
         + settings_row("Visible overview cards", str(config.web.visible_device_limit))
         + settings_row(
+            "Default chart range",
+            {
+                "raw": "Recent raw",
+                "1": "1 day",
+                "7": "7 days",
+                "30": "30 days",
+                "90": "90 days",
+                "365": "1 year",
+                "730": "2 years",
+                "all": "All",
+            }.get(config.web.default_chart_range, config.web.default_chart_range),
+        )
+        + settings_row(
+            "Default chart metric",
+            {
+                "voltage": "Voltage",
+                "soc": "State of Charge",
+                "temperature": "Temperature",
+            }.get(config.web.default_chart_metric, config.web.default_chart_metric),
+        )
+        + settings_row(
             "Appearance",
             {
                 "light": "Light",
@@ -2317,17 +2340,64 @@ def render_settings_html(
                 (
                     '<select id="visible-device-limit-input" name="visible_device_limit" '
                     'autocomplete="off">'
-                    f'<option value="1"{_selected_attr(config.web.visible_device_limit == 1)}>'
-                    "1</option>"
-                    f'<option value="3"{_selected_attr(config.web.visible_device_limit == 3)}>'
-                    "3</option>"
-                    f'<option value="5"{_selected_attr(config.web.visible_device_limit == 5)}>'
-                    "5</option>"
+                    f'<option value="2"{_selected_attr(config.web.visible_device_limit == 2)}>'
+                    "2</option>"
+                    f'<option value="4"{_selected_attr(config.web.visible_device_limit == 4)}>'
+                    "4</option>"
+                    f'<option value="6"{_selected_attr(config.web.visible_device_limit == 6)}>'
+                    "6</option>"
+                    f'<option value="8"{_selected_attr(config.web.visible_device_limit == 8)}>'
+                    "8</option>"
                     "</select>"
                 ),
                 help_text=(
                     "Choose how many monitored batteries stay visible before the "
                     "overview pages horizontally on larger fleets."
+                ),
+            )
+            + settings_control_row(
+                "Default chart range",
+                (
+                    '<select id="default-chart-range-input" name="default_chart_range" '
+                    'autocomplete="off">'
+                    f'<option value="raw"{_selected_attr(config.web.default_chart_range == "raw")}>'
+                    "Recent raw</option>"
+                    f'<option value="1"{_selected_attr(config.web.default_chart_range == "1")}>'
+                    "1 day</option>"
+                    f'<option value="7"{_selected_attr(config.web.default_chart_range == "7")}>'
+                    "7 days</option>"
+                    f'<option value="30"{_selected_attr(config.web.default_chart_range == "30")}>'
+                    "30 days</option>"
+                    f'<option value="90"{_selected_attr(config.web.default_chart_range == "90")}>'
+                    "90 days</option>"
+                    f'<option value="365"{_selected_attr(config.web.default_chart_range == "365")}>'
+                    "1 year</option>"
+                    f'<option value="730"{_selected_attr(config.web.default_chart_range == "730")}>'
+                    "2 years</option>"
+                    f'<option value="all"{_selected_attr(config.web.default_chart_range == "all")}>'
+                    "All</option>"
+                    "</select>"
+                ),
+                help_text="Choose which retained time window charts should open with by default.",
+            )
+            + settings_control_row(
+                "Default chart metric",
+                (
+                    '<select id="default-chart-metric-input" name="default_chart_metric" '
+                    'autocomplete="off">'
+                    f'<option value="voltage"'
+                    f"{_selected_attr(config.web.default_chart_metric == 'voltage')}>"
+                    "Voltage</option>"
+                    f'<option value="soc"'
+                    f"{_selected_attr(config.web.default_chart_metric == 'soc')}>"
+                    "State of Charge</option>"
+                    f'<option value="temperature"'
+                    f"{_selected_attr(config.web.default_chart_metric == 'temperature')}>"
+                    "Temperature</option>"
+                    "</select>"
+                ),
+                help_text=(
+                    "Pick whether charts should open on Voltage, State of Charge, or Temperature."
                 ),
             )
             + settings_control_row(
@@ -2548,6 +2618,8 @@ def render_device_html(
     device_summary: dict[str, object] | None = None,
     show_chart_markers: bool = False,
     theme_preference: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
 ) -> str:
     version_label = display_version()
     summary = _device_summary_from_history(
@@ -2717,8 +2789,8 @@ def render_device_html(
                 ("730", "2 years"),
                 ("all", "All"),
             ),
-            default_range="30",
-            default_metric="voltage",
+            default_range=default_chart_range,
+            default_metric=default_chart_metric,
             legend=[(device_name, device_color)],
             show_markers=show_chart_markers,
         )
@@ -2768,6 +2840,8 @@ def render_history_html(
     monthly_history: list[dict[str, object]],
     show_chart_markers: bool = False,
     theme_preference: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
 ) -> str:
     version_label = display_version()
     sections = _render_history_sections(
@@ -2836,8 +2910,8 @@ def render_history_html(
                 ("730", "2 years"),
                 ("all", "All"),
             ),
-            default_range="30",
-            default_metric="soc",
+            default_range=default_chart_range,
+            default_metric=default_chart_metric,
             legend=[(history_series, history_color)],
             show_markers=show_chart_markers,
         )

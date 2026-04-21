@@ -41,8 +41,10 @@ enabled = true
 host = "0.0.0.0"
 port = 80
 show_chart_markers = false
-visible_device_limit = 5
+visible_device_limit = 4
 appearance = "system"
+default_chart_range = "7"
+default_chart_metric = "soc"
 
 [retention]
 raw_retention_days = 180

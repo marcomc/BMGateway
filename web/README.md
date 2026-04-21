@@ -55,7 +55,9 @@ Notable web-facing config under `[web]` includes:
 
 - `appearance`
 - `show_chart_markers`
-- `visible_device_limit`
+- `visible_device_limit` (`2`, `4`, `6`, or `8`)
+- `default_chart_range`
+- `default_chart_metric`
 
 Authoritative references:
 

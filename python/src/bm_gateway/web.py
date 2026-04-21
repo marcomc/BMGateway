@@ -240,6 +240,8 @@ def serve_management(
                     device_summary=snapshot_device,
                     show_chart_markers=config.web.show_chart_markers,
                     theme_preference=config.web.appearance,
+                    default_chart_range=config.web.default_chart_range,
+                    default_chart_metric=config.web.default_chart_metric,
                 )
                 self._send_html(html)
                 return
@@ -285,6 +287,8 @@ def serve_management(
                     ),
                     show_chart_markers=config.web.show_chart_markers,
                     theme_preference=config.web.appearance,
+                    default_chart_range=config.web.default_chart_range,
+                    default_chart_metric=config.web.default_chart_metric,
                 )
                 self._send_html(html)
                 return
@@ -397,6 +401,8 @@ def serve_management(
                 show_chart_markers=config.web.show_chart_markers,
                 visible_device_limit=config.web.visible_device_limit,
                 appearance=config.web.appearance,
+                default_chart_range=config.web.default_chart_range,
+                default_chart_metric=config.web.default_chart_metric,
             )
             self._send_html(html)
 
@@ -725,6 +731,8 @@ def serve_management(
                 show_chart_markers: bool | None = None
                 visible_device_limit: int | None = None
                 appearance: str | None = None
+                default_chart_range: str | None = None
+                default_chart_metric: str | None = None
                 if settings_section == "web":
                     try:
                         web_port = int(form.get("web_port", ["80"])[0])
@@ -750,7 +758,7 @@ def serve_management(
                 elif settings_section == "display":
                     show_chart_markers = _bool_from_form(form, "show_chart_markers")
                     try:
-                        visible_device_limit = int(form.get("visible_device_limit", ["5"])[0])
+                        visible_device_limit = int(form.get("visible_device_limit", ["4"])[0])
                     except ValueError:
                         configured_devices = load_device_registry(config.device_registry_path)
                         self._send_html(
@@ -769,6 +777,12 @@ def serve_management(
                         )
                         return
                     appearance = form.get("appearance", [config.web.appearance])[0]
+                    default_chart_range = form.get(
+                        "default_chart_range", [config.web.default_chart_range]
+                    )[0]
+                    default_chart_metric = form.get(
+                        "default_chart_metric", [config.web.default_chart_metric]
+                    )[0]
                 else:
                     configured_devices = load_device_registry(config.device_registry_path)
                     self._send_html(
@@ -794,6 +808,8 @@ def serve_management(
                     show_chart_markers=show_chart_markers,
                     visible_device_limit=visible_device_limit,
                     appearance=appearance,
+                    default_chart_range=default_chart_range,
+                    default_chart_metric=default_chart_metric,
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)

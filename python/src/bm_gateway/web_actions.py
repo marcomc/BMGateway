@@ -252,6 +252,8 @@ def update_web_preferences(
     show_chart_markers: bool | None,
     visible_device_limit: int | None,
     appearance: str | None,
+    default_chart_range: str | None,
+    default_chart_metric: str | None,
 ) -> list[str]:
     config = load_config(config_path)
     resolved_enabled = config.web.enabled if web_enabled is None else web_enabled
@@ -264,6 +266,12 @@ def update_web_preferences(
         config.web.visible_device_limit if visible_device_limit is None else visible_device_limit
     )
     resolved_appearance = config.web.appearance if appearance is None else appearance
+    resolved_default_chart_range = (
+        config.web.default_chart_range if default_chart_range is None else default_chart_range
+    )
+    resolved_default_chart_metric = (
+        config.web.default_chart_metric if default_chart_metric is None else default_chart_metric
+    )
     updated = replace(
         config,
         web=replace(
@@ -274,6 +282,8 @@ def update_web_preferences(
             show_chart_markers=resolved_show_chart_markers,
             visible_device_limit=resolved_visible_device_limit,
             appearance=resolved_appearance,
+            default_chart_range=resolved_default_chart_range,
+            default_chart_metric=resolved_default_chart_metric,
         ),
     )
     from .config import validate_config
