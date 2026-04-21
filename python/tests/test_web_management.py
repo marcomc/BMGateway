@@ -6,8 +6,10 @@ import urllib.parse
 import urllib.request
 from dataclasses import replace
 from pathlib import Path
+from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
+from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
@@ -18,6 +20,7 @@ from bm_gateway.web import (
     add_device_from_form,
     build_run_once_command,
     render_add_device_html,
+    render_battery_html,
     render_device_html,
     render_devices_html,
     render_edit_device_html,
@@ -30,6 +33,11 @@ from bm_gateway.web import (
     update_gateway_preferences,
     update_web_preferences,
 )
+from bm_gateway.web import (
+    render_reboot_pending_html as render_reboot_pending_html_wrapper,
+)
+from bm_gateway.web_actions import restart_system_service
+from bm_gateway.web_pages_settings import render_reboot_pending_html
 from bm_gateway.web_ui import base_css, chart_script
 
 
@@ -118,6 +126,21 @@ def test_chart_script_centers_active_controls_in_scroll_rail() -> None:
     assert 'window.addEventListener("load", () => {' in script
 
 
+def test_chart_script_supports_range_paging_and_drag_panning() -> None:
+    script = chart_script("history-chart")
+
+    assert "function rangeDurationMs(rangeValue)" in script
+    assert "function clampWindowEnd(requestedEnd, *, earliest, latest, duration)" in script
+    assert 'data-chart-nav="previous"' in script
+    assert "function pageRange(direction)" in script
+    assert 'previousButton.addEventListener("click", () => pageRange(-1));' in script
+    assert 'nextButton.addEventListener("click", () => pageRange(1));' in script
+    assert 'frame.addEventListener("pointerdown", (event) => {' in script
+    assert 'frame.addEventListener("pointermove", (event) => {' in script
+    assert "currentWindowEnd = dragStartEnd - deltaMs;" in script
+    assert 'frame.classList.add("is-panning");' in script
+
+
 def test_chart_script_renders_multi_series_tooltip_rows() -> None:
     script = chart_script("history-chart")
 
@@ -127,6 +150,56 @@ def test_chart_script_renders_multi_series_tooltip_rows() -> None:
     assert 'class="tooltip-series-swatch"' in script
     assert 'class="tooltip-series-value"' in script
     assert "const rows = entries.map((entry) => (" in script
+
+
+def test_chart_card_markup_includes_side_navigation_buttons() -> None:
+    html = render_battery_html(
+        snapshot={"devices": []},
+        devices=[],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert 'class="chart-nav-arrow previous"' in html
+    assert 'class="chart-nav-arrow next"' in html
+    assert 'class="chart-canvas"' in html
+
+
+def test_restart_system_service_uses_non_interactive_sudo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    restart_system_service("bm-gateway.service")
+
+    assert captured["command"] == ["sudo", "-n", "systemctl", "restart", "bm-gateway.service"]
+
+
+def test_render_reboot_pending_html_contains_polling_status_page() -> None:
+    html = render_reboot_pending_html(theme_preference="dark")
+
+    assert "Reboot In Progress" in html
+    assert 'id="reboot-elapsed-seconds"' in html
+    assert 'id="reboot-status-text"' in html
+    assert 'fetch("/api/status", { cache: "no-store" })' in html
+    assert "Raspberry Pi is back online" in html
+
+
+def test_render_reboot_pending_html_wrapper_delegates() -> None:
+    html = render_reboot_pending_html_wrapper(theme_preference="light")
+
+    assert "BMGateway Reboot" in html
+    assert "Automatic status checks run every few seconds." in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -978,6 +1051,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
     assert "Run One Collection Cycle" in html
+    assert "Restart bm-gateway service" in html
+    assert "Restart Bluetooth service" in html
+    assert "Reboot Raspberry Pi" in html
     assert "Home Assistant Contract" in html
     assert "Storage Summary" in html
     assert "Configuration Files" in html
@@ -1092,6 +1168,9 @@ def test_render_settings_html_edit_mode_shows_chart_default_options() -> None:
     assert 'name="default_chart_range"' in html
     assert 'name="default_chart_metric"' in html
     assert '<option value="7" selected>' in html
+    assert '<option value="3"' in html
+    assert '<option value="5"' in html
+    assert '<option value="raw"' not in html
     assert '<option value="soc" selected>' in html
 
 
@@ -1224,6 +1303,9 @@ def test_render_battery_html_defaults_chart_to_seven_days_and_soc() -> None:
     )
 
     assert 'data-range="7" data-range-label="7 days" class="active"' in html
+    assert 'data-range="3" data-range-label="3 days"' in html
+    assert 'data-range="5" data-range-label="5 days"' in html
+    assert 'data-range="raw"' not in html
     assert 'data-metric="soc" class="active"' in html
 
 
@@ -1550,6 +1632,9 @@ def test_render_history_html_respects_saved_chart_defaults() -> None:
     )
 
     assert 'data-range="90" data-range-label="90 days" class="active"' in html
+    assert 'data-range="3" data-range-label="3 days"' in html
+    assert 'data-range="5" data-range-label="5 days"' in html
+    assert 'data-range="raw"' not in html
     assert 'data-metric="temperature" class="active"' in html
 
 
@@ -2031,9 +2116,12 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "SoC" in html
     assert "Temperature" in html
     assert "1 day" in html
+    assert "3 days" in html
+    assert "5 days" in html
     assert "7 days" in html
     assert "2 years" in html
     assert "All" in html
+    assert 'data-range="raw"' not in html
     assert "Valid samples" in html
     assert "Error count" in html
     assert "Average voltage" in html

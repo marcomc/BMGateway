@@ -390,3 +390,25 @@ def run_once_via_cli(
         capture_output=True,
         text=True,
     )
+
+
+def _privileged_systemctl_command(*args: str) -> list[str]:
+    return ["sudo", "-n", "systemctl", *args]
+
+
+def restart_system_service(service_name: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _privileged_systemctl_command("restart", service_name),
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
+def schedule_host_reboot() -> None:
+    subprocess.Popen(  # noqa: S603
+        ["/bin/sh", "-lc", "sleep 1 && sudo -n systemctl reboot"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )

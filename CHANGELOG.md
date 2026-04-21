@@ -89,6 +89,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Fleet Trend, History, and Device Detail chart selectors now expose visible
+  day ranges of `1`, `3`, `5`, `7`, `30`, `90`, `1 year`, `2 years`, and
+  `All`, and no longer show the `Recent raw` selector in the UI.
+- Settings summary `Actions` now includes recovery controls for restarting
+  `bm-gateway.service`, restarting `bluetooth.service`, and scheduling a
+  Raspberry Pi reboot.
+- Settings `Actions` now execute service restarts and host reboot through
+  non-interactive `sudo`, and Raspberry Pi reboot now redirects to a waiting
+  page that keeps checking the gateway until it comes back online.
+- The packaged `bm-gateway-web.service` unit now keeps the minimum additional
+  capabilities needed for those maintenance actions to invoke `sudo -n`
+  successfully, instead of failing inside the systemd service sandbox.
+- Fleet Trend, History, and Device Detail charts now support previous/next
+  range paging plus direct drag/pan interaction with mouse or touch, so the
+  current day window can be moved backward or forward naturally.
 - Battery overview cards now show a clear red `Unable to connect` state when
   the live snapshot reports `device_not_found`, instead of the softer
   `No recent sample` wording, while Fleet Trend continues to show retained

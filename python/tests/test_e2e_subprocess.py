@@ -352,6 +352,9 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         assert "Gateway Settings" in settings_page
         assert "Edit settings" in settings_page
         assert "Run One Collection Cycle" in settings_page
+        assert "Restart bm-gateway service" in settings_page
+        assert "Restart Bluetooth service" in settings_page
+        assert "Reboot Raspberry Pi" in settings_page
 
         device_page = (
             urllib.request.urlopen(

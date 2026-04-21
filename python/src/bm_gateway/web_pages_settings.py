@@ -162,6 +162,15 @@ def render_settings_html(
         '<form method="post" action="/actions/run-once">'
         f"{button('Run One Collection Cycle', kind='primary')}"
         "</form>"
+        '<form method="post" action="/actions/restart-runtime">'
+        f"{button('Restart bm-gateway service', kind='secondary')}"
+        "</form>"
+        '<form method="post" action="/actions/restart-bluetooth-service">'
+        f"{button('Restart Bluetooth service', kind='secondary')}"
+        "</form>"
+        '<form method="post" action="/actions/reboot-host">'
+        f"{button('Reboot Raspberry Pi', kind='secondary')}"
+        "</form>"
         '<form method="post" action="/actions/recover-bluetooth">'
         f"{button('Recover Bluetooth Adapter', kind='secondary')}"
         "</form>"
@@ -187,15 +196,19 @@ def render_settings_html(
         + settings_row(
             "Default chart range",
             {
-                "raw": "Recent raw",
                 "1": "1 day",
+                "3": "3 days",
+                "5": "5 days",
                 "7": "7 days",
                 "30": "30 days",
                 "90": "90 days",
                 "365": "1 year",
                 "730": "2 years",
                 "all": "All",
-            }.get(config.web.default_chart_range, config.web.default_chart_range),
+            }.get(
+                shared._sanitize_default_chart_range(config.web.default_chart_range),
+                shared._sanitize_default_chart_range(config.web.default_chart_range),
+            ),
         )
         + settings_row(
             "Default chart metric",
@@ -244,17 +257,12 @@ def render_settings_html(
             for value in (2, 4, 6, 8)
         )
         default_chart_range_options = "".join(
-            _option_html(value, label, config.web.default_chart_range)
-            for value, label in (
-                ("raw", "Recent raw"),
-                ("1", "1 day"),
-                ("7", "7 days"),
-                ("30", "30 days"),
-                ("90", "90 days"),
-                ("365", "1 year"),
-                ("730", "2 years"),
-                ("all", "All"),
+            _option_html(
+                value,
+                label,
+                shared._sanitize_default_chart_range(config.web.default_chart_range),
             )
+            for value, label in shared._visible_chart_range_options()
         )
         default_chart_metric_options = "".join(
             _option_html(value, label, config.web.default_chart_metric)
@@ -634,4 +642,100 @@ def _option_html(value: str, label: str, selected_value: str) -> str:
         f'<option value="{safe_value}"'
         f"{shared._selected_attr(value == selected_value)}>"
         f"{safe_label}</option>"
+    )
+
+
+def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
+    polling_script = """
+<script>
+(() => {
+  const startedAt = Date.now();
+  const elapsedValue = document.getElementById("reboot-elapsed-seconds");
+  const statusValue = document.getElementById("reboot-status-text");
+  const detailValue = document.getElementById("reboot-detail-text");
+  const updateElapsed = () => {
+    if (!elapsedValue) {
+      return;
+    }
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    elapsedValue.textContent = String(elapsedSeconds);
+  };
+  const markWaiting = () => {
+    if (statusValue) {
+      statusValue.textContent = "Gateway is restarting";
+    }
+    if (detailValue) {
+      detailValue.textContent = "Waiting for the Raspberry Pi to come back online...";
+    }
+  };
+  const checkGateway = async () => {
+    updateElapsed();
+    try {
+      const response = await fetch("/api/status", { cache: "no-store" });
+      if (response.ok) {
+        const message = encodeURIComponent("Raspberry Pi is back online");
+        window.location.replace("/settings?message=" + message);
+        return;
+      }
+      markWaiting();
+    } catch (_error) {
+      markWaiting();
+    }
+    window.setTimeout(checkGateway, 2500);
+  };
+  updateElapsed();
+  window.setInterval(updateElapsed, 1000);
+  window.setTimeout(checkGateway, 1200);
+})();
+</script>
+"""
+    body = top_header(
+        eyebrow="Settings",
+        title="Reboot In Progress",
+        subtitle=(
+            "The Raspberry Pi is restarting. Keep this page open and it will return "
+            "to Settings automatically when the gateway responds again."
+        ),
+    ) + section_card(
+        title="Gateway Restart",
+        subtitle="Automatic status checks run every few seconds.",
+        body=(
+            '<div class="metrics-grid compact-overview-grid">'
+            + summary_card(
+                "Status",
+                "Reboot scheduled",
+                subvalue="The reboot command was accepted by the gateway.",
+                classes="compact-summary",
+            )
+            + (
+                '<div class="summary-card compact-summary">'
+                '<div class="label">Elapsed</div>'
+                '<div class="value"><span id="reboot-elapsed-seconds">0</span> s</div>'
+                '<div class="subvalue">Updated automatically while waiting.</div>'
+                "</div>"
+            )
+            + "</div>"
+            + (
+                '<div class="settings-row" style="margin-top:1rem">'
+                '<div class="settings-label">Current state</div>'
+                '<div class="settings-value" id="reboot-status-text">'
+                "Waiting for the reboot to begin"
+                "</div>"
+                "</div>"
+            )
+            + ('<div class="section-subtitle" id="reboot-detail-text" style="margin-top:0.75rem">')
+            + (
+                "This page keeps checking the web interface and redirects "
+                "when the gateway is online again."
+            )
+            + "</div>"
+        ),
+    )
+    return app_document(
+        title="BMGateway Reboot",
+        body=body,
+        active_nav="settings",
+        version_label=display_version(),
+        theme_preference=theme_preference,
+        script=polling_script,
     )

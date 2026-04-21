@@ -285,8 +285,8 @@ Environment=BMGATEWAY_CONFIG=${config_path}
 ExecStart=/usr/local/bin/bm-gateway-web --config \${BMGATEWAY_CONFIG} --state-dir ${state_dir}
 Restart=always
 RestartSec=10
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
 User=${service_user}
 Group=${service_user}
 WorkingDirectory=${state_dir}

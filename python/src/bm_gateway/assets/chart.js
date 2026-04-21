@@ -23,6 +23,16 @@
     const parsed = Date.parse(value);
     return Number.isNaN(parsed) ? null : parsed;
   }}
+  function rangeDurationMs(rangeValue) {{
+    if (rangeValue === "all" || rangeValue === "raw") {{
+      return null;
+    }}
+    const days = parseInt(rangeValue, 10);
+    if (Number.isNaN(days)) {{
+      return null;
+    }}
+    return days * 24 * 60 * 60 * 1000;
+  }}
   function formatAxisLabel(timestamp, span) {{
     const date = new Date(timestamp);
     if (span <= 36 * 60 * 60 * 1000) {{
@@ -36,27 +46,97 @@
   function formatDetailLabel(timestamp) {{
     return AXIS_FORMATTERS.detail.format(new Date(timestamp));
   }}
-  function pickRange(points, rangeValue) {{
+  function clampWindowEnd(requestedEnd, *, earliest, latest, duration) {{
+    if (duration === null || latest === null || earliest === null) {{
+      return latest;
+    }}
+    if ((latest - earliest) <= duration) {{
+      return latest;
+    }}
+    const minEnd = earliest + duration;
+    return Math.min(latest, Math.max(minEnd, requestedEnd));
+  }}
+  function pickRange(points, rangeValue, requestedWindowEnd = null) {{
     if (rangeValue === "raw") {{
-      return points.filter((point) => point.kind === "raw");
+      const rawPoints = points.filter((point) => point.kind === "raw");
+      const rawTimes = rawPoints.map((point) => parseTime(point.ts)).filter((point) => point !== null);
+      return {{
+        points: rawPoints,
+        earliest: rawTimes.length > 0 ? Math.min(...rawTimes) : null,
+        latest: rawTimes.length > 0 ? Math.max(...rawTimes) : null,
+        duration: null,
+        effectiveStart: rawTimes.length > 0 ? Math.min(...rawTimes) : null,
+        effectiveEnd: rawTimes.length > 0 ? Math.max(...rawTimes) : null,
+        pageable: false,
+        canPrevious: false,
+        canNext: false,
+      }};
     }}
     if (rangeValue === "all") {{
-      return points;
+      const timestamps = points.map((point) => parseTime(point.ts)).filter((point) => point !== null);
+      return {{
+        points,
+        earliest: timestamps.length > 0 ? Math.min(...timestamps) : null,
+        latest: timestamps.length > 0 ? Math.max(...timestamps) : null,
+        duration: null,
+        effectiveStart: timestamps.length > 0 ? Math.min(...timestamps) : null,
+        effectiveEnd: timestamps.length > 0 ? Math.max(...timestamps) : null,
+        pageable: false,
+        canPrevious: false,
+        canNext: false,
+      }};
     }}
-    const days = parseInt(rangeValue, 10);
-    if (Number.isNaN(days)) {{
-      return points;
+    const duration = rangeDurationMs(rangeValue);
+    if (duration === null) {{
+      return {{
+        points,
+        earliest: null,
+        latest: null,
+        duration: null,
+        effectiveStart: null,
+        effectiveEnd: null,
+        pageable: false,
+        canPrevious: false,
+        canNext: false,
+      }};
     }}
     const timestamps = points.map((point) => parseTime(point.ts)).filter((point) => point !== null);
     const latest = timestamps.length > 0 ? Math.max(...timestamps) : null;
+    const earliest = timestamps.length > 0 ? Math.min(...timestamps) : null;
     if (latest === null) {{
-      return points;
+      return {{
+        points,
+        earliest: null,
+        latest: null,
+        duration,
+        effectiveStart: null,
+        effectiveEnd: null,
+        pageable: false,
+        canPrevious: false,
+        canNext: false,
+      }};
     }}
-    const cutoff = latest - (days * 24 * 60 * 60 * 1000);
-    return points.filter((point) => {{
+    const effectiveEnd = clampWindowEnd(
+      requestedWindowEnd ?? latest,
+      {{ earliest, latest, duration }},
+    );
+    const effectiveStart = Math.max(earliest ?? effectiveEnd, effectiveEnd - duration);
+    const visiblePoints = points.filter((point) => {{
       const parsed = parseTime(point.ts);
-      return parsed !== null && parsed >= cutoff;
+      return parsed !== null && parsed >= effectiveStart && parsed <= effectiveEnd;
     }});
+    const pageable = earliest !== null && latest !== null && (latest - earliest) > duration;
+    return {{
+      points: visiblePoints,
+      earliest,
+      latest,
+      duration,
+      effectiveStart,
+      effectiveEnd,
+      pageable,
+      canPrevious: pageable && effectiveEnd > ((earliest ?? effectiveEnd) + duration + 1000),
+      canNext: pageable && effectiveEnd < ((latest ?? effectiveEnd) - 1000),
+    }};
   }}
   function describeWindow(rangeValue, rangeLabel) {{
     if (rangeValue === "all") {{
@@ -349,6 +429,12 @@
     if (!frame || !meta) {{
       return;
     }}
+    const canvas = frame.querySelector(".chart-canvas");
+    const previousButton = document.querySelector(`[data-chart-id="${{id}}"][data-chart-nav="previous"]`);
+    const nextButton = document.querySelector(`[data-chart-id="${{id}}"][data-chart-nav="next"]`);
+    if (!canvas) {{
+      return;
+    }}
     const allPoints = JSON.parse(frame.dataset.chartPoints || "[]");
     const card = frame.closest(".chart-card");
     if (!card) {{
@@ -359,17 +445,56 @@
     const showMarkers = frame.dataset.showMarkers === "true";
     let currentRange = rangeButtons.find((button) => button.classList.contains("active"))?.dataset.range || "30";
     let currentMetric = metricButtons.find((button) => button.classList.contains("active"))?.dataset.metric || "voltage";
-    function render() {{
-      const points = pickRange(allPoints, currentRange);
+    let currentWindowEnd = null;
+    let currentChart = null;
+    let currentWindow = null;
+    let isDragging = false;
+    let dragPointerId = null;
+    let dragStartX = 0;
+    let dragStartEnd = null;
+    let pendingRender = false;
+    let pendingFocusClientX = null;
+    function overlayBounds() {{
+      const overlay = frame.querySelector(".chart-overlay");
+      return overlay ? overlay.getBoundingClientRect() : null;
+    }}
+    function targetXFromClientX(clientX) {{
+      if (!currentChart) {{
+        return null;
+      }}
+      const bounds = overlayBounds();
+      if (!bounds || bounds.width <= 0) {{
+        return null;
+      }}
+      const relativeX = Math.max(0, Math.min(clientX - bounds.left, bounds.width));
+      return currentChart.padLeft + (
+        (relativeX / bounds.width) * (currentChart.width - currentChart.padLeft - currentChart.padRight)
+      );
+    }}
+    function updateNavigationState() {{
+      const pageable = Boolean(currentWindow && currentWindow.pageable);
+      frame.classList.toggle("is-pannable", pageable);
+      if (previousButton) {{
+        previousButton.hidden = !pageable;
+        previousButton.disabled = !currentWindow?.canPrevious;
+      }}
+      if (nextButton) {{
+        nextButton.hidden = !pageable;
+        nextButton.disabled = !currentWindow?.canNext;
+      }}
+    }}
+    function render(focusClientX = null) {{
+      const windowState = pickRange(allPoints, currentRange, currentWindowEnd);
+      currentWindow = windowState;
+      currentWindowEnd = windowState.effectiveEnd;
+      const points = windowState.points;
       const activeRangeButton = rangeButtons.find((button) => button.dataset.range === currentRange);
       const rangeLabel = activeRangeButton?.dataset.rangeLabel || currentRange;
       const windowLabel = describeWindow(currentRange, rangeLabel);
-      const tooltip = frame.querySelector(".chart-tooltip");
       const chart = buildSvg(points, currentMetric, id, showMarkers, windowLabel);
-      frame.innerHTML = chart.svg;
-      if (tooltip) {{
-        frame.appendChild(tooltip);
-      }}
+      currentChart = chart;
+      canvas.innerHTML = chart.svg;
+      updateNavigationState();
       const usable = points.filter((point) => typeof point[currentMetric] === "number");
       const allUsable = allPoints.filter((point) => typeof point[currentMetric] === "number");
       const coverageLabel = summarizeCoverage(allPoints, currentMetric);
@@ -379,6 +504,7 @@
           `<span>No usable ${{METRICS[currentMetric].label.toLowerCase()}} samples in this range</span>`,
           `<span>${{coverageLabel}}</span>`
         ].join("");
+        hideTooltip(frame);
         return;
       }}
       const values = usable.map((point) => point[currentMetric]);
@@ -394,44 +520,45 @@
         `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
         `<span>${{coverageSummary}}</span>`
       ].join("");
-      const overlay = frame.querySelector(".chart-overlay");
-      if (overlay && chart.coords.length > 0) {{
-        const targetXFromEvent = (event) => {{
-          const bounds = overlay.getBoundingClientRect();
-          const relativeX = Math.max(0, Math.min(event.clientX - bounds.left, bounds.width));
-          return chart.padLeft + (
-            (relativeX / bounds.width) * (chart.width - chart.padLeft - chart.padRight)
-          );
-        }};
-        const move = (event) => showTooltip(frame, chart, targetXFromEvent(event));
-        overlay.addEventListener("mousemove", move);
-        overlay.addEventListener(
-          "mouseenter",
-          () => showTooltip(frame, chart, chart.coords[chart.coords.length - 1].x),
-        );
-        overlay.addEventListener("mouseleave", () => hideTooltip(frame));
-        overlay.addEventListener("touchstart", (event) => {{
-          if (event.touches.length > 0) {{
-            showTooltip(frame, chart, targetXFromEvent(event.touches[0]));
+      if (chart.coords.length > 0) {{
+        if (focusClientX !== null) {{
+          const targetX = targetXFromClientX(focusClientX);
+          if (targetX !== null) {{
+            showTooltip(frame, chart, targetX);
+            return;
           }}
-        }}, {{ passive: true }});
-        overlay.addEventListener("touchmove", (event) => {{
-          if (event.touches.length > 0) {{
-            showTooltip(frame, chart, targetXFromEvent(event.touches[0]));
-          }}
-        }}, {{ passive: true }});
-        overlay.addEventListener("touchend", () => hideTooltip(frame));
+        }}
         showTooltip(frame, chart, chart.coords[chart.coords.length - 1].x);
       }}
+    }}
+    function requestRender(focusClientX = null) {{
+      pendingFocusClientX = focusClientX;
+      if (pendingRender) {{
+        return;
+      }}
+      pendingRender = true;
+      requestAnimationFrame(() => {{
+        pendingRender = false;
+        render(pendingFocusClientX);
+        pendingFocusClientX = null;
+      }});
+    }}
+    function pageRange(direction) {{
+      if (!currentWindow || !currentWindow.pageable || currentWindow.duration === null) {{
+        return;
+      }}
+      currentWindowEnd = (currentWindow.effectiveEnd ?? 0) + (direction * currentWindow.duration);
+      requestRender();
     }}
     for (const button of rangeButtons) {{
       button.addEventListener("click", () => {{
         currentRange = button.dataset.range || currentRange;
+        currentWindowEnd = null;
         for (const candidate of rangeButtons) {{
           candidate.classList.toggle("active", candidate === button);
         }}
         centerButtonInRail(button, "smooth");
-        render();
+        requestRender();
       }});
     }}
     for (const button of metricButtons) {{
@@ -441,9 +568,104 @@
           candidate.classList.toggle("active", candidate === button);
         }}
         centerButtonInRail(button, "smooth");
-        render();
+        requestRender();
       }});
     }}
+    if (previousButton) {{
+      previousButton.addEventListener("click", () => pageRange(-1));
+    }}
+    if (nextButton) {{
+      nextButton.addEventListener("click", () => pageRange(1));
+    }}
+    frame.addEventListener("pointerdown", (event) => {{
+      if (event.button !== undefined && event.button !== 0) {{
+        return;
+      }}
+      if (!currentWindow || !currentWindow.pageable || currentWindow.duration === null) {{
+        return;
+      }}
+      const bounds = overlayBounds();
+      if (!bounds) {{
+        return;
+      }}
+      if (
+        event.clientX < bounds.left
+        || event.clientX > bounds.right
+        || event.clientY < bounds.top
+        || event.clientY > bounds.bottom
+      ) {{
+        return;
+      }}
+      isDragging = true;
+      dragPointerId = event.pointerId;
+      dragStartX = event.clientX;
+      dragStartEnd = currentWindow.effectiveEnd;
+      frame.classList.add("is-panning");
+      frame.setPointerCapture?.(event.pointerId);
+      const targetX = targetXFromClientX(event.clientX);
+      if (targetX !== null && currentChart) {{
+        showTooltip(frame, currentChart, targetX);
+      }}
+      event.preventDefault();
+    }});
+    frame.addEventListener("pointermove", (event) => {{
+      if (isDragging && dragPointerId === event.pointerId && currentWindow && currentWindow.duration !== null) {{
+        const bounds = overlayBounds();
+        if (!bounds || bounds.width <= 0) {{
+          return;
+        }}
+        const deltaX = event.clientX - dragStartX;
+        const deltaMs = (deltaX / bounds.width) * currentWindow.duration;
+        currentWindowEnd = dragStartEnd - deltaMs;
+        requestRender(event.clientX);
+        event.preventDefault();
+        return;
+      }}
+      const bounds = overlayBounds();
+      if (
+        !bounds
+        || event.clientX < bounds.left
+        || event.clientX > bounds.right
+        || event.clientY < bounds.top
+        || event.clientY > bounds.bottom
+      ) {{
+        if (!isDragging) {{
+          hideTooltip(frame);
+        }}
+        return;
+      }}
+      const targetX = targetXFromClientX(event.clientX);
+      if (targetX !== null && currentChart) {{
+        showTooltip(frame, currentChart, targetX);
+      }}
+    }});
+    const endDrag = (event) => {{
+      if (!isDragging) {{
+        return;
+      }}
+      if (dragPointerId !== null && event.pointerId !== undefined && dragPointerId !== event.pointerId) {{
+        return;
+      }}
+      isDragging = false;
+      dragPointerId = null;
+      frame.classList.remove("is-panning");
+      if (event.pointerId !== undefined) {{
+        frame.releasePointerCapture?.(event.pointerId);
+      }}
+      const targetX = targetXFromClientX(event.clientX);
+      if (targetX !== null && currentChart) {{
+        showTooltip(frame, currentChart, targetX);
+      }} else {{
+        hideTooltip(frame);
+      }}
+    }};
+    frame.addEventListener("pointerup", endDrag);
+    frame.addEventListener("pointercancel", endDrag);
+    frame.addEventListener("pointerleave", () => {{
+      if (!isDragging) {{
+        hideTooltip(frame);
+      }}
+    }});
     render();
     const centerActiveControls = (behavior = "auto") => {{
       centerButtonInRail(

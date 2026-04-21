@@ -31,6 +31,7 @@ def render_battery_html(
     default_chart_metric: str = "soc",
 ) -> str:
     version_label = display_version()
+    resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
     primary_device_id = shared._primary_device_id(snapshot, devices)
     snapshot_devices = shared._merge_snapshot_devices(snapshot, devices)
     device_cards: list[str] = []
@@ -163,17 +164,8 @@ def render_battery_html(
                 "throughout the app."
             ),
             points=chart_points,
-            range_options=(
-                ("raw", "Recent raw"),
-                ("1", "1 day"),
-                ("7", "7 days"),
-                ("30", "30 days"),
-                ("90", "90 days"),
-                ("365", "1 year"),
-                ("730", "2 years"),
-                ("all", "All"),
-            ),
-            default_range=default_chart_range,
+            range_options=shared._visible_chart_range_options(),
+            default_range=resolved_default_chart_range,
             default_metric=default_chart_metric,
             legend=legend or [("No devices", "#95a3b8")],
             show_markers=show_chart_markers,

@@ -328,8 +328,11 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("web.visible_device_limit must be one of: 2, 4, 6, 8")
     if config.web.appearance not in {"light", "dark", "system"}:
         errors.append("web.appearance must be one of: light, dark, system")
-    if config.web.default_chart_range not in {"raw", "1", "7", "30", "90", "365", "730", "all"}:
-        errors.append("web.default_chart_range must be one of: raw, 1, 7, 30, 90, 365, 730, all")
+    allowed_chart_ranges = {"raw", "1", "3", "5", "7", "30", "90", "365", "730", "all"}
+    if config.web.default_chart_range not in allowed_chart_ranges:
+        errors.append(
+            "web.default_chart_range must be one of: raw, 1, 3, 5, 7, 30, 90, 365, 730, all"
+        )
     if config.web.default_chart_metric not in {"voltage", "soc", "temperature"}:
         errors.append("web.default_chart_metric must be one of: voltage, soc, temperature")
     if config.retention.raw_retention_days <= 0:

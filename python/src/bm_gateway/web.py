@@ -25,7 +25,9 @@ from .web_actions import (
     _config_and_registry_texts,
     add_device_from_form,
     build_run_once_command,
+    restart_system_service,
     run_once_via_cli,
+    schedule_host_reboot,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -53,6 +55,7 @@ from .web_pages import (
     render_edit_device_html,
     render_history_html,
     render_management_html,
+    render_reboot_pending_html,
     render_settings_html,
     render_snapshot_html,
 )
@@ -68,6 +71,7 @@ __all__ = [
     "render_edit_device_html",
     "render_history_html",
     "render_management_html",
+    "render_reboot_pending_html",
     "render_settings_html",
     "render_snapshot_html",
     "serve_management",
@@ -302,6 +306,10 @@ def serve_management(
                     theme_preference=config.web.appearance,
                 )
                 self._send_html(html)
+                return
+
+            if parsed.path == "/rebooting":
+                self._send_html(render_reboot_pending_html(theme_preference=config.web.appearance))
                 return
 
             if parsed.path == "/devices/new":
@@ -841,8 +849,44 @@ def serve_management(
                 if completed.stderr:
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)
+                self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/restart-runtime":
+                completed = restart_system_service("bm-gateway.service")
+                message = (
+                    "bm-gateway service restarted"
+                    if completed.returncode == 0
+                    else "Failed to restart bm-gateway service"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/restart-bluetooth-service":
+                completed = restart_system_service("bluetooth.service")
+                message = (
+                    "Bluetooth service restarted"
+                    if completed.returncode == 0
+                    else "Failed to restart Bluetooth service"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/reboot-host":
+                schedule_host_reboot()
+                self.send_response(303)
                 self.send_header(
-                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                    "Location",
+                    "/rebooting",
                 )
                 self.end_headers()
                 return
@@ -854,8 +898,7 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/settings?"
-                    + urlencode({"edit": "1", "message": "Bluetooth adapter recovery triggered"}),
+                    "/settings?" + urlencode({"message": "Bluetooth adapter recovery triggered"}),
                 )
                 self.end_headers()
                 return
@@ -870,7 +913,7 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/settings?" + urlencode({"edit": "1", "message": "History pruned"}),
+                    "/settings?" + urlencode({"message": "History pruned"}),
                 )
                 self.end_headers()
                 return

@@ -497,10 +497,19 @@ def chart_card(
         "</div>"
         "</div>"
         f'<div class="chart-legend">{legend_html}</div>'
+        '<div class="chart-frame-shell">'
+        f'<button type="button" class="chart-nav-arrow previous" '
+        f'data-chart-nav="previous" data-chart-id="{html.escape(chart_id)}" '
+        'aria-label="Show previous range">‹</button>'
         f'<div class="chart-frame" id="{html.escape(chart_id)}" '
         f'data-chart-points="{points_json}" '
         f'data-show-markers="{str(show_markers).lower()}">'
+        '<div class="chart-canvas"></div>'
         '<div class="chart-tooltip" aria-hidden="true"></div>'
+        "</div>"
+        f'<button type="button" class="chart-nav-arrow next" '
+        f'data-chart-nav="next" data-chart-id="{html.escape(chart_id)}" '
+        'aria-label="Show next range">›</button>'
         "</div>"
         f'<div class="chart-meta" id="{html.escape(chart_id)}-meta"></div>'
         "</section>"

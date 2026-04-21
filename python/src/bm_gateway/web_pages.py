@@ -64,6 +64,18 @@ DEVICE_COLOR_HEX: dict[str, str] = {
     "amber": "#f0b429",
 }
 
+VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
+    ("1", "1 day"),
+    ("3", "3 days"),
+    ("5", "5 days"),
+    ("7", "7 days"),
+    ("30", "30 days"),
+    ("90", "90 days"),
+    ("365", "1 year"),
+    ("730", "2 years"),
+    ("all", "All"),
+)
+
 
 def _device_color_key(device: dict[str, object], *, fallback_index: int = 0) -> str:
     color_key = str(device.get("color_key", "")).strip()
@@ -85,6 +97,15 @@ def _tone_card_style(color_key: str) -> str:
         f"--card-accent-soft-strong: color-mix(in srgb, {accent} 26%, var(--bg-surface));"
         f"--card-accent-glow: color-mix(in srgb, {accent} 24%, transparent);"
     )
+
+
+def _visible_chart_range_options() -> tuple[tuple[str, str], ...]:
+    return VISIBLE_CHART_RANGE_OPTIONS
+
+
+def _sanitize_default_chart_range(range_value: str) -> str:
+    allowed = {value for value, _label in VISIBLE_CHART_RANGE_OPTIONS}
+    return range_value if range_value in allowed else "7"
 
 
 def _read_sysfs_value(path: Path) -> str:
@@ -1543,6 +1564,12 @@ def render_settings_html(
         detected_bluetooth_adapters=detected_bluetooth_adapters,
         theme_preference=theme_preference,
     )
+
+
+def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
+    from .web_pages_settings import render_reboot_pending_html as _render_reboot_pending_html
+
+    return _render_reboot_pending_html(theme_preference=theme_preference)
 
 
 def render_device_html(

@@ -34,6 +34,7 @@ def render_device_html(
     default_chart_metric: str = "soc",
 ) -> str:
     version_label = display_version()
+    resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
     summary = shared._device_summary_from_history(
         device_id=device_id,
         raw_history=raw_history,
@@ -191,17 +192,8 @@ def render_device_html(
                 series=device_name,
                 series_color=device_color,
             ),
-            range_options=(
-                ("raw", "Recent raw"),
-                ("1", "1 day"),
-                ("7", "7 days"),
-                ("30", "30 days"),
-                ("90", "90 days"),
-                ("365", "1 year"),
-                ("730", "2 years"),
-                ("all", "All"),
-            ),
-            default_range=default_chart_range,
+            range_options=shared._visible_chart_range_options(),
+            default_range=resolved_default_chart_range,
             default_metric=default_chart_metric,
             legend=[(device_name, device_color)],
             show_markers=show_chart_markers,
@@ -256,6 +248,7 @@ def render_history_html(
     default_chart_metric: str = "soc",
 ) -> str:
     version_label = display_version()
+    resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
     sections = _render_history_sections(
         raw_history=raw_history,
         daily_history=daily_history,
@@ -312,17 +305,8 @@ def render_history_html(
                 series=history_series,
                 series_color=history_color,
             ),
-            range_options=(
-                ("raw", "Recent raw"),
-                ("1", "1 day"),
-                ("7", "7 days"),
-                ("30", "30 days"),
-                ("90", "90 days"),
-                ("365", "1 year"),
-                ("730", "2 years"),
-                ("all", "All"),
-            ),
-            default_range=default_chart_range,
+            range_options=shared._visible_chart_range_options(),
+            default_range=resolved_default_chart_range,
             default_metric=default_chart_metric,
             legend=[(history_series, history_color)],
             show_markers=show_chart_markers,
