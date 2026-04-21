@@ -33,6 +33,8 @@ CUSTOM_SOC_MODES = {
 VEHICLE_TYPES = {
     "car": "Car",
     "motorcycle": "Motorcycle",
+    "scooter": "Scooter",
+    "electric_bike": "Electric Bike",
     "van": "Van",
     "camper": "Camper",
     "truck": "Truck",
@@ -41,7 +43,7 @@ VEHICLE_TYPES = {
     "tractor": "Tractor",
     "atv": "ATV / Quad",
     "machinery": "Machinery",
-    "other_vehicle": "Other Vehicle",
+    "other_vehicle": "Other",
 }
 ICON_CATALOG = {
     "battery_monitor": "Battery Monitor",
@@ -53,6 +55,29 @@ ICON_CATALOG = {
     "gel_battery": "GEL Battery",
     "lithium_battery": "Lithium Battery",
     "custom_battery": "Custom Battery",
+    "vehicle_car": "Car",
+    "vehicle_motorcycle": "Motorcycle",
+    "vehicle_scooter": "Scooter",
+    "vehicle_electric_bike": "Electric Bike",
+    "vehicle_van": "Van",
+    "vehicle_camper": "Camper",
+    "vehicle_truck": "Truck",
+    "vehicle_bus": "Bus",
+    "vehicle_boat": "Boat",
+    "vehicle_tractor": "Tractor",
+    "vehicle_atv": "ATV / Quad",
+    "vehicle_machinery": "Machinery",
+    "vehicle_other": "Other Vehicle",
+}
+COLOR_CATALOG = {
+    "green": "Green",
+    "blue": "Blue",
+    "purple": "Purple",
+    "orange": "Orange",
+    "teal": "Teal",
+    "rose": "Rose",
+    "indigo": "Indigo",
+    "amber": "Amber",
 }
 DEFAULT_CUSTOM_CURVE = (
     (100, 12.90),
@@ -92,6 +117,7 @@ class Device:
     custom_soc_mode: str = "intelligent_algorithm"
     custom_voltage_curve: tuple[tuple[int, float], ...] = DEFAULT_CUSTOM_CURVE
     icon_key: str = "battery_monitor"
+    color_key: str = "green"
     installed_in_vehicle: bool = False
     vehicle_type: str = ""
     battery_brand: str = ""
@@ -108,6 +134,8 @@ class Device:
             "enabled": self.enabled,
             "icon_key": self.icon_key,
             "icon_label": icon_label(self.icon_key),
+            "color_key": self.color_key,
+            "color_label": color_label(self.color_key),
             "installed_in_vehicle": self.installed_in_vehicle,
             "vehicle_type": self.vehicle_type,
             "battery_brand": self.battery_brand,
@@ -157,6 +185,10 @@ def icon_label(icon_key: str) -> str:
     return ICON_CATALOG.get(icon_key, icon_key.replace("_", " ").title())
 
 
+def color_label(color_key: str) -> str:
+    return COLOR_CATALOG.get(color_key, color_key.replace("_", " ").title())
+
+
 def vehicle_type_label(vehicle_type: str) -> str:
     if not vehicle_type:
         return "Not set"
@@ -193,6 +225,13 @@ def default_icon_key(*, battery_family: str, battery_profile: str) -> str:
     return "battery_monitor"
 
 
+def default_color_key(*, used_colors: set[str]) -> str:
+    for color_key in COLOR_CATALOG:
+        if color_key not in used_colors:
+            return color_key
+    return next(iter(COLOR_CATALOG))
+
+
 def _parse_custom_voltage_curve(
     raw_curve: object,
 ) -> tuple[tuple[int, float], ...]:
@@ -217,6 +256,24 @@ def normalize_mac_address(value: str) -> str:
     return value.strip().upper()
 
 
+def generate_device_id(
+    *,
+    device_name: str,
+    device_type: str,
+    existing_ids: set[str],
+) -> str:
+    base = re.sub(r"[^a-z0-9]+", "_", device_name.strip().lower()).strip("_")
+    if not base:
+        fallback_type = re.sub(r"[^a-z0-9]+", "_", device_type.strip().lower()).strip("_")
+        base = fallback_type or "device"
+    candidate = base
+    suffix = 2
+    while candidate in existing_ids:
+        candidate = f"{base}_{suffix}"
+        suffix += 1
+    return candidate
+
+
 def load_device_registry(path: Path) -> list[Device]:
     with path.open("rb") as handle:
         data = tomllib.load(handle)
@@ -226,6 +283,7 @@ def load_device_registry(path: Path) -> list[Device]:
         raise ValueError(f"Device registry {path} must define [[devices]] entries.")
 
     devices: list[Device] = []
+    used_colors: set[str] = set()
     for item in raw_devices:
         if not isinstance(item, dict):
             raise ValueError(f"Device registry {path} contains a non-table device entry.")
@@ -243,6 +301,9 @@ def load_device_registry(path: Path) -> list[Device]:
             )
         ).strip()
         custom_soc_mode = str(battery_table.get("custom_soc_mode", "intelligent_algorithm")).strip()
+        requested_color_key = str(item.get("color_key", "")).strip()
+        resolved_color_key = requested_color_key or default_color_key(used_colors=used_colors)
+        used_colors.add(resolved_color_key)
         devices.append(
             Device(
                 id=str(item.get("id", "")).strip(),
@@ -265,6 +326,7 @@ def load_device_registry(path: Path) -> list[Device]:
                         ),
                     )
                 ).strip(),
+                color_key=resolved_color_key,
                 installed_in_vehicle=bool(item.get("installed_in_vehicle", False)),
                 vehicle_type=str(item.get("vehicle_type", "")).strip(),
                 battery_brand=str(battery_table.get("brand", "")).strip(),
@@ -296,6 +358,7 @@ def write_device_registry(path: Path, devices: list[Device]) -> None:
                 f"mac = {_toml_string(device.mac)}",
                 f"enabled = {'true' if device.enabled else 'false'}",
                 f"icon_key = {_toml_string(device.icon_key)}",
+                f"color_key = {_toml_string(device.color_key)}",
                 f"installed_in_vehicle = {'true' if device.installed_in_vehicle else 'false'}",
                 f"vehicle_type = {_toml_string(device.vehicle_type)}",
                 "[devices.battery]",
@@ -328,7 +391,8 @@ def write_device_registry(path: Path, devices: list[Device]) -> None:
 def validate_devices(devices: list[Device]) -> list[str]:
     errors: list[str] = []
     seen_ids: set[str] = set()
-    seen_macs: set[str] = set()
+    seen_identifiers: set[str] = set()
+    seen_colors: set[str] = set()
 
     for device in devices:
         if not device.id:
@@ -373,6 +437,16 @@ def validate_devices(devices: list[Device]) -> list[str]:
                 f"device {device.id or '<unknown>'} icon key must be one of "
                 f"{', '.join(sorted(ICON_CATALOG))}"
             )
+
+        if device.color_key not in COLOR_CATALOG:
+            errors.append(
+                f"device {device.id or '<unknown>'} color key must be one of "
+                f"{', '.join(sorted(COLOR_CATALOG))}"
+            )
+        elif device.color_key in seen_colors:
+            errors.append(f"duplicate device color key: {device.color_key}")
+        else:
+            seen_colors.add(device.color_key)
 
         if device.installed_in_vehicle:
             if device.vehicle_type not in VEHICLE_TYPES:
@@ -427,10 +501,11 @@ def validate_devices(devices: list[Device]) -> list[str]:
                         f"voltage must be positive"
                     )
 
-        if not MAC_ADDRESS_RE.fullmatch(device.mac):
-            errors.append(f"device {device.id or '<unknown>'} mac is invalid: {device.mac}")
-        elif device.mac in seen_macs:
-            errors.append(f"duplicate device mac: {device.mac}")
+        identifier = device.mac.strip().upper()
+        if not identifier:
+            errors.append(f"device {device.id or '<unknown>'} mac or serial must not be empty")
+        elif identifier in seen_identifiers:
+            errors.append(f"duplicate device mac or serial: {device.mac}")
         else:
-            seen_macs.add(device.mac)
+            seen_identifiers.add(identifier)
     return errors

@@ -20,6 +20,7 @@ def app_document(
     active_nav: str = "battery",
     primary_device_id: str = "",
     version_label: str = "",
+    theme_preference: str = "",
     head_extra: str = "",
     script: str = "",
 ) -> str:
@@ -27,6 +28,9 @@ def app_document(
         f'<div class="app-version-badge" translate="no">{html.escape(version_label)}</div>'
         if version_label
         else ""
+    )
+    theme_attr = (
+        f' data-theme-preference="{html.escape(theme_preference)}"' if theme_preference else ""
     )
     return f"""<!doctype html>
 <html lang="en">
@@ -39,7 +43,7 @@ def app_document(
     </style>
     {head_extra}
   </head>
-  <body>
+  <body{theme_attr}>
     <div class="app-shell">
       {version_badge}
       <a class="skip-link" href="#main-content">Skip to main content</a>
@@ -58,12 +62,14 @@ def base_css() -> str:
     return """
 :root {
   --bg-app: #e9edf3;
+  --bg-app-end: #eef2f7;
   --bg-header-start: #dfeaf5;
   --bg-header-end: #eef7ef;
   --bg-surface: #ffffff;
   --bg-surface-soft: #f6f9fd;
   --bg-elevated: #fbfdff;
   --bg-chart: #f7f9fc;
+  --bg-nav: rgba(251, 253, 255, 0.96);
   --bg-muted: #dde4ee;
   --text-primary: #111827;
   --text-secondary: #526071;
@@ -88,11 +94,181 @@ def base_css() -> str:
   --shadow-card: 0 8px 24px rgba(33, 48, 73, 0.06);
   --shadow-elevated: 0 14px 36px rgba(33, 48, 73, 0.1);
   --shadow-glow: 0 0 34px rgba(23, 196, 90, 0.25);
+  --badge-surface: rgba(248, 252, 249, 0.96);
+  --badge-border: rgba(168, 196, 176, 0.62);
+  --badge-icon-color: rgba(28, 37, 45, 0.92);
+  --badge-body-fill: #d9dee6;
+  --badge-soft-fill: rgba(28, 37, 45, 0.12);
+  --badge-accent-stroke: rgba(23, 196, 90, 0.88);
+  --badge-accent-fill: rgba(23, 196, 90, 0.22);
+  --gauge-inner-start: #ffffff;
+  --gauge-inner-mid: #ffffff;
+  --gauge-inner-ring: #eff8f1;
+  --gauge-inner-end: #f8fbff;
+  --gauge-text-strong: #111827;
+  --gauge-text-soft: #5f6e81;
+  --chart-svg-surface: #f7f9fc;
+  --chart-grid: rgba(196, 207, 220, 0.88);
+  --chart-axis: #708094;
+  --chart-tooltip-surface: rgba(255, 255, 255, 0.96);
+  --chart-tooltip-border: rgba(215, 224, 234, 0.95);
   --radius-sm: 10px;
   --radius-md: 14px;
   --radius-lg: 18px;
   --radius-xl: 24px;
   --radius-pill: 999px;
+}
+
+body[data-theme-preference="light"] {
+  color-scheme: light;
+}
+body[data-theme-preference="light"] {
+  --bg-app: #e9edf3;
+  --bg-app-end: #eef2f7;
+  --bg-header-start: #dfeaf5;
+  --bg-header-end: #eef7ef;
+  --bg-surface: #ffffff;
+  --bg-surface-soft: #f6f9fd;
+  --bg-elevated: #fbfdff;
+  --bg-chart: #f7f9fc;
+  --bg-nav: rgba(251, 253, 255, 0.96);
+  --bg-muted: #dde4ee;
+  --text-primary: #111827;
+  --text-secondary: #526071;
+  --text-soft: #8995a6;
+  --border-soft: #d7e0ea;
+  --border-muted: #c6d0dc;
+  --shadow-card: 0 8px 24px rgba(33, 48, 73, 0.06);
+  --shadow-elevated: 0 14px 36px rgba(33, 48, 73, 0.1);
+  --shadow-glow: 0 0 34px rgba(23, 196, 90, 0.25);
+  --badge-surface: rgba(248, 252, 249, 0.96);
+  --badge-border: rgba(168, 196, 176, 0.62);
+  --badge-icon-color: rgba(28, 37, 45, 0.92);
+  --badge-body-fill: #d9dee6;
+  --badge-soft-fill: rgba(28, 37, 45, 0.12);
+  --badge-accent-stroke: rgba(23, 196, 90, 0.88);
+  --badge-accent-fill: rgba(23, 196, 90, 0.22);
+  --gauge-inner-start: #ffffff;
+  --gauge-inner-mid: #ffffff;
+  --gauge-inner-ring: #eff8f1;
+  --gauge-inner-end: #f8fbff;
+  --gauge-text-strong: #111827;
+  --gauge-text-soft: #5f6e81;
+  --chart-svg-surface: #f7f9fc;
+  --chart-grid: rgba(196, 207, 220, 0.88);
+  --chart-axis: #708094;
+  --chart-tooltip-surface: rgba(255, 255, 255, 0.96);
+  --chart-tooltip-border: rgba(215, 224, 234, 0.95);
+}
+body[data-theme-preference="dark"] {
+  color-scheme: dark;
+  --bg-app: #111214;
+  --bg-app-end: #17181c;
+  --bg-header-start: #1c1c1e;
+  --bg-header-end: #16181d;
+  --bg-surface: #1c1c1e;
+  --bg-surface-soft: #242428;
+  --bg-elevated: #2c2c2e;
+  --bg-chart: #16181d;
+  --bg-nav: rgba(28, 28, 30, 0.94);
+  --bg-muted: #3a3a3c;
+  --text-primary: #f5f5f7;
+  --text-secondary: rgba(235, 235, 245, 0.78);
+  --text-soft: rgba(235, 235, 245, 0.5);
+  --accent-green: #34d178;
+  --accent-green-soft: #1c3124;
+  --accent-blue: #78a8ff;
+  --accent-blue-soft: #1d2840;
+  --accent-purple: #bd8cff;
+  --accent-purple-soft: #2d2340;
+  --accent-orange: #f7b35b;
+  --accent-orange-soft: #36281d;
+  --accent-mint: #7ee3c9;
+  --accent-yellow-soft: #35301c;
+  --accent-red: #ff7078;
+  --state-ok: #48de89;
+  --state-warning: #ffbf62;
+  --state-error: #ff7a7f;
+  --state-offline: #9aa7bb;
+  --border-soft: rgba(84, 84, 88, 0.65);
+  --border-muted: rgba(99, 99, 102, 0.75);
+  --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.32);
+  --shadow-elevated: 0 18px 42px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 34px rgba(52, 209, 120, 0.16);
+  --badge-surface: rgba(38, 38, 41, 0.98);
+  --badge-border: rgba(120, 120, 128, 0.42);
+  --badge-icon-color: rgba(245, 245, 247, 0.96);
+  --badge-body-fill: #b7bec8;
+  --badge-soft-fill: rgba(245, 245, 247, 0.2);
+  --badge-accent-stroke: rgba(72, 222, 137, 0.92);
+  --badge-accent-fill: rgba(72, 222, 137, 0.18);
+  --gauge-inner-start: #30333a;
+  --gauge-inner-mid: #262930;
+  --gauge-inner-ring: #20242b;
+  --gauge-inner-end: #181b21;
+  --gauge-text-strong: #f5f5f7;
+  --gauge-text-soft: rgba(235, 235, 245, 0.76);
+  --chart-svg-surface: #1f2228;
+  --chart-grid: rgba(82, 91, 104, 0.65);
+  --chart-axis: rgba(214, 219, 228, 0.72);
+  --chart-tooltip-surface: rgba(36, 39, 45, 0.96);
+  --chart-tooltip-border: rgba(92, 100, 114, 0.88);
+}
+@media (prefers-color-scheme: dark) {
+  body[data-theme-preference="system"] {
+    color-scheme: dark;
+    --bg-app: #111214;
+    --bg-app-end: #17181c;
+    --bg-header-start: #1c1c1e;
+    --bg-header-end: #16181d;
+    --bg-surface: #1c1c1e;
+    --bg-surface-soft: #242428;
+    --bg-elevated: #2c2c2e;
+    --bg-chart: #16181d;
+    --bg-nav: rgba(28, 28, 30, 0.94);
+    --bg-muted: #3a3a3c;
+    --text-primary: #f5f5f7;
+    --text-secondary: rgba(235, 235, 245, 0.78);
+    --text-soft: rgba(235, 235, 245, 0.5);
+    --accent-green: #34d178;
+    --accent-green-soft: #1c3124;
+    --accent-blue: #78a8ff;
+    --accent-blue-soft: #1d2840;
+    --accent-purple: #bd8cff;
+    --accent-purple-soft: #2d2340;
+    --accent-orange: #f7b35b;
+    --accent-orange-soft: #36281d;
+    --accent-mint: #7ee3c9;
+    --accent-yellow-soft: #35301c;
+    --accent-red: #ff7078;
+    --state-ok: #48de89;
+    --state-warning: #ffbf62;
+    --state-error: #ff7a7f;
+    --state-offline: #9aa7bb;
+    --border-soft: rgba(84, 84, 88, 0.65);
+    --border-muted: rgba(99, 99, 102, 0.75);
+    --shadow-card: 0 10px 28px rgba(0, 0, 0, 0.32);
+    --shadow-elevated: 0 18px 42px rgba(0, 0, 0, 0.4);
+    --shadow-glow: 0 0 34px rgba(52, 209, 120, 0.16);
+    --badge-surface: rgba(38, 38, 41, 0.98);
+    --badge-border: rgba(120, 120, 128, 0.42);
+    --badge-icon-color: rgba(245, 245, 247, 0.96);
+    --badge-body-fill: #b7bec8;
+    --badge-soft-fill: rgba(245, 245, 247, 0.2);
+    --badge-accent-stroke: rgba(72, 222, 137, 0.92);
+    --badge-accent-fill: rgba(72, 222, 137, 0.18);
+    --gauge-inner-start: #30333a;
+    --gauge-inner-mid: #262930;
+    --gauge-inner-ring: #20242b;
+    --gauge-inner-end: #181b21;
+    --gauge-text-strong: #f5f5f7;
+    --gauge-text-soft: rgba(235, 235, 245, 0.76);
+    --chart-svg-surface: #1f2228;
+    --chart-grid: rgba(82, 91, 104, 0.65);
+    --chart-axis: rgba(214, 219, 228, 0.72);
+    --chart-tooltip-surface: rgba(36, 39, 45, 0.96);
+    --chart-tooltip-border: rgba(92, 100, 114, 0.88);
+  }
 }
 
 * { box-sizing: border-box; }
@@ -144,7 +320,7 @@ textarea:focus-visible {
   padding: 0.42rem 0.72rem;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-pill);
-  background: rgba(255, 255, 255, 0.92);
+  background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
   box-shadow: var(--shadow-card);
   color: var(--text-secondary);
   font-size: 0.8rem;
@@ -210,7 +386,7 @@ details summary::-webkit-details-marker { display: none; }
   min-height: 100vh;
   background:
     radial-gradient(circle at top left, rgba(126, 227, 201, 0.16), transparent 32%),
-    linear-gradient(180deg, var(--bg-app) 0%, #eef2f7 100%);
+    linear-gradient(180deg, var(--bg-app) 0%, var(--bg-app-end) 100%);
 }
 .page-shell {
   margin: 0 auto;
@@ -273,7 +449,7 @@ details summary::-webkit-details-marker { display: none; }
 .section-card {
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xl);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-surface);
   box-shadow: var(--shadow-card);
 }
 .section-card {
@@ -310,7 +486,7 @@ details summary::-webkit-details-marker { display: none; }
   box-shadow: var(--shadow-card);
 }
 .summary-card {
-  padding: 1rem 1.05rem;
+  padding: 0.95rem 1rem;
   background: var(--bg-surface);
   border: 1px solid var(--border-soft);
 }
@@ -322,10 +498,12 @@ details summary::-webkit-details-marker { display: none; }
 }
 .summary-card .value {
   margin-top: 0.35rem;
-  font-size: clamp(1.8rem, 5vw, 2.5rem);
+  font-size: clamp(1.45rem, 4vw, 2.25rem);
   font-weight: 800;
-  line-height: 1;
+  line-height: 1.08;
   font-variant-numeric: tabular-nums;
+  white-space: normal;
+  text-wrap: balance;
 }
 .summary-card .subvalue,
 .metric-tile .subvalue {
@@ -376,8 +554,8 @@ details summary::-webkit-details-marker { display: none; }
 .signal-bars span:nth-child(3) { height: 0.72rem; }
 .signal-bars span:nth-child(4) { height: 0.9rem; }
 .metric-tile.blue { background: var(--accent-blue-soft); }
-.metric-tile.green { background: #d9f4e8; }
-.metric-tile.purple { background: #eddcfb; }
+.metric-tile.green { background: color-mix(in srgb, var(--accent-green-soft) 82%, var(--bg-elevated)); }
+.metric-tile.purple { background: color-mix(in srgb, var(--accent-purple-soft) 82%, var(--bg-elevated)); }
 .metric-tile.orange { background: var(--accent-orange-soft); }
 .metric-tile.yellow { background: var(--accent-yellow-soft); }
 .control-plane {
@@ -394,7 +572,12 @@ details summary::-webkit-details-marker { display: none; }
   display: grid;
   gap: 1rem;
 }
-.device-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.device-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 320px)); justify-content: flex-start; }
+.devices-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 360px)); }
+.devices-grid.single-card-grid {
+  grid-template-columns: minmax(280px, 360px);
+  max-width: 360px;
+}
 .two-column-grid { grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
 .config-grid { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
 .device-card,
@@ -402,8 +585,25 @@ details summary::-webkit-details-marker { display: none; }
   position: relative;
   overflow: hidden;
   padding: 1rem;
-  border: 1px solid rgba(255, 255, 255, 0.5);
+  border: 1px solid color-mix(in srgb, var(--card-accent, var(--border-soft)) 24%, var(--border-soft));
 }
+.tone-card {
+  --card-accent: var(--accent-green);
+  --card-accent-soft: color-mix(in srgb, var(--card-accent) 16%, var(--bg-surface));
+  --card-accent-soft-strong: color-mix(in srgb, var(--card-accent) 22%, var(--bg-surface));
+  --card-accent-glow: color-mix(in srgb, var(--card-accent) 18%, transparent);
+  background:
+    radial-gradient(circle at top left, color-mix(in srgb, var(--card-accent) 14%, transparent), transparent 42%),
+    linear-gradient(180deg, var(--card-accent-soft-strong), var(--card-accent-soft));
+}
+.tone-card.green { --card-accent: #17c45a; }
+.tone-card.blue { --card-accent: #4f8df7; }
+.tone-card.purple { --card-accent: #9a57f5; }
+.tone-card.orange { --card-accent: #f4a340; }
+.tone-card.teal { --card-accent: #16b8b0; }
+.tone-card.rose { --card-accent: #ec5c86; }
+.tone-card.indigo { --card-accent: #6677ff; }
+.tone-card.amber { --card-accent: #f0b429; }
 .device-card-head {
   display: flex;
   align-items: flex-start;
@@ -415,29 +615,174 @@ details summary::-webkit-details-marker { display: none; }
 }
 .history-device-card {
   display: block;
-  min-height: 170px;
+  flex: 0 0 220px;
+  min-height: 0;
+  width: 220px;
+  max-width: 100%;
+  padding: 0.85rem 0.95rem 0.85rem 1.1rem;
   color: inherit;
   text-decoration: none;
+  border-color: color-mix(in srgb, var(--card-accent) 44%, var(--border-soft));
+  box-shadow:
+    0 14px 30px color-mix(in srgb, var(--card-accent) 10%, transparent),
+    var(--shadow-card);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
 }
 .history-device-card:hover {
   text-decoration: none;
 }
 .history-device-card.selected {
-  box-shadow: var(--shadow-elevated);
+  border-color: color-mix(in srgb, var(--card-accent) 72%, var(--border-soft));
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--card-accent) 42%, transparent),
+    0 16px 34px color-mix(in srgb, var(--card-accent) 18%, transparent),
+    var(--shadow-elevated);
+  transform: translateY(-1px);
+}
+.history-device-head {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  align-items: start;
+  gap: 0.85rem;
+}
+.device-icon-frame.history-device-badge {
+  position: static;
+  flex: 0 0 48px;
+  flex-basis: 48px;
+  inline-size: 48px;
+  block-size: 48px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  min-height: 48px;
+  max-width: 48px;
+  max-height: 48px;
+  min-inline-size: 48px;
+  min-block-size: 48px;
+  max-inline-size: 48px;
+  max-block-size: 48px;
+  aspect-ratio: 1 / 1;
+  border-radius: 16px;
+  color: var(--badge-icon-color);
+  box-shadow: 0 6px 14px rgba(22, 28, 38, 0.08);
+  overflow: hidden;
+}
+.device-icon-frame.history-device-badge .device-icon-svg {
+  width: 38px;
+  height: 38px;
+}
+.device-icon-frame.history-device-badge .device-icon-svg .fill-main {
+  fill: var(--badge-body-fill);
+}
+.device-icon-frame.history-device-badge .device-icon-svg .fill-soft {
+  fill: var(--badge-soft-fill);
+}
+.device-icon-frame.history-device-badge .device-icon-svg .stroke-accent {
+  stroke: var(--card-accent, var(--badge-accent-stroke));
+}
+.device-icon-frame.history-device-badge .device-icon-svg .fill-accent {
+  fill: color-mix(in srgb, var(--card-accent, var(--badge-accent-stroke)) 20%, transparent);
+  stroke: var(--card-accent, var(--badge-accent-stroke));
+}
+.history-device-copy {
+  display: flex;
+  min-height: 100%;
+  justify-content: flex-start;
+  align-items: flex-start;
+  flex-direction: column;
+  text-align: left;
+  gap: 0.18rem;
+}
+.history-device-copy .meta-name {
+  font-size: 1rem;
+  line-height: 1.08;
+}
+.history-device-summary {
+  font-size: 0.8rem;
+  line-height: 1.24;
 }
 .history-device-current {
-  margin-top: 0.7rem;
-  font-weight: 700;
+  margin-top: auto;
+  padding-top: 0.4rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+.history-device-card.selected .history-device-current {
+  color: var(--card-accent);
+  font-weight: 800;
+}
+.history-device-card.selected .meta-name {
   color: var(--text-primary);
+}
+.history-device-grid {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 1rem;
 }
 .device-card-copy {
   min-width: 0;
   flex: 1 1 auto;
 }
-.tone-card.green { background: var(--accent-green-soft); }
-.tone-card.purple { background: var(--accent-purple-soft); }
-.tone-card.blue { background: var(--accent-blue-soft); }
-.tone-card.orange { background: var(--accent-yellow-soft); }
+.device-list-card {
+  display: grid;
+  gap: 0.9rem;
+}
+.device-list-card-head {
+  display: grid;
+  grid-template-columns: 60px minmax(0, 1fr);
+  align-items: start;
+  gap: 0.85rem;
+}
+.device-list-icon {
+  flex: 0 0 60px;
+  width: 60px;
+  height: 60px;
+  border-radius: 18px;
+}
+.device-list-icon .device-icon-svg {
+  width: 42px;
+  height: 42px;
+}
+.device-list-card-copy {
+  display: grid;
+  gap: 0.22rem;
+  min-width: 0;
+}
+.device-list-card-context,
+.device-list-card-summary,
+.device-list-card-id {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.32;
+}
+.device-list-card-context {
+  font-weight: 700;
+}
+.device-list-card-name {
+  color: var(--text-primary);
+  font-size: 1.15rem;
+  font-weight: 800;
+  line-height: 1.08;
+}
+.device-list-card-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+.compact-device-metrics {
+  margin-top: 0.1rem;
+}
+.compact-device-metrics .metric-tile {
+  min-height: 132px;
+}
+.device-list-card-actions {
+  justify-content: flex-start;
+}
 .device-card h3,
 .tone-card h3 {
   margin: 0;
@@ -450,8 +795,8 @@ details summary::-webkit-details-marker { display: none; }
   font-variant-numeric: tabular-nums;
 }
 .battery-overview-card {
-  min-height: 300px;
-  padding: 1.15rem;
+  min-height: 248px;
+  padding: 0.95rem;
 }
 .battery-overview-controls {
   display: flex;
@@ -488,50 +833,120 @@ details summary::-webkit-details-marker { display: none; }
 }
 .battery-overview-page.is-single-page {
   min-width: 0;
-  width: fit-content;
+  width: auto;
   max-width: 100%;
   flex: none;
-  grid-template-columns: repeat(var(--overview-columns), minmax(240px, 320px));
+  grid-template-columns: repeat(var(--overview-columns), minmax(220px, 300px));
+}
+.battery-overview-page.is-single-page.page-two-cards {
+  justify-content: flex-start;
+  margin: 0;
+  grid-template-columns: repeat(2, minmax(220px, 300px));
+}
+.battery-overview-page.is-single-page.page-one-card {
+  justify-content: flex-start;
+  margin: 0;
+  grid-template-columns: minmax(220px, 300px);
+}
+.battery-card-top {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.9rem;
 }
 .battery-tile-hero {
   display: grid;
   place-items: center;
   width: 100%;
-  max-width: 260px;
-  margin: 0 auto 0.95rem;
-  aspect-ratio: 1 / 1;
+  margin: 0.8rem auto 0.9rem;
+  min-height: 172px;
+  padding: 0.15rem 0.25rem;
 }
 .battery-tile-hero .battery-card-gauge {
-  width: 100%;
-  height: 100%;
-  max-width: none;
   box-shadow: var(--shadow-elevated);
 }
+.device-badge-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+.device-badge-stack.compact {
+  gap: 0.42rem;
+}
+.device-badge-stack .badge-placeholder {
+  visibility: hidden;
+  pointer-events: none;
+}
+.battery-card-badge {
+  position: static;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border-radius: 16px;
+  background: var(--badge-surface);
+  border: 1px solid var(--badge-border);
+  box-shadow: 0 8px 18px rgba(22, 28, 38, 0.08);
+}
+.battery-card-badge .device-icon-svg {
+  color: var(--badge-icon-color);
+}
+.battery-card-badge .device-icon-svg .fill-main {
+  fill: var(--badge-body-fill);
+}
+.battery-card-badge .device-icon-svg .fill-soft {
+  fill: var(--badge-soft-fill);
+}
+.battery-card-badge .device-icon-svg .stroke-accent {
+  stroke: var(--card-accent, var(--badge-accent-stroke));
+}
+.battery-card-badge .device-icon-svg .fill-accent {
+  fill: color-mix(in srgb, var(--card-accent, var(--badge-accent-stroke)) 20%, transparent);
+  stroke: var(--card-accent, var(--badge-accent-stroke));
+}
 .battery-tile-icon {
-  flex: 0 0 58px;
-  width: 58px;
-  height: 58px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.72);
+  flex: 0 0 50px;
+  flex-basis: 50px;
+  inline-size: 50px;
+  block-size: 50px;
+  width: 50px;
+  height: 50px;
+  min-width: 50px;
+  min-height: 50px;
+  max-width: 50px;
+  max-height: 50px;
+  min-inline-size: 50px;
+  min-block-size: 50px;
+  max-inline-size: 50px;
+  max-block-size: 50px;
+  align-self: flex-start;
+  overflow: hidden;
 }
 .battery-tile-icon .device-icon-svg {
-  width: 38px;
-  height: 38px;
+  width: 42px;
+  height: 42px;
 }
 .battery-card-gauge {
   position: relative;
-  flex: 0 0 112px;
-  width: 112px;
+  flex: 0 0 172px;
+  width: 172px;
   aspect-ratio: 1 / 1;
   border-radius: 50%;
-  box-shadow: var(--shadow-glow);
+  box-shadow: 0 0 34px var(--card-accent-glow);
 }
 .battery-card-gauge::after {
   content: "";
   position: absolute;
   inset: 12%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #ffffff 0%, #ffffff 56%, #eff8f1 57%, #f8fbff 100%);
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--gauge-inner-start) 0%,
+    var(--gauge-inner-mid) 56%,
+    var(--gauge-inner-ring) 57%,
+    var(--gauge-inner-end) 100%
+  );
 }
 .battery-card-gauge-content {
   position: absolute;
@@ -541,19 +956,20 @@ details summary::-webkit-details-marker { display: none; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 0.35rem;
-  padding: 1rem;
+  gap: 0.28rem;
+  padding: 1.05rem;
   text-align: center;
+  color: var(--gauge-text-strong);
 }
 .battery-card-gauge-label {
-  color: var(--text-secondary);
-  font-size: 0.82rem;
+  color: var(--gauge-text-soft);
+  font-size: 0.74rem;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 .battery-card-gauge-value {
-  font-size: clamp(2.1rem, 5vw, 3rem);
+  font-size: clamp(1.8rem, 4.4vw, 2.55rem);
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;
@@ -561,9 +977,18 @@ details summary::-webkit-details-marker { display: none; }
 .battery-card-copy {
   display: flex;
   flex-direction: column;
-  gap: 0.3rem;
-  align-items: center;
-  text-align: center;
+  gap: 0.28rem;
+  align-items: flex-start;
+  text-align: left;
+}
+.devices-grid .section-card {
+  margin-bottom: 0;
+}
+.devices-grid .tone-card {
+  border-color: color-mix(in srgb, var(--card-accent) 44%, var(--border-soft));
+  box-shadow:
+    0 14px 30px color-mix(in srgb, var(--card-accent) 10%, transparent),
+    var(--shadow-card);
 }
 .battery-overview-card .meta-name {
   color: var(--text-primary);
@@ -573,16 +998,17 @@ details summary::-webkit-details-marker { display: none; }
   max-width: 18ch;
 }
 .battery-overview-card .meta-context {
-  font-size: 0.88rem;
-  max-width: 24ch;
+  font-size: 0.84rem;
+  max-width: 18ch;
 }
 .battery-overview-card .battery-card-reading {
   color: var(--text-primary);
-  font-size: 1.05rem;
+  font-size: 0.92rem;
   font-weight: 600;
 }
 .battery-overview-card .battery-card-meta-extra {
-  font-size: 0.84rem;
+  font-size: 0.78rem;
+  max-width: 18ch;
 }
 .battery-card-status {
   display: inline-flex;
@@ -594,7 +1020,7 @@ details summary::-webkit-details-marker { display: none; }
 }
 .battery-card-status-inline {
   margin-top: 0;
-  font-size: 0.82rem;
+  font-size: 0.72rem;
   line-height: 1.1;
 }
 .battery-card-status.ok { color: var(--state-ok); }
@@ -608,11 +1034,12 @@ details summary::-webkit-details-marker { display: none; }
   flex: 0 0 auto;
 }
 .hero-device-icon {
-  flex: 0 0 clamp(88px, 18vw, 112px);
+  flex-basis: clamp(88px, 18vw, 112px);
   width: clamp(88px, 18vw, 112px);
   height: clamp(88px, 18vw, 112px);
   border-radius: 28px;
-  background: rgba(255, 255, 255, 0.62);
+  background: var(--badge-surface);
+  border: 1px solid var(--badge-border);
 }
 .hero-device-icon .device-icon-svg {
   width: clamp(58px, 12vw, 76px);
@@ -629,36 +1056,9 @@ details summary::-webkit-details-marker { display: none; }
   margin-top: 0.8rem;
   color: var(--text-secondary);
 }
-.battery-overview-card .footer-row,
-.battery-overview-add-card .footer-row {
+.battery-overview-card .footer-row {
   justify-content: center;
-}
-.battery-overview-add-card {
-  min-height: 300px;
-}
-.battery-overview-add-tile {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  min-height: 100%;
-  text-align: center;
-}
-.battery-overview-add-glyph {
-  font-size: 4rem;
-  color: var(--accent-orange);
-  font-weight: 300;
-  line-height: 1;
-}
-.battery-overview-add-copy {
-  margin-top: 0.75rem;
-  color: var(--text-primary);
-  font-size: 1.1rem;
-  font-weight: 800;
-}
-.battery-overview-add-note {
-  margin-top: 0.35rem;
-  max-width: 18ch;
+  margin-top: auto;
 }
 .device-icon-frame {
   display: grid;
@@ -666,18 +1066,24 @@ details summary::-webkit-details-marker { display: none; }
   flex: 0 0 72px;
   width: 72px;
   height: 72px;
+  min-width: 72px;
+  min-height: 72px;
+  aspect-ratio: 1 / 1;
   border-radius: 22px;
-  border: 1px solid rgba(255, 255, 255, 0.7);
-  background: rgba(255, 255, 255, 0.52);
+  border: 1px solid var(--badge-border);
+  background: var(--badge-surface);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.72), var(--shadow-card);
 }
 .device-icon-svg {
   width: 48px;
   height: 48px;
-  color: rgba(17, 24, 39, 0.78);
+  color: var(--badge-icon-color);
+}
+.device-icon-svg .fill-main {
+  fill: var(--badge-body-fill);
 }
 .device-icon-svg .fill-soft {
-  fill: rgba(255, 255, 255, 0.45);
+  fill: var(--badge-soft-fill);
 }
 .device-icon-svg .stroke-main {
   fill: none;
@@ -717,7 +1123,11 @@ details summary::-webkit-details-marker { display: none; }
   margin-bottom: 1rem;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(247,250,253,0.95));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-elevated) 96%, transparent),
+    color-mix(in srgb, var(--bg-surface-soft) 94%, transparent)
+  );
   box-shadow: var(--shadow-card);
 }
 .status-explainer-summary {
@@ -753,7 +1163,16 @@ details summary::-webkit-details-marker { display: none; }
   min-height: 22px;
   overflow: hidden;
   border-radius: var(--radius-pill);
-  background: rgba(221, 229, 240, 0.55);
+  background: color-mix(in srgb, var(--bg-muted) 72%, transparent);
+}
+.status-scale-divider {
+  position: absolute;
+  top: 18%;
+  bottom: 18%;
+  width: 2px;
+  background: color-mix(in srgb, var(--bg-surface) 72%, var(--text-soft));
+  opacity: 0.9;
+  transform: translateX(-50%);
 }
 .status-scale-fill {
   position: absolute;
@@ -771,7 +1190,7 @@ details summary::-webkit-details-marker { display: none; }
   top: 50%;
   width: 16px;
   height: 16px;
-  border: 3px solid #fff;
+  border: 3px solid var(--bg-surface);
   border-radius: 999px;
   box-shadow: var(--shadow-card);
   transform: translate(-50%, -50%);
@@ -781,43 +1200,6 @@ details summary::-webkit-details-marker { display: none; }
 .status-scale-marker.tone-error { background: #ef4444; }
 .status-scale-marker.tone-info { background: #4f8df7; }
 .status-scale-marker.tone-purple { background: #9b78ff; }
-.status-scale-labels {
-  display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
-  gap: 0.55rem;
-}
-.status-scale-segment {
-  display: grid;
-  gap: 0.3rem;
-  justify-items: center;
-  text-align: center;
-  color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 700;
-}
-.status-scale-segment span {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 38px;
-  width: 100%;
-  border-radius: 999px;
-  padding: 0.4rem 0.45rem;
-  border: 1px solid rgba(215, 224, 234, 0.95);
-  background: rgba(255, 255, 255, 0.9);
-}
-.status-scale-segment.reached span {
-  color: var(--text-primary);
-}
-.status-scale-segment.active span {
-  box-shadow: var(--shadow-card);
-  transform: translateY(-1px);
-}
-.status-scale-segment.tone-ok span { background: rgba(23, 196, 90, 0.1); }
-.status-scale-segment.tone-warning span { background: rgba(245, 158, 11, 0.12); }
-.status-scale-segment.tone-error span { background: rgba(239, 68, 68, 0.12); }
-.status-scale-segment.tone-info span { background: rgba(79, 141, 247, 0.12); }
-.status-scale-segment.tone-purple span { background: rgba(155, 120, 255, 0.14); }
 .banner-strip {
   display: flex;
   align-items: flex-start;
@@ -826,11 +1208,32 @@ details summary::-webkit-details-marker { display: none; }
   padding: 0.95rem 1rem;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-lg);
-  background: linear-gradient(180deg, rgba(255,255,255,0.98), rgba(246,249,253,0.95));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-elevated) 96%, transparent),
+    color-mix(in srgb, var(--bg-surface-soft) 96%, transparent)
+  );
 }
 .banner-strip.warning {
   border-color: rgba(245, 158, 11, 0.3);
-  background: linear-gradient(180deg, rgba(255,248,235,0.98), rgba(255,252,245,0.95));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--accent-yellow-soft) 62%, var(--bg-elevated)),
+    color-mix(in srgb, var(--accent-yellow-soft) 36%, var(--bg-surface))
+  );
+}
+.icon-button {
+  gap: 0.55rem;
+}
+.button-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 1.3rem;
+  height: 1.3rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 1rem;
+  line-height: 1;
 }
 .api-chip,
 .pill-chip {
@@ -845,23 +1248,24 @@ details summary::-webkit-details-marker { display: none; }
 }
 .settings-row {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.9rem 0;
+  padding: 1rem 0;
   border-bottom: 1px solid var(--border-soft);
 }
 .settings-row:last-child { border-bottom: 0; }
 .settings-label {
   font-weight: 700;
+  padding-top: 0.72rem;
 }
 .settings-value {
   color: var(--text-secondary);
   text-align: right;
 }
 .settings-control {
-  flex: 0 1 360px;
-  width: min(100%, 360px);
+  flex: 0 1 380px;
+  width: min(100%, 380px);
 }
 .settings-control .settings-value {
   text-align: left;
@@ -904,7 +1308,7 @@ details summary::-webkit-details-marker { display: none; }
   border: 1px solid var(--border-soft);
 }
 .secondary-button:hover {
-  background: #edf3fa;
+  background: color-mix(in srgb, var(--bg-elevated) 86%, var(--bg-surface-soft));
   text-decoration: none;
   transform: translateY(-1px);
 }
@@ -914,7 +1318,7 @@ details summary::-webkit-details-marker { display: none; }
   border: 1px solid var(--border-soft);
 }
 .ghost-button:hover {
-  background: rgba(255, 255, 255, 0.72);
+  background: color-mix(in srgb, var(--bg-elevated) 84%, transparent);
   color: var(--text-primary);
   text-decoration: none;
 }
@@ -924,7 +1328,8 @@ details summary::-webkit-details-marker { display: none; }
   gap: 0.35rem;
   padding: 0.28rem;
   border-radius: var(--radius-pill);
-  background: rgba(221, 229, 240, 0.95);
+  background: color-mix(in srgb, var(--bg-surface-soft) 92%, transparent);
+  border: 1px solid var(--border-soft);
 }
 .control-rail {
   max-width: 100%;
@@ -942,15 +1347,35 @@ details summary::-webkit-details-marker { display: none; }
   border: 0;
   border-radius: var(--radius-pill);
   background: transparent;
-  color: var(--text-primary);
+  color: var(--text-secondary);
   padding: 0.6rem 0.95rem;
   font-weight: 700;
   white-space: nowrap;
+}
+.control-segment button:hover {
+  background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+  color: var(--text-primary);
 }
 .control-segment button.active {
   background: var(--accent-green);
   color: #fff;
   box-shadow: var(--shadow-card);
+}
+.compact-overview-grid {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.8rem;
+}
+.summary-card.compact-summary {
+  padding: 0.85rem 0.95rem;
+}
+.summary-card.compact-summary .label {
+  font-size: 0.82rem;
+}
+.summary-card.compact-summary .value {
+  font-size: clamp(1.2rem, 3.6vw, 1.95rem);
+}
+.summary-card.timestamp-summary .value {
+  font-size: clamp(1.08rem, 3vw, 1.55rem);
 }
 .history-controls {
   display: grid;
@@ -961,7 +1386,7 @@ details summary::-webkit-details-marker { display: none; }
   padding: 1rem;
   border-radius: var(--radius-xl);
   border: 1px solid var(--border-soft);
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--bg-surface);
   box-shadow: var(--shadow-card);
 }
 .chart-frame {
@@ -970,6 +1395,7 @@ details summary::-webkit-details-marker { display: none; }
   padding: 1rem;
   border-radius: var(--radius-lg);
   background: var(--bg-chart);
+  border: 1px solid var(--border-soft);
 }
 .chart-empty {
   display: flex;
@@ -989,8 +1415,8 @@ details summary::-webkit-details-marker { display: none; }
   align-items: center;
   gap: 0.45rem;
   color: var(--text-secondary);
-  font-size: 0.92rem;
-  font-weight: 600;
+  font-size: 0.95rem;
+  font-weight: 700;
 }
 .legend-swatch {
   width: 12px;
@@ -1003,7 +1429,7 @@ details summary::-webkit-details-marker { display: none; }
   gap: 0.7rem 1rem;
   margin-top: 0.85rem;
   color: var(--text-secondary);
-  font-size: 0.92rem;
+  font-size: 0.95rem;
   font-variant-numeric: tabular-nums;
 }
 .chart-tooltip {
@@ -1011,9 +1437,9 @@ details summary::-webkit-details-marker { display: none; }
   z-index: 2;
   min-width: 170px;
   padding: 0.75rem 0.85rem;
-  border: 1px solid rgba(215, 224, 234, 0.95);
+  border: 1px solid var(--chart-tooltip-border);
   border-radius: 14px;
-  background: rgba(255, 255, 255, 0.96);
+  background: var(--chart-tooltip-surface);
   box-shadow: var(--shadow-elevated);
   color: var(--text-primary);
   font-size: 0.88rem;
@@ -1067,7 +1493,13 @@ details summary::-webkit-details-marker { display: none; }
   position: absolute;
   inset: 11%;
   border-radius: 50%;
-  background: radial-gradient(circle at 50% 50%, #ffffff 0%, #ffffff 56%, #eff8f1 57%, #f8fbff 100%);
+  background: radial-gradient(
+    circle at 50% 50%,
+    var(--gauge-inner-start) 0%,
+    var(--gauge-inner-mid) 56%,
+    var(--gauge-inner-ring) 57%,
+    var(--gauge-inner-end) 100%
+  );
 }
 .soc-gauge-content {
   position: absolute;
@@ -1077,10 +1509,12 @@ details summary::-webkit-details-marker { display: none; }
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  color: var(--gauge-text-strong);
 }
 .soc-gauge-label {
-  color: var(--text-secondary);
+  color: var(--gauge-text-soft);
   font-size: 1.55rem;
+  font-weight: 700;
 }
 .soc-gauge-value {
   font-size: clamp(3.4rem, 8vw, 5.4rem);
@@ -1107,7 +1541,11 @@ details summary::-webkit-details-marker { display: none; }
   gap: 0.9rem;
   padding: 1rem;
   border-radius: var(--radius-lg);
-  background: rgba(244, 248, 252, 0.9);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-elevated) 96%, transparent),
+    color-mix(in srgb, var(--bg-surface-soft) 92%, transparent)
+  );
   border: 1px solid var(--border-soft);
 }
 .battery-form-grid {
@@ -1136,7 +1574,7 @@ details summary::-webkit-details-marker { display: none; }
   padding: 0.85rem 0.75rem;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border-soft);
-  background: rgba(255, 255, 255, 0.92);
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
   box-shadow: var(--shadow-card);
   transition:
     border-color 120ms ease,
@@ -1149,7 +1587,11 @@ details summary::-webkit-details-marker { display: none; }
 }
 .icon-picker-card input:checked + .icon-picker-surface {
   border-color: rgba(23, 196, 90, 0.5);
-  background: linear-gradient(180deg, rgba(245, 255, 247, 0.98), rgba(233, 250, 238, 0.95));
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--card-accent, var(--accent-green)) 18%, var(--bg-elevated)),
+    color-mix(in srgb, var(--card-accent, var(--accent-green)) 10%, var(--bg-surface-soft))
+  );
   box-shadow: var(--shadow-glow);
 }
 .icon-picker-card input:focus-visible + .icon-picker-surface {
@@ -1181,6 +1623,28 @@ details summary::-webkit-details-marker { display: none; }
   font-size: 0.9rem;
   line-height: 1.5;
 }
+.select-with-preview {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+}
+.color-preview-dot {
+  flex: 0 0 auto;
+  width: 0.9rem;
+  height: 0.9rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--text-primary) 18%, transparent);
+  background: var(--color-swatch, var(--accent-green));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--color-swatch, var(--accent-green)) 14%, transparent);
+}
+.color-preview-dot.green { --color-swatch: #17c45a; }
+.color-preview-dot.blue { --color-swatch: #4f8df7; }
+.color-preview-dot.purple { --color-swatch: #9a57f5; }
+.color-preview-dot.orange { --color-swatch: #f4a340; }
+.color-preview-dot.teal { --color-swatch: #16b8b0; }
+.color-preview-dot.rose { --color-swatch: #ec5c86; }
+.color-preview-dot.indigo { --color-swatch: #6677ff; }
+.color-preview-dot.amber { --color-swatch: #f0b429; }
 .error-pill {
   display: inline-flex;
   align-items: center;
@@ -1202,8 +1666,9 @@ details summary::-webkit-details-marker { display: none; }
   bottom: 0;
   z-index: 20;
   border-top: 1px solid var(--border-soft);
-  background: rgba(255, 255, 255, 0.95);
+  background: var(--bg-nav);
   backdrop-filter: blur(12px);
+  box-shadow: 0 -8px 24px rgba(17, 24, 39, 0.08);
 }
 .bottom-nav-inner {
   display: flex;
@@ -1268,16 +1733,83 @@ details summary::-webkit-details-marker { display: none; }
 }
 @media (max-width: 640px) {
   .page-shell { padding: 1rem 0.8rem 5.8rem; }
-  .top-header { padding: 1.1rem; }
+  .top-header {
+    display: grid;
+    padding: 3.4rem 1.1rem 1.1rem;
+  }
+  .hero-actions {
+    justify-content: flex-start;
+  }
   .section-card { padding: 1rem; }
+  .settings-row {
+    display: grid;
+    grid-template-columns: minmax(92px, 0.72fr) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.72rem 0;
+  }
+  .settings-label {
+    padding-top: 0;
+    font-size: 0.92rem;
+  }
+  .settings-control {
+    width: 100%;
+    flex: none;
+  }
+  .settings-value {
+    text-align: left;
+  }
   .battery-overview-page,
   .battery-overview-page.is-single-page {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(148px, 1fr));
     min-width: 100%;
     width: 100%;
   }
+  .battery-overview-page.is-single-page.page-two-cards,
+  .battery-overview-page.is-single-page.page-one-card,
+  .battery-overview-page.page-multi-cards {
+    grid-template-columns: repeat(2, minmax(148px, 1fr));
+    width: 100%;
+    margin: 0;
+  }
+  .battery-overview-page.is-single-page.page-one-card {
+    grid-template-columns: minmax(160px, 188px);
+    width: fit-content;
+    min-width: 0;
+  }
   .battery-overview-card {
-    min-height: 272px;
+    min-height: 214px;
+    padding: 0.8rem;
+  }
+  .device-grid {
+    grid-template-columns: repeat(2, minmax(148px, 1fr));
+    gap: 0.75rem;
+  }
+  .devices-grid,
+  .devices-grid.single-card-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: none;
+  }
+  .device-list-card-head {
+    grid-template-columns: 48px minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+  .device-list-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 16px;
+  }
+  .device-list-icon .device-icon-svg {
+    width: 34px;
+    height: 34px;
+  }
+  .device-list-card-name {
+    font-size: 1rem;
+  }
+  .device-list-card-context,
+  .device-list-card-summary,
+  .device-list-card-id {
+    font-size: 0.78rem;
   }
   .battery-overview-controls {
     justify-content: stretch;
@@ -1285,13 +1817,112 @@ details summary::-webkit-details-marker { display: none; }
   .battery-overview-arrow {
     flex: 1 1 0;
   }
+  .battery-card-top {
+    gap: 0.6rem;
+  }
+  .device-badge-stack {
+    gap: 0.42rem;
+  }
   .battery-card-gauge {
-    flex-basis: 96px;
-    width: 96px;
+    flex-basis: 132px;
+    width: 132px;
+  }
+  .battery-tile-hero {
+    min-height: 142px;
+    margin: 0.55rem auto 0.45rem;
   }
   .battery-tile-icon {
-    width: 64px;
-    height: 64px;
+    flex: 0 0 38px;
+    flex-basis: 38px;
+    inline-size: 38px;
+    block-size: 38px;
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+    min-height: 38px;
+    max-width: 38px;
+    max-height: 38px;
+    min-inline-size: 38px;
+    min-block-size: 38px;
+    max-inline-size: 38px;
+    max-block-size: 38px;
+    aspect-ratio: 1 / 1;
+    border-radius: 14px;
+    align-self: flex-start;
+    overflow: hidden;
+  }
+  .battery-tile-icon .device-icon-svg {
+    width: 30px;
+    height: 30px;
+  }
+  .battery-card-copy {
+    gap: 0.14rem;
+  }
+  .battery-overview-card .meta-name {
+    font-size: 0.88rem;
+  }
+  .battery-overview-card .meta-context,
+  .battery-overview-card .battery-card-reading,
+  .battery-overview-card .battery-card-meta-extra {
+    font-size: 0.74rem;
+  }
+  .history-device-grid {
+    display: flex;
+    gap: 1rem;
+    overflow-x: auto;
+    padding-bottom: 0.15rem;
+    scroll-snap-type: x proximity;
+  }
+  .history-device-card {
+    flex: 0 0 172px;
+    width: 172px;
+    max-width: 172px;
+    min-height: 132px;
+    padding: 0.75rem 0.8rem 0.75rem 0.95rem;
+    scroll-snap-align: start;
+  }
+  .history-device-head {
+    grid-template-columns: 40px minmax(0, 1fr);
+    gap: 0.65rem;
+  }
+  .device-icon-frame.history-device-badge {
+    flex-basis: 40px;
+    inline-size: 40px;
+    block-size: 40px;
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+    min-height: 40px;
+    max-width: 40px;
+    max-height: 40px;
+    min-inline-size: 40px;
+    min-block-size: 40px;
+    max-inline-size: 40px;
+    max-block-size: 40px;
+    aspect-ratio: 1 / 1;
+    overflow: hidden;
+  }
+  .device-icon-frame.history-device-badge .device-icon-svg {
+    width: 30px;
+    height: 30px;
+  }
+  .history-device-copy .meta-name {
+    font-size: 0.9rem;
+  }
+  .history-device-summary,
+  .history-device-current {
+    font-size: 0.74rem;
+  }
+  .chart-card {
+    padding: 0.9rem;
+  }
+  .chart-frame {
+    padding: 0.8rem;
+    min-height: 260px;
+  }
+  .chart-legend,
+  .chart-meta {
+    font-size: 0.84rem;
   }
   .status-explainer-summary {
     align-items: flex-start;
@@ -1314,6 +1945,7 @@ details summary::-webkit-details-marker { display: none; }
     top: 0.75rem;
     right: 0.75rem;
     max-width: calc(100vw - 1.5rem);
+    font-size: 0.72rem;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -1445,9 +2077,10 @@ def banner_strip(message: str, *, kind: str = "warning", trailing: str = "") -> 
     )
 
 
-def tone_card(body: str, *, tone: str, extra_class: str = "") -> str:
+def tone_card(body: str, *, tone: str, extra_class: str = "", style: str = "") -> str:
     class_name = _join_classes("tone-card", html.escape(tone), extra_class)
-    return f'<article class="{class_name}">{body}</article>'
+    style_attr = f' style="{html.escape(style)}"' if style else ""
+    return f'<article class="{class_name}"{style_attr}>{body}</article>'
 
 
 def device_icon(icon_key: str, *, label: str, frame_class: str = "") -> str:
@@ -1478,59 +2111,148 @@ def icon_picker_option(icon_key: str, *, label: str, checked: bool = False) -> s
 
 def _device_icon_svg(icon_key: str, *, label: str) -> str:
     title = f"<title>{label}</title>"
-    if icon_key == "car_12v":
+    if icon_key in {"car_12v", "vehicle_car"}:
         content = """
 <path class="stroke-main" d="M14 38h36l-3-9c-.7-2.2-2.7-3.6-5-3.6H22c-2.3 0-4.3 1.4-5 3.6z"/>
 <path class="stroke-main" d="M12 38h40v7H12z"/>
-<circle class="fill-soft" cx="21" cy="45" r="4.5"/>
-<circle class="fill-soft" cx="43" cy="45" r="4.5"/>
+<circle class="fill-main" cx="21" cy="45" r="4.5"/>
+<circle class="fill-main" cx="43" cy="45" r="4.5"/>
 <path class="stroke-accent" d="M31 18v9m-4.5-4.5h9"/>
 """
-    elif icon_key == "motorcycle_12v":
+    elif icon_key in {"motorcycle_12v", "vehicle_motorcycle"}:
         content = """
-<circle class="fill-soft" cx="20" cy="44" r="6"/>
-<circle class="fill-soft" cx="45" cy="44" r="6"/>
+<circle class="fill-main" cx="20" cy="44" r="6"/>
+<circle class="fill-main" cx="45" cy="44" r="6"/>
 <path class="stroke-main" d="M20 44h10l6-10h7"/>
 <path class="stroke-main" d="M32 34h-6l-5-7h7l4 7"/>
 <path class="stroke-main" d="M42 26h6"/>
 <path class="stroke-accent" d="M46 18v8m-4-4h8"/>
 """
+    elif icon_key == "vehicle_scooter":
+        content = """
+<circle class="fill-main" cx="22" cy="44" r="5.5"/>
+<circle class="fill-main" cx="44" cy="44" r="5.5"/>
+<path class="stroke-main" d="M21 44h11l6-11h7"/>
+<path class="stroke-main" d="M32 33h-7l-4-7h10l3 7"/>
+<path class="stroke-main" d="M37 24h7"/>
+<path class="stroke-accent" d="M44 18v8m-4-4h8"/>
+"""
+    elif icon_key == "vehicle_electric_bike":
+        content = """
+<circle class="fill-main" cx="19" cy="44" r="6"/>
+<circle class="fill-main" cx="45" cy="44" r="6"/>
+<path class="stroke-main" d="M19 44h11l6-12h8"/>
+<path class="stroke-main" d="M31 32h-8l-4-6h7l5 6z"/>
+<path class="stroke-main" d="M38 26h5"/>
+<path class="stroke-accent" d="M45 16v8m-4-4h8"/>
+"""
+    elif icon_key == "vehicle_van":
+        content = """
+<path class="stroke-main" d="M12 39h40v7H12z"/>
+<path class="stroke-main" d="M14 39V28h19v11"/>
+<path class="stroke-main" d="M33 39V30h9l5 5v4"/>
+<circle class="fill-main" cx="22" cy="46" r="4.5"/>
+<circle class="fill-main" cx="43" cy="46" r="4.5"/>
+"""
+    elif icon_key == "vehicle_camper":
+        content = """
+<path class="stroke-main" d="M10 40h44v6H10z"/>
+<path class="stroke-main" d="M14 40V26h20v14"/>
+<path class="stroke-main" d="M34 40V30h10l6 6v4"/>
+<circle class="fill-main" cx="21" cy="46" r="4.5"/>
+<circle class="fill-main" cx="44" cy="46" r="4.5"/>
+<path class="stroke-accent" d="M23 30h8"/>
+"""
+    elif icon_key == "vehicle_truck":
+        content = """
+<path class="stroke-main" d="M10 40h44v6H10z"/>
+<path class="stroke-main" d="M12 40V26h24v14"/>
+<path class="stroke-main" d="M36 40V30h9l7 7v3"/>
+<circle class="fill-main" cx="20" cy="46" r="4.5"/>
+<circle class="fill-main" cx="36" cy="46" r="4.5"/>
+<circle class="fill-main" cx="47" cy="46" r="4.5"/>
+"""
+    elif icon_key == "vehicle_bus":
+        content = """
+<rect class="stroke-main" x="11" y="22" width="42" height="20" rx="4"/>
+<path class="stroke-main" d="M17 22v-4h30v4"/>
+<path class="stroke-main" d="M18 30h28"/>
+<circle class="fill-main" cx="21" cy="46" r="4.5"/>
+<circle class="fill-main" cx="43" cy="46" r="4.5"/>
+"""
+    elif icon_key == "vehicle_boat":
+        content = """
+<path class="stroke-main" d="M18 37h28l-6 8H24z"/>
+<path class="stroke-main" d="M30 20v17"/>
+<path class="stroke-main" d="M30 20l8 6h-8"/>
+<path class="stroke-accent" d="M18 48c3-2 6-2 9 0 3-2 6-2 9 0 3-2 6-2 9 0"/>
+"""
+    elif icon_key == "vehicle_tractor":
+        content = """
+<circle class="fill-main" cx="20" cy="44" r="8"/>
+<circle class="fill-main" cx="44" cy="45" r="4.5"/>
+<path class="stroke-main" d="M20 44h15l5-9h8"/>
+<path class="stroke-main" d="M31 35V24h10v11"/>
+<path class="stroke-main" d="M24 32h7"/>
+"""
+    elif icon_key == "vehicle_atv":
+        content = """
+<circle class="fill-main" cx="19" cy="44" r="5"/>
+<circle class="fill-main" cx="45" cy="44" r="5"/>
+<path class="stroke-main" d="M19 44h12l5-9h9"/>
+<path class="stroke-main" d="M31 35h-8l-3-6h9l4 6"/>
+<path class="stroke-accent" d="M44 18v8m-4-4h8"/>
+"""
+    elif icon_key == "vehicle_machinery":
+        content = """
+<rect class="stroke-main" x="18" y="26" width="20" height="13" rx="2"/>
+<path class="stroke-main" d="M38 31h8l6 7"/>
+<circle class="fill-main" cx="23" cy="45" r="5"/>
+<circle class="fill-main" cx="44" cy="45" r="7"/>
+<path class="stroke-main" d="M18 39h25"/>
+"""
+    elif icon_key == "vehicle_other":
+        content = """
+<rect class="fill-main" x="17" y="17" width="30" height="30" rx="10"/>
+<path class="stroke-main" d="M32 24v10"/>
+<circle class="fill-accent" cx="32" cy="40" r="2.2"/>
+"""
     elif icon_key == "lead_acid_battery":
         content = """
-<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<rect class="fill-main" x="15" y="18" width="34" height="30" rx="7"/>
 <path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
 <path class="stroke-main" d="M22 33c3.5-4 6.5-4 10 0s6.5 4 10 0"/>
 <path class="stroke-accent" d="M32 26v14"/>
 """
     elif icon_key == "agm_battery":
         content = """
-<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<rect class="fill-main" x="15" y="18" width="34" height="30" rx="7"/>
 <path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
 <path class="stroke-main" d="M24 39l8-13 8 13h-16z"/>
 <path class="stroke-accent" d="M32 29v6"/>
 """
     elif icon_key == "efb_battery":
         content = """
-<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<rect class="fill-main" x="15" y="18" width="34" height="30" rx="7"/>
 <path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
 <path class="stroke-main" d="M22 29h20M22 35h20M22 41h20"/>
 <path class="stroke-accent" d="M27 24v5"/>
 """
     elif icon_key == "gel_battery":
         content = """
-<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<rect class="fill-main" x="15" y="18" width="34" height="30" rx="7"/>
 <path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
 <path class="fill-accent" d="M32 25c-3 4-5 7-5 10.2A5 5 0 0037 35c0-3.2-2-6.2-5-10z"/>
 """
     elif icon_key == "lithium_battery":
         content = """
-<rect class="fill-soft" x="20" y="12" width="24" height="40" rx="8"/>
+<rect class="fill-main" x="20" y="12" width="24" height="40" rx="8"/>
 <path class="stroke-main" d="M28 12V8h8v4"/>
 <path class="stroke-accent" d="M34 22l-5 9h4l-3 10 8-12h-4l4-7z"/>
 """
     elif icon_key == "custom_battery":
         content = """
-<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<rect class="fill-main" x="15" y="18" width="34" height="30" rx="7"/>
 <path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
 <path class="stroke-main" d="M21 39c5-7 8-5 11-8s5-4 11-4"/>
 <circle class="fill-accent" cx="24" cy="35" r="2.5"/>
@@ -1539,7 +2261,7 @@ def _device_icon_svg(icon_key: str, *, label: str) -> str:
 """
     else:
         content = """
-<rect class="fill-soft" x="15" y="18" width="34" height="30" rx="7"/>
+<rect class="fill-main" x="15" y="18" width="34" height="30" rx="7"/>
 <path class="stroke-main" d="M23 18v-4h6v4m6 0v-4h6v4"/>
 <path class="stroke-main" d="M24 32h16"/>
 <path class="stroke-accent" d="M32 24v16"/>
@@ -1681,6 +2403,8 @@ def chart_script(*chart_ids: str) -> str:
 <script>
 (() => {{
   const chartIds = {ids};
+  const themeStyles = window.getComputedStyle(document.body);
+  const themeValue = (name, fallback) => themeStyles.getPropertyValue(name).trim() || fallback;
   const METRICS = {{
     voltage: {{ label: "Voltage", color: "#4f8df7", format: (value) => `${{value.toFixed(2)}} V` }},
     soc: {{ label: "SoC", color: "#17c45a", format: (value) => `${{value.toFixed(0)}}%` }},
@@ -1784,6 +2508,9 @@ def chart_script(*chart_ids: str) -> str:
     return {{ min: minValue - padding, max: maxValue + padding }};
   }}
   function buildSvg(points, metric, chartId, showMarkers, windowLabel) {{
+    const chartSurface = themeValue("--chart-svg-surface", "#f7f9fc");
+    const chartGrid = themeValue("--chart-grid", "rgba(196, 207, 220, 0.88)");
+    const chartAxis = themeValue("--chart-axis", "#708094");
     const usable = points.filter((point) => typeof point[metric] === "number");
     if (usable.length === 0) {{
       return {{
@@ -1836,13 +2563,13 @@ def chart_script(*chart_ids: str) -> str:
     const yGuides = Array.from({{ length: 5 }}, (_, index) => {{
       const y = padTop + ((plotHeight / 4) * index);
       const labelValue = maxValue - ((span / 4) * index);
-      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="#d2dbe7" stroke-width="1"/>\n<text x="10" y="${{(y + 4).toFixed(1)}}" fill="#7c8797" font-size="12">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
+      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="${{chartGrid}}" stroke-width="1"/>\n<text x="10" y="${{(y + 4).toFixed(1)}}" fill="${{chartAxis}}" font-size="12">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
     }}).join("");
     const xIndexes = new Set([0, Math.floor(coords.length / 3), Math.floor((coords.length * 2) / 3), coords.length - 1]);
-    const xGuides = coords.filter((_, index) => xIndexes.has(index)).map((point) => `\n<line x1="${{point.x.toFixed(1)}}" y1="${{padTop}}" x2="${{point.x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="rgba(201,210,224,0.82)" stroke-dasharray="4 8" stroke-width="1"/>`).join("");
+    const xGuides = coords.filter((_, index) => xIndexes.has(index)).map((point) => `\n<line x1="${{point.x.toFixed(1)}}" y1="${{padTop}}" x2="${{point.x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{chartGrid}}" stroke-dasharray="4 8" stroke-width="1"/>`).join("");
     const xLabels = coords.filter((_, index) => xIndexes.has(index)).map((point) => {{
       const timestamp = parseTime(point.ts) ?? start;
-      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - 12}}" text-anchor="middle" fill="#7c8797" font-size="12">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
+      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - 12}}" text-anchor="middle" fill="${{chartAxis}}" font-size="12">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
     }}).join("");
     const gapThreshold = Math.max(xSpan / 8, 6 * 60 * 60 * 1000);
     const segmentSeries = (points) => {{
@@ -1880,7 +2607,7 @@ def chart_script(*chart_ids: str) -> str:
           ? `<polyline fill="none" stroke="${{series.color}}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" points="${{line}}" />`
           : "";
         const dotsSvg = showMarkers
-          ? segment.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4.5" fill="#ffffff" stroke="${{series.color}}" stroke-width="3" />`).join("")
+          ? segment.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4.5" fill="${{chartSurface}}" stroke="${{series.color}}" stroke-width="3" />`).join("")
           : "";
         return `${{areaSvg}}${{lineSvg}}${{dotsSvg}}`;
       }}).join("");
@@ -1891,7 +2618,7 @@ def chart_script(*chart_ids: str) -> str:
     }});
     const overlayId = `${{chartId}}-${{metric}}-overlay`;
     return {{
-      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="22" fill="#f7f9fc"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
+      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="22" fill="${{chartSurface}}"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
       coords,
       metric,
       width,
@@ -1922,6 +2649,27 @@ def chart_script(*chart_ids: str) -> str:
     if (tooltip) {{
       tooltip.classList.remove("visible");
     }}
+  }}
+  function centerButtonInRail(button, behavior = "auto") {{
+    if (!button) {{
+      return;
+    }}
+    const rail = button.closest(".control-rail");
+    if (!rail) {{
+      return;
+    }}
+    const railRect = rail.getBoundingClientRect();
+    const buttonRect = button.getBoundingClientRect();
+    const buttonCenter = (buttonRect.left - railRect.left) + rail.scrollLeft + (buttonRect.width / 2);
+    const maxScrollLeft = Math.max(0, rail.scrollWidth - rail.clientWidth);
+    const targetLeft = Math.min(
+      maxScrollLeft,
+      Math.max(0, buttonCenter - (rail.clientWidth / 2)),
+    );
+    rail.scrollTo({{
+      left: targetLeft,
+      behavior,
+    }});
   }}
   function initChart(id) {{
     const frame = document.getElementById(id);
@@ -2015,7 +2763,7 @@ def chart_script(*chart_ids: str) -> str:
         for (const candidate of rangeButtons) {{
           candidate.classList.toggle("active", candidate === button);
         }}
-        button.scrollIntoView({{ behavior: "smooth", inline: "center", block: "nearest" }});
+        centerButtonInRail(button, "smooth");
         render();
       }});
     }}
@@ -2025,11 +2773,31 @@ def chart_script(*chart_ids: str) -> str:
         for (const candidate of metricButtons) {{
           candidate.classList.toggle("active", candidate === button);
         }}
-        button.scrollIntoView({{ behavior: "smooth", inline: "center", block: "nearest" }});
+        centerButtonInRail(button, "smooth");
         render();
       }});
     }}
     render();
+    const centerActiveControls = (behavior = "auto") => {{
+      centerButtonInRail(
+        rangeButtons.find((button) => button.classList.contains("active")),
+        behavior,
+      );
+      centerButtonInRail(
+        metricButtons.find((button) => button.classList.contains("active")),
+        behavior,
+      );
+    }};
+    requestAnimationFrame(() => {{
+      centerActiveControls();
+      setTimeout(() => centerActiveControls(), 80);
+    }});
+    window.addEventListener("load", () => {{
+      centerActiveControls();
+    }}, {{ once: true }});
+    window.addEventListener("resize", () => {{
+      centerActiveControls();
+    }});
   }}
   for (const chartId of chartIds) {{
     initChart(chartId);

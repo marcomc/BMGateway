@@ -78,6 +78,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Dedicated device-edit flow with editable device type, battery profile,
   installation context, and icon selection.
 - Richer device registry metadata for vehicle type plus battery brand, model,
+
+### Changed
+
+- Device add/edit now accepts non-MAC serial-style identifiers in the `MAC or
+  serial` field instead of rejecting them as invalid Bluetooth addresses.
   capacity, and production year, exposed through both add-device and
   edit-device web flows.
 - Optional `glances-web.service` install flow plus Raspberry Pi runbook
@@ -98,8 +103,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   horizontal navigation for larger fleets, and a larger integrated battery
   tile design with the SoC gauge, icon, and device identity combined into one
   primary mobile-style surface.
-
-### Changed
+- Web appearance preferences now support `light`, `dark`, and `system` modes,
+  and the settings page exposes the current appearance choice alongside the
+  existing display controls.
+- Persistent per-device overview colors with uniqueness enforcement in the
+  registry and add/edit device flows, so each battery now keeps the same color
+  across overview cards, history selectors, and charts.
+- Devices page cards and the add/edit device flows now share the same dark and
+  light theme surface system, with more compact registry cards and battery
+  setup panels that no longer mix light-only blocks into dark mode.
+- Add/edit device flows now derive visual badges automatically from battery
+  and vehicle metadata, remove manual icon picking from the web UI, and
+  generate device IDs automatically from the device name.
+- Battery overview cards now place stacked automatic badges beside the device
+  identity, keep the SoC circle clear of badge overlap, and use stronger dark
+  mode gauge contrast on both the battery overview and device detail pages.
+- Overview color selection now shows a live color preview beside the control,
+  and the vehicle taxonomy now includes scooter and electric-bike installs.
 
 - Standalone and development installs now link both `bm-gateway` and
   `bm-gateway-web`, and the web `systemd` service now launches the dedicated
@@ -115,6 +135,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `not found` / timeout-class BM200 live failures, and the management UI now
   exposes a manual Bluetooth recovery action.
 - The shared chart renderer now uses richer time-axis formatting, interactive
+- The mobile battery overview now uses compact two-card rows instead of a
+  single oversized card, the add-device entry moved into the Bluetooth warning
+  banner, and the history selector now uses smaller non-overlapping cards.
+- Light and dark icon badges now use stronger theme-specific fills and chart
+  surfaces now follow the active theme instead of keeping a white plot in dark
+  mode.
+- Settings summary cards are more compact, and mobile settings edit rows now
+  keep labels and controls on the same row to avoid large vertical gaps.
   tooltips, calmer fills, and historical fleet overlays on the battery landing
   page.
 - Daily rollups now exclude error snapshots from voltage/SoC averages, the
@@ -163,6 +191,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The Bluetooth adapter selector now uses the host's detected adapters instead
   of a free-text field and highlights missing / absent adapters in the
   settings UI.
+- Battery overview cards now pin a high-contrast icon badge in the card corner
+  and keep the SoC gauge focused on percentage, status, and voltage, while the
+  History selector uses compact battery-identity cards instead of larger
+  status-heavy tiles.
+- The responsive web UI now rebalances one-card and small-fleet layouts across
+  Battery, History, and Devices, enlarges the battery gauge on both desktop and
+  mobile, and uses a darker Apple-style surface hierarchy with higher-contrast
+  controls when dark mode is active.
 
 ### Documented
 

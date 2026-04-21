@@ -314,6 +314,7 @@ The installed config keeps:
 - `web.port = 80`
 - `web.show_chart_markers = false`
 - `web.visible_device_limit = 5`
+- `web.appearance = "system"`
 
 The devices registry starts empty on purpose so the web UI can be the first
 real configuration surface instead of shipping fake sample hardware.

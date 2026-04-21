@@ -5,6 +5,7 @@ name = "BM200 House"
 mac = "AA:BB:CC:DD:EE:01"
 enabled = true
 icon_key = "lead_acid_battery"
+color_key = "green"
 [devices.battery]
 family = "lead_acid"
 profile = "regular_lead_acid"
@@ -17,6 +18,7 @@ name = "BM300 Van"
 mac = "AA:BB:CC:DD:EE:02"
 enabled = false
 icon_key = "lithium_battery"
+color_key = "blue"
 [devices.battery]
 family = "lithium"
 profile = "lithium"

@@ -22,6 +22,26 @@ The optional web process serves:
 - `/management` and `/gateway` as compatibility aliases that currently open the
   editable settings mode
 
+The current UI contract also includes:
+
+- appearance theming with `light`, `dark`, and `system` modes
+- mobile-first battery overview cards with automatic battery and vehicle
+  badges, compact multi-card mobile rows, and a SoC-first gauge
+- compact history battery selectors that prioritize battery identity over
+  installation context while reusing the same badge language as the battery and
+  device pages
+- persistent per-device accent colors shared between the battery overview,
+  history selectors, and charts
+- responsive single-device and small-fleet layouts that avoid stretched
+  desktop cards and rebalance the battery gauge for narrow mobile screens
+- device registry cards and add/edit device forms that share the same themed
+  surface system instead of mixing light-only panels into dark mode
+- add/edit device flows that generate the device ID automatically from the
+  device name and derive badges from battery and vehicle metadata instead of
+  exposing manual icon picking
+- Bluetooth/add-device warning banners that keep the add-device CTA outside the
+  overview grid instead of consuming a fake battery slot
+
 Primary launch command:
 
 ```bash
@@ -30,6 +50,7 @@ bm-gateway-web --config /etc/bm-gateway/config.toml --port 8080
 
 Notable web-facing config under `[web]` includes:
 
+- `appearance`
 - `show_chart_markers`
 - `visible_device_limit`
 
