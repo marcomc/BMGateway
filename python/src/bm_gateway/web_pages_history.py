@@ -1,0 +1,435 @@
+"""History and device detail page rendering for the BMGateway web interface."""
+
+from __future__ import annotations
+
+import html
+from typing import cast
+from urllib.parse import quote
+
+from . import display_version
+from . import web_pages as shared
+from .web_ui import (
+    app_document,
+    chart_card,
+    chart_script,
+    metric_tile,
+    section_card,
+    summary_card,
+    top_header,
+)
+
+
+def render_device_html(
+    *,
+    device_id: str,
+    raw_history: list[dict[str, object]],
+    daily_history: list[dict[str, object]],
+    monthly_history: list[dict[str, object]],
+    yearly_history: list[dict[str, object]],
+    analytics: dict[str, object],
+    device_summary: dict[str, object] | None = None,
+    show_chart_markers: bool = False,
+    theme_preference: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
+) -> str:
+    version_label = display_version()
+    summary = shared._device_summary_from_history(
+        device_id=device_id,
+        raw_history=raw_history,
+        daily_history=daily_history,
+        device_summary=device_summary,
+    )
+    trend_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{window['days']}</td>"
+            f"<td>{window['current_avg_voltage']}</td>"
+            f"<td>{window['previous_avg_voltage']}</td>"
+            f"<td>{window['delta_avg_voltage']}</td>"
+            f"<td>{window['current_avg_soc']}</td>"
+            f"<td>{window['previous_avg_soc']}</td>"
+            f"<td>{window['delta_avg_soc']}</td>"
+            "</tr>"
+        )
+        for window in cast(list[dict[str, object]], analytics.get("windows", []))
+    )
+    yearly_rows = "\n".join(
+        (
+            "<tr>"
+            f"<td>{row['year']}</td><td>{row['samples']}</td>"
+            f"<td>{row['avg_voltage']}</td><td>{row['avg_soc']}</td>"
+            f"<td>{row['error_count']}</td>"
+            "</tr>"
+        )
+        for row in yearly_history
+    )
+    trend_rows_html = trend_rows or "<tr><td colspan='7'>No comparison windows</td></tr>"
+    yearly_rows_html = yearly_rows or "<tr><td colspan='5'>No yearly data</td></tr>"
+    history_sections = _render_history_sections(
+        raw_history=raw_history,
+        daily_history=daily_history,
+        monthly_history=monthly_history,
+    )
+    voltage = shared._format_number(summary.get("voltage"), digits=2, suffix=" V")
+    temperature = shared._format_number(summary.get("temperature"), digits=1, suffix=" C")
+    rssi = summary.get("rssi")
+    signal_grade, _signal_percent, _signal_bars, _signal_rssi_text = shared._signal_quality(
+        rssi=rssi,
+        connected=bool(summary.get("connected", False)),
+        error_code=cast(str | None, summary.get("error_code")),
+    )
+    vehicle_text = html.escape(shared._vehicle_summary(summary))
+    battery_meta_text = html.escape(shared._battery_metadata_summary(summary))
+    chart_id = f"device-chart-{quote(device_id)}".replace("%", "")
+    device_name = str(summary.get("name", device_id))
+    device_color = shared._device_accent_color(summary)
+    body = (
+        top_header(
+            title=f"{summary.get('name', device_id)}",
+            subtitle=(
+                f"Device detail for {device_id}. {vehicle_text}. Real history, "
+                "live runtime status, and gateway-focused health signals."
+            ),
+            eyebrow="Battery Detail",
+            right=(
+                '<div class="hero-actions">'
+                f'<a class="secondary-button" href="/devices/edit?device_id={quote(device_id)}">'
+                "Edit device</a></div>"
+            ),
+        )
+        + section_card(
+            title="Battery Status",
+            subtitle=(
+                "BM200/BM6 monitors can report protocol states like Critical, Low, "
+                "Normal, Charging, and Floating. Gateway-only states such as Offline, "
+                "Error, Disabled, or Unsupported are also surfaced when the runtime "
+                "cannot use a direct monitor state."
+            ),
+            body=shared._device_status_explainer(summary),
+        )
+        + '<div class="hero-shell">'
+        + section_card(
+            title="State of Charge",
+            subtitle=(
+                "SoC remains the dominant focal metric, with vehicle-only "
+                "BM300 actions replaced by gateway health signals."
+            ),
+            body=(
+                '<div class="soc-gauge-card">'
+                f"{shared._soc_gauge_markup(soc_value=summary.get('soc'))}"
+                "</div>"
+            ),
+            classes="hero-shell-primary",
+        )
+        + '<div class="hero-aside">'
+        + metric_tile(
+            label="Voltage",
+            value=voltage,
+            tone="blue",
+            subvalue="Latest live/device sample",
+        )
+        + metric_tile(
+            label="Temperature",
+            value=temperature,
+            tone="green",
+            subvalue="Recent raw sample",
+        )
+        + metric_tile(
+            label="Signal Quality",
+            value=signal_grade,
+            tone="orange",
+            detail_html=shared._signal_quality_detail_html(
+                rssi=rssi,
+                connected=bool(summary.get("connected", False)),
+                error_code=cast(str | None, summary.get("error_code")),
+            ),
+        )
+        + metric_tile(
+            label="Battery Health",
+            value="Stable" if summary.get("error_code") is None else "Needs attention",
+            tone="purple",
+            subvalue="Gateway-adapted replacement for vehicle-only tests",
+        )
+        + "</div></div>"
+        + section_card(
+            title="Runtime Status",
+            subtitle=(
+                "These cards replace BM300 vehicle actions with gateway-relevant operational state."
+            ),
+            body=(
+                '<div class="metrics-grid">'
+                + summary_card(
+                    "Last Seen",
+                    shared._display_timestamp(summary.get("last_seen", "unknown")),
+                    classes="timestamp-summary",
+                )
+                + summary_card("Vehicle", vehicle_text)
+                + summary_card("Battery Metadata", battery_meta_text)
+                + summary_card(
+                    "Error Code",
+                    html.escape(str(summary.get("error_code", "None"))),
+                    subvalue=html.escape(
+                        str(summary.get("error_detail", "No current driver/runtime error"))
+                    ),
+                )
+                + summary_card("Connection", "Connected" if summary.get("connected") else "Offline")
+                + "</div>"
+            ),
+        )
+        + chart_card(
+            chart_id=chart_id,
+            title="Historical Chart",
+            subtitle=(
+                "Switch between voltage, SoC, and temperature without leaving "
+                "the page. Longer ranges prioritize rollups, recent ranges "
+                "keep raw samples visible."
+            ),
+            points=shared._chart_points(
+                raw_history,
+                daily_history,
+                series=device_name,
+                series_color=device_color,
+            ),
+            range_options=(
+                ("raw", "Recent raw"),
+                ("1", "1 day"),
+                ("7", "7 days"),
+                ("30", "30 days"),
+                ("90", "90 days"),
+                ("365", "1 year"),
+                ("730", "2 years"),
+                ("all", "All"),
+            ),
+            default_range=default_chart_range,
+            default_metric=default_chart_metric,
+            legend=[(device_name, device_color)],
+            show_markers=show_chart_markers,
+        )
+        + section_card(
+            title="Trend Windows",
+            subtitle=(
+                "Rolling comparison windows stay visible, but as compact "
+                "product-grade insight cards instead of a dominant debug table."
+            ),
+            body=(
+                '<div class="table-shell"><table><thead><tr><th>Days</th><th>Current Avg V</th>'
+                "<th>Previous Avg V</th><th>Delta V</th>"
+                "<th>Current Avg SoC</th><th>Previous Avg SoC</th><th>Delta SoC</th></tr></thead>"
+                f"<tbody>{trend_rows_html}</tbody></table></div>"
+            ),
+        )
+        + section_card(
+            title="Yearly Summary",
+            subtitle=(
+                "Long-term rollups remain directly visible for degradation "
+                "tracking across seasons and years."
+            ),
+            body=(
+                '<div class="table-shell"><table><thead><tr><th>Year</th><th>Samples</th>'
+                "<th>Avg V</th><th>Avg SoC</th><th>Error Count</th></tr></thead>"
+                f"<tbody>{yearly_rows_html}</tbody></table></div>"
+            ),
+        )
+        + history_sections
+    )
+    return app_document(
+        title=f"{device_id} Device",
+        body=body,
+        active_nav="battery",
+        version_label=version_label,
+        theme_preference=theme_preference,
+        script=chart_script(chart_id),
+    )
+
+
+def render_history_html(
+    *,
+    device_id: str,
+    configured_devices: list[dict[str, object]],
+    raw_history: list[dict[str, object]],
+    daily_history: list[dict[str, object]],
+    monthly_history: list[dict[str, object]],
+    show_chart_markers: bool = False,
+    theme_preference: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
+) -> str:
+    version_label = display_version()
+    sections = _render_history_sections(
+        raw_history=raw_history,
+        daily_history=daily_history,
+        monthly_history=monthly_history,
+    )
+    escaped_device_id = html.escape(device_id)
+    summary = shared._history_summary(raw_history)
+    chart_id = f"history-chart-{quote(device_id)}".replace("%", "")
+    selected_device = cast(
+        dict[str, object],
+        next(
+            (device for device in configured_devices if str(device.get("id", "")) == device_id),
+            {"id": device_id},
+        ),
+    )
+    history_color = shared._device_accent_color(selected_device)
+    history_series = str(selected_device.get("name") or device_id)
+    body = (
+        top_header(
+            title="History",
+            subtitle=("Chart-first history dashboard with calmer hierarchy."),
+            eyebrow="History",
+        )
+        + shared._history_device_selector_html(
+            configured_devices=configured_devices,
+            selected_device_id=device_id,
+        )
+        + section_card(
+            title="Summary",
+            subtitle=(
+                "Valid samples, error pressure, and average device health are "
+                "surfaced before the raw rows."
+            ),
+            body=(
+                '<div class="metrics-grid">'
+                + summary_card("Valid samples", summary["valid_samples"])
+                + summary_card("Error count", summary["error_count"])
+                + summary_card("Average voltage", summary["avg_voltage"])
+                + summary_card("Average SoC", summary["avg_soc"])
+                + "</div>"
+            ),
+        )
+        + chart_card(
+            chart_id=chart_id,
+            title="History Chart",
+            subtitle=(
+                "Use the segmented control to switch between Voltage, SoC, and "
+                "Temperature. Range controls rebalance recent raw readings "
+                "against daily rollups."
+            ),
+            points=shared._chart_points(
+                raw_history,
+                daily_history,
+                series=history_series,
+                series_color=history_color,
+            ),
+            range_options=(
+                ("raw", "Recent raw"),
+                ("1", "1 day"),
+                ("7", "7 days"),
+                ("30", "30 days"),
+                ("90", "90 days"),
+                ("365", "1 year"),
+                ("730", "2 years"),
+                ("all", "All"),
+            ),
+            default_range=default_chart_range,
+            default_metric=default_chart_metric,
+            legend=[(history_series, history_color)],
+            show_markers=show_chart_markers,
+        )
+        + sections
+    )
+    return app_document(
+        title=f"{escaped_device_id} History",
+        body=body,
+        active_nav="history",
+        version_label=version_label,
+        theme_preference=theme_preference,
+        script=chart_script(chart_id),
+    )
+
+
+def _render_history_sections(
+    *,
+    raw_history: list[dict[str, object]],
+    daily_history: list[dict[str, object]],
+    monthly_history: list[dict[str, object]],
+) -> str:
+    raw_rows = "\n".join(
+        "<tr>"
+        f"<td>{shared._escape_cell(row['ts'])}</td>"
+        f"<td>{shared._escape_cell(row['voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['soc'])}</td>"
+        f"<td>{shared._escape_cell(row.get('temperature', '-'))}</td>"
+        f"<td>{shared._escape_cell(row['state'])}</td>"
+        f"<td>{_error_cell(row)}</td>"
+        "</tr>"
+        for row in raw_history
+    )
+    daily_rows = "\n".join(
+        "<tr>"
+        f"<td>{shared._escape_cell(row['day'])}</td>"
+        f"<td>{shared._escape_cell(row['samples'])}</td>"
+        f"<td>{shared._escape_cell(row['min_voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['max_voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['avg_voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['avg_soc'])}</td>"
+        f"<td>{shared._escape_cell(row.get('avg_temperature', '-'))}</td>"
+        f"<td>{shared._escape_cell(row['error_count'])}</td>"
+        "</tr>"
+        for row in daily_history
+    )
+    monthly_rows = "\n".join(
+        "<tr>"
+        f"<td>{shared._escape_cell(row['month'])}</td>"
+        f"<td>{shared._escape_cell(row['samples'])}</td>"
+        f"<td>{shared._escape_cell(row['min_voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['max_voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['avg_voltage'])}</td>"
+        f"<td>{shared._escape_cell(row['avg_soc'])}</td>"
+        f"<td>{shared._escape_cell(row.get('avg_temperature', '-'))}</td>"
+        f"<td>{shared._escape_cell(row['error_count'])}</td>"
+        "</tr>"
+        for row in monthly_history
+    )
+    raw_rows_html = raw_rows or "<tr><td colspan='6'>No data</td></tr>"
+    daily_rows_html = daily_rows or "<tr><td colspan='8'>No data</td></tr>"
+    monthly_rows_html = monthly_rows or "<tr><td colspan='8'>No data</td></tr>"
+    return (
+        section_card(
+            title="Recent Raw Readings",
+            subtitle=(
+                "Raw rows stay available, but tucked behind a lower-priority "
+                "operational panel so chart insight leads the page."
+            ),
+            body=(
+                '<div class="raw-table-shell"><details open><summary class="settings-label">'
+                "Raw readings table</summary>"
+                '<div class="table-shell"><table><thead><tr><th>Timestamp</th><th>Voltage</th>'
+                "<th>SoC</th><th>Temperature</th><th>State</th><th>Error</th></tr></thead>"
+                f"<tbody>{raw_rows_html}</tbody></table></div></details></div>"
+            ),
+        )
+        + section_card(
+            title="Daily Rollups",
+            subtitle=(
+                "Aggregated daily summaries for longer-range trend "
+                "interpretation and cleaner degradation analysis."
+            ),
+            body=(
+                '<div class="table-shell"><table><thead><tr><th>Day</th><th>Samples</th>'
+                "<th>Min V</th><th>Max V</th>"
+                "<th>Avg V</th><th>Avg SoC</th><th>Avg Temp</th><th>Error count</th></tr></thead>"
+                f"<tbody>{daily_rows_html}</tbody></table></div>"
+            ),
+        )
+        + section_card(
+            title="Monthly Summaries",
+            subtitle=(
+                "Lower-frequency summaries remain accessible for long "
+                "retention windows without letting the raw error rows "
+                "dominate the page."
+            ),
+            body=(
+                '<div class="table-shell"><table><thead><tr><th>Month</th><th>Samples</th>'
+                "<th>Min V</th><th>Max V</th>"
+                "<th>Avg V</th><th>Avg SoC</th><th>Avg Temp</th><th>Error count</th></tr></thead>"
+                f"<tbody>{monthly_rows_html}</tbody></table></div>"
+            ),
+        )
+    )
+
+
+def _error_cell(row: dict[str, object]) -> str:
+    error_code = row.get("error_code")
+    return shared._escape_cell(error_code) if error_code is not None else "-"
