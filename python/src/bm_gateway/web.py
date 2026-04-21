@@ -170,7 +170,12 @@ def _history_device_selector_html(
     )
 
 
-def _soc_gauge_markup(*, soc_value: object, compact: bool = False) -> str:
+def _soc_gauge_markup(
+    *,
+    soc_value: object,
+    compact: bool = False,
+    inner_html: str | None = None,
+) -> str:
     soc_percent = min(max(_coerce_float(soc_value, 0.0), 0.0), 100.0)
     gauge_degrees = soc_percent * 3.6
     soc_text = html.escape(_format_number(soc_percent, digits=0, suffix="%"))
@@ -179,16 +184,97 @@ def _soc_gauge_markup(*, soc_value: object, compact: bool = False) -> str:
     label_class = "battery-card-gauge-label" if compact else "soc-gauge-label"
     value_class = "battery-card-gauge-value" if compact else "soc-gauge-value"
     label_text = "Charge" if compact else "SoC"
+    gauge_inner = (
+        inner_html
+        if inner_html is not None
+        else (
+            f'<div class="{label_class}">{label_text}</div>'
+            f'<div class="{value_class}">{soc_text}</div>'
+        )
+    )
     return (
         f'<div class="{gauge_class}" style="background: conic-gradient(var(--accent-green) '
         f"0deg {gauge_degrees}deg, rgba(191, 207, 198, 0.55) "
         f'{gauge_degrees}deg 360deg);">'
-        f'<div class="{content_class}">'
-        f'<div class="{label_class}">{label_text}</div>'
-        f'<div class="{value_class}">{soc_text}</div>'
-        "</div>"
+        f'<div class="{content_class}">{gauge_inner}</div>'
         "</div>"
     )
+
+
+def _overview_layout_dimensions(card_count: int) -> tuple[int, int]:
+    if card_count <= 2:
+        return 2, 1
+    if card_count <= 4:
+        return 2, 2
+    return 3, 2
+
+
+def _chunk_overview_cards(
+    device_cards: list[str],
+    *,
+    device_slots: int,
+    add_card: str,
+) -> list[list[str]]:
+    if not device_cards:
+        return [[add_card]]
+    pages: list[list[str]] = []
+    for index in range(0, len(device_cards), device_slots):
+        pages.append([*device_cards[index : index + device_slots], add_card])
+    return pages
+
+
+def _battery_overview_script(track_id: str) -> str:
+    previous_selector = f'[data-overview-target="{track_id}"][data-direction="previous"]'
+    next_selector = f'[data-overview-target="{track_id}"][data-direction="next"]'
+    return f"""
+<script>
+(() => {{
+  const track = document.getElementById("{track_id}");
+  if (!track) {{
+    return;
+  }}
+  const previousButton = document.querySelector('{previous_selector}');
+  const nextButton = document.querySelector('{next_selector}');
+  const pages = Array.from(track.querySelectorAll(".battery-overview-page"));
+  if (pages.length <= 1) {{
+    if (previousButton) previousButton.hidden = true;
+    if (nextButton) nextButton.hidden = true;
+    return;
+  }}
+  let currentPage = 0;
+  function syncButtons() {{
+    if (previousButton) previousButton.disabled = currentPage <= 0;
+    if (nextButton) nextButton.disabled = currentPage >= pages.length - 1;
+  }}
+  function scrollToPage(index) {{
+    currentPage = Math.max(0, Math.min(index, pages.length - 1));
+    pages[currentPage].scrollIntoView({{ behavior: "smooth", inline: "start", block: "nearest" }});
+    syncButtons();
+  }}
+  if (previousButton) {{
+    previousButton.addEventListener("click", () => scrollToPage(currentPage - 1));
+  }}
+  if (nextButton) {{
+    nextButton.addEventListener("click", () => scrollToPage(currentPage + 1));
+  }}
+  track.addEventListener("scroll", () => {{
+    const trackLeft = track.getBoundingClientRect().left;
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    pages.forEach((page, index) => {{
+      const distance = Math.abs(page.getBoundingClientRect().left - trackLeft);
+      if (distance < bestDistance) {{
+        bestDistance = distance;
+        bestIndex = index;
+      }}
+    }});
+    currentPage = bestIndex;
+    syncButtons();
+  }}, {{ passive: true }});
+  syncButtons();
+}})();
+</script>
+"""
 
 
 def render_snapshot_html(snapshot: dict[str, object]) -> str:
@@ -412,7 +498,7 @@ def _device_icon_markup(device: dict[str, object]) -> str:
     return device_icon(icon_key, label=icon_label(icon_key))
 
 
-def _battery_card_status_markup(device: dict[str, object]) -> str:
+def _battery_card_status_markup(device: dict[str, object], *, inline: bool = False) -> str:
     state = str(device.get("state", "unknown"))
     kind = _status_kind(
         state,
@@ -445,11 +531,11 @@ def _battery_card_status_markup(device: dict[str, object]) -> str:
             "</svg>"
         )
     elif kind == "offline":
-        label = "Not visible"
+        label = "No recent sample"
         status_class = "offline"
         icon = (
             '<svg class="battery-card-status-icon" viewBox="0 0 20 20" fill="none" '
-            'xmlns="http://www.w3.org/2000/svg" aria-label="Not visible" role="img">'
+            'xmlns="http://www.w3.org/2000/svg" aria-label="No recent sample" role="img">'
             "<circle cx='10' cy='10' r='8.2' stroke='currentColor' stroke-width='1.8'/>"
             "<path d='M6.4 13.6 13.6 6.4' stroke='currentColor' stroke-width='2.1' "
             "stroke-linecap='round'/>"
@@ -467,10 +553,11 @@ def _battery_card_status_markup(device: dict[str, object]) -> str:
             "<circle cx='10' cy='13.8' r='1.1' fill='currentColor'/>"
             "</svg>"
         )
-    return (
-        f'<div class="battery-card-status {html.escape(status_class)}">'
-        f"{icon}<span>{html.escape(label)}</span></div>"
-    )
+    classes = "battery-card-status"
+    if inline:
+        classes += " battery-card-status-inline"
+    classes += f" {html.escape(status_class)}"
+    return f'<div class="{classes}">{icon}<span>{html.escape(label)}</span></div>'
 
 
 def _device_lookup_by_id(
@@ -982,7 +1069,12 @@ def _signal_quality(
     error_code: str | None,
 ) -> tuple[str, int, int, str]:
     if not connected or error_code == "device_not_found" or rssi is None:
-        return ("Not visible", 0, 0, "The adapter did not see this monitor in the latest scan.")
+        return (
+            "No recent sample",
+            0,
+            0,
+            "The adapter did not see this monitor in the latest scan.",
+        )
     rssi_value = int(_coerce_float(rssi))
     percent = round(((rssi_value + 100) / 50) * 100)
     percent = max(0, min(100, percent))
@@ -1238,6 +1330,7 @@ def render_battery_html(
     chart_points: list[dict[str, object]],
     legend: list[tuple[str, str]],
     show_chart_markers: bool = False,
+    visible_device_limit: int = 5,
 ) -> str:
     version_label = display_version()
     primary_device_id = _primary_device_id(snapshot, devices)
@@ -1255,11 +1348,11 @@ def render_battery_html(
         )
         icon_key = _device_icon_key(device)
         device_name_text = html.escape(str(device.get("name", device_id)))
-        reading_text = f"{voltage_text} {temperature_text}"
-        hero_icon = device_icon(
+        reading_text = f"Temperature {temperature_text}"
+        hero_icon_markup = device_icon(
             icon_key,
             label=icon_label(icon_key),
-            frame_class="hero-device-icon",
+            frame_class="battery-tile-icon",
         )
         vehicle_text = html.escape(_vehicle_summary(device))
         battery_summary = _battery_metadata_summary(device)
@@ -1268,23 +1361,33 @@ def render_battery_html(
             if battery_summary == "Battery details not set"
             else f"<div class='meta battery-card-meta-extra'>{html.escape(battery_summary)}</div>"
         )
-        status_line = _battery_card_status_markup(device)
+        circle_status = _battery_card_status_markup(device, inline=True)
+        gauge_value = html.escape(_format_number(device.get("soc"), digits=0, suffix="%"))
+        gauge_inner = (
+            f"{hero_icon_markup}"
+            f'<div class="battery-card-gauge-value">{gauge_value}</div>'
+            f"{circle_status}"
+            f'<div class="battery-card-gauge-label">{voltage_text}</div>'
+        )
+        gauge_markup = _soc_gauge_markup(
+            soc_value=device.get("soc"),
+            compact=True,
+            inner_html=gauge_inner,
+        )
         device_cards.append(
             tone_card(
                 (
-                    "<div class='device-card-head battery-card-head'>"
-                    f"{hero_icon}"
-                    f"{_soc_gauge_markup(soc_value=device.get('soc'), compact=True)}"
+                    "<div class='battery-tile-hero'>"
+                    f"{gauge_markup}"
+                    "</div>"
                     "<div class='device-card-copy battery-card-copy'>"
                     f"<div class='meta meta-name'>{device_name_text}</div>"
                     f"<div class='meta meta-context'>{vehicle_text}</div>"
                     f"<div class='meta battery-card-reading'>{reading_text}</div>"
-                    f"{status_line}"
                     f"{battery_meta_html}"
                     "<div class='footer-row'>"
                     f'<a class="secondary-button" href="/device?device_id={quote(device_id)}">'
                     "Device Details</a>"
-                    "</div>"
                     "</div>"
                     "</div>"
                 ),
@@ -1292,15 +1395,55 @@ def render_battery_html(
                 extra_class="battery-overview-card",
             )
         )
+    add_button_html = (
+        '<div class="footer-row"><a class="primary-button" href="/devices/new">Add Device</a></div>'
+    )
     add_card = tone_card(
         (
-            "<div style='display:flex;min-height:198px;align-items:center;justify-content:center;"
-            "font-size:4rem;color:var(--accent-orange);font-weight:300'>+</div>"
-            "<div class='meta' style='text-align:center'>"
-            "<a href='/devices/new'>Add Device</a>"
+            "<div class='battery-overview-add-tile'>"
+            "<div class='battery-overview-add-glyph'>+</div>"
+            "<div class='meta battery-overview-add-copy'>Add Device</div>"
+            "<div class='meta battery-overview-add-note'>Register another BM monitor</div>"
+            f"{add_button_html}"
             "</div>"
         ),
         tone="orange",
+        extra_class="battery-overview-add-card",
+    )
+    overview_pages = _chunk_overview_cards(
+        device_cards,
+        device_slots=visible_device_limit,
+        add_card=add_card,
+    )
+    overview_track_id = "battery-overview-track"
+    is_paginated = len(overview_pages) > 1
+    overview_pages_html = "".join(
+        (
+            f'<div class="battery-overview-page{" is-single-page" if not is_paginated else ""}" '
+            f'style="--overview-columns: {_overview_layout_dimensions(len(page))[0]}; '
+            f'--overview-rows: {_overview_layout_dimensions(len(page))[1]};">'
+            + "".join(page)
+            + "</div>"
+        )
+        for page in overview_pages
+    )
+    overview_controls = ""
+    if is_paginated:
+        overview_controls = (
+            '<div class="battery-overview-controls">'
+            f'<button type="button" class="ghost-button battery-overview-arrow" '
+            f'data-overview-target="{overview_track_id}" data-direction="previous" '
+            'aria-label="Show previous battery cards">Prev</button>'
+            f'<button type="button" class="ghost-button battery-overview-arrow" '
+            f'data-overview-target="{overview_track_id}" data-direction="next" '
+            'aria-label="Show next battery cards">Next</button>'
+            "</div>"
+        )
+    overview_scroller = (
+        overview_controls
+        + f'<div id="{overview_track_id}" class="battery-overview-scroller'
+        + ("" if is_paginated else " is-single-page")
+        + f'">{overview_pages_html}</div>'
     )
     chart_id = "battery-overview-chart"
     body = (
@@ -1329,7 +1472,7 @@ def render_battery_html(
                 "The default landing page mirrors the mobile app journey: "
                 "check live state first, then dive into device detail or history."
             ),
-            body=f'<div class="device-grid">{"".join(device_cards)}{add_card}</div>',
+            body=overview_scroller,
         )
         + chart_card(
             chart_id=chart_id,
@@ -1362,7 +1505,7 @@ def render_battery_html(
         active_nav="battery",
         primary_device_id=primary_device_id,
         version_label=version_label,
-        script=chart_script(chart_id),
+        script=chart_script(chart_id) + _battery_overview_script(overview_track_id),
     )
 
 
@@ -1814,7 +1957,7 @@ def render_settings_html(
     display_section_body = settings_row(
         "Chart point markers",
         "Enabled" if config.web.show_chart_markers else "Disabled",
-    )
+    ) + settings_row("Visible overview cards", str(config.web.visible_device_limit))
     bluetooth_section_body = (
         settings_row("Adapter", config.bluetooth.adapter)
         + settings_row("Detected adapters", detected_adapter_summary)
@@ -1957,6 +2100,24 @@ def render_settings_html(
                 help_text=(
                     "Turn point markers back on if you prefer exact sample dots "
                     "over the cleaner default BM-style lines."
+                ),
+            )
+            + settings_control_row(
+                "Visible overview cards",
+                (
+                    '<select id="visible-device-limit-input" name="visible_device_limit" '
+                    'autocomplete="off">'
+                    f'<option value="1"{_selected_attr(config.web.visible_device_limit == 1)}>'
+                    "1</option>"
+                    f'<option value="3"{_selected_attr(config.web.visible_device_limit == 3)}>'
+                    "3</option>"
+                    f'<option value="5"{_selected_attr(config.web.visible_device_limit == 5)}>'
+                    "5</option>"
+                    "</select>"
+                ),
+                help_text=(
+                    "Choose how many monitored batteries stay visible before the "
+                    "overview pages horizontally. The Add Device tile is always shown after them."
                 ),
             )
             + '<div style="margin-top:1rem">'
@@ -2755,6 +2916,7 @@ def update_web_preferences(
     web_host: str | None,
     web_port: int | None,
     show_chart_markers: bool | None,
+    visible_device_limit: int | None,
 ) -> list[str]:
     config = load_config(config_path)
     resolved_enabled = config.web.enabled if web_enabled is None else web_enabled
@@ -2762,6 +2924,9 @@ def update_web_preferences(
     resolved_port = config.web.port if web_port is None else web_port
     resolved_show_chart_markers = (
         config.web.show_chart_markers if show_chart_markers is None else show_chart_markers
+    )
+    resolved_visible_device_limit = (
+        config.web.visible_device_limit if visible_device_limit is None else visible_device_limit
     )
     updated = replace(
         config,
@@ -2771,6 +2936,7 @@ def update_web_preferences(
             host=resolved_host,
             port=resolved_port,
             show_chart_markers=resolved_show_chart_markers,
+            visible_device_limit=resolved_visible_device_limit,
         ),
     )
     from .config import validate_config
@@ -3155,6 +3321,7 @@ def serve_management(
                 chart_points=battery_chart_points,
                 legend=battery_legend,
                 show_chart_markers=config.web.show_chart_markers,
+                visible_device_limit=config.web.visible_device_limit,
             )
             self._send_html(html)
 
@@ -3460,6 +3627,7 @@ def serve_management(
                 web_host: str | None = None
                 web_port: int | None = None
                 show_chart_markers: bool | None = None
+                visible_device_limit: int | None = None
                 if settings_section == "web":
                     try:
                         web_port = int(form.get("web_port", ["80"])[0])
@@ -3484,6 +3652,25 @@ def serve_management(
                     web_host = form.get("web_host", ["0.0.0.0"])[0]
                 elif settings_section == "display":
                     show_chart_markers = _bool_from_form(form, "show_chart_markers")
+                    try:
+                        visible_device_limit = int(form.get("visible_device_limit", ["5"])[0])
+                    except ValueError:
+                        config, snapshot, current_database_path = self._load_current()
+                        configured_devices = load_device_registry(config.device_registry_path)
+                        self._send_html(
+                            render_management_html(
+                                snapshot=snapshot,
+                                config=config,
+                                storage_summary=fetch_storage_summary(current_database_path),
+                                devices=[device.to_dict() for device in configured_devices],
+                                config_text=_read_text(config_path),
+                                devices_text=_read_text(config.device_registry_path),
+                                contract=build_contract(config, configured_devices),
+                                message="Validation failed: visible device limit must be numeric",
+                            ),
+                            status=400,
+                        )
+                        return
                 else:
                     config, snapshot, current_database_path = self._load_current()
                     configured_devices = load_device_registry(config.device_registry_path)
@@ -3507,6 +3694,7 @@ def serve_management(
                     web_host=web_host,
                     web_port=web_port,
                     show_chart_markers=show_chart_markers,
+                    visible_device_limit=visible_device_limit,
                 )
                 if errors:
                     config, snapshot, current_database_path = self._load_current()

@@ -474,6 +474,7 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
+                "visible_device_limit = 5",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -490,12 +491,14 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
         web_host=None,
         web_port=None,
         show_chart_markers=True,
+        visible_device_limit=None,
     )
 
     assert errors == []
     config = load_config(config_path)
     assert config.web.port == 9091
     assert config.web.show_chart_markers is True
+    assert config.web.visible_device_limit == 5
 
 
 def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -> None:
@@ -538,6 +541,7 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
+                "visible_device_limit = 5",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -554,6 +558,7 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
         web_host="127.0.0.1",
         web_port=8088,
         show_chart_markers=None,
+        visible_device_limit=3,
     )
 
     assert errors == []
@@ -561,6 +566,7 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
     assert config.web.enabled is False
     assert config.web.host == "127.0.0.1"
     assert config.web.port == 8088
+    assert config.web.visible_device_limit == 3
 
 
 def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
@@ -605,6 +611,7 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
                 'host = "0.0.0.0"',
                 "port = 80",
                 "show_chart_markers = true",
+                "visible_device_limit = 5",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -621,12 +628,14 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
         web_host=None,
         web_port=8088,
         show_chart_markers=None,
+        visible_device_limit=None,
     )
 
     assert errors == []
     config = load_config(config_path)
     assert config.web.port == 8088
     assert config.web.show_chart_markers is True
+    assert config.web.visible_device_limit == 5
 
 
 def test_compact_mac_address_is_normalized() -> None:
@@ -762,6 +771,7 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Gateway Settings" in html
     assert "Web Service" in html
     assert "Display Settings" in html
+    assert "Visible overview cards" in html
     assert "Edit settings" in html
     assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
@@ -821,6 +831,7 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="timezone"' in html
     assert 'name="web_host"' in html
     assert 'name="web_enabled"' in html
+    assert 'name="visible_device_limit"' in html
     assert 'name="bluetooth_adapter"' in html
     assert 'name="scan_timeout_seconds"' in html
     assert 'name="connect_timeout_seconds"' in html
@@ -912,14 +923,66 @@ def test_render_battery_html_renders_device_icon() -> None:
 
     assert "device-icon-frame" in html
     assert 'data-icon-key="motorcycle_12v"' in html
-    assert "device-icon-frame hero-device-icon" in html
+    assert "device-icon-frame battery-tile-icon" in html
     assert "battery-card-gauge" in html
     assert "battery-card-gauge-value" in html
     assert "battery-card-status" in html
+    assert "battery-card-status-inline" in html
     assert "Battery OK" in html
     assert "Device Details" in html
     assert "Open device" not in html
     assert "All" in html
+    assert "battery-overview-scroller" in html
+    assert 'aria-label="Show previous battery cards"' not in html
+    assert 'aria-label="Show next battery cards"' not in html
+    assert "battery-overview-page" in html
+    assert "--overview-columns:" in html
+    assert "Add Device" in html
+
+
+def test_render_battery_html_pages_cards_by_visible_device_limit() -> None:
+    from bm_gateway.web import render_battery_html
+
+    snapshot_devices = [
+        {
+            "id": f"battery_{index}",
+            "name": f"Battery {index}",
+            "type": "bm200",
+            "soc": 80 + index,
+            "voltage": 13.1 + (index * 0.01),
+            "temperature": 22.0,
+            "state": "normal",
+            "connected": True,
+            "icon_key": "car_12v",
+        }
+        for index in range(1, 8)
+    ]
+    html = render_battery_html(
+        snapshot={"devices": snapshot_devices},
+        devices=[
+            {
+                "id": device["id"],
+                "name": device["name"],
+                "type": "bm200",
+                "mac": f"AA:BB:CC:DD:EE:{index:02d}",
+                "enabled": True,
+                "icon_key": "car_12v",
+            }
+            for index, device in enumerate(snapshot_devices, start=1)
+        ],
+        chart_points=[],
+        legend=[],
+        visible_device_limit=3,
+    )
+
+    assert html.count('<div class="battery-overview-page"') == 3
+    assert "--overview-columns: 2;" in html
+    assert "--overview-rows: 2;" in html
+    assert "Battery 7" in html
+    assert "battery-overview-add-tile" in html
+    assert 'data-direction="previous"' in html
+    assert 'data-direction="next"' in html
+    assert html.count("<div class='battery-overview-add-tile'>") == 3
 
 
 def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
@@ -956,7 +1019,7 @@ def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
     )
 
     assert "Charging" in html
-    assert "battery-card-status charging" in html
+    assert "battery-card-status battery-card-status-inline charging" in html
     assert 'aria-label="Charging"' in html
 
 
@@ -1231,7 +1294,7 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
 
     assert "Offline" in html
     assert "No BLE advertisement seen during the latest scan window." in html
-    assert "Not visible" in html
+    assert "No recent sample" in html
     assert "The adapter did not see this monitor in the latest scan." in html
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert 'href="/devices/new"' in html

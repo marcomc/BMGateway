@@ -28,6 +28,11 @@ Primary launch command:
 bm-gateway-web --config /etc/bm-gateway/config.toml --port 8080
 ```
 
+Notable web-facing config under `[web]` includes:
+
+- `show_chart_markers`
+- `visible_device_limit`
+
 Authoritative references:
 
 - [Architecture plan](../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)

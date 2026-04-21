@@ -22,6 +22,9 @@
 - Add integration tests that exercise the example config files end-to-end.
 - Revisit Docker only for 64-bit deployment targets if containerization becomes
   operationally useful again.
+- Revisit the battery overview after a second real device is added, so the new
+  multi-device layout can be judged against live hardware instead of only the
+  current single-device gateway state.
 
 ## Propositions
 
@@ -38,24 +41,3 @@
     the scan fails
   - define validation and error messaging for unreadable or unsupported barcode
     payloads
-
-- [ ] Redesign the battery overview grid for scalable multi-device layouts.
-  The landing page should optimize the visible device tiles for screen size and
-  device count while always preserving a visible add-device affordance.
-  Actions:
-  - define responsive layout rules for small, medium, and large screens so the
-    overview uses rows and columns efficiently
-  - reserve one tile-sized affordance for adding a new device when the visible
-    device count is below the configured page capacity
-  - decide the maximum number of visible devices per overview page before
-    scrolling is required
-  - add a display setting that controls the visible-device limit for the
-    battery overview
-  - implement horizontal navigation for larger fleets, including touch scroll
-    and explicit arrow controls for pointer devices
-  - ensure the layout remains visually balanced for one, two, three, four, and
-    many-device scenarios
-  - redesign the battery tile so the state-of-charge circle becomes the primary
-    square visual container, with the monitored-device icon, label, and charge
-    percentage integrated inside that larger gauge instead of split across
-    separate card regions

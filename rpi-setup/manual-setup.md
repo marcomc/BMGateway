@@ -313,6 +313,7 @@ The installed config keeps:
 - `web.host = "0.0.0.0"`
 - `web.port = 80`
 - `web.show_chart_markers = false`
+- `web.visible_device_limit = 5`
 
 The devices registry starts empty on purpose so the web UI can be the first
 real configuration surface instead of shipping fake sample hardware.

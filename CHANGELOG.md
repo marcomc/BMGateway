@@ -94,6 +94,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fleet, device, and history charts now include an `All` range and clearer
   window/coverage messaging, so longer ranges explain when they are simply
   showing all retained history instead of appearing broken or unchanged.
+- The battery overview now supports a configurable visible-card limit, paged
+  horizontal navigation for larger fleets, and a larger integrated battery
+  tile design with the SoC gauge, icon, and device identity combined into one
+  primary mobile-style surface.
 
 ### Changed
 
@@ -143,7 +147,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   symbols instead of generic status chips.
 - Live BM200/BM6 reads now preserve scan RSSI in the snapshot/runtime model, so
   device and devices pages show real BLE signal quality instead of incorrectly
-  falling back to `Not visible` after successful polls.
+  falling back to `No recent sample` after successful polls.
 - Device detail pages now expose an inline expandable reported-status explainer,
   showing that BM200/BM6 states are device-reported categories, surfacing the
   protocol code, and visualizing the discrete status scale in-page instead of

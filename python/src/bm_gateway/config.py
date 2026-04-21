@@ -53,6 +53,7 @@ class WebConfig:
     host: str = "0.0.0.0"
     port: int = 80
     show_chart_markers: bool = False
+    visible_device_limit: int = 5
 
 
 @dataclass(frozen=True)
@@ -126,6 +127,7 @@ class AppConfig:
                 "host": self.web.host,
                 "port": self.web.port,
                 "show_chart_markers": self.web.show_chart_markers,
+                "visible_device_limit": self.web.visible_device_limit,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -211,6 +213,7 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"host = {_string_to_toml(config.web.host)}",
             f"port = {config.web.port}",
             f"show_chart_markers = {_bool_to_toml(config.web.show_chart_markers)}",
+            f"visible_device_limit = {config.web.visible_device_limit}",
             "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
@@ -264,6 +267,7 @@ def load_config(path: Path) -> AppConfig:
         host=str(web_table.get("host", "0.0.0.0")),
         port=int(web_table.get("port", 80)),
         show_chart_markers=bool(web_table.get("show_chart_markers", False)),
+        visible_device_limit=int(web_table.get("visible_device_limit", 5)),
     )
     retention = RetentionConfig(
         raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
@@ -308,6 +312,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("web.port must be greater than zero")
     if config.web.port > 65535:
         errors.append("web.port must be less than or equal to 65535")
+    if config.web.visible_device_limit not in {1, 3, 5}:
+        errors.append("web.visible_device_limit must be one of: 1, 3, 5")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:
