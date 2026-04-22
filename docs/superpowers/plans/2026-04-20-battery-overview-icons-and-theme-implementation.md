@@ -176,8 +176,8 @@ git commit -m "feat: add appearance preference to web settings"
 Add tests in `python/tests/test_web_management.py` covering:
 
 ```python
-def test_render_battery_html_marks_document_with_appearance_preference() -> None:
-    html = render_battery_html(
+def test_render_home_html_marks_document_with_appearance_preference() -> None:
+    html = render_home_html(
         snapshot={"devices": []},
         devices=[],
         chart_points=[],
@@ -187,8 +187,8 @@ def test_render_battery_html_marks_document_with_appearance_preference() -> None
     assert 'data-theme-preference="dark"' in html
 
 
-def test_render_battery_html_uses_icon_badge_markup() -> None:
-    html = render_battery_html(...)
+def test_render_home_html_uses_icon_badge_markup() -> None:
+    html = render_home_html(...)
     assert "battery-card-badge" in html
     assert "battery-tile-icon" in html
 ```
@@ -209,7 +209,7 @@ Expected:
 
 In `python/src/bm_gateway/web.py`:
 
-- extend `render_battery_html(...)` to accept `appearance: str = "system"`
+- extend `render_home_html(...)` to accept `appearance: str = "system"`
 - pass the appearance preference into the shared document renderer
 - expose a stable document attribute such as:
 
@@ -267,8 +267,8 @@ git commit -m "feat: add theme-aware icon badge styling"
 Add tests in `python/tests/test_web_management.py` covering:
 
 ```python
-def test_render_battery_html_places_badge_outside_soc_circle() -> None:
-    html = render_battery_html(...)
+def test_render_home_html_places_badge_outside_soc_circle() -> None:
+    html = render_home_html(...)
     assert "battery-card-badge" in html
     assert "battery-tile-hero" in html
     assert "battery-card-gauge-value" in html
@@ -276,8 +276,8 @@ def test_render_battery_html_places_badge_outside_soc_circle() -> None:
     assert "Ancell BM200" in html
 
 
-def test_render_battery_html_soc_circle_omits_device_name() -> None:
-    html = render_battery_html(...)
+def test_render_home_html_soc_circle_omits_device_name() -> None:
+    html = render_home_html(...)
     assert "battery-card-gauge-label" in html
     assert "Device Details" in html
 ```
@@ -294,7 +294,7 @@ Keep the assertions focused on required structure:
 Run:
 
 ```bash
-uv run pytest -q python/tests/test_web_management.py -k 'render_battery_html'
+uv run pytest -q python/tests/test_web_management.py -k 'render_home_html'
 ```
 
 Expected:
@@ -334,7 +334,7 @@ In `python/src/bm_gateway/web_ui.py`:
 Run:
 
 ```bash
-uv run pytest -q python/tests/test_web_management.py -k 'render_battery_html'
+uv run pytest -q python/tests/test_web_management.py -k 'render_home_html'
 ```
 
 Expected:
@@ -448,7 +448,7 @@ Keep one canonical explanation per topic and link rather than duplicating.
 Run:
 
 ```bash
-uv run pytest -q python/tests/test_web_management.py -k 'appearance or render_battery_html or render_history_html'
+uv run pytest -q python/tests/test_web_management.py -k 'appearance or render_home_html or render_history_html'
 ```
 
 Expected:

@@ -20,7 +20,6 @@ from bm_gateway.web import (
     add_device_from_form,
     build_run_once_command,
     render_add_device_html,
-    render_battery_html,
     render_device_html,
     render_devices_html,
     render_edit_device_html,
@@ -189,7 +188,7 @@ def test_chart_script_renders_multi_series_tooltip_rows() -> None:
 
 
 def test_chart_card_markup_includes_side_navigation_buttons() -> None:
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={"devices": []},
         devices=[],
         chart_points=[],
@@ -1259,10 +1258,10 @@ def test_render_settings_html_edit_mode_marks_configured_adapter_missing() -> No
     assert "Detected adapters: hci0." in html
 
 
-def test_render_battery_html_renders_device_icon() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_renders_device_icon() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1303,15 +1302,15 @@ def test_render_battery_html_renders_device_icon() -> None:
     assert "battery-card-status" in html
     assert "battery-card-status-inline" in html
     assert "Battery OK" in html
-    assert "battery-overview-card-link" in html
-    assert "battery-overview-orb" in html
+    assert "home-overview-card-link" in html
+    assert "home-overview-orb" in html
     assert "home-orb-layout" in html
     assert "Open device" not in html
     assert "All" in html
-    assert "battery-overview-scroller" in html
-    assert 'aria-label="Show previous battery cards"' not in html
-    assert 'aria-label="Show next battery cards"' not in html
-    assert "battery-overview-page" in html
+    assert "home-overview-scroller" in html
+    assert 'aria-label="Show previous home cards"' not in html
+    assert 'aria-label="Show next home cards"' not in html
+    assert "home-overview-page" in html
     assert "--overview-columns:" in html
     assert "Add Device" in html
     assert (
@@ -1339,10 +1338,10 @@ def test_render_home_html_threads_appearance_to_document_root() -> None:
     assert 'rel="manifest" href="/site.webmanifest"' in html
 
 
-def test_render_battery_html_defaults_chart_to_seven_days_and_soc() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_defaults_chart_to_seven_days_and_soc() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={"devices": []},
         devices=[],
         chart_points=[],
@@ -1356,10 +1355,10 @@ def test_render_battery_html_defaults_chart_to_seven_days_and_soc() -> None:
     assert 'data-metric="soc" class="active"' in html
 
 
-def test_render_battery_html_uses_shared_icon_badge_markup() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_uses_shared_icon_badge_markup() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1396,10 +1395,10 @@ def test_render_battery_html_uses_shared_icon_badge_markup() -> None:
     assert "badge-placeholder" in html
 
 
-def test_render_battery_html_prefers_registry_name_over_stale_snapshot_name() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_prefers_registry_name_over_stale_snapshot_name() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1431,10 +1430,10 @@ def test_render_battery_html_prefers_registry_name_over_stale_snapshot_name() ->
     assert "Ancell BM200" not in html
 
 
-def test_render_battery_html_places_identity_and_badges_inside_home_orb() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_places_identity_and_badges_inside_home_orb() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1466,7 +1465,7 @@ def test_render_battery_html_places_identity_and_badges_inside_home_orb() -> Non
         legend=[],
     )
 
-    link_index = html.index("battery-overview-card-link")
+    link_index = html.index("home-overview-card-link")
     link_close_index = html.index("</a>", link_index)
     orb_slice = html[link_index:link_close_index]
 
@@ -1481,10 +1480,10 @@ def test_render_battery_html_places_identity_and_badges_inside_home_orb() -> Non
     assert "meta-context" in orb_slice
 
 
-def test_render_battery_html_uses_compact_home_metadata_line_with_nominal_voltage() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_uses_compact_home_metadata_line_with_nominal_voltage() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1533,9 +1532,9 @@ def test_render_battery_html_uses_compact_home_metadata_line_with_nominal_voltag
 def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     css = base_css()
 
-    assert ".battery-overview-card {" in css
-    assert ".battery-overview-card-link {" in css
-    assert ".battery-overview-orb {" in css
+    assert ".home-overview-card {" in css
+    assert ".home-overview-card-link {" in css
+    assert ".home-overview-orb {" in css
     assert ".home-orb-layout {" in css
     assert ".home-orb-head {" in css
     assert ".device-badge-stack {" in css
@@ -1620,7 +1619,7 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "--bg-elevated: #2c2c2e;" in css
     assert "--text-primary: #f5f5f7;" in css
     assert "--text-secondary: rgba(235, 235, 245, 0.78);" in css
-    assert ".battery-overview-page.is-single-page.page-two-cards {" in css
+    assert ".home-overview-page.is-single-page.page-two-cards {" in css
     assert "justify-content: flex-start;" in css
     assert "background: var(--bg-surface);" in css
     assert ".banner-strip {" in css
@@ -1647,7 +1646,7 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "font-size: 0.82rem;" in css
     assert "font-size: 2.2rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
-    assert ".battery-overview-page.is-single-page.page-two-cards," in css
+    assert ".home-overview-page.is-single-page.page-two-cards," in css
 
 
 def test_render_devices_html_threads_appearance_to_document_root() -> None:
@@ -1778,8 +1777,8 @@ def test_render_settings_html_threads_appearance_to_document_root() -> None:
     assert 'data-theme-preference="dark"' in html
 
 
-def test_render_battery_html_pages_cards_by_visible_device_limit() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_pages_cards_by_visible_device_limit() -> None:
+    from bm_gateway.web import render_home_html
 
     snapshot_devices = [
         {
@@ -1795,7 +1794,7 @@ def test_render_battery_html_pages_cards_by_visible_device_limit() -> None:
         }
         for index in range(1, 8)
     ]
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={"devices": snapshot_devices},
         devices=[
             {
@@ -1813,21 +1812,21 @@ def test_render_battery_html_pages_cards_by_visible_device_limit() -> None:
         visible_device_limit=4,
     )
 
-    assert html.count('class="battery-overview-page page-multi-cards"') == 2
-    assert 'class="battery-overview-page page-one-card"' not in html
+    assert html.count('class="home-overview-page page-multi-cards"') == 2
+    assert 'class="home-overview-page page-one-card"' not in html
     assert "--overview-columns: 2;" in html
     assert "--overview-rows: 2;" in html
     assert "Battery 7" in html
     assert 'data-direction="previous"' in html
     assert 'data-direction="next"' in html
-    assert "battery-overview-add-tile" not in html
+    assert "home-overview-add-tile" not in html
     assert "icon-button" in html
 
 
-def test_render_battery_html_marks_single_page_card_count() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_marks_single_page_card_count() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1858,11 +1857,11 @@ def test_render_battery_html_marks_single_page_card_count() -> None:
         visible_device_limit=4,
     )
 
-    assert "battery-overview-page is-single-page page-one-card" in html
+    assert "home-overview-page is-single-page page-one-card" in html
 
 
-def test_render_battery_html_uses_four_by_two_layout_for_eight_visible_cards() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_uses_four_by_two_layout_for_eight_visible_cards() -> None:
+    from bm_gateway.web import render_home_html
 
     snapshot_devices = [
         {
@@ -1890,7 +1889,7 @@ def test_render_battery_html_uses_four_by_two_layout_for_eight_visible_cards() -
         for index, device in enumerate(snapshot_devices, start=1)
     ]
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={"devices": snapshot_devices},
         devices=registry_devices,
         chart_points=[],
@@ -1898,16 +1897,16 @@ def test_render_battery_html_uses_four_by_two_layout_for_eight_visible_cards() -
         visible_device_limit=8,
     )
 
-    assert 'class="battery-overview-page is-single-page page-multi-cards"' in html
+    assert 'class="home-overview-page is-single-page page-multi-cards"' in html
     assert "--overview-columns: 4;" in html
     assert "--overview-rows: 2;" in html
-    assert 'class="battery-overview-controls"' not in html
+    assert 'class="home-overview-controls"' not in html
 
 
-def test_render_battery_html_keeps_registry_only_devices_visible() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_keeps_registry_only_devices_visible() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1949,10 +1948,10 @@ def test_render_battery_html_keeps_registry_only_devices_visible() -> None:
     assert "Pending Device" in html
 
 
-def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_shows_charging_status_with_explicit_icon() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {
@@ -1987,10 +1986,10 @@ def test_render_battery_html_shows_charging_status_with_explicit_icon() -> None:
     assert 'aria-label="Charging"' in html
 
 
-def test_render_battery_html_shows_connection_failure_as_red_warning() -> None:
-    from bm_gateway.web import render_battery_html
+def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
+    from bm_gateway.web import render_home_html
 
-    html = render_battery_html(
+    html = render_home_html(
         snapshot={
             "devices": [
                 {

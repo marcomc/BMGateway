@@ -19,7 +19,7 @@ def app_document(
     *,
     title: str,
     body: str,
-    active_nav: str = "battery",
+    active_nav: str = "home",
     primary_device_id: str = "",
     version_label: str = "",
     theme_preference: str = "",
@@ -393,7 +393,7 @@ def bottom_nav(active_nav: str, *, primary_device_id: str = "") -> str:
     if primary_device_id:
         history_href = f"/history?device_id={html.escape(primary_device_id)}"
     items = [
-        ("battery", "/", "Home"),
+        ("home", "/", "Home"),
         ("history", history_href, "History"),
         ("devices", "/devices", "Devices"),
         ("settings", "/settings", "Settings"),
@@ -415,7 +415,7 @@ def bottom_nav(active_nav: str, *, primary_device_id: str = "") -> str:
 
 
 def _nav_icon(item_id: str, *, label: str) -> str:
-    if item_id == "battery":
+    if item_id == "home":
         body = """
 <rect class="fill-main" x="6" y="8" width="12" height="10" rx="2.2"/>
 <path class="stroke-main" d="M10 8V6h4v2m-2 2v6"/>

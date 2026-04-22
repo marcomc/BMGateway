@@ -301,7 +301,7 @@ def _chunk_overview_cards(
 
 
 def _overview_page_class(card_count: int, *, is_single_page: bool) -> str:
-    classes = ["battery-overview-page"]
+    classes = ["home-overview-page"]
     if is_single_page:
         classes.append("is-single-page")
     if card_count <= 1:
@@ -313,7 +313,7 @@ def _overview_page_class(card_count: int, *, is_single_page: bool) -> str:
     return " ".join(classes)
 
 
-def _battery_overview_script(track_id: str) -> str:
+def _home_overview_script(track_id: str) -> str:
     previous_selector = f'[data-overview-target="{track_id}"][data-direction="previous"]'
     next_selector = f'[data-overview-target="{track_id}"][data-direction="next"]'
     return f"""
@@ -325,7 +325,7 @@ def _battery_overview_script(track_id: str) -> str:
   }}
   const previousButton = document.querySelector('{previous_selector}');
   const nextButton = document.querySelector('{next_selector}');
-  const pages = Array.from(track.querySelectorAll(".battery-overview-page"));
+  const pages = Array.from(track.querySelectorAll(".home-overview-page"));
   if (pages.length <= 1) {{
     if (previousButton) previousButton.hidden = true;
     if (nextButton) nextButton.hidden = true;
@@ -1547,31 +1547,6 @@ def render_home_html(
     from .web_pages_home import render_home_html as _render_home_html
 
     return _render_home_html(
-        snapshot=snapshot,
-        devices=devices,
-        chart_points=chart_points,
-        legend=legend,
-        show_chart_markers=show_chart_markers,
-        visible_device_limit=visible_device_limit,
-        appearance=appearance,
-        default_chart_range=default_chart_range,
-        default_chart_metric=default_chart_metric,
-    )
-
-
-def render_battery_html(
-    *,
-    snapshot: dict[str, object],
-    devices: list[dict[str, object]],
-    chart_points: list[dict[str, object]],
-    legend: list[tuple[str, str]],
-    show_chart_markers: bool = False,
-    visible_device_limit: int = 4,
-    appearance: str = "system",
-    default_chart_range: str = "7",
-    default_chart_metric: str = "soc",
-) -> str:
-    return render_home_html(
         snapshot=snapshot,
         devices=devices,
         chart_points=chart_points,

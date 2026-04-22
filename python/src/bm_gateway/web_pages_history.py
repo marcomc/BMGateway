@@ -154,7 +154,7 @@ def render_device_html(
     return app_document(
         title=f"{device_id} Device",
         body=body,
-        active_nav="battery",
+        active_nav="home",
         version_label=version_label,
         theme_preference=theme_preference,
         script=chart_script(chart_id),

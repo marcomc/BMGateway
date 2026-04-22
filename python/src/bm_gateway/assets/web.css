@@ -735,7 +735,7 @@ details summary::-webkit-details-marker { display: none; }
   font-weight: 800;
   font-variant-numeric: tabular-nums;
 }
-.battery-overview-card {
+.home-overview-card {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -746,7 +746,7 @@ details summary::-webkit-details-marker { display: none; }
   background: transparent;
   box-shadow: none;
 }
-.battery-overview-card-link {
+.home-overview-card-link {
   display: grid;
   place-items: center;
   width: 100%;
@@ -754,24 +754,24 @@ details summary::-webkit-details-marker { display: none; }
   color: inherit;
   text-decoration: none;
 }
-.battery-overview-card-link:hover {
+.home-overview-card-link:hover {
   text-decoration: none;
 }
-.battery-overview-card-link:focus-visible {
+.home-overview-card-link:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--card-accent) 76%, white);
   outline-offset: 4px;
   border-radius: 18px;
 }
-.battery-overview-controls {
+.home-overview-controls {
   display: flex;
   justify-content: flex-end;
   gap: 0.7rem;
   margin-bottom: 0.9rem;
 }
-.battery-overview-arrow {
+.home-overview-arrow {
   min-width: 88px;
 }
-.battery-overview-scroller {
+.home-overview-scroller {
   display: flex;
   overflow-x: auto;
   overflow-y: hidden;
@@ -779,10 +779,10 @@ details summary::-webkit-details-marker { display: none; }
   scrollbar-width: none;
   -webkit-overflow-scrolling: touch;
 }
-.battery-overview-scroller::-webkit-scrollbar {
+.home-overview-scroller::-webkit-scrollbar {
   display: none;
 }
-.battery-overview-page {
+.home-overview-page {
   display: grid;
   gap: 1rem;
   grid-template-columns: repeat(var(--overview-columns), minmax(0, 1fr));
@@ -791,23 +791,23 @@ details summary::-webkit-details-marker { display: none; }
   flex: 0 0 100%;
   scroll-snap-align: start;
 }
-.battery-overview-scroller.is-single-page {
+.home-overview-scroller.is-single-page {
   display: block;
   overflow: visible;
 }
-.battery-overview-page.is-single-page {
+.home-overview-page.is-single-page {
   min-width: 0;
   width: auto;
   max-width: 100%;
   flex: none;
   grid-template-columns: repeat(var(--overview-columns), minmax(162px, 198px));
 }
-.battery-overview-page.is-single-page.page-two-cards {
+.home-overview-page.is-single-page.page-two-cards {
   justify-content: flex-start;
   margin: 0;
   grid-template-columns: repeat(2, minmax(162px, 198px));
 }
-.battery-overview-page.is-single-page.page-one-card {
+.home-overview-page.is-single-page.page-one-card {
   justify-content: flex-start;
   margin: 0;
   grid-template-columns: minmax(162px, 198px);
@@ -818,12 +818,12 @@ details summary::-webkit-details-marker { display: none; }
   align-items: start;
   gap: 0.3rem;
 }
-.battery-overview-orb-shell {
+.home-overview-orb-shell {
   border: 0;
   background: transparent;
   box-shadow: none;
 }
-.battery-overview-orb {
+.home-overview-orb {
   padding: 0;
   border-radius: 999px;
   border: 0;
@@ -831,14 +831,14 @@ details summary::-webkit-details-marker { display: none; }
   box-shadow: none;
   overflow: visible;
 }
-.battery-overview-orb .battery-card-gauge {
+.home-overview-orb .battery-card-gauge {
   width: 100%;
   flex-basis: auto;
   box-shadow:
     0 0 36px var(--card-accent-glow),
     0 12px 26px color-mix(in srgb, var(--card-accent) 16%, transparent);
 }
-.battery-overview-orb .battery-card-gauge::after {
+.home-overview-orb .battery-card-gauge::after {
   inset: 11%;
   background: radial-gradient(
     circle at 30% 24%,
@@ -1089,7 +1089,7 @@ details summary::-webkit-details-marker { display: none; }
     0 14px 30px color-mix(in srgb, var(--card-accent) 10%, transparent),
     var(--shadow-card);
 }
-.battery-overview-card .meta-name {
+.home-overview-card .meta-name {
   color: var(--text-primary);
   font-size: 1rem;
   font-weight: 700;
@@ -1100,7 +1100,7 @@ details summary::-webkit-details-marker { display: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.battery-overview-card .meta-context {
+.home-overview-card .meta-context {
   font-size: 0.9rem;
   width: 100%;
   max-width: none;
@@ -1108,7 +1108,7 @@ details summary::-webkit-details-marker { display: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.battery-overview-card .battery-card-meta-extra {
+.home-overview-card .battery-card-meta-extra {
   font-size: 0.88rem;
   width: 100%;
   max-width: none;
@@ -1260,11 +1260,6 @@ details summary::-webkit-details-marker { display: none; }
   justify-content: space-between;
   gap: 1rem;
   padding: 1rem;
-}
-.status-explainer-value {
-  margin-top: 0.2rem;
-  font-size: 1.35rem;
-  font-weight: 800;
 }
 .status-explainer-body {
   display: grid;
@@ -2077,25 +2072,25 @@ details summary::-webkit-details-marker { display: none; }
   .settings-value {
     text-align: left;
   }
-  .battery-overview-page,
-  .battery-overview-page.is-single-page {
+  .home-overview-page,
+  .home-overview-page.is-single-page {
     grid-template-columns: repeat(2, minmax(132px, 1fr));
     min-width: 100%;
     width: 100%;
   }
-  .battery-overview-page.is-single-page.page-two-cards,
-  .battery-overview-page.is-single-page.page-one-card,
-  .battery-overview-page.page-multi-cards {
+  .home-overview-page.is-single-page.page-two-cards,
+  .home-overview-page.is-single-page.page-one-card,
+  .home-overview-page.page-multi-cards {
     grid-template-columns: repeat(2, minmax(132px, 1fr));
     width: 100%;
     margin: 0;
   }
-  .battery-overview-page.is-single-page.page-one-card {
+  .home-overview-page.is-single-page.page-one-card {
     grid-template-columns: minmax(148px, 172px);
     width: fit-content;
     min-width: 0;
   }
-  .battery-overview-card {
+  .home-overview-card {
     min-height: 0;
     padding: 0;
   }
@@ -2128,16 +2123,16 @@ details summary::-webkit-details-marker { display: none; }
     width: 100%;
     justify-content: flex-start;
   }
-  .battery-overview-controls {
+  .home-overview-controls {
     justify-content: stretch;
   }
-  .battery-overview-arrow {
+  .home-overview-arrow {
     flex: 1 1 0;
   }
   .device-badge-stack {
     gap: 0.14rem;
   }
-  .battery-overview-orb .battery-card-gauge {
+  .home-overview-orb .battery-card-gauge {
     width: 100%;
   }
   .home-orb-layout {
@@ -2171,11 +2166,11 @@ details summary::-webkit-details-marker { display: none; }
   .battery-card-copy {
     gap: 0.06rem;
   }
-  .battery-overview-card .meta-name {
+  .home-overview-card .meta-name {
     font-size: 0.76rem;
   }
-  .battery-overview-card .meta-context,
-  .battery-overview-card .battery-card-meta-extra {
+  .home-overview-card .meta-context,
+  .home-overview-card .battery-card-meta-extra {
     font-size: 0.66rem;
   }
   .battery-card-gauge-value {
@@ -2277,9 +2272,6 @@ details summary::-webkit-details-marker { display: none; }
   }
   .header-subtitle-line {
     font-size: 0.9rem;
-  }
-  .status-scale-labels {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .chart-title-row {
     display: grid;

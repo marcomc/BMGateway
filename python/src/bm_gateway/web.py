@@ -56,7 +56,6 @@ from .web_pages import (
     _snapshot_with_version,
     _string_from_form,
     render_add_device_html,
-    render_battery_html,
     render_device_html,
     render_devices_html,
     render_edit_device_html,
@@ -74,7 +73,6 @@ __all__ = [
     "build_run_once_command",
     "render_add_device_html",
     "render_home_html",
-    "render_battery_html",
     "render_device_html",
     "render_devices_html",
     "render_edit_device_html",
@@ -459,7 +457,7 @@ def serve_management(
                 database_path=database_path,
                 devices=serialized_devices,
             )
-            html = render_battery_html(
+            html = render_home_html(
                 snapshot=snapshot,
                 devices=serialized_devices,
                 chart_points=battery_chart_points,

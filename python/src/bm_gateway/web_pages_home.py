@@ -85,8 +85,8 @@ def render_home_html(
         )
         device_href = f"/device?device_id={quote(device_id)}"
         device_cards.append(
-            f"<article class='battery-overview-card battery-overview-orb-shell'>"
-            f"<a class='battery-overview-card-link battery-overview-orb tone-card {color_key}' "
+            f"<article class='home-overview-card home-overview-orb-shell'>"
+            f"<a class='home-overview-card-link home-overview-orb tone-card {color_key}' "
             f"href='{device_href}' aria-label='Open details for {device_name_text}' "
             f"style='{shared._tone_card_style(color_key)}'>"
             f"{gauge_markup}"
@@ -98,7 +98,7 @@ def render_home_html(
         device_slots=visible_device_limit,
         add_card="",
     )
-    overview_track_id = "battery-overview-track"
+    overview_track_id = "home-overview-track"
     is_paginated = len(overview_pages) > 1
     overview_pages_html = "".join(
         (
@@ -110,22 +110,22 @@ def render_home_html(
     overview_controls = ""
     if is_paginated:
         overview_controls = (
-            '<div class="battery-overview-controls">'
-            f'<button type="button" class="ghost-button battery-overview-arrow" '
+            '<div class="home-overview-controls">'
+            f'<button type="button" class="ghost-button home-overview-arrow" '
             f'data-overview-target="{overview_track_id}" data-direction="previous" '
-            'aria-label="Show previous battery cards">Prev</button>'
-            f'<button type="button" class="ghost-button battery-overview-arrow" '
+            'aria-label="Show previous home cards">Prev</button>'
+            f'<button type="button" class="ghost-button home-overview-arrow" '
             f'data-overview-target="{overview_track_id}" data-direction="next" '
-            'aria-label="Show next battery cards">Next</button>'
+            'aria-label="Show next home cards">Next</button>'
             "</div>"
         )
     overview_scroller = (
         overview_controls
-        + f'<div id="{overview_track_id}" class="battery-overview-scroller'
+        + f'<div id="{overview_track_id}" class="home-overview-scroller'
         + ("" if is_paginated else " is-single-page")
         + f'">{overview_pages_html}</div>'
     )
-    chart_id = "battery-overview-chart"
+    chart_id = "home-overview-chart"
     body = (
         top_header(
             title="BMGateway",
@@ -160,36 +160,11 @@ def render_home_html(
     return app_document(
         title="BMGateway",
         body=body,
-        active_nav="battery",
+        active_nav="home",
         primary_device_id=primary_device_id,
         version_label=version_label,
         theme_preference=appearance,
-        script=chart_script(chart_id) + shared._battery_overview_script(overview_track_id),
-    )
-
-
-def render_battery_html(
-    *,
-    snapshot: dict[str, object],
-    devices: list[dict[str, object]],
-    chart_points: list[dict[str, object]],
-    legend: list[tuple[str, str]],
-    show_chart_markers: bool = False,
-    visible_device_limit: int = 4,
-    appearance: str = "system",
-    default_chart_range: str = "7",
-    default_chart_metric: str = "soc",
-) -> str:
-    return render_home_html(
-        snapshot=snapshot,
-        devices=devices,
-        chart_points=chart_points,
-        legend=legend,
-        show_chart_markers=show_chart_markers,
-        visible_device_limit=visible_device_limit,
-        appearance=appearance,
-        default_chart_range=default_chart_range,
-        default_chart_metric=default_chart_metric,
+        script=chart_script(chart_id) + shared._home_overview_script(overview_track_id),
     )
 
 
