@@ -8,6 +8,15 @@ You do not need a custom Home Assistant integration for the normal setup path.
 The required Home Assistant-side integration already exists: the built-in MQTT
 integration.
 
+Before following this file, use the project overview in
+[../README.md](../README.md) if you still need the Raspberry Pi install path or
+the broader documentation map.
+
+Reference documents for this setup:
+
+- [README.md](README.md)
+- [contract.md](contract.md)
+
 ## Prerequisites
 
 - A working Home Assistant installation

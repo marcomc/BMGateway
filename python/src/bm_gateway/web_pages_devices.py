@@ -276,7 +276,7 @@ def render_edit_device_html(
                 f'name="battery_model" value="{battery_model}" '
                 'autocomplete="off"></div>'
                 '<div><label class="settings-label" '
-                'for="edit-battery-voltage-input">Nominal voltage</label>'
+                'for="edit-battery-voltage-input">Battery voltage</label>'
                 '<select id="edit-battery-voltage-input" name="battery_nominal_voltage">'
                 f"{nominal_voltage_options}</select></div>"
                 '<div><label class="settings-label" '

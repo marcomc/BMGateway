@@ -6,6 +6,7 @@ LOG_FILE="/var/log/bm-gateway-first-run.log"
 REPO_URL="${BMGATEWAY_REPO_URL:-https://github.com/marcomc/BMGateway.git}"
 REPO_DIR="${BMGATEWAY_REPO_DIR:-/opt/BMGateway}"
 SERVICE_USER="${BMGATEWAY_SERVICE_USER:-admin}"
+BMGATEWAY_HOSTNAME="${BMGATEWAY_HOSTNAME:-}"
 BOOT_DIR="/boot/firmware"
 exec >>"${LOG_FILE}" 2>&1
 
@@ -22,7 +23,18 @@ else
 fi
 
 cd "${REPO_DIR}"
-./scripts/bootstrap-install.sh --repo-dir "${REPO_DIR}" --skip-apt --service-user "${SERVICE_USER}"
+if [ -n "${BMGATEWAY_HOSTNAME}" ]; then
+    ./scripts/bootstrap-install.sh \
+        --repo-dir "${REPO_DIR}" \
+        --skip-apt \
+        --service-user "${SERVICE_USER}" \
+        --hostname "${BMGATEWAY_HOSTNAME}"
+else
+    ./scripts/bootstrap-install.sh \
+        --repo-dir "${REPO_DIR}" \
+        --skip-apt \
+        --service-user "${SERVICE_USER}"
+fi
 
 CONFIG_DIR="/home/${SERVICE_USER}/.config/bm-gateway"
 if [ -f "${BOOT_DIR}/bm-gateway-config.toml" ]; then

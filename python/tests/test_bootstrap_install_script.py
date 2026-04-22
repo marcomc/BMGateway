@@ -62,6 +62,10 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
         fake_bin / "python3",
         "#!/bin/sh\n" + logger + 'printf "%s\\n" "$0"\n',
     )
+    _write_executable(
+        fake_bin / "hostnamectl",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
 
     return fake_bin, command_log
 
@@ -137,6 +141,38 @@ def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> N
     assert "git clone https://example.invalid/BMGateway.git" not in commands
     assert f"git -C {repo_dir} fetch --all --tags --prune" in commands
     assert f"git -C {repo_dir} pull --ff-only" in commands
+
+
+def test_bootstrap_install_script_can_set_hostname(tmp_path: Path) -> None:
+    script_path = Path("scripts/bootstrap-install.sh").resolve()
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+    repo_dir = tmp_path / "BMGateway"
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        [
+            str(script_path),
+            "--repo-url",
+            "https://example.invalid/BMGateway.git",
+            "--repo-dir",
+            str(repo_dir),
+            "--hostname",
+            "garage-gateway",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = command_log.read_text(encoding="utf-8")
+    assert "hostnamectl set-hostname garage-gateway" in commands
 
 
 def test_bootstrap_install_script_uses_current_checkout_without_repo_url(

@@ -34,7 +34,6 @@ from .web_ui import (
     button,
     device_icon,
     section_card,
-    status_badge,
 )
 
 PROTOCOL_STATE_CODES: dict[str, int] = {
@@ -46,11 +45,16 @@ PROTOCOL_STATE_CODES: dict[str, int] = {
 }
 
 PROTOCOL_STATUS_SCALE: tuple[tuple[str, str, str, str], ...] = (
-    ("critical", "Critical", "Critical reserve or alarm condition.", "error"),
-    ("low", "Low", "Low reserve reported by the monitor.", "warning"),
-    ("normal", "Normal", "Stable battery condition reported by the monitor.", "ok"),
-    ("charging", "Charging", "Active charging reported by the monitor.", "info"),
-    ("floating", "Floating", "Maintenance / float charge reported by the monitor.", "purple"),
+    ("critical", "Critical", "Battery is in a critically low or alarm condition.", "error"),
+    ("low", "Low", "Battery charge is low and should be recharged soon.", "warning"),
+    ("normal", "Normal", "Battery condition is stable and ready for normal use.", "ok"),
+    ("charging", "Charging", "The monitor sees the battery under active charge.", "info"),
+    (
+        "floating",
+        "Floating",
+        "Battery is full and is being maintained at float charge.",
+        "purple",
+    ),
 )
 
 DEVICE_COLOR_HEX: dict[str, str] = {
@@ -241,6 +245,7 @@ def _soc_gauge_markup(
     soc_value: object,
     compact: bool = False,
     inner_html: str | None = None,
+    accent_css: str = "var(--accent-green)",
 ) -> str:
     soc_percent = min(max(_coerce_float(soc_value, 0.0), 0.0), 100.0)
     gauge_degrees = soc_percent * 3.6
@@ -259,7 +264,7 @@ def _soc_gauge_markup(
         )
     )
     return (
-        f'<div class="{gauge_class}" style="background: conic-gradient(var(--accent-green) '
+        f'<div class="{gauge_class}" style="background: conic-gradient({accent_css} '
         f"0deg {gauge_degrees}deg, rgba(191, 207, 198, 0.55) "
         f'{gauge_degrees}deg 360deg);">'
         f'<div class="{content_class}">{gauge_inner}</div>'
@@ -490,7 +495,7 @@ def _vehicle_summary(device: dict[str, object]) -> str:
         if vehicle_type:
             return vehicle_type_label(vehicle_type)
         return "Installed in a vehicle"
-    return "Bench / stationary battery"
+    return "Bench"
 
 
 def _device_icon_key(device: dict[str, object]) -> str:
@@ -821,7 +826,7 @@ def _add_device_form_html(
         '<div><label class="settings-label" for="battery-model-input">Battery model</label>'
         '<input id="battery-model-input" type="text" name="battery_model" '
         'autocomplete="off" placeholder="Blue Dynamic E44…"></div>'
-        '<div><label class="settings-label" for="battery-voltage-input">Nominal voltage</label>'
+        '<div><label class="settings-label" for="battery-voltage-input">Battery voltage</label>'
         '<select id="battery-voltage-input" name="battery_nominal_voltage">'
         f"{_battery_nominal_voltage_options()}</select></div>"
         '<div><label class="settings-label" for="battery-capacity-input">Capacity (Ah)</label>'
@@ -1124,59 +1129,79 @@ def _status_scale_markup(
         active_index = None
     tone = _status_visual_tone(normalized, connected=connected, error_code=error_code)
     state_label = _status_label(normalized, connected=connected, error_code=error_code)
-    fill_html = ""
-    marker_html = ""
+    active_segment_html = ""
     if active_index is not None:
-        marker_percent = ((active_index + 0.5) / len(PROTOCOL_STATUS_SCALE)) * 100.0
-        fill_width = f"{marker_percent:.1f}%"
-        fill_html = (
-            '<div class="status-scale-fill '
-            f'tone-{html.escape(tone)}" style="width:{fill_width}"></div>'
-        )
-        marker_html = (
-            f'<div class="status-scale-marker tone-{html.escape(tone)}" '
-            f'style="left:{marker_percent:.1f}%"></div>'
+        segment_width = 100.0 / len(PROTOCOL_STATUS_SCALE)
+        segment_left = active_index * segment_width
+        active_segment_html = (
+            '<div class="status-scale-active-segment '
+            f'tone-{html.escape(tone)}" style="left:{segment_left:.1f}%;'
+            f'width:{segment_width:.1f}%"></div>'
         )
     divider_html_parts: list[str] = []
+    region_html_parts: list[str] = []
+    region_width = 100.0 / len(PROTOCOL_STATUS_SCALE)
+    for index, (_key, label, description, segment_tone) in enumerate(PROTOCOL_STATUS_SCALE):
+        region_left = index * region_width
+        active_class = " active" if active_index == index else ""
+        region_html_parts.append(
+            '<div class="status-scale-region '
+            f'tone-{html.escape(segment_tone)}{active_class}" tabindex="0" '
+            f'style="left:{region_left:.1f}%;width:{region_width:.1f}%;" '
+            f'data-label="{html.escape(label)}" '
+            f'aria-label="Status range: {html.escape(label)}. {html.escape(description)}">'
+            f'<span class="status-scale-label">{html.escape(label)}</span>'
+            "</div>"
+        )
     for index in range(len(PROTOCOL_STATUS_SCALE) - 1):
         divider_percent = ((index + 1) / len(PROTOCOL_STATUS_SCALE)) * 100.0
         divider_html_parts.append(
             f'<div class="status-scale-divider" style="left:{divider_percent:.1f}%"></div>'
         )
     divider_html = "".join(divider_html_parts)
+    region_html = "".join(region_html_parts)
     scale_order = ", ".join(item[1] for item in PROTOCOL_STATUS_SCALE)
     return (
         '<div class="status-scale" role="img" '
         f'aria-label="BM200/BM6 protocol state order: {html.escape(scale_order)}. '
         f'Current state: {html.escape(state_label)}.">'
         '<div class="status-scale-track">'
-        f"{fill_html}"
+        f"{active_segment_html}"
+        f"{region_html}"
         f"{divider_html}"
-        f"{marker_html}"
         "</div>"
         "</div>"
     )
 
 
-def _device_status_explainer(summary: dict[str, object]) -> str:
+def _soc_progress_markup(*, soc_value: object, accent_css: str) -> str:
+    soc_percent = min(max(_coerce_float(soc_value, 0.0), 0.0), 100.0)
+    soc_text = html.escape(_format_number(soc_percent, digits=0, suffix="%"))
+    return (
+        '<div class="soc-progress">'
+        '<div class="soc-progress-header">'
+        '<span class="settings-label">State of Charge</span>'
+        f'<span class="soc-progress-value">{soc_text}</span>'
+        "</div>"
+        '<div class="soc-progress-track">'
+        f'<div class="soc-progress-fill" style="width:{soc_percent:.1f}%; '
+        f'background:{html.escape(accent_css)}"></div>'
+        "</div>"
+        "</div>"
+    )
+
+
+def _device_status_explainer(
+    summary: dict[str, object], *, accent_css: str = "var(--accent-green)"
+) -> str:
     state = str(summary.get("state", "unknown"))
     connected = bool(summary.get("connected", False))
     error_code = cast(str | None, summary.get("error_code"))
     error_detail = str(summary.get("error_detail", "") or "").strip()
-    label = _status_label(state, connected=connected, error_code=error_code)
-    kind = _status_kind(state, error_code=error_code, connected=connected)
     normalized = state.lower().strip()
-    protocol_code = PROTOCOL_STATE_CODES.get(normalized)
     protocol_item = next((item for item in PROTOCOL_STATUS_SCALE if item[0] == normalized), None)
     voltage = _format_number(summary.get("voltage"), digits=2, suffix=" V")
-    soc = _format_number(summary.get("soc"), digits=0, suffix="%")
     temperature = _format_number(summary.get("temperature"), digits=1, suffix=" C")
-    protocol_note = (
-        "This state comes directly from the BM200/BM6 monitor protocol. "
-        "BMGateway does not derive it from voltage, SoC, temperature, or a combined threshold."
-    )
-    runtime_note = "This state is produced by the gateway runtime instead of the monitor itself."
-    note = protocol_note if protocol_code is not None else runtime_note
     scale_html = ""
     description = "Gateway runtime state."
     if protocol_item is not None:
@@ -1191,27 +1216,24 @@ def _device_status_explainer(summary: dict[str, object]) -> str:
     chips: list[str] = []
     latest_sample = _display_timestamp(summary.get("last_seen", "unknown"))
     chips.append(f"<span class='pill-chip'>Latest sample {latest_sample}</span>")
-    if protocol_code is not None:
-        chips.append(f"<span class='pill-chip'>Protocol code {protocol_code}</span>")
     chips.append(f"<span class='pill-chip'>Voltage {html.escape(voltage)}</span>")
-    chips.append(f"<span class='pill-chip'>SoC {html.escape(soc)}</span>")
     if temperature != "-":
         chips.append(f"<span class='pill-chip'>Temperature {html.escape(temperature)}</span>")
     chips_html = "".join(chips)
+    soc_progress_html = _soc_progress_markup(soc_value=summary.get("soc"), accent_css=accent_css)
     return (
         '<div class="status-explainer">'
         '<div class="status-explainer-summary">'
         "<div>"
         "<div class='settings-label'>Reported Status</div>"
         "</div>"
-        f"{status_badge(label, kind=kind)}"
         "</div>"
         '<div class="status-explainer-body">'
+        f"{scale_html}"
         "<p class='status-explainer-copy'><strong>What it means:</strong> "
         f"{html.escape(description)}</p>"
-        f"<p class='status-explainer-copy'>{html.escape(note)}</p>"
+        f"{soc_progress_html}"
         f"<div class='chip-grid status-chip-grid'>{chips_html}</div>"
-        f"{scale_html}"
         "</div>"
         "</div>"
     )

@@ -9,6 +9,7 @@ Usage:
 Options:
   --repo-dir <path>               Checkout path. Default: $HOME/BMGateway
   --ref <git-ref>                 Optional branch, tag, or commit to checkout after update
+  --hostname <name>               Set the Pi hostname before finishing install
   --disable-web                   Do not enable the management web service
   --disable-home-assistant        Disable MQTT and Home Assistant in the installed config
   --enable-glances                Install and enable a Glances API service for Home Assistant
@@ -38,6 +39,49 @@ enable_glances=0
 enable_cockpit=0
 web_port="80"
 glances_port="61208"
+hostname_override=""
+
+set_system_hostname() {
+  local requested_hostname="$1"
+  local current_hostname
+
+  if [[ -z "${requested_hostname}" ]]; then
+    return
+  fi
+
+  current_hostname="$(hostname)"
+  if [[ "${requested_hostname}" == "${current_hostname}" ]]; then
+    return
+  fi
+
+  sudo hostnamectl set-hostname "${requested_hostname}"
+
+  if sudo test -f /etc/hosts; then
+    sudo python3 - <<'PY' "${requested_hostname}"
+from pathlib import Path
+import sys
+
+hostname = sys.argv[1]
+hosts_path = Path("/etc/hosts")
+lines = hosts_path.read_text(encoding="utf-8").splitlines()
+updated: list[str] = []
+replaced = False
+
+for line in lines:
+    stripped = line.strip()
+    if stripped.startswith("127.0.1.1"):
+        updated.append(f"127.0.1.1\t{hostname}")
+        replaced = True
+    else:
+        updated.append(line)
+
+if not replaced:
+    updated.append(f"127.0.1.1\t{hostname}")
+
+hosts_path.write_text("\n".join(updated) + "\n", encoding="utf-8")
+PY
+  fi
+}
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -51,6 +95,10 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --ref)
       git_ref="${2:?missing value for --ref}"
+      shift 2
+      ;;
+    --hostname)
+      hostname_override="${2:?missing value for --hostname}"
       shift 2
       ;;
     --skip-apt)
@@ -128,6 +176,8 @@ if [[ "${skip_apt}" -eq 0 ]]; then
   fi
   sudo apt-get install -y "${apt_packages[@]}"
 fi
+
+set_system_hostname "${hostname_override}"
 
 if [[ "${skip_uv}" -eq 0 ]] && ! command -v uv >/dev/null 2>&1; then
   installer_dir="$(mktemp -d)"

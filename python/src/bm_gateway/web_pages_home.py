@@ -9,7 +9,6 @@ from . import display_version
 from . import web_pages as shared
 from .web_ui import (
     app_document,
-    banner_strip,
     chart_card,
     chart_script,
     section_card,
@@ -38,6 +37,7 @@ def render_home_html(
         if not isinstance(device, dict):
             continue
         color_key = shared._device_color_key(device, fallback_index=index)
+        device_accent = shared._device_accent_color(device, fallback_index=index)
         device_id = str(device.get("id", ""))
         voltage_value = shared._format_number(device.get("voltage"), digits=2, suffix="V")
         voltage_text = html.escape(voltage_value)
@@ -81,6 +81,7 @@ def render_home_html(
             soc_value=device.get("soc"),
             compact=True,
             inner_html=gauge_inner,
+            accent_css=device_accent,
         )
         device_href = f"/device?device_id={quote(device_id)}"
         device_cards.append(
@@ -127,23 +128,22 @@ def render_home_html(
     chart_id = "battery-overview-chart"
     body = (
         top_header(
-            title="BMGateway Home",
-            eyebrow="Home",
+            title="BMGateway",
+            right=(
+                f'<div class="header-build-badge" translate="no">{html.escape(version_label)}</div>'
+            ),
         )
         + section_card(
             title="Battery Overview",
             subtitle="Touch the charge circle to open device details.",
             body=overview_scroller,
         )
-        + banner_strip(
-            "Bluetooth device status is shown directly on each card. Classic-only "
-            "or unavailable BLE adapters remain visible as controlled warnings.",
-            kind="warning",
-            trailing=(
-                '<a class="primary-button icon-button" href="/devices/new">'
-                '<span class="button-icon" aria-hidden="true">+</span>'
-                "<span>Add Device</span></a>"
-            ),
+        + (
+            '<section class="home-add-device-strip">'
+            '<a class="primary-button icon-button home-add-device-button" href="/devices/new">'
+            '<span class="button-icon" aria-hidden="true">+</span>'
+            "<span>Add Device</span></a>"
+            "</section>"
         )
         + chart_card(
             chart_id=chart_id,
@@ -158,7 +158,7 @@ def render_home_html(
         )
     )
     return app_document(
-        title="BMGateway Home",
+        title="BMGateway",
         body=body,
         active_nav="battery",
         primary_device_id=primary_device_id,

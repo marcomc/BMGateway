@@ -37,7 +37,7 @@ bm-gateway-web = "bm_gateway.web_cli:main"
 where = ["python/src"]
 
 [tool.setuptools.package-data]
-bm_gateway = ["assets/*.css", "assets/*.js"]
+bm_gateway = ["assets/*.css", "assets/*.js", "assets/*.svg", "assets/*.png", "assets/*.webmanifest"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

@@ -8,15 +8,7 @@ from urllib.parse import quote
 
 from . import display_version
 from . import web_pages as shared
-from .web_ui import (
-    app_document,
-    chart_card,
-    chart_script,
-    metric_tile,
-    section_card,
-    summary_card,
-    top_header,
-)
+from .web_ui import app_document, chart_card, chart_script, section_card, summary_card, top_header
 
 
 def render_device_html(
@@ -72,23 +64,22 @@ def render_device_html(
         daily_history=daily_history,
         monthly_history=monthly_history,
     )
-    voltage = shared._format_number(summary.get("voltage"), digits=2, suffix=" V")
-    temperature = shared._format_number(summary.get("temperature"), digits=1, suffix=" C")
-    rssi = summary.get("rssi")
-    signal_grade, _signal_percent, _signal_bars, _signal_rssi_text = shared._signal_quality(
-        rssi=rssi,
-        connected=bool(summary.get("connected", False)),
-        error_code=cast(str | None, summary.get("error_code")),
-    )
     vehicle_text = html.escape(shared._vehicle_summary(summary))
-    battery_meta_text = html.escape(shared._battery_metadata_summary(summary))
+    battery_meta_text = html.escape(shared._battery_metadata_summary(summary).replace(" · ", " "))
     chart_id = f"device-chart-{quote(device_id)}".replace("%", "")
     device_name = str(summary.get("name", device_id))
     device_color = shared._device_accent_color(summary)
+    battery_meta_summary = shared._battery_metadata_summary(summary).replace(" · ", " ")
+    vehicle_summary = shared._vehicle_summary(summary)
+    subtitle_lines: list[str] = []
+    if battery_meta_summary and battery_meta_summary != "Battery details not set":
+        subtitle_lines.append(battery_meta_summary)
+    if vehicle_summary and vehicle_summary != "Not set":
+        subtitle_lines.append(vehicle_summary)
     body = (
         top_header(
-            title=f"{summary.get('name', device_id)}",
-            eyebrow="Battery Detail",
+            title=device_name,
+            subtitle_lines=subtitle_lines,
             right=(
                 '<div class="hero-actions">'
                 f'<a class="secondary-button" href="/devices/edit?device_id={quote(device_id)}">'
@@ -97,48 +88,8 @@ def render_device_html(
         )
         + section_card(
             title="Battery Status",
-            body=shared._device_status_explainer(summary),
+            body=shared._device_status_explainer(summary, accent_css=device_color),
         )
-        + '<div class="hero-shell">'
-        + section_card(
-            title="State of Charge",
-            body=(
-                '<div class="soc-gauge-card">'
-                f"{shared._soc_gauge_markup(soc_value=summary.get('soc'))}"
-                "</div>"
-            ),
-            classes="hero-shell-primary",
-        )
-        + '<div class="hero-aside">'
-        + metric_tile(
-            label="Voltage",
-            value=voltage,
-            tone="blue",
-            subvalue="Latest live/device sample",
-        )
-        + metric_tile(
-            label="Temperature",
-            value=temperature,
-            tone="green",
-            subvalue="Recent raw sample",
-        )
-        + metric_tile(
-            label="Signal Quality",
-            value=signal_grade,
-            tone="orange",
-            detail_html=shared._signal_quality_detail_html(
-                rssi=rssi,
-                connected=bool(summary.get("connected", False)),
-                error_code=cast(str | None, summary.get("error_code")),
-            ),
-        )
-        + metric_tile(
-            label="Battery Health",
-            value="Stable" if summary.get("error_code") is None else "Needs attention",
-            tone="purple",
-            subvalue="Gateway-adapted replacement for vehicle-only tests",
-        )
-        + "</div></div>"
         + section_card(
             title="Runtime Status",
             body=(
@@ -149,7 +100,11 @@ def render_device_html(
                     classes="timestamp-summary",
                 )
                 + summary_card("Vehicle", vehicle_text)
-                + summary_card("Battery Metadata", battery_meta_text)
+                + summary_card(
+                    "Battery Metadata",
+                    battery_meta_text,
+                    classes="timestamp-summary metadata-summary",
+                )
                 + summary_card(
                     "Error Code",
                     html.escape(str(summary.get("error_code", "None"))),

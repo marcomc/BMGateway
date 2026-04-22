@@ -2,37 +2,40 @@
 
 ## Table of Contents
 
-- [Overview](#overview)
-- [Setup](#setup)
-- [Repository Assets](#repository-assets)
+- [Purpose](#purpose)
+- [Start Here](#start-here)
+- [Included Assets](#included-assets)
 - [CLI Support](#cli-support)
 
-## Overview
+## Purpose
 
-This directory owns the Home Assistant-facing setup for `BMGateway`.
+This directory contains the Home Assistant-facing assets and documentation for
+`BMGateway`.
 
-`BMGateway` uses Home Assistant's built-in MQTT integration and MQTT discovery.
-There is no separate custom integration to install for the normal setup path.
+`BMGateway` uses Home Assistant's built-in MQTT integration. There is no
+separate custom Home Assistant integration required for the normal setup path.
 
-## Setup
+## Start Here
 
-Use the canonical setup guide:
+Use these documents in order:
 
-- [setup.md](setup.md)
+1. [setup.md](setup.md)
+2. [contract.md](contract.md)
 
-## Repository Assets
+## Included Assets
 
-Current contents:
-
-- [contract.md](contract.md) for the MQTT topic and entity contract
-- [setup.md](setup.md) for the end-user setup flow
-- `packages/bm_gateway.yaml` for optional template helpers and startup logging
+- [setup.md](setup.md) for end-user setup
+- [contract.md](contract.md) for the MQTT topic/entity contract
+- `packages/bm_gateway.yaml` for optional Home Assistant helpers
 - `dashboards/bm_gateway.yaml` for a starter Lovelace dashboard
-- `discovery/` for exported example MQTT discovery payloads
+- `discovery/` for exported example discovery payloads
 
 ## CLI Support
 
-The Python CLI mirrors this contract through:
+The Python CLI mirrors the Home Assistant surface through:
 
 - `bm-gateway ha contract`
 - `bm-gateway ha discovery --output-dir home-assistant/discovery`
+
+For the main project entry point, go back to the root
+[README.md](../README.md).

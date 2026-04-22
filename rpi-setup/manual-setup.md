@@ -94,6 +94,22 @@ full appliance installation in one step:
 That is the recommended command once the repository is already present on the
 target machine.
 
+By default, `BMGateway` assumes the Raspberry Pi hostname is `bmgateway`, so
+the common Bonjour/mDNS address becomes:
+
+- `bmgateway.local`
+
+If you prefer a different `.local` hostname, set it before first deployment or
+pass it during bootstrap with:
+
+```bash
+./scripts/bootstrap-install.sh --hostname garage-gateway
+```
+
+That updates the system hostname before the installer prints the final service
+URLs, so the web UI and Cockpit addresses are emitted with
+`garage-gateway.local` instead of `bmgateway.local`.
+
 If you later publish the script at a reachable URL, the same bootstrap can be
 run without a pre-existing checkout:
 
@@ -117,6 +133,7 @@ Useful options:
 
 - `--disable-web`
 - `--disable-home-assistant`
+- `--hostname <name>`
 - `--enable-glances`
 - `--enable-cockpit`
 - `--skip-services`
@@ -182,7 +199,8 @@ Then, in Home Assistant:
 
 1. Open `Settings > Devices & services`.
 2. Add the `Glances` integration.
-3. Enter the Pi host, for example `bmgateway.local`.
+3. Enter the Pi host, for example `bmgateway.local` or your custom
+   `<hostname>.local`.
 4. Enter port `61208`.
 
 If you prefer the automated path, the bootstrap and service installers support
@@ -219,6 +237,9 @@ curl -k -I https://127.0.0.1:9090/
 Open:
 
 - [https://bmgateway.local:9090/](https://bmgateway.local:9090/)
+
+If you changed the hostname during bootstrap, replace `bmgateway.local` with
+your chosen `<hostname>.local`.
 
 Cockpit login uses a local system account and password. SSH keys alone are not
 enough for the web login flow.

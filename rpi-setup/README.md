@@ -44,6 +44,13 @@ The one-line bootstrap now installs the full appliance by default:
 - optional Cockpit HTTPS host administration on port `9090`
 - live-ready config with an empty device registry
 
+Default hostname behavior:
+
+- the documented default Raspberry Pi hostname is `bmgateway`
+- the default Bonjour/mDNS address is `bmgateway.local`
+- if you want a different `.local` name, use the hostname override documented
+  in [manual-setup.md](manual-setup.md)
+
 For repeat development deploys to an already bootstrapped host, use:
 
 ```bash

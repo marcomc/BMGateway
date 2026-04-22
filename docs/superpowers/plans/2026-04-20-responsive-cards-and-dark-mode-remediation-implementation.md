@@ -182,7 +182,7 @@ Record:
 Run:
 
 ```bash
-markdownlint --config /Users/mmassari/.markdownlint.json CHANGELOG.md web/README.md docs/superpowers/specs/2026-04-20-responsive-cards-and-dark-mode-remediation-design.md docs/superpowers/plans/2026-04-20-responsive-cards-and-dark-mode-remediation-implementation.md
+markdownlint --config .markdownlint.json CHANGELOG.md web/README.md docs/superpowers/specs/2026-04-20-responsive-cards-and-dark-mode-remediation-design.md docs/superpowers/plans/2026-04-20-responsive-cards-and-dark-mode-remediation-implementation.md
 ```
 
 Expected:
@@ -206,8 +206,8 @@ Expected:
 Run:
 
 ```bash
-make dev-deploy TARGET=admin@bmgateway.local
-ssh admin@bmgateway.local 'systemctl is-active bm-gateway.service bm-gateway-web.service'
+make dev-deploy TARGET=admin@host
+ssh admin@host 'systemctl is-active bm-gateway.service bm-gateway-web.service'
 ```
 
 Then capture fresh desktop and mobile screenshots of:

@@ -3,113 +3,114 @@
 ## Table of Contents
 
 - [Overview](#overview)
-- [Architecture](#architecture)
+- [Choose Your Path](#choose-your-path)
+- [What Is Included](#what-is-included)
 - [Repository Structure](#repository-structure)
-- [Quick Start](#quick-start)
-- [Documentation](#documentation)
+- [Documentation Map](#documentation-map)
 - [Development](#development)
-- [Roadmap](#roadmap)
+- [Release Status](#release-status)
+- [Credits And Attribution](#credits-and-attribution)
 - [License](#license)
 
 ## Overview
 
-`BMGateway` is a Raspberry Pi battery monitor gateway built as one shared
-Python codebase with two executables:
+`BMGateway` is a Raspberry Pi battery-monitor gateway for BM200/BM6-family
+devices.
 
-- `bm-gateway` for configuration, runtime collection, history inspection, and
-  Home Assistant publishing
-- `bm-gateway-web` for the optional local management web interface
+It ships as one Python codebase with two executables:
 
-The web UI is additive, not required. A runtime-only install is still a valid
-and supported appliance shape when you only need CLI access plus Home Assistant.
+- `bm-gateway` for runtime collection, configuration, history, and Home
+  Assistant publishing
+- `bm-gateway-web` for the optional local web application
 
-## Architecture
+The project is intentionally battery-first:
 
-The live project architecture is:
+- live polling from the Raspberry Pi
+- retained local history in SQLite
+- Home Assistant integration through MQTT discovery
+- a mobile-friendly local web UI for Home, History, Devices, and Settings
 
-- shared core code in `python/src/bm_gateway/`
-- runtime and Home Assistant surface through `bm-gateway`
-- optional web surface through `bm-gateway-web`
+## Choose Your Path
 
-This keeps config, BLE, SQLite, MQTT, and Home Assistant logic in one place
-instead of maintaining separate Python products with duplicated behavior.
+### I Want To Install It On A Raspberry Pi
 
-The authoritative boundary and migration decision lives in
-[docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md).
+Start here:
+
+- [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md)
+
+If you want to prepare the SD card from macOS first:
+
+- [rpi-setup/macos-imager-cli.md](rpi-setup/macos-imager-cli.md)
+
+### I Want To Connect It To Home Assistant
+
+Start here:
+
+- [home-assistant/setup.md](home-assistant/setup.md)
+
+Reference contract:
+
+- [home-assistant/contract.md](home-assistant/contract.md)
+
+### I Want To Develop Or Modify The Project
+
+Start here:
+
+- [python/README.md](python/README.md)
+- [docs/README.md](docs/README.md)
+
+## What Is Included
+
+- Packaged runtime CLI and web executable
+- Live BM200/BM6-family polling path
+- SQLite history with raw, daily, monthly, and yearly views
+- Optional Home Assistant MQTT discovery integration
+- Raspberry Pi bootstrap and `systemd` service installation
+- Local web app with:
+  - Home
+  - History
+  - Device Detail
+  - Devices
+  - Settings
+- Light/dark/system appearance modes
+- Per-device colors, badges, and battery metadata
+- Battery, fleet, history, and device charts
+
+For the first release summary, use [CHANGELOG.md](CHANGELOG.md).
 
 ## Repository Structure
 
 ```text
 .
-├── AGENTS.md
 ├── CHANGELOG.md
-├── Makefile
 ├── README.md
 ├── TODO.md
 ├── docs/
 ├── home-assistant/
-├── pyproject.toml
 ├── python/
 ├── rpi-setup/
-├── scripts/
 └── web/
 ```
 
-- `python/` contains the packaged application, tests, and example config
-- `home-assistant/` contains the MQTT contract and exported assets
-- `rpi-setup/` contains Raspberry Pi install, service, and operations guidance
-- `web/` contains web product notes and boundary documentation
-- `docs/` contains cross-cutting architecture, specs, and research
+- `python/` contains the packaged application and tests
+- `home-assistant/` contains the MQTT contract and Home Assistant assets
+- `rpi-setup/` contains Raspberry Pi installation and operations docs
+- `web/` contains the web product boundary notes
+- `docs/` contains architecture, research, and development notes
 
-## Quick Start
-
-### Local Development
-
-```bash
-make install-dev
-bm-gateway --config ./python/config/gateway.toml.example config validate
-bm-gateway --config ./python/config/gateway.toml.example run --once --dry-run --json
-bm-gateway-web --config ./python/config/gateway.toml.example --host 127.0.0.1 --port 8080
-```
-
-### Raspberry Pi Appliance Install
-
-If the repository is already present on the target host:
-
-```bash
-./scripts/bootstrap-install.sh
-```
-
-That bootstrap path installs the standalone runtime, config templates, runtime
-service, and optional web service. For the full appliance flow, service options,
-and host operations details, use
-[rpi-setup/manual-setup.md](rpi-setup/manual-setup.md).
-
-### Runtime and Web Commands
-
-- `bm-gateway config validate`
-- `bm-gateway devices list`
-- `bm-gateway ha contract`
-- `bm-gateway run --once --dry-run --json`
-- `bm-gateway history stats --json`
-- `bm-gateway-web --config /path/to/config.toml`
-- `bm-gateway-web serve --snapshot-file /path/to/latest_snapshot.json`
-- `bm-gateway-web render --snapshot-file /path/to/latest_snapshot.json`
-
-## Documentation
+## Documentation Map
 
 Use one canonical source per topic:
 
-| Topic | Canonical doc |
+| Topic | Canonical document |
 | --- | --- |
-| Architecture and migration plan | [docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md) |
-| Documentation index | [docs/README.md](docs/README.md) |
-| Runtime and packaged Python component | [python/README.md](python/README.md) |
+| First-release summary | [CHANGELOG.md](CHANGELOG.md) |
+| Active backlog | [TODO.md](TODO.md) |
+| Python package and contributor entry point | [python/README.md](python/README.md) |
+| Developer notes and architecture index | [docs/README.md](docs/README.md) |
+| Home Assistant setup | [home-assistant/setup.md](home-assistant/setup.md) |
 | Home Assistant MQTT contract | [home-assistant/contract.md](home-assistant/contract.md) |
-| Home Assistant setup flow | [home-assistant/setup.md](home-assistant/setup.md) |
-| Raspberry Pi appliance install | [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md) |
-| Raspberry Pi Imager CLI flow | [rpi-setup/macos-imager-cli.md](rpi-setup/macos-imager-cli.md) |
-| Hardware audit and service tuning | [rpi-setup/hardware-audit.md](rpi-setup/hardware-audit.md) |
+| Raspberry Pi installation | [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md) |
 | Web product boundary | [web/README.md](web/README.md) |
 
 ## Development
@@ -117,28 +118,60 @@ Use one canonical source per topic:
 Primary maintainer commands:
 
 ```bash
-make check
 make install-dev
+make check
 make dev-deploy TARGET=admin@host
 ```
 
-`make check` runs:
+The default quality gate is `make check`.
 
-- `uv run pytest -q`
-- `uv run ruff check python/src python/tests`
-- `uv run ruff format --check python/src python/tests`
-- `uv run mypy python/src python/tests`
-- repo Markdown linting
-- shell script linting
+## Release Status
 
-## Roadmap
+The current documented first release is:
 
-See [TODO.md](TODO.md) for the active backlog. Current themes are:
+- `0.1.0`
 
-- BM300 Pro support decisioning
-- richer degradation analytics
-- Home Assistant/MQTT resilience improvements
-- web security and hardening follow-up
+Use [CHANGELOG.md](CHANGELOG.md) for release content and [TODO.md](TODO.md) for
+work that is not shipped yet.
+
+## Credits And Attribution
+
+`BMGateway` is an original project, but it builds on upstream open-source
+software and protocol research that should be credited explicitly.
+
+### Open-Source Software Used
+
+- [Bleak](https://github.com/hbldh/bleak) by
+  [Henrik Blidh](https://github.com/hbldh) and contributors.
+  `BMGateway` uses `Bleak` as the Python BLE client/scanner foundation for the
+  Raspberry Pi live polling path. Thanks to the Bleak maintainers and
+  contributors for the library and surrounding troubleshooting knowledge.
+
+### Protocol / Reverse-Engineering References
+
+- BM6 reverse-engineering reference by
+  [tarball.ca](https://www.tarball.ca/posts/reverse-engineering-the-bm6-ble-battery-monitor/).
+  This informed parts of the BM6/BM200 protocol investigation. Thanks for the
+  published research.
+- BM6/Home Assistant community discussion:
+  [Home Assistant BM6 thread](https://community.home-assistant.io/t/bm6-battery-monitor-esphome/806239).
+  This helped validate practical behavior seen on live hardware. Thanks to the
+  community contributors for sharing findings.
+- BM2/BM6 community discussion:
+  [OpenMQTTGateway BM2 thread](https://community.openmqttgateway.com/t/omg-1-8-0-no-longer-gets-bm2-messages/3578).
+  This provided useful context during compatibility debugging. Thanks to the
+  contributors there as well.
+
+### Attribution Policy
+
+Whenever code, protocol logic, assets, or meaningful implementation ideas are
+adapted from other open-source projects in the future, they must be added to
+this section with:
+
+- the project name
+- a link to the canonical Git repository when available
+- the author or maintainer name when known
+- a short note explaining what `BMGateway` reused or was inspired by
 
 ## License
 

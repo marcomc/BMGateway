@@ -35,6 +35,12 @@ from .web_actions import (
     update_gateway_preferences,
     update_web_preferences,
 )
+from .web_assets import (
+    apple_touch_icon_bytes,
+    favicon_png_bytes,
+    favicon_svg_source,
+    web_manifest_source,
+)
 from .web_pages import (
     RECENT_CHART_HISTORY_LIMIT,
     _add_device_form_html,
@@ -148,6 +154,13 @@ def serve_management(
             self.end_headers()
             self.wfile.write(payload)
 
+        def _send_bytes(self, payload: bytes, *, content_type: str, status: int = 200) -> None:
+            self.send_response(status)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+
         def _load_current(self) -> tuple[AppConfig, dict[str, object], Path]:
             config = load_config(config_path)
             snapshot_path = state_file_path(config, state_dir=state_dir)
@@ -161,6 +174,25 @@ def serve_management(
             devices = load_device_registry(config.device_registry_path)
             serialized_devices = [device.to_dict() for device in devices]
             contract = build_contract(config, devices)
+
+            if parsed.path == "/favicon.svg":
+                self._send_bytes(
+                    favicon_svg_source().encode("utf-8"),
+                    content_type="image/svg+xml; charset=utf-8",
+                )
+                return
+            if parsed.path in {"/favicon.png", "/favicon.ico"}:
+                self._send_bytes(favicon_png_bytes(), content_type="image/png")
+                return
+            if parsed.path == "/apple-touch-icon.png":
+                self._send_bytes(apple_touch_icon_bytes(), content_type="image/png")
+                return
+            if parsed.path == "/site.webmanifest":
+                self._send_bytes(
+                    web_manifest_source().encode("utf-8"),
+                    content_type="application/manifest+json; charset=utf-8",
+                )
+                return
 
             if parsed.path == "/api/config":
                 config_text, devices_text = _config_and_registry_texts(config_path)
@@ -220,11 +252,26 @@ def serve_management(
                 device_id = params.get("device_id", [""])[0]
                 snapshot_devices = snapshot.get("devices", [])
                 snapshot_device: dict[str, object] | None = None
+                configured_device: dict[str, object] | None = next(
+                    (
+                        device
+                        for device in serialized_devices
+                        if str(device.get("id", "")) == device_id
+                    ),
+                    None,
+                )
                 if isinstance(snapshot_devices, list):
                     for device in snapshot_devices:
                         if isinstance(device, dict) and str(device.get("id", "")) == device_id:
                             snapshot_device = device
                             break
+                merged_device_summary: dict[str, object] | None = None
+                if configured_device is not None or snapshot_device is not None:
+                    merged_device_summary = {}
+                    if configured_device is not None:
+                        merged_device_summary.update(configured_device)
+                    if snapshot_device is not None:
+                        merged_device_summary.update(snapshot_device)
                 html = render_device_html(
                     device_id=device_id,
                     raw_history=fetch_recent_history(
@@ -248,7 +295,7 @@ def serve_management(
                         limit=10,
                     ),
                     analytics=fetch_degradation_report(database_path, device_id=device_id),
-                    device_summary=snapshot_device,
+                    device_summary=merged_device_summary,
                     show_chart_markers=config.web.show_chart_markers,
                     theme_preference=config.web.appearance,
                     default_chart_range=config.web.default_chart_range,

@@ -135,6 +135,23 @@ Before using that script in a real deployment, set:
 
 - `BMGATEWAY_REPO_URL`
 - optionally `BMGATEWAY_REPO_DIR`
+- optionally `BMGATEWAY_HOSTNAME` if you want a `.local` name other than the
+  default `bmgateway.local`
+
+Example:
+
+```bash
+BMGATEWAY_HOSTNAME=garage-gateway \
+./rpi-setup/scripts/macos-imager-cli.sh \
+  --image ~/Downloads/raspios-lite.img.xz \
+  --device /dev/disk4 \
+  --first-run-script ./rpi-setup/examples/imager/bm-gateway-first-run.sh \
+  --debug
+```
+
+That causes the first-run bootstrap to set the Pi hostname to
+`garage-gateway`, so the web UI becomes available at
+`garage-gateway.local`.
 
 The shipped default now points at:
 

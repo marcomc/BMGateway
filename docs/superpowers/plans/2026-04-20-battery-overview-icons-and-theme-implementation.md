@@ -476,7 +476,7 @@ Expected:
 Run:
 
 ```bash
-make dev-deploy TARGET=admin@bmgateway.local
+make dev-deploy TARGET=admin@host
 ```
 
 Expected:
@@ -488,10 +488,10 @@ Expected:
 Run:
 
 ```bash
-ssh admin@bmgateway.local 'systemctl is-active bm-gateway.service bm-gateway-web.service'
-ssh admin@bmgateway.local 'curl -fsS http://127.0.0.1/ | grep -E "battery-card-badge|data-theme-preference|Device Details" -n | head'
-ssh admin@bmgateway.local 'curl -fsS http://127.0.0.1/history | grep -E "history-device-card|battery-card-badge" -n | head'
-ssh admin@bmgateway.local 'curl -fsS "http://127.0.0.1/settings?edit=1" | grep -E "name=\"appearance\"|value=\"light\"|value=\"dark\"|value=\"system\"" -n'
+ssh admin@host 'systemctl is-active bm-gateway.service bm-gateway-web.service'
+ssh admin@host 'curl -fsS http://127.0.0.1/ | grep -E "battery-card-badge|data-theme-preference|Device Details" -n | head'
+ssh admin@host 'curl -fsS http://127.0.0.1/history | grep -E "history-device-card|battery-card-badge" -n | head'
+ssh admin@host 'curl -fsS "http://127.0.0.1/settings?edit=1" | grep -E "name=\"appearance\"|value=\"light\"|value=\"dark\"|value=\"system\"" -n'
 ```
 
 Expected:

@@ -1031,7 +1031,7 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
     assert 'name="settings_section" value="web"' in html
     assert 'name="settings_section" value="display"' in html
     assert 'action="/settings/gateway"' in html
-    assert __version__ in html
+    assert __version__ not in html
     assert "build" in html
 
 
@@ -1330,7 +1330,13 @@ def test_render_home_html_threads_appearance_to_document_root() -> None:
     )
 
     assert 'data-theme-preference="dark"' in html
-    assert "BMGateway Home" in html
+    assert "<h1>BMGateway</h1>" in html
+    assert "Bluetooth device status is shown directly on each card." not in html
+    assert 'class="header-build-badge"' in html
+    assert 'rel="icon" href="/favicon.png" sizes="32x32" type="image/png"' in html
+    assert 'rel="icon" href="/favicon.svg"' in html
+    assert 'rel="apple-touch-icon" href="/apple-touch-icon.png"' in html
+    assert 'rel="manifest" href="/site.webmanifest"' in html
 
 
 def test_render_battery_html_defaults_chart_to_seven_days_and_soc() -> None:
@@ -2128,32 +2134,47 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
             "error_code": None,
             "last_seen": "2026-04-18T12:30:00+02:00",
             "connected": True,
+            "battery": {
+                "brand": "NOCO",
+                "model": "NLP5",
+                "nominal_voltage": 12,
+                "capacity_ah": 5.0,
+                "production_year": 2025,
+            },
+            "installed_in_vehicle": False,
         },
     )
 
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
     assert "<script>alert(1)</script>" not in html
     assert "Historical Chart" in html
-    assert "Battery Health" in html
-    assert "Signal Quality" in html
-    assert "Good" in html
-    assert "58%" in html
-    assert "RSSI -71 dBm" in html
-    assert html.count("RSSI -71 dBm") == 1
+    assert "Battery Health" not in html
     assert "Last Seen" in html
     assert "summary-card timestamp-summary" in html
     assert "Battery Status" in html
     assert "Runtime Status" in html
     assert "Reported Status" in html
+    assert "<h1>BM200 House</h1>" in html
+    assert "NOCO NLP5 12 V 5.0 Ah 2025" in html
+    assert "Bench" in html
     assert "What it means:" in html
-    assert "This state comes directly from the BM200/BM6 monitor protocol." in html
-    assert "BMGateway does not derive it from voltage, SoC, temperature" in html
+    assert "Battery condition is stable and ready for normal use." in html
     assert "Latest sample" in html
-    assert "Protocol code 2" in html
+    assert "Protocol code 2" not in html
     assert "Critical, Low, Normal, Charging, Floating" in html
     assert "status-explainer" in html
-    assert "status-scale-fill" in html
+    assert "status-scale-active-segment" in html
+    assert "status-scale-label" in html
+    assert "Battery is full and is being maintained at float charge." in html
+    assert 'data-label="Normal"' in html
+    assert 'class="status-scale-region tone-ok active"' in html
+    assert "status-scale-marker" not in html
+    assert '<span class="status-badge ok">Normal</span>' not in html
+    assert "State of Charge" in html
+    assert "soc-progress-fill" in html
+    assert "background:#17c45a" in html
     assert "status-scale-divider" in html
+    assert html.index("status-scale-active-segment") < html.index("What it means:")
     assert "is the latest sample this device page is built from." not in html
     assert "Edit device" in html
     assert "/devices/edit?device_id=bm200_house" in html
@@ -2221,7 +2242,9 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "Error count" in html
     assert "Average voltage" in html
     assert "Average SoC" in html
-    assert "history-controls" in html
+    assert "chart-card-header" in html
+    assert "chart-metric-rail" in html
+    assert "chart-range-rail" in html
     assert '<a class="secondary-button" href="/">Battery</a>' not in html
     assert "Device Detail" not in html
     assert 'aria-current="page"' in html

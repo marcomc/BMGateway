@@ -322,9 +322,30 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         battery_page = (
             urllib.request.urlopen(base_url, timeout=RUNTIME_TIMEOUT_SECONDS).read().decode("utf-8")
         )
-        assert "BMGateway Home" in battery_page
+        assert "BMGateway" in battery_page
+        assert "BMGateway Home" not in battery_page
         assert "Add Device" in battery_page
         assert "All" in battery_page
+        favicon = (
+            urllib.request.urlopen(f"{base_url}/favicon.svg", timeout=RUNTIME_TIMEOUT_SECONDS)
+            .read()
+            .decode("utf-8")
+        )
+        assert "radialGradient" in favicon
+        png_favicon = urllib.request.urlopen(
+            f"{base_url}/favicon.png", timeout=RUNTIME_TIMEOUT_SECONDS
+        ).read()
+        assert png_favicon.startswith(b"\x89PNG\r\n\x1a\n")
+        icon = urllib.request.urlopen(
+            f"{base_url}/apple-touch-icon.png", timeout=RUNTIME_TIMEOUT_SECONDS
+        ).read()
+        assert icon.startswith(b"\x89PNG\r\n\x1a\n")
+        manifest = (
+            urllib.request.urlopen(f"{base_url}/site.webmanifest", timeout=RUNTIME_TIMEOUT_SECONDS)
+            .read()
+            .decode("utf-8")
+        )
+        assert '"name": "BMGateway"' in manifest
 
         management_page = (
             urllib.request.urlopen(f"{base_url}/management", timeout=RUNTIME_TIMEOUT_SECONDS)
@@ -363,9 +384,10 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
             .read()
             .decode("utf-8")
         )
-        assert "Battery Health" in device_page
         assert "Runtime Status" in device_page
         assert "Historical Chart" in device_page
+        assert "soc-progress-fill" in device_page
+        assert "Battery Health" not in device_page
 
         history_page = (
             urllib.request.urlopen(

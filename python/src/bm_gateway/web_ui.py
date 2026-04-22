@@ -26,20 +26,22 @@ def app_document(
     head_extra: str = "",
     script: str = "",
 ) -> str:
-    version_badge = (
-        f'<div class="app-version-badge" translate="no">{html.escape(version_label)}</div>'
-        if version_label
-        else ""
-    )
     theme_attr = (
         f' data-theme-preference="{html.escape(theme_preference)}"' if theme_preference else ""
     )
+    icon_links = """<link rel="icon" href="/favicon.png" sizes="32x32" type="image/png">
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">"""
     return f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{html.escape(title)}</title>
+    {icon_links}
     <style>
 {base_css()}
     </style>
@@ -47,7 +49,6 @@ def app_document(
   </head>
   <body{theme_attr}>
     <div class="app-shell">
-      {version_badge}
       <a class="skip-link" href="#main-content">Skip to main content</a>
       <main class="page-shell" id="main-content">
         {body}
@@ -68,10 +69,25 @@ def top_header(
     *,
     title: str,
     subtitle: str = "",
+    subtitle_lines: Iterable[str] | None = None,
     eyebrow: str = "",
     right: str = "",
 ) -> str:
-    return f'<header class="top-header"><div><h1>{html.escape(title)}</h1></div>{right}</header>'
+    subtitle_markup = ""
+    lines = [line.strip() for line in (subtitle_lines or ()) if line and line.strip()]
+    if not lines and subtitle:
+        lines = [subtitle.strip()]
+    if lines:
+        subtitle_markup = "".join(
+            f'<div class="header-subtitle-line">{html.escape(line)}</div>' for line in lines
+        )
+        subtitle_markup = f'<div class="header-subtitles">{subtitle_markup}</div>'
+    return (
+        '<header class="top-header"><div>'
+        f"<h1>{html.escape(title)}</h1>"
+        f"{subtitle_markup}"
+        f"</div>{right}</header>"
+    )
 
 
 def section_card(
@@ -477,14 +493,18 @@ def chart_card(
     )
     return (
         '<section class="chart-card">'
-        '<div class="section-title-row">'
-        "<div>"
+        '<div class="chart-card-header">'
+        '<div class="section-title-row chart-title-row">'
+        '<div class="chart-title-block">'
         f'<h2 class="section-title">{html.escape(title)}</h2>'
         f"{subtitle_html}"
         "</div>"
-        '<div class="history-controls">'
-        f'<div class="control-rail"><div class="control-segment range-strip">{range_buttons}</div></div>'
-        f'<div class="control-rail"><div class="control-segment tab-strip">{metric_buttons}</div></div>'
+        '<div class="control-rail chart-metric-rail">'
+        f'<div class="control-segment tab-strip">{metric_buttons}</div>'
+        "</div>"
+        "</div>"
+        '<div class="control-rail chart-range-rail">'
+        f'<div class="control-segment range-strip">{range_buttons}</div>'
         "</div>"
         "</div>"
         f'<div class="chart-legend">{legend_html}</div>'
