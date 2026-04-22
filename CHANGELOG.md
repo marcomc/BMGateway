@@ -77,6 +77,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   duplicate temperature line from the description, compressing battery brand /
   model / capacity onto one line, and scaling the SoC ring up again for better
   mobile readability.
+- Battery overview cards now use a circle-first Home layout: the SoC ring is
+  the full tap target, the old rectangular card shell is gone, badges now live
+  inside the ring, and the battery metadata line now includes nominal voltage.
+- Device add/edit flows now capture battery nominal voltage so Home and Devices
+  can show `6 V` / `12 V` / `24 V` style battery identity alongside capacity.
 - Web display settings now control the default chart range and chart metric for
   Battery, History, and Device Detail pages, with `7 days` as the shipped
   default range.
@@ -106,6 +111,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fleet Trend, History, and Device Detail chart selectors now expose visible
   day ranges of `1`, `3`, `5`, `7`, `30`, `90`, `1 year`, `2 years`, and
   `All`, and no longer show the `Recent raw` selector in the UI.
+- Chart tooltips now clamp within the visible chart frame instead of being
+  allowed to overflow off the page edge, and mobile chart frames now size to
+  the chart itself instead of leaving a large blank area underneath.
 - Settings summary `Actions` now includes recovery controls for restarting
   `bm-gateway.service`, restarting `bluetooth.service`, and scheduling a
   Raspberry Pi reboot.
@@ -276,3 +284,6 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   binary sensors for gateway/device connectivity plus proper units, device
   classes, and diagnostic categories, and the repository now includes a full
   Home Assistant setup guide without requiring a custom integration.
+- Page headers and section copy across the web UI were trimmed down so the
+  application uses less redundant descriptive text and preserves more working
+  space for controls and data.

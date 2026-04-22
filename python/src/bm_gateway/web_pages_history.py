@@ -88,10 +88,6 @@ def render_device_html(
     body = (
         top_header(
             title=f"{summary.get('name', device_id)}",
-            subtitle=(
-                f"Device detail for {device_id}. {vehicle_text}. Real history, "
-                "live runtime status, and gateway-focused health signals."
-            ),
             eyebrow="Battery Detail",
             right=(
                 '<div class="hero-actions">'
@@ -101,21 +97,11 @@ def render_device_html(
         )
         + section_card(
             title="Battery Status",
-            subtitle=(
-                "BM200/BM6 monitors can report protocol states like Critical, Low, "
-                "Normal, Charging, and Floating. Gateway-only states such as Offline, "
-                "Error, Disabled, or Unsupported are also surfaced when the runtime "
-                "cannot use a direct monitor state."
-            ),
             body=shared._device_status_explainer(summary),
         )
         + '<div class="hero-shell">'
         + section_card(
             title="State of Charge",
-            subtitle=(
-                "SoC remains the dominant focal metric, with vehicle-only "
-                "BM300 actions replaced by gateway health signals."
-            ),
             body=(
                 '<div class="soc-gauge-card">'
                 f"{shared._soc_gauge_markup(soc_value=summary.get('soc'))}"
@@ -155,9 +141,6 @@ def render_device_html(
         + "</div></div>"
         + section_card(
             title="Runtime Status",
-            subtitle=(
-                "These cards replace BM300 vehicle actions with gateway-relevant operational state."
-            ),
             body=(
                 '<div class="metrics-grid">'
                 + summary_card(
@@ -181,11 +164,7 @@ def render_device_html(
         + chart_card(
             chart_id=chart_id,
             title="Historical Chart",
-            subtitle=(
-                "Switch between voltage, SoC, and temperature without leaving "
-                "the page. Longer ranges prioritize rollups, recent ranges "
-                "keep raw samples visible."
-            ),
+            subtitle="",
             points=shared._chart_points(
                 raw_history,
                 daily_history,
@@ -200,10 +179,6 @@ def render_device_html(
         )
         + section_card(
             title="Trend Windows",
-            subtitle=(
-                "Rolling comparison windows stay visible, but as compact "
-                "product-grade insight cards instead of a dominant debug table."
-            ),
             body=(
                 '<div class="table-shell"><table><thead><tr><th>Days</th><th>Current Avg V</th>'
                 "<th>Previous Avg V</th><th>Delta V</th>"
@@ -213,10 +188,6 @@ def render_device_html(
         )
         + section_card(
             title="Yearly Summary",
-            subtitle=(
-                "Long-term rollups remain directly visible for degradation "
-                "tracking across seasons and years."
-            ),
             body=(
                 '<div class="table-shell"><table><thead><tr><th>Year</th><th>Samples</th>'
                 "<th>Avg V</th><th>Avg SoC</th><th>Error Count</th></tr></thead>"
@@ -269,7 +240,6 @@ def render_history_html(
     body = (
         top_header(
             title="History",
-            subtitle=("Chart-first history dashboard with calmer hierarchy."),
             eyebrow="History",
         )
         + shared._history_device_selector_html(
@@ -278,10 +248,6 @@ def render_history_html(
         )
         + section_card(
             title="Summary",
-            subtitle=(
-                "Valid samples, error pressure, and average device health are "
-                "surfaced before the raw rows."
-            ),
             body=(
                 '<div class="metrics-grid">'
                 + summary_card("Valid samples", summary["valid_samples"])
@@ -294,11 +260,7 @@ def render_history_html(
         + chart_card(
             chart_id=chart_id,
             title="History Chart",
-            subtitle=(
-                "Use the segmented control to switch between Voltage, SoC, and "
-                "Temperature. Range controls rebalance recent raw readings "
-                "against daily rollups."
-            ),
+            subtitle="",
             points=shared._chart_points(
                 raw_history,
                 daily_history,
@@ -386,10 +348,6 @@ def _render_history_sections(
         )
         + section_card(
             title="Daily Rollups",
-            subtitle=(
-                "Aggregated daily summaries for longer-range trend "
-                "interpretation and cleaner degradation analysis."
-            ),
             body=(
                 '<div class="table-shell"><table><thead><tr><th>Day</th><th>Samples</th>'
                 "<th>Min V</th><th>Max V</th>"
@@ -399,11 +357,6 @@ def _render_history_sections(
         )
         + section_card(
             title="Monthly Summaries",
-            subtitle=(
-                "Lower-frequency summaries remain accessible for long "
-                "retention windows without letting the raw error rows "
-                "dominate the page."
-            ),
             body=(
                 '<div class="table-shell"><table><thead><tr><th>Month</th><th>Samples</th>'
                 "<th>Min V</th><th>Max V</th>"

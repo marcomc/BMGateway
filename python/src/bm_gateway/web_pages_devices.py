@@ -66,10 +66,6 @@ def render_devices_html(
     body = (
         top_header(
             title="Devices",
-            subtitle=(
-                "Configured gateway devices shown as a compact list with "
-                "battery identity, badges, and a direct edit action."
-            ),
             eyebrow="Devices",
             right=(
                 '<div class="hero-actions">'
@@ -80,7 +76,6 @@ def render_devices_html(
         + banner
         + section_card(
             title="Configured Devices",
-            subtitle="Configured devices with their assigned overview colors.",
             body=(
                 f'<div class="device-list-rows">{"".join(rows)}</div>'
                 if rows
@@ -109,9 +104,6 @@ def render_add_device_html(
     body = (
         top_header(
             title="Add Device",
-            subtitle=(
-                "Register a new BM device without the configured-device list getting in the way."
-            ),
             eyebrow="Devices",
             right=(
                 '<div class="hero-actions">'
@@ -122,7 +114,6 @@ def render_add_device_html(
         + banner
         + section_card(
             title="New Device",
-            subtitle="Register new BM devices directly from the device registry.",
             body=shared._add_device_form_html(
                 selected_color_key=selected_color_key,
                 reserved_color_keys=reserved_color_keys,
@@ -179,6 +170,13 @@ def render_edit_device_html(
         vehicle_type = str(device.get("vehicle_type", ""))
     battery_brand = html.escape(str(battery_table.get("brand", "")))
     battery_model = html.escape(str(battery_table.get("model", "")))
+    battery_nominal_voltage = battery_table.get("nominal_voltage")
+    resolved_nominal_voltage = (
+        int(str(battery_nominal_voltage)) if battery_nominal_voltage not in (None, "") else None
+    )
+    nominal_voltage_options = shared._battery_nominal_voltage_options(
+        selected_voltage=resolved_nominal_voltage
+    )
     battery_capacity_ah = battery_table.get("capacity_ah")
     battery_production_year = battery_table.get("production_year")
     battery_capacity_text = (
@@ -209,16 +207,11 @@ def render_edit_device_html(
     body = (
         top_header(
             title="Edit Device",
-            subtitle=(
-                "Update the registry metadata, battery profile, and "
-                "installation context for this monitor."
-            ),
             eyebrow="Devices",
         )
         + banner
         + section_card(
             title=str(device.get("name", device_id)),
-            subtitle="Update the registry metadata and battery profile for this monitor.",
             body=(
                 '<form method="post" action="/devices/update" class="two-column-grid" '
                 'data-battery-config-form="true">'
@@ -282,6 +275,10 @@ def render_edit_device_html(
                 f'<input id="edit-battery-model-input" type="text" '
                 f'name="battery_model" value="{battery_model}" '
                 'autocomplete="off"></div>'
+                '<div><label class="settings-label" '
+                'for="edit-battery-voltage-input">Nominal voltage</label>'
+                '<select id="edit-battery-voltage-input" name="battery_nominal_voltage">'
+                f"{nominal_voltage_options}</select></div>"
                 '<div><label class="settings-label" '
                 'for="edit-battery-capacity-input">Capacity (Ah)</label>'
                 f'<input id="edit-battery-capacity-input" type="number" step="0.1" '

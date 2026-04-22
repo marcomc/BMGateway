@@ -238,7 +238,6 @@ def test_render_reboot_pending_html_wrapper_delegates() -> None:
     html = render_reboot_pending_html_wrapper(theme_preference="light")
 
     assert "BMGateway Reboot" in html
-    assert "Automatic status checks run every few seconds." in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -414,6 +413,7 @@ def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_p
         vehicle_type="motorcycle",
         battery_brand="Yuasa",
         battery_model="YTX20L-BS",
+        battery_nominal_voltage=12,
         battery_capacity_ah=18.0,
         battery_production_year=2025,
     )
@@ -428,6 +428,7 @@ def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_p
     assert devices[0].vehicle_type == "motorcycle"
     assert devices[0].battery_brand == "Yuasa"
     assert devices[0].battery_model == "YTX20L-BS"
+    assert devices[0].battery_nominal_voltage == 12
     assert devices[0].battery_capacity_ah == 18.0
     assert devices[0].battery_production_year == 2025
 
@@ -1302,8 +1303,9 @@ def test_render_battery_html_renders_device_icon() -> None:
     assert "battery-card-status" in html
     assert "battery-card-status-inline" in html
     assert "Battery OK" in html
-    assert "Touch a device card to open its details." in html
     assert "battery-overview-card-link" in html
+    assert "battery-overview-orb" in html
+    assert "home-orb-layout" in html
     assert "Open device" not in html
     assert "All" in html
     assert "battery-overview-scroller" in html
@@ -1423,7 +1425,7 @@ def test_render_battery_html_prefers_registry_name_over_stale_snapshot_name() ->
     assert "Ancell BM200" not in html
 
 
-def test_render_battery_html_places_badge_outside_gauge_and_identity_below() -> None:
+def test_render_battery_html_places_identity_and_badges_inside_home_orb() -> None:
     from bm_gateway.web import render_battery_html
 
     html = render_battery_html(
@@ -1458,22 +1460,22 @@ def test_render_battery_html_places_badge_outside_gauge_and_identity_below() -> 
         legend=[],
     )
 
-    top_index = html.index("<div class='battery-card-top'>")
-    hero_index = html.index("<div class='battery-tile-hero'>")
-    link_close_index = html.index("</a>", hero_index)
+    link_index = html.index("battery-overview-card-link")
+    link_close_index = html.index("</a>", link_index)
+    orb_slice = html[link_index:link_close_index]
 
-    assert top_index < hero_index < link_close_index
-    assert "device-badge-stack" in html[top_index:hero_index]
-    assert "battery-card-gauge-value" in html[hero_index:link_close_index]
-    assert "battery-card-status-inline" in html[hero_index:link_close_index]
-    assert "battery-card-gauge-label" in html[hero_index:link_close_index]
-    assert "battery-card-gauge-subvalue" in html[hero_index:link_close_index]
-    assert "meta-name" in html[top_index:hero_index]
-    assert "meta-context" in html[top_index:hero_index]
-    assert "battery-card-reading" not in html[top_index:hero_index]
+    assert "home-orb-head" in orb_slice
+    assert "home-orb-badges" in orb_slice
+    assert "home-orb-center" in orb_slice
+    assert "battery-card-gauge-value" in orb_slice
+    assert "battery-card-status-inline" in orb_slice
+    assert "battery-card-gauge-label" in orb_slice
+    assert "battery-card-gauge-subvalue" in orb_slice
+    assert "meta-name" in orb_slice
+    assert "meta-context" in orb_slice
 
 
-def test_render_battery_html_uses_compact_home_metadata_line_without_year() -> None:
+def test_render_battery_html_uses_compact_home_metadata_line_with_nominal_voltage() -> None:
     from bm_gateway.web import render_battery_html
 
     html = render_battery_html(
@@ -1491,6 +1493,7 @@ def test_render_battery_html_uses_compact_home_metadata_line_without_year() -> N
                     "battery": {
                         "brand": "NOCO",
                         "model": "NLP5",
+                        "nominal_voltage": 12,
                         "capacity_ah": 5.0,
                         "production_year": 2025,
                     },
@@ -1507,6 +1510,7 @@ def test_render_battery_html_uses_compact_home_metadata_line_without_year() -> N
                 "battery": {
                     "brand": "NOCO",
                     "model": "NLP5",
+                    "nominal_voltage": 12,
                     "capacity_ah": 5.0,
                     "production_year": 2025,
                 },
@@ -1516,22 +1520,22 @@ def test_render_battery_html_uses_compact_home_metadata_line_without_year() -> N
         legend=[],
     )
 
-    assert "NOCO NLP5 5.0 Ah" in html
+    assert "NOCO NLP5 12 V 5.0 Ah" in html
     assert "2025" not in html
 
 
 def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     css = base_css()
 
-    assert ".battery-card-top {" in css
     assert ".battery-overview-card {" in css
     assert ".battery-overview-card-link {" in css
+    assert ".battery-overview-orb {" in css
+    assert ".home-orb-layout {" in css
+    assert ".home-orb-head {" in css
     assert ".device-badge-stack {" in css
     assert ".device-icon-frame {" in css
     assert "aspect-ratio: 1 / 1;" in css
-    assert ".battery-tile-hero {" in css
     assert ".battery-card-badge {" in css
-    assert "position: static;" in css
     assert "place-items: center;" in css
     assert "justify-content: flex-start;" in css
     assert ".history-device-badge {" in css
@@ -1626,16 +1630,16 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert ".device-icon-frame.history-device-badge {" in css
     assert "inline-size: 40px;" in css
     assert "max-inline-size: 40px;" in css
-    assert "width: 28px;" in css
-    assert "height: 28px;" in css
+    assert "width: 22px;" in css
+    assert "height: 22px;" in css
     assert "width: 30px;" in css
     assert "height: 30px;" in css
     assert "width: 24px;" in css
     assert "height: 24px;" in css
-    assert "font-size: clamp(1.42rem, 2.65vw, 1.96rem);" in css
-    assert "font-size: 0.58rem;" in css
-    assert "font-size: 0.54rem;" in css
-    assert "font-size: 2rem;" in css
+    assert "font-size: clamp(2rem, 5vw, 2.9rem);" in css
+    assert "font-size: 0.78rem;" in css
+    assert "font-size: 0.82rem;" in css
+    assert "font-size: 2.2rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
     assert ".battery-overview-page.is-single-page.page-two-cards," in css
 
@@ -2243,7 +2247,6 @@ def test_render_history_html_shows_device_selector_and_quick_switch_links() -> N
     )
 
     assert "History Device" in html
-    assert "Switch the history surface between configured batteries" in html
     assert 'action="/history"' not in html
     assert 'name="device_id"' not in html
     assert 'href="/history?device_id=bm200_house"' in html
@@ -2378,7 +2381,6 @@ def test_render_history_html_handles_no_configured_devices() -> None:
     )
 
     assert "No Devices Configured" in html
-    assert "Add a battery monitor before using the history dashboard." in html
     assert 'href="/devices/new"' in html
     assert "History Device" not in html
 
@@ -2446,7 +2448,6 @@ def test_render_add_device_html_is_dedicated_creation_surface() -> None:
     html = render_add_device_html(message="Validation failed")
 
     assert "Add Device" in html
-    assert "Register a new BM device without the configured-device list getting in the way." in html
     assert 'action="/devices/add"' in html
     assert 'href="/devices"' in html
     assert "Configured Devices" not in html
@@ -2466,6 +2467,7 @@ def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
     assert ">ATV / Quad<" in html
     assert 'name="battery_brand"' in html
     assert 'name="battery_model"' in html
+    assert 'name="battery_nominal_voltage"' in html
     assert 'name="battery_capacity_ah"' in html
     assert 'name="battery_production_year"' in html
     assert 'name="device_id"' not in html
@@ -2503,6 +2505,7 @@ def test_render_edit_device_html_prefills_device_fields() -> None:
                 "custom_soc_mode": "intelligent_algorithm",
                 "brand": "Yuasa",
                 "model": "YTX20L-BS",
+                "nominal_voltage": 12,
                 "capacity_ah": 18.0,
                 "production_year": 2025,
                 "custom_voltage_curve": [
@@ -2527,6 +2530,8 @@ def test_render_edit_device_html_prefills_device_fields() -> None:
     assert 'name="vehicle_type"' in html
     assert "Yuasa" in html
     assert "YTX20L-BS" in html
+    assert 'name="battery_nominal_voltage"' in html
+    assert ">12 V</option>" in html
     assert 'name="battery_capacity_ah"' in html
     assert 'name="battery_production_year"' in html
     assert 'name="icon_key"' not in html

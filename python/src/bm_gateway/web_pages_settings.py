@@ -512,10 +512,6 @@ def render_settings_html(
     body = (
         top_header(
             title="Settings",
-            subtitle=(
-                "Read the current gateway configuration first, then unlock the "
-                "same page when you want to edit it."
-            ),
             eyebrow="Settings",
             right=(
                 '<div class="hero-actions">'
@@ -533,7 +529,6 @@ def render_settings_html(
             if edit_mode
             else section_card(
                 title="Gateway Overview",
-                subtitle="Operational Surfaces",
                 body=overview_cards,
             )
         )
@@ -542,30 +537,23 @@ def render_settings_html(
             if edit_mode
             else section_card(
                 title="Actions",
-                subtitle=(
-                    "Run the collector, prune retained history, and inspect the live JSON APIs."
-                ),
                 body=actions_body,
             )
         )
         + section_card(
             title="Gateway Settings",
-            subtitle="Current runtime and integration summary",
             body=gateway_section_body,
         )
         + section_card(
             title="Web Service",
-            subtitle="Current management UI binding",
             body=web_section_body,
         )
         + section_card(
             title="Display Settings",
-            subtitle="Current chart rendering preferences",
             body=display_section_body,
         )
         + section_card(
             title="Bluetooth",
-            subtitle="Adapter selection and BLE timeout tuning.",
             body=bluetooth_section_body,
         )
         + (
@@ -573,10 +561,6 @@ def render_settings_html(
             if edit_mode
             else section_card(
                 title="Home Assistant Contract",
-                subtitle=(
-                    "Keep the MQTT surface easy to scan without losing the exact "
-                    "state and discovery topics."
-                ),
                 body=(
                     settings_row("Gateway state topic", gateway_state_topic)
                     + settings_row("Gateway discovery topic", gateway_discovery_topic)
@@ -589,10 +573,6 @@ def render_settings_html(
             if edit_mode
             else section_card(
                 title="Storage Summary",
-                subtitle=(
-                    "Recent raw samples and long-term rollups stay available, but "
-                    "the page emphasizes storage posture first."
-                ),
                 body=(
                     '<div class="table-shell"><table><thead><tr><th>Device</th><th>Raw samples</th>'
                     "<th>Raw first</th><th>Raw last</th>"
@@ -605,7 +585,6 @@ def render_settings_html(
     if not edit_mode:
         body += section_card(
             title="Configuration Files",
-            subtitle="Reference paths and raw configuration snapshots.",
             body=(
                 settings_row("Config path", str(config.source_path))
                 + settings_row("Device registry path", str(config.device_registry_path))
@@ -690,15 +669,9 @@ def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
 </script>
 """
     body = top_header(
-        eyebrow="Settings",
         title="Reboot In Progress",
-        subtitle=(
-            "The Raspberry Pi is restarting. Keep this page open and it will return "
-            "to Settings automatically when the gateway responds again."
-        ),
     ) + section_card(
         title="Gateway Restart",
-        subtitle="Automatic status checks run every few seconds.",
         body=(
             '<div class="metrics-grid compact-overview-grid">'
             + summary_card(

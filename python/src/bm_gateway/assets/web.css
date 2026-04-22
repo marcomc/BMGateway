@@ -728,17 +728,20 @@ details summary::-webkit-details-marker { display: none; }
 }
 .battery-overview-card {
   display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
+  align-items: center;
+  justify-content: center;
   aspect-ratio: 1 / 1;
   min-height: 0;
-  padding: 0.68rem;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
 }
 .battery-overview-card-link {
-  display: flex;
-  flex: 1 1 auto;
-  min-height: 100%;
-  flex-direction: column;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
   color: inherit;
   text-decoration: none;
 }
@@ -806,6 +809,36 @@ details summary::-webkit-details-marker { display: none; }
   align-items: start;
   gap: 0.3rem;
 }
+.battery-overview-orb-shell {
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.battery-overview-orb {
+  padding: 0;
+  border-radius: 999px;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+.battery-overview-orb .battery-card-gauge {
+  width: 100%;
+  flex-basis: auto;
+  box-shadow:
+    0 0 36px var(--card-accent-glow),
+    0 12px 26px color-mix(in srgb, var(--card-accent) 16%, transparent);
+}
+.battery-overview-orb .battery-card-gauge::after {
+  inset: 11%;
+  background: radial-gradient(
+    circle at 30% 24%,
+    color-mix(in srgb, var(--card-accent) 28%, var(--gauge-inner-start)) 0%,
+    color-mix(in srgb, var(--card-accent) 14%, var(--gauge-inner-mid)) 48%,
+    var(--gauge-inner-ring) 68%,
+    var(--gauge-inner-end) 100%
+  );
+}
 .battery-tile-hero {
   display: grid;
   place-items: center;
@@ -826,6 +859,10 @@ details summary::-webkit-details-marker { display: none; }
 }
 .device-badge-stack.compact {
   gap: 0.18rem;
+}
+.device-badge-stack.home-orb-badges {
+  gap: 0.12rem;
+  align-items: flex-end;
 }
 .device-badge-stack .badge-placeholder {
   visibility: hidden;
@@ -913,21 +950,48 @@ details summary::-webkit-details-marker { display: none; }
   text-align: center;
   color: var(--gauge-text-strong);
 }
+.home-orb-layout {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  grid-template-rows: auto 1fr;
+  padding: 0.92rem;
+  text-align: left;
+}
+.home-orb-head {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.45rem;
+}
+.home-orb-copy {
+  gap: 0.14rem;
+}
+.home-orb-center {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.1rem;
+  min-height: 0;
+  padding: 0.28rem 0 0.1rem;
+  text-align: center;
+}
 .battery-card-gauge-label {
   color: var(--gauge-text-soft);
-  font-size: 0.58rem;
+  font-size: 0.78rem;
   font-weight: 700;
   line-height: 1;
 }
 .battery-card-gauge-value {
-  font-size: clamp(1.42rem, 2.65vw, 1.96rem);
+  font-size: clamp(2rem, 5vw, 2.9rem);
   font-weight: 800;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .battery-card-gauge-subvalue {
   color: var(--gauge-text-soft);
-  font-size: 0.54rem;
+  font-size: 0.82rem;
   font-weight: 700;
   line-height: 1;
 }
@@ -950,7 +1014,7 @@ details summary::-webkit-details-marker { display: none; }
 }
 .battery-overview-card .meta-name {
   color: var(--text-primary);
-  font-size: 0.72rem;
+  font-size: 1rem;
   font-weight: 700;
   line-height: 1.08;
   width: 100%;
@@ -960,7 +1024,7 @@ details summary::-webkit-details-marker { display: none; }
   text-overflow: ellipsis;
 }
 .battery-overview-card .meta-context {
-  font-size: 0.58rem;
+  font-size: 0.9rem;
   width: 100%;
   max-width: none;
   white-space: nowrap;
@@ -968,7 +1032,7 @@ details summary::-webkit-details-marker { display: none; }
   text-overflow: ellipsis;
 }
 .battery-overview-card .battery-card-meta-extra {
-  font-size: 0.68rem;
+  font-size: 0.88rem;
   width: 100%;
   max-width: none;
   white-space: nowrap;
@@ -986,7 +1050,7 @@ details summary::-webkit-details-marker { display: none; }
 .battery-card-status-inline {
   margin-top: 0;
   gap: 0.18rem;
-  font-size: 0.34rem;
+  font-size: 0.62rem;
   line-height: 1.1;
 }
 .battery-card-status.ok { color: var(--state-ok); }
@@ -1210,14 +1274,21 @@ details summary::-webkit-details-marker { display: none; }
   gap: 0.55rem;
 }
 .button-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 1.55rem;
-  height: 1.55rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 1.85rem;
+  width: 1.85rem;
+  height: 1.85rem;
+  min-width: 1.85rem;
+  min-height: 1.85rem;
+  aspect-ratio: 1 / 1;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.22);
-  font-size: 2rem;
-  line-height: 1;
+  font-size: 2.2rem;
+  font-weight: 400;
+  line-height: 0.82;
+  transform: translateY(-0.02em);
 }
 .api-chip,
 .pill-chip {
@@ -1378,14 +1449,18 @@ details summary::-webkit-details-marker { display: none; }
 }
 .chart-frame {
   position: relative;
-  min-height: 320px;
   padding: 1rem;
   border-radius: var(--radius-lg);
   background: var(--bg-chart);
   border: 1px solid var(--border-soft);
 }
 .chart-canvas {
-  min-height: 100%;
+  min-height: 0;
+}
+.chart-canvas svg {
+  display: block;
+  width: 100%;
+  height: auto;
 }
 .chart-frame.is-pannable {
   cursor: grab;
@@ -1490,6 +1565,7 @@ details summary::-webkit-details-marker { display: none; }
   position: absolute;
   z-index: 2;
   min-width: 170px;
+  max-width: min(280px, calc(100% - 16px));
   padding: 0.75rem 0.85rem;
   border: 1px solid var(--chart-tooltip-border);
   border-radius: 14px;
@@ -1500,7 +1576,6 @@ details summary::-webkit-details-marker { display: none; }
   line-height: 1.4;
   pointer-events: none;
   opacity: 0;
-  transform: translate(-50%, calc(-100% - 16px));
   transition: opacity 120ms ease;
   backdrop-filter: blur(14px);
 }
@@ -1865,7 +1940,7 @@ details summary::-webkit-details-marker { display: none; }
   }
   .battery-overview-card {
     min-height: 0;
-    padding: 0.58rem;
+    padding: 0;
   }
   .device-grid {
     grid-template-columns: repeat(2, minmax(148px, 1fr));
@@ -1902,65 +1977,60 @@ details summary::-webkit-details-marker { display: none; }
   .battery-overview-arrow {
     flex: 1 1 0;
   }
-  .battery-card-top {
-    gap: 0.24rem;
-  }
   .device-badge-stack {
     gap: 0.14rem;
   }
-  .battery-card-gauge {
-    flex-basis: 95px;
-    width: 95px;
+  .battery-overview-orb .battery-card-gauge {
+    width: 100%;
   }
-  .battery-tile-hero {
-    min-height: 95px;
-    margin: 0.08rem auto 0.14rem;
+  .home-orb-layout {
+    padding: 0.72rem;
   }
   .device-icon-frame.battery-tile-icon {
-    flex: 0 0 28px;
-    flex-basis: 28px;
-    inline-size: 28px;
-    block-size: 28px;
-    width: 28px;
-    height: 28px;
-    min-width: 28px;
-    min-height: 28px;
-    max-width: 28px;
-    max-height: 28px;
-    min-inline-size: 28px;
-    min-block-size: 28px;
-    max-inline-size: 28px;
-    max-block-size: 28px;
+    flex: 0 0 22px;
+    flex-basis: 22px;
+    inline-size: 22px;
+    block-size: 22px;
+    width: 22px;
+    height: 22px;
+    min-width: 22px;
+    min-height: 22px;
+    max-width: 22px;
+    max-height: 22px;
+    min-inline-size: 22px;
+    min-block-size: 22px;
+    max-inline-size: 22px;
+    max-block-size: 22px;
     aspect-ratio: 1 / 1;
     border-radius: 8px;
     align-self: flex-start;
     overflow: hidden;
   }
   .device-icon-frame.battery-tile-icon .device-icon-svg {
-    width: 24px;
-    height: 24px;
+    width: 20px;
+    height: 20px;
   }
   .battery-card-copy {
     gap: 0.06rem;
   }
   .battery-overview-card .meta-name {
-    font-size: 0.62rem;
+    font-size: 0.76rem;
   }
   .battery-overview-card .meta-context,
   .battery-overview-card .battery-card-meta-extra {
-    font-size: 0.58rem;
+    font-size: 0.66rem;
   }
   .battery-card-gauge-value {
-    font-size: 1.22rem;
+    font-size: 1.5rem;
   }
   .battery-card-gauge-label {
-    font-size: 0.46rem;
+    font-size: 0.62rem;
   }
   .battery-card-gauge-subvalue {
-    font-size: 0.42rem;
+    font-size: 0.62rem;
   }
   .battery-card-status-inline {
-    font-size: 0.3rem;
+    font-size: 0.48rem;
   }
   .battery-card-status-icon {
     width: 7px;
@@ -2029,7 +2099,15 @@ details summary::-webkit-details-marker { display: none; }
   }
   .chart-frame {
     padding: 0.8rem;
-    min-height: 260px;
+    min-height: 0;
+  }
+  .chart-tooltip {
+    min-width: 150px;
+    max-width: min(220px, calc(100% - 12px));
+    padding: 0.65rem 0.72rem;
+  }
+  .chart-tooltip .tooltip-series-value {
+    font-size: 0.92rem;
   }
   .chart-legend,
   .chart-meta {

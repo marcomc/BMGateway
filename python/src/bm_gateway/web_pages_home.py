@@ -13,7 +13,6 @@ from .web_ui import (
     chart_card,
     chart_script,
     section_card,
-    tone_card,
     top_header,
 )
 
@@ -46,22 +45,13 @@ def render_home_html(
             shared._format_number(device.get("temperature"), digits=1, suffix="°C")
         )
         device_name_text = html.escape(str(device.get("name", device_id)))
-        battery_table = device.get("battery")
-        battery_table = battery_table if isinstance(battery_table, dict) else {}
-        battery_meta_parts = [
-            str(battery_table.get("brand", "")).strip(),
-            str(battery_table.get("model", "")).strip(),
-        ]
-        capacity = battery_table.get("capacity_ah")
-        if capacity not in (None, ""):
-            battery_meta_parts.append(f"{capacity} Ah")
-        compact_battery_summary = " ".join(part for part in battery_meta_parts if part)
         badge_stack_markup = shared._device_badge_stack_markup(
             device,
             badge_class="battery-tile-icon battery-card-badge",
+            stack_class="home-orb-badges",
         )
         vehicle_text = html.escape(shared._vehicle_summary(device))
-        battery_summary = compact_battery_summary or shared._battery_metadata_summary(device)
+        battery_summary = shared._battery_home_metadata_summary(device)
         battery_meta_html = (
             ""
             if battery_summary == "Battery details not set"
@@ -70,10 +60,22 @@ def render_home_html(
         circle_status = shared._battery_card_status_markup(device, inline=True)
         gauge_value = html.escape(shared._format_number(device.get("soc"), digits=0, suffix="%"))
         gauge_inner = (
+            '<div class="home-orb-layout">'
+            '<div class="home-orb-head">'
+            '<div class="device-card-copy battery-card-copy home-orb-copy">'
+            f"<div class='meta meta-name'>{device_name_text}</div>"
+            f"<div class='meta meta-context'>{vehicle_text}</div>"
+            f"{battery_meta_html}"
+            "</div>"
+            f"{badge_stack_markup}"
+            "</div>"
+            '<div class="home-orb-center">'
             f'<div class="battery-card-gauge-value">{gauge_value}</div>'
             f"{circle_status}"
             f'<div class="battery-card-gauge-label">{temperature_text}</div>'
             f'<div class="battery-card-gauge-subvalue">{voltage_text}</div>'
+            "</div>"
+            "</div>"
         )
         gauge_markup = shared._soc_gauge_markup(
             soc_value=device.get("soc"),
@@ -82,27 +84,13 @@ def render_home_html(
         )
         device_href = f"/device?device_id={quote(device_id)}"
         device_cards.append(
-            tone_card(
-                (
-                    f"<a class='battery-overview-card-link' href='{device_href}' "
-                    f"aria-label='Open details for {device_name_text}'>"
-                    "<div class='battery-card-top'>"
-                    "<div class='device-card-copy battery-card-copy'>"
-                    f"<div class='meta meta-name'>{device_name_text}</div>"
-                    f"<div class='meta meta-context'>{vehicle_text}</div>"
-                    f"{battery_meta_html}"
-                    "</div>"
-                    f"{badge_stack_markup}"
-                    "</div>"
-                    "<div class='battery-tile-hero'>"
-                    f"{gauge_markup}"
-                    "</div>"
-                    "</a>"
-                ),
-                tone=color_key,
-                extra_class="battery-overview-card",
-                style=shared._tone_card_style(color_key),
-            )
+            f"<article class='battery-overview-card battery-overview-orb-shell'>"
+            f"<a class='battery-overview-card-link battery-overview-orb tone-card {color_key}' "
+            f"href='{device_href}' aria-label='Open details for {device_name_text}' "
+            f"style='{shared._tone_card_style(color_key)}'>"
+            f"{gauge_markup}"
+            "</a>"
+            "</article>"
         )
     overview_pages = shared._chunk_overview_cards(
         device_cards,
@@ -140,19 +128,11 @@ def render_home_html(
     body = (
         top_header(
             title="BMGateway Home",
-            subtitle=(
-                "Live battery overview with BM300-style card hierarchy, "
-                "direct device entry points, and a calmer cross-device chart."
-            ),
             eyebrow="Home",
         )
         + section_card(
             title="Battery Overview",
-            subtitle=(
-                "The default landing page mirrors the mobile app journey: "
-                "check live state first, then dive into device detail or history. "
-                "Touch a device card to open its details."
-            ),
+            subtitle="Touch the charge circle to open device details.",
             body=overview_scroller,
         )
         + banner_strip(
@@ -168,11 +148,7 @@ def render_home_html(
         + chart_card(
             chart_id=chart_id,
             title="Fleet Trend",
-            subtitle=(
-                "Historical fleet chart with multi-device overlays, calmer "
-                "axis rhythm, and the same metric switching model used "
-                "throughout the app."
-            ),
+            subtitle="",
             points=chart_points,
             range_options=shared._visible_chart_range_options(),
             default_range=resolved_default_chart_range,

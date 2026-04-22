@@ -393,8 +393,30 @@
       + `<div class="tooltip-series-list">${{rows}}</div>`
     );
     tooltip.classList.add("visible");
-    tooltip.style.left = `${{(primary.point.x / chart.width) * 100}}%`;
-    tooltip.style.top = `${{(Math.min(...entries.map((entry) => entry.point.y)) / chart.height) * 100}}%`;
+    const svg = frame.querySelector("svg");
+    if (!svg) {{
+      return;
+    }}
+    const frameRect = frame.getBoundingClientRect();
+    const svgRect = svg.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const pointX = (primary.point.x / chart.width) * svgRect.width + (svgRect.left - frameRect.left);
+    const pointY = (
+      (Math.min(...entries.map((entry) => entry.point.y)) / chart.height) * svgRect.height
+    ) + (svgRect.top - frameRect.top);
+    const margin = 8;
+    const desiredLeft = pointX - (tooltipRect.width / 2);
+    const clampedLeft = Math.max(
+      margin,
+      Math.min(desiredLeft, frame.clientWidth - tooltipRect.width - margin),
+    );
+    const preferredTop = pointY - tooltipRect.height - 16;
+    const fallbackBelow = pointY + 16;
+    const clampedTop = preferredTop < margin
+      ? Math.min(fallbackBelow, frame.clientHeight - tooltipRect.height - margin)
+      : Math.max(margin, Math.min(preferredTop, frame.clientHeight - tooltipRect.height - margin));
+    tooltip.style.left = `${{clampedLeft}}px`;
+    tooltip.style.top = `${{clampedTop}}px`;
   }}
   function hideTooltip(frame) {{
     const tooltip = frame.querySelector(".chart-tooltip");

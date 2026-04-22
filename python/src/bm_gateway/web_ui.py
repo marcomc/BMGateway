@@ -71,18 +71,7 @@ def top_header(
     eyebrow: str = "",
     right: str = "",
 ) -> str:
-    eyebrow_html = f'<div class="eyebrow">{html.escape(eyebrow)}</div>' if eyebrow else ""
-    subtitle_html = f"<p>{html.escape(subtitle)}</p>" if subtitle else ""
-    return (
-        '<header class="top-header">'
-        "<div>"
-        f"{eyebrow_html}"
-        f"<h1>{html.escape(title)}</h1>"
-        f"{subtitle_html}"
-        "</div>"
-        f"{right}"
-        "</header>"
-    )
+    return f'<header class="top-header"><div><h1>{html.escape(title)}</h1></div>{right}</header>'
 
 
 def section_card(
@@ -94,19 +83,17 @@ def section_card(
     classes: str = "",
 ) -> str:
     if title:
+        subtitle_html = (
+            f'<div class="section-subtitle">{html.escape(subtitle)}</div>' if subtitle else ""
+        )
         header = (
             '<div class="section-title-row">'
             "<div>"
             f'<h2 class="section-title">{html.escape(title)}</h2>'
-            f'<div class="section-subtitle">{html.escape(subtitle)}</div>'
-            if subtitle
-            else ""
+            f"{subtitle_html}"
+            "</div>"
+            f"{right}</div>"
         )
-        if subtitle:
-            header += "</div>"
-        else:
-            header += "</div>"
-        header += f"{right}</div>"
     else:
         header = ""
     return f'<section class="{_join_classes("section-card", classes)}">{header}{body}</section>'
@@ -485,12 +472,15 @@ def chart_card(
             ("temperature", "Temperature"),
         )
     )
+    subtitle_html = (
+        f'<div class="section-subtitle">{html.escape(subtitle)}</div>' if subtitle else ""
+    )
     return (
         '<section class="chart-card">'
         '<div class="section-title-row">'
         "<div>"
         f'<h2 class="section-title">{html.escape(title)}</h2>'
-        f'<div class="section-subtitle">{html.escape(subtitle)}</div>'
+        f"{subtitle_html}"
         "</div>"
         '<div class="history-controls">'
         f'<div class="control-rail"><div class="control-segment range-strip">{range_buttons}</div></div>'

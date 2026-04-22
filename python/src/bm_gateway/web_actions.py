@@ -89,6 +89,7 @@ def add_device_from_form(
     vehicle_type: str = "",
     battery_brand: str = "",
     battery_model: str = "",
+    battery_nominal_voltage: int | None = None,
     battery_capacity_ah: float | None = None,
     battery_production_year: int | None = None,
 ) -> list[str]:
@@ -131,6 +132,7 @@ def add_device_from_form(
             vehicle_type=vehicle_type.strip() if installed_in_vehicle else "",
             battery_brand=battery_brand.strip(),
             battery_model=battery_model.strip(),
+            battery_nominal_voltage=battery_nominal_voltage,
             battery_capacity_ah=battery_capacity_ah,
             battery_production_year=battery_production_year,
         )
@@ -168,6 +170,7 @@ def update_device_from_form(
     vehicle_type: str,
     battery_brand: str,
     battery_model: str,
+    battery_nominal_voltage: int | None,
     battery_capacity_ah: float | None,
     battery_production_year: int | None,
 ) -> list[str]:
@@ -200,6 +203,7 @@ def update_device_from_form(
                     vehicle_type=vehicle_type.strip() if installed_in_vehicle else "",
                     battery_brand=battery_brand.strip(),
                     battery_model=battery_model.strip(),
+                    battery_nominal_voltage=battery_nominal_voltage,
                     battery_capacity_ah=battery_capacity_ah,
                     battery_production_year=battery_production_year,
                 )
@@ -238,6 +242,7 @@ def update_device_icon(*, config_path: Path, device_id: str, icon_key: str) -> l
         vehicle_type=target.vehicle_type,
         battery_brand=target.battery_brand,
         battery_model=target.battery_model,
+        battery_nominal_voltage=target.battery_nominal_voltage,
         battery_capacity_ah=target.battery_capacity_ah,
         battery_production_year=target.battery_production_year,
     )

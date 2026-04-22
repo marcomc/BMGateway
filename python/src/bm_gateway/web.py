@@ -482,6 +482,10 @@ def serve_management(
                     vehicle_type=_string_from_form(form, "vehicle_type"),
                     battery_brand=_string_from_form(form, "battery_brand"),
                     battery_model=_string_from_form(form, "battery_model"),
+                    battery_nominal_voltage=_optional_int_from_form(
+                        form,
+                        "battery_nominal_voltage",
+                    ),
                     battery_capacity_ah=_optional_float_from_form(form, "battery_capacity_ah"),
                     battery_production_year=_optional_int_from_form(
                         form,
@@ -528,6 +532,10 @@ def serve_management(
                     vehicle_type=_string_from_form(form, "vehicle_type"),
                     battery_brand=_string_from_form(form, "battery_brand"),
                     battery_model=_string_from_form(form, "battery_model"),
+                    battery_nominal_voltage=_optional_int_from_form(
+                        form,
+                        "battery_nominal_voltage",
+                    ),
                     battery_capacity_ah=_optional_float_from_form(form, "battery_capacity_ah"),
                     battery_production_year=_optional_int_from_form(
                         form,
@@ -559,6 +567,10 @@ def serve_management(
                                 )[0],
                                 "brand": _string_from_form(form, "battery_brand"),
                                 "model": _string_from_form(form, "battery_model"),
+                                "nominal_voltage": _optional_int_from_form(
+                                    form,
+                                    "battery_nominal_voltage",
+                                ),
                                 "capacity_ah": _optional_float_from_form(
                                     form,
                                     "battery_capacity_ah",

@@ -122,6 +122,7 @@ class Device:
     vehicle_type: str = ""
     battery_brand: str = ""
     battery_model: str = ""
+    battery_nominal_voltage: int | None = None
     battery_capacity_ah: float | None = None
     battery_production_year: int | None = None
 
@@ -140,6 +141,7 @@ class Device:
             "vehicle_type": self.vehicle_type,
             "battery_brand": self.battery_brand,
             "battery_model": self.battery_model,
+            "battery_nominal_voltage": self.battery_nominal_voltage,
             "battery_capacity_ah": self.battery_capacity_ah,
             "battery_production_year": self.battery_production_year,
             "vehicle": {
@@ -166,6 +168,7 @@ class Device:
                 ],
                 "brand": self.battery_brand,
                 "model": self.battery_model,
+                "nominal_voltage": self.battery_nominal_voltage,
                 "capacity_ah": self.battery_capacity_ah,
                 "production_year": self.battery_production_year,
             },
@@ -331,6 +334,11 @@ def load_device_registry(path: Path) -> list[Device]:
                 vehicle_type=str(item.get("vehicle_type", "")).strip(),
                 battery_brand=str(battery_table.get("brand", "")).strip(),
                 battery_model=str(battery_table.get("model", "")).strip(),
+                battery_nominal_voltage=(
+                    int(battery_table["nominal_voltage"])
+                    if battery_table.get("nominal_voltage") not in (None, "")
+                    else None
+                ),
                 battery_capacity_ah=(
                     float(battery_table["capacity_ah"])
                     if battery_table.get("capacity_ah") not in (None, "")
@@ -371,6 +379,8 @@ def write_device_registry(path: Path, devices: list[Device]) -> None:
             lines.append(f"brand = {_toml_string(device.battery_brand)}")
         if device.battery_model:
             lines.append(f"model = {_toml_string(device.battery_model)}")
+        if device.battery_nominal_voltage is not None:
+            lines.append(f"nominal_voltage = {device.battery_nominal_voltage}")
         if device.battery_capacity_ah is not None:
             lines.append(f"capacity_ah = {device.battery_capacity_ah:g}")
         if device.battery_production_year is not None:
@@ -458,6 +468,11 @@ def validate_devices(devices: list[Device]) -> list[str]:
             errors.append(
                 f"device {device.id or '<unknown>'} vehicle_type requires "
                 "installed_in_vehicle = true"
+            )
+
+        if device.battery_nominal_voltage is not None and device.battery_nominal_voltage <= 0:
+            errors.append(
+                f"device {device.id or '<unknown>'} battery.nominal_voltage must be positive"
             )
 
         if device.battery_capacity_ah is not None and device.battery_capacity_ah <= 0:

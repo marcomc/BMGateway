@@ -28,6 +28,7 @@ def test_write_and_load_device_registry_round_trips_battery_metadata(tmp_path: P
             vehicle_type="motorcycle",
             battery_brand="Ancell",
             battery_model="BM200 AGM",
+            battery_nominal_voltage=12,
             battery_capacity_ah=18.0,
             battery_production_year=2025,
         )
@@ -98,11 +99,13 @@ def test_validate_devices_rejects_invalid_battery_metadata() -> None:
                 type="bm200",
                 name="Ancell BM200",
                 mac="3C:AB:72:82:86:EA",
+                battery_nominal_voltage=-12,
                 battery_capacity_ah=-1,
                 battery_production_year=1900,
             )
         ]
     )
 
+    assert any("nominal_voltage" in error for error in errors)
     assert any("capacity_ah" in error for error in errors)
     assert any("production_year" in error for error in errors)

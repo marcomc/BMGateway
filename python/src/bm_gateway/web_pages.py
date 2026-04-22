@@ -159,7 +159,6 @@ def _history_device_selector_html(
     if not configured_devices:
         return section_card(
             title="No Devices Configured",
-            subtitle="Add a battery monitor before using the history dashboard.",
             body=(
                 "<div class='inline-actions'>"
                 '<a class="primary-button" href="/devices/new">Add Device</a>'
@@ -200,7 +199,6 @@ def _history_device_selector_html(
         )
     return section_card(
         title="History Device",
-        subtitle="Switch the history surface between configured batteries.",
         body=f'<div class="device-grid history-device-grid">{"".join(device_cards)}</div>',
     )
 
@@ -451,13 +449,33 @@ def _battery_metadata_summary(device: dict[str, object]) -> str:
         str(battery_table.get("brand", "")).strip(),
         str(battery_table.get("model", "")).strip(),
     ]
+    nominal_voltage = battery_table.get("nominal_voltage")
     capacity = battery_table.get("capacity_ah")
     year = battery_table.get("production_year")
+    if nominal_voltage not in (None, ""):
+        parts.append(f"{nominal_voltage} V")
     if capacity not in (None, ""):
         parts.append(f"{capacity} Ah")
     if year not in (None, ""):
         parts.append(str(year))
     summary = " · ".join(part for part in parts if part)
+    return summary or "Battery details not set"
+
+
+def _battery_home_metadata_summary(device: dict[str, object]) -> str:
+    battery = device.get("battery")
+    battery_table = battery if isinstance(battery, dict) else {}
+    parts = [
+        str(battery_table.get("brand", "")).strip(),
+        str(battery_table.get("model", "")).strip(),
+    ]
+    nominal_voltage = battery_table.get("nominal_voltage")
+    capacity = battery_table.get("capacity_ah")
+    if nominal_voltage not in (None, ""):
+        parts.append(f"{nominal_voltage} V")
+    if capacity not in (None, ""):
+        parts.append(f"{capacity} Ah")
+    summary = " ".join(part for part in parts if part)
     return summary or "Battery details not set"
 
 
@@ -803,6 +821,9 @@ def _add_device_form_html(
         '<div><label class="settings-label" for="battery-model-input">Battery model</label>'
         '<input id="battery-model-input" type="text" name="battery_model" '
         'autocomplete="off" placeholder="Blue Dynamic E44…"></div>'
+        '<div><label class="settings-label" for="battery-voltage-input">Nominal voltage</label>'
+        '<select id="battery-voltage-input" name="battery_nominal_voltage">'
+        f"{_battery_nominal_voltage_options()}</select></div>"
         '<div><label class="settings-label" for="battery-capacity-input">Capacity (Ah)</label>'
         '<input id="battery-capacity-input" type="number" step="0.1" min="0" '
         'name="battery_capacity_ah" inputmode="decimal" placeholder="95"></div>'
@@ -903,6 +924,15 @@ def _color_key_control_html(
         )
         + "</select></div>"
     )
+
+
+def _battery_nominal_voltage_options(*, selected_voltage: int | None = None) -> str:
+    options = ["<option value=''>Select nominal voltage</option>"]
+    for value in (6, 12, 24, 48):
+        options.append(
+            f"<option value='{value}'{_selected_attr(value == selected_voltage)}>{value} V</option>"
+        )
+    return "".join(options)
 
 
 TOGGLE_LABEL_STYLE = "display:flex;justify-content:flex-start;gap:0.55rem;align-items:center"
