@@ -34,6 +34,7 @@ from .web_ui import (
     button,
     device_icon,
     section_card,
+    status_badge,
 )
 
 PROTOCOL_STATE_CODES: dict[str, int] = {
@@ -1084,7 +1085,9 @@ def _status_kind(state: str, error_code: str | None = None, connected: bool = Tr
 
 def _status_label(state: str, *, connected: bool, error_code: str | None) -> str:
     normalized = state.lower().strip()
-    if not connected or error_code == "device_not_found" or normalized == "offline":
+    if error_code == "device_not_found":
+        return "Unable to connect"
+    if not connected or normalized == "offline":
         return "Offline"
     if normalized == "charging":
         return "Charging"
@@ -1200,10 +1203,13 @@ def _device_status_explainer(
     error_detail = str(summary.get("error_detail", "") or "").strip()
     normalized = state.lower().strip()
     protocol_item = next((item for item in PROTOCOL_STATUS_SCALE if item[0] == normalized), None)
+    label = _status_label(state, connected=connected, error_code=error_code)
+    kind = _status_kind(state, error_code=error_code, connected=connected)
     voltage = _format_number(summary.get("voltage"), digits=2, suffix=" V")
     temperature = _format_number(summary.get("temperature"), digits=1, suffix=" C")
     scale_html = ""
     description = "Gateway runtime state."
+    summary_badge_html = ""
     if protocol_item is not None:
         description = protocol_item[2]
         scale_html = _status_scale_markup(
@@ -1213,6 +1219,9 @@ def _device_status_explainer(
         )
     elif error_detail:
         description = error_detail
+        summary_badge_html = status_badge(label, kind=kind)
+    else:
+        summary_badge_html = status_badge(label, kind=kind)
     chips: list[str] = []
     latest_sample = _display_timestamp(summary.get("last_seen", "unknown"))
     chips.append(f"<span class='pill-chip'>Latest sample {latest_sample}</span>")
@@ -1227,6 +1236,7 @@ def _device_status_explainer(
         "<div>"
         "<div class='settings-label'>Reported Status</div>"
         "</div>"
+        f"{summary_badge_html}"
         "</div>"
         '<div class="status-explainer-body">'
         f"{scale_html}"

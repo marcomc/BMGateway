@@ -2027,6 +2027,42 @@ def test_render_battery_html_shows_connection_failure_as_red_warning() -> None:
     assert "No recent sample" not in html
 
 
+def test_render_device_html_keeps_reported_status_badge_for_offline_state() -> None:
+    html = render_device_html(
+        device_id="bm_offline",
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+        yearly_history=[],
+        analytics={"windows": []},
+        device_summary={
+            "name": "Offline Battery",
+            "soc": 0,
+            "voltage": 0.0,
+            "temperature": None,
+            "rssi": None,
+            "state": "offline",
+            "error_code": "device_not_found",
+            "error_detail": "No BLE advertisement seen during the scan window.",
+            "last_seen": "2026-04-22T16:30:00+02:00",
+            "connected": False,
+            "battery": {
+                "brand": "NOCO",
+                "model": "NLP5",
+                "nominal_voltage": 12,
+                "capacity_ah": 5.0,
+                "production_year": 2025,
+            },
+            "installed_in_vehicle": False,
+        },
+    )
+
+    assert "Reported Status" in html
+    assert '<span class="status-badge offline">Unable to connect</span>' in html
+    assert '<div class="status-scale" role="img"' not in html
+    assert "No BLE advertisement seen during the scan window." in html
+
+
 def test_chart_points_ignore_error_rows_and_empty_raw_samples() -> None:
     points = _chart_points(
         raw_history=[
