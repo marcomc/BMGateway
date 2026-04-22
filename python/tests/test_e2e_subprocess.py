@@ -322,7 +322,7 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         battery_page = (
             urllib.request.urlopen(base_url, timeout=RUNTIME_TIMEOUT_SECONDS).read().decode("utf-8")
         )
-        assert "BMGateway Battery" in battery_page
+        assert "BMGateway Home" in battery_page
         assert "Add Device" in battery_page
         assert "All" in battery_page
 

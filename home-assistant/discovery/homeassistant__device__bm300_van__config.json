@@ -1,51 +1,109 @@
 {
   "cmps": {
-    "connected": {
+    "availability_reason": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:lan-disconnect",
+      "name": "Availability Reason",
       "p": "sensor",
       "state_topic": "bm_gateway/devices/bm300_van/state",
+      "unique_id": "bm300_van_availability_reason",
+      "value_template": "{{ value_json.availability_reason }}"
+    },
+    "connected": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "device_class": "connectivity",
+      "entity_category": "diagnostic",
+      "name": "Connected",
+      "p": "binary_sensor",
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "bm_gateway/devices/bm300_van/state",
       "unique_id": "bm300_van_connected",
-      "value_template": "{{ value_json.connected }}"
+      "value_template": "{{ 'ON' if value_json.connected else 'OFF' }}"
+    },
+    "error_code": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:alert-circle-outline",
+      "name": "Error Code",
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm300_van/state",
+      "unique_id": "bm300_van_error_code",
+      "value_template": "{{ value_json.error_code }}"
     },
     "last_seen": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "device_class": "timestamp",
+      "entity_category": "diagnostic",
+      "name": "Last Seen",
       "p": "sensor",
       "state_topic": "bm_gateway/devices/bm300_van/state",
       "unique_id": "bm300_van_last_seen",
       "value_template": "{{ value_json.last_seen }}"
     },
     "rssi": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "device_class": "signal_strength",
+      "entity_category": "diagnostic",
+      "name": "RSSI",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm300_van/state",
       "unique_id": "bm300_van_rssi",
+      "unit_of_measurement": "dBm",
       "value_template": "{{ value_json.rssi }}"
     },
     "soc": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "device_class": "battery",
+      "name": "State of Charge",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm300_van/state",
+      "suggested_display_precision": 0,
       "unique_id": "bm300_van_soc",
+      "unit_of_measurement": "%",
       "value_template": "{{ value_json.soc }}"
     },
     "state": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "icon": "mdi:car-battery",
+      "name": "Reported State",
       "p": "sensor",
       "state_topic": "bm_gateway/devices/bm300_van/state",
       "unique_id": "bm300_van_state",
       "value_template": "{{ value_json.state }}"
     },
     "temperature": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "device_class": "temperature",
+      "name": "Temperature",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm300_van/state",
+      "suggested_display_precision": 1,
       "unique_id": "bm300_van_temperature",
+      "unit_of_measurement": "\u00b0C",
       "value_template": "{{ value_json.temperature }}"
     },
     "voltage": {
+      "availability_topic": "bm_gateway/devices/bm300_van/availability",
+      "device_class": "voltage",
+      "name": "Voltage",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm300_van/state",
+      "suggested_display_precision": 2,
       "unique_id": "bm300_van_voltage",
+      "unit_of_measurement": "V",
       "value_template": "{{ value_json.voltage }}"
     }
   },
   "dev": {
     "ids": "bm300_van",
-    "mdl": "bm300pro",
+    "mdl": "BM300PRO",
+    "mf": "BMGateway",
     "name": "BM300 Van",
     "sw": "0.1.0"
   },

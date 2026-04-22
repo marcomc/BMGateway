@@ -8,7 +8,7 @@ This directory contains the packaged Python implementation for `BMGateway`.
 - `src/bm_gateway/web.py` is the HTTP/service entrypoint for the web process
 - `src/bm_gateway/web_pages.py` is the compatibility surface for shared web
   rendering helpers plus page-render dispatch
-- `src/bm_gateway/web_pages_battery.py` contains Battery overview rendering
+- `src/bm_gateway/web_pages_home.py` contains Home overview rendering
 - `src/bm_gateway/web_pages_devices.py` contains Devices and device-form rendering
 - `src/bm_gateway/web_pages_history.py` contains History and Device Detail rendering
 - `src/bm_gateway/web_pages_settings.py` contains Settings and Gateway-management rendering
@@ -96,7 +96,11 @@ The device registry supports:
   installation
 - host bootstrap uses `../scripts/bootstrap-install.sh`
 - the runtime supports both fake and live `bm200` polling paths
-- live `bm200` history retrieval is not wired yet, so long-term history is
-  still built from per-cycle state snapshots
+- imported archive rows are merged into chart queries without duplicating
+  matching live timestamps, and the runtime can now plan reconnect backfill
+  attempts for the existing BM200 history path
+- BM6-family live archive retrieval is still incomplete on real hardware; the
+  current devices poll correctly but do not yet answer the shipped BM200
+  history commands
 - subprocess coverage exercises `bm-gateway`, `bm-gateway-web`, and
   `python -m bm_gateway`

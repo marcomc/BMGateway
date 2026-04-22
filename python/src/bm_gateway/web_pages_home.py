@@ -1,4 +1,4 @@
-"""Battery overview page rendering for the BMGateway web interface."""
+"""Home page rendering for the BMGateway web interface."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ from .web_ui import (
 )
 
 
-def render_battery_html(
+def render_home_html(
     *,
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
@@ -46,13 +46,22 @@ def render_battery_html(
             shared._format_number(device.get("temperature"), digits=1, suffix="°C")
         )
         device_name_text = html.escape(str(device.get("name", device_id)))
-        reading_text = f"Temperature {temperature_text}"
+        battery_table = device.get("battery")
+        battery_table = battery_table if isinstance(battery_table, dict) else {}
+        battery_meta_parts = [
+            str(battery_table.get("brand", "")).strip(),
+            str(battery_table.get("model", "")).strip(),
+        ]
+        capacity = battery_table.get("capacity_ah")
+        if capacity not in (None, ""):
+            battery_meta_parts.append(f"{capacity} Ah")
+        compact_battery_summary = " ".join(part for part in battery_meta_parts if part)
         badge_stack_markup = shared._device_badge_stack_markup(
             device,
             badge_class="battery-tile-icon battery-card-badge",
         )
         vehicle_text = html.escape(shared._vehicle_summary(device))
-        battery_summary = shared._battery_metadata_summary(device)
+        battery_summary = compact_battery_summary or shared._battery_metadata_summary(device)
         battery_meta_html = (
             ""
             if battery_summary == "Battery details not set"
@@ -63,21 +72,24 @@ def render_battery_html(
         gauge_inner = (
             f'<div class="battery-card-gauge-value">{gauge_value}</div>'
             f"{circle_status}"
-            f'<div class="battery-card-gauge-label">{voltage_text}</div>'
+            f'<div class="battery-card-gauge-label">{temperature_text}</div>'
+            f'<div class="battery-card-gauge-subvalue">{voltage_text}</div>'
         )
         gauge_markup = shared._soc_gauge_markup(
             soc_value=device.get("soc"),
             compact=True,
             inner_html=gauge_inner,
         )
+        device_href = f"/device?device_id={quote(device_id)}"
         device_cards.append(
             tone_card(
                 (
+                    f"<a class='battery-overview-card-link' href='{device_href}' "
+                    f"aria-label='Open details for {device_name_text}'>"
                     "<div class='battery-card-top'>"
                     "<div class='device-card-copy battery-card-copy'>"
                     f"<div class='meta meta-name'>{device_name_text}</div>"
                     f"<div class='meta meta-context'>{vehicle_text}</div>"
-                    f"<div class='meta battery-card-reading'>{reading_text}</div>"
                     f"{battery_meta_html}"
                     "</div>"
                     f"{badge_stack_markup}"
@@ -85,12 +97,7 @@ def render_battery_html(
                     "<div class='battery-tile-hero'>"
                     f"{gauge_markup}"
                     "</div>"
-                    "<div class='footer-row'>"
-                    + (
-                        '<a class="secondary-button battery-card-action" '
-                        f'href="/device?device_id={quote(device_id)}">Device Details</a>'
-                        "</div>"
-                    )
+                    "</a>"
                 ),
                 tone=color_key,
                 extra_class="battery-overview-card",
@@ -132,18 +139,19 @@ def render_battery_html(
     chart_id = "battery-overview-chart"
     body = (
         top_header(
-            title="BMGateway Battery",
+            title="BMGateway Home",
             subtitle=(
                 "Live battery overview with BM300-style card hierarchy, "
                 "direct device entry points, and a calmer cross-device chart."
             ),
-            eyebrow="Battery",
+            eyebrow="Home",
         )
         + section_card(
             title="Battery Overview",
             subtitle=(
                 "The default landing page mirrors the mobile app journey: "
-                "check live state first, then dive into device detail or history."
+                "check live state first, then dive into device detail or history. "
+                "Touch a device card to open its details."
             ),
             body=overview_scroller,
         )
@@ -174,13 +182,38 @@ def render_battery_html(
         )
     )
     return app_document(
-        title="BMGateway Battery",
+        title="BMGateway Home",
         body=body,
         active_nav="battery",
         primary_device_id=primary_device_id,
         version_label=version_label,
         theme_preference=appearance,
         script=chart_script(chart_id) + shared._battery_overview_script(overview_track_id),
+    )
+
+
+def render_battery_html(
+    *,
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+    chart_points: list[dict[str, object]],
+    legend: list[tuple[str, str]],
+    show_chart_markers: bool = False,
+    visible_device_limit: int = 4,
+    appearance: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
+) -> str:
+    return render_home_html(
+        snapshot=snapshot,
+        devices=devices,
+        chart_points=chart_points,
+        legend=legend,
+        show_chart_markers=show_chart_markers,
+        visible_device_limit=visible_device_limit,
+        appearance=appearance,
+        default_chart_range=default_chart_range,
+        default_chart_metric=default_chart_metric,
     )
 
 

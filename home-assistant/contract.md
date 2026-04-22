@@ -2,8 +2,10 @@
 
 ## Purpose
 
-This document defines the MQTT-facing contract that `BMGateway` will expose to
-Home Assistant.
+This document defines the MQTT-facing contract that `BMGateway` exposes to
+Home Assistant through the built-in MQTT integration and MQTT discovery.
+
+For the end-user setup flow, use [setup.md](setup.md).
 
 The same contract is rendered by the Python CLI:
 
@@ -44,27 +46,33 @@ homeassistant/device/<device_id>/config
 
 ## Gateway Entities
 
-The gateway discovery payload should expose these entities:
+The gateway discovery payload exposes:
 
-- `version`
-- `uptime`
-- `active_adapter`
-- `running`
-- `mqtt_connected`
-- `devices_total`
-- `devices_online`
+| Entity | Home Assistant type | Notes |
+| --- | --- | --- |
+| `version` | `sensor` | diagnostic |
+| `uptime` | `sensor` | seconds, diagnostic |
+| `active_adapter` | `sensor` | diagnostic |
+| `running` | `binary_sensor` | connectivity |
+| `mqtt_connected` | `binary_sensor` | connectivity |
+| `devices_total` | `sensor` | diagnostic |
+| `devices_online` | `sensor` | summary |
 
 ## Device Entities
 
-Each battery monitor discovery payload should expose these entities:
+Each battery monitor discovery payload exposes:
 
-- `voltage`
-- `soc`
-- `temperature`
-- `connected`
-- `last_seen`
-- `rssi`
-- `state`
+| Entity | Home Assistant type | Notes |
+| --- | --- | --- |
+| `voltage` | `sensor` | voltage, `V` |
+| `soc` | `sensor` | battery percentage, `%` |
+| `temperature` | `sensor` | temperature, `°C` |
+| `connected` | `binary_sensor` | connectivity |
+| `availability_reason` | `sensor` | diagnostic |
+| `error_code` | `sensor` | diagnostic |
+| `last_seen` | `sensor` | timestamp |
+| `rssi` | `sensor` | signal strength, `dBm` |
+| `state` | `sensor` | monitor-reported state |
 
 ## State Payload Shape
 
@@ -98,6 +106,8 @@ Per-device state topic:
 
 ## Notes
 
+- No custom Home Assistant integration is required for the normal setup path.
+  The built-in MQTT integration is the intended integration surface.
 - Disabled devices may still exist in the registry, but the runtime can choose
   whether to publish them.
 - `bm-gateway run --publish-discovery` is the intended path for publishing

@@ -2,8 +2,11 @@
 
 ## Next Steps
 
-- Complete live BM200 history retrieval and persist decoded history packets
-  instead of only current-state polling.
+- Complete BM6-family onboard-history retrieval.
+  The current devices advertise and poll as BM6-family monitors, but live
+  archive probes do not yet answer the existing BM200 history-count/download
+  commands. Finish the device-memory fetch path before treating reconnect
+  backfill as shipped on real hardware.
 - Decide whether BM300 Pro support ships in the same runtime milestone or
   stays behind a disabled driver flag.
 - Add richer degradation analytics beyond the current yearly summaries and
@@ -22,6 +25,10 @@
 - Add integration tests that exercise the example config files end-to-end.
 - Revisit Docker only for 64-bit deployment targets if containerization becomes
   operationally useful again.
+- Add localization support for the 10 most common interface languages.
+  The web app currently assumes a single language. Add a proper localization
+  layer so labels, status explanations, settings text, and operational
+  messages can be translated without forking templates.
 
 ## Propositions
 

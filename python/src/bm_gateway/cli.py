@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Sequence, cast
 
 from . import __version__
-from .archive_sync import sync_bm200_device_archive
+from .archive_sync import (
+    plan_archive_backfill,
+    sync_archive_backfill_candidates,
+    sync_bm200_device_archive,
+)
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, load_device_registry, validate_devices
@@ -384,6 +388,16 @@ def _run_cycle(
     state_dir: Path | None,
 ) -> GatewaySnapshot:
     snapshot = build_snapshot(config, devices)
+    database_path = database_file_path(config, state_dir=state_dir)
+    archive_backfill_candidates = (
+        plan_archive_backfill(
+            database_path=database_path,
+            snapshot=snapshot,
+            poll_interval_seconds=config.gateway.poll_interval_seconds,
+        )
+        if config.gateway.reader_mode == "live"
+        else set()
+    )
     try:
         mqtt_connected = publisher.publish_runtime(
             config=config,
@@ -405,8 +419,14 @@ def _run_cycle(
         devices=snapshot.devices,
     )
     write_snapshot(state_file_path(config, state_dir=state_dir), snapshot)
-    database_path = database_file_path(config, state_dir=state_dir)
     persist_snapshot(database_path, snapshot)
+    if not isinstance(publisher, DryRunPublisher):
+        sync_archive_backfill_candidates(
+            config=config,
+            devices=devices,
+            database_path=database_path,
+            device_ids=archive_backfill_candidates,
+        )
     prune_history(
         database_path,
         raw_retention_days=config.retention.raw_retention_days,

@@ -390,7 +390,7 @@ def bottom_nav(active_nav: str, *, primary_device_id: str = "") -> str:
     if primary_device_id:
         history_href = f"/history?device_id={html.escape(primary_device_id)}"
     items = [
-        ("battery", "/", "Battery"),
+        ("battery", "/", "Home"),
         ("history", history_href, "History"),
         ("devices", "/devices", "Devices"),
         ("settings", "/settings", "Settings"),

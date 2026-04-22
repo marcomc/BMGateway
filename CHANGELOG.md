@@ -27,6 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `error_code` and `error_detail` fields in runtime payloads.
 - Raw-retention pruning and daily SQLite rollups for longer-term history on
   Raspberry Pi storage.
+- Archive-history plumbing now merges imported device-memory voltage rows into
+  the Battery/History/Device charts without duplicate timestamps, and the
+  runtime can plan reconnect backfill attempts for the BM200 history path.
 - CLI history inspection commands for raw, daily, and monthly summaries.
 - Storage summary and manual retention-pruning commands under `history`.
 - Yearly history summaries and degradation-comparison analytics from persisted
@@ -67,6 +70,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fleet and history chart hover tooltips now show all device values present at
   the hovered point, and Battery overview cards now prefer saved registry names
   over stale runtime snapshot names.
+- Battery overview cards now use a tighter square layout with smaller badge
+  frames, denser typography, and gauge text that stays inside the SoC ring on
+  compact screens.
+- Battery overview cards now use a more compact identity stack by removing the
+  duplicate temperature line from the description, compressing battery brand /
+  model / capacity onto one line, and scaling the SoC ring up again for better
+  mobile readability.
 - Web display settings now control the default chart range and chart metric for
   Battery, History, and Device Detail pages, with `7 days` as the shipped
   default range.
@@ -89,6 +99,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Daily chart rollups now use their real `last_seen` timestamp when available,
+  so the latest visible point can align to the right edge of Battery, History,
+  and Device Detail charts instead of being pushed left by a synthetic noon
+  timestamp.
 - Fleet Trend, History, and Device Detail chart selectors now expose visible
   day ranges of `1`, `3`, `5`, `7`, `30`, `90`, `1 year`, `2 years`, and
   `All`, and no longer show the `Recent raw` selector in the UI.
@@ -117,6 +131,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Battery overview cards now scale down more uniformly, including the card
   shell, gauge block, badge stack, button, and text sizing, so the shorter
   layout stays proportional instead of only shrinking a few inner elements.
+- Battery overview badges now use smaller square frames with larger glyph fill,
+  the SoC ring is sized to keep `100%` and status text inside the circle, and
+  the Add Device `+` icon is larger for touch visibility.
+- Battery overview cards are now whole-card links, with larger one-line
+  identity text, temperature shown inside the SoC ring, and the old
+  `Device Details` footer button removed to free space on compact layouts.
 - Device add/edit now accepts non-MAC serial-style identifiers in the `MAC or
   serial` field instead of rejecting them as invalid Bluetooth addresses.
   capacity, and production year, exposed through both add-device and
@@ -249,3 +269,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - The currently tested CSR USB Bluetooth dongle (`0a12:0001`) exposes only
   classic BR/EDR and cannot provide the BLE central role required by BM200
   monitoring.
+- The Battery landing surface is now internally treated as `Home`, and the
+  Devices page now renders configured hardware as a compact color-coded list
+  with small badges and direct edit actions instead of large status cards.
+- Home Assistant MQTT discovery now publishes richer entity metadata, including
+  binary sensors for gateway/device connectivity plus proper units, device
+  classes, and diagnostic categories, and the repository now includes a full
+  Home Assistant setup guide without requiring a custom integration.

@@ -142,9 +142,21 @@ def test_build_discovery_payloads_include_availability_topics() -> None:
     assert gateway_components["running"]["availability_topic"] == (
         "bm_gateway/gateway/availability"
     )
+    assert gateway_components["running"]["p"] == "binary_sensor"
+    assert gateway_components["running"]["device_class"] == "connectivity"
+    assert gateway_components["mqtt_connected"]["p"] == "binary_sensor"
+    assert gateway_components["uptime"]["unit_of_measurement"] == "s"
     assert device_components["connected"]["availability_topic"] == (
         "bm_gateway/devices/bm200_house/availability"
     )
+    assert device_components["connected"]["p"] == "binary_sensor"
+    assert device_components["connected"]["device_class"] == "connectivity"
+    assert device_components["voltage"]["unit_of_measurement"] == "V"
+    assert device_components["voltage"]["device_class"] == "voltage"
+    assert device_components["soc"]["device_class"] == "battery"
+    assert device_components["temperature"]["device_class"] == "temperature"
+    assert device_components["last_seen"]["device_class"] == "timestamp"
+    assert device_components["rssi"]["unit_of_measurement"] == "dBm"
 
 
 def test_mqtt_publisher_waits_for_publish_before_disconnect(

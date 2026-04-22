@@ -10,6 +10,8 @@ views:
         entities:
           - entity: sensor.bm_gateway_version
           - entity: sensor.bm_gateway_active_adapter
+          - entity: binary_sensor.bm_gateway_running
+          - entity: binary_sensor.bm_gateway_mqtt_connected
           - entity: sensor.bm_gateway_devices_online
           - entity: sensor.bm_gateway_devices_total
           - entity: binary_sensor.bm_gateway_online
@@ -21,9 +23,11 @@ views:
       - type: entities
         title: Example Device
         entities:
+          - entity: binary_sensor.bm200_house_connected
           - entity: sensor.bm200_house_voltage
           - entity: sensor.bm200_house_soc
           - entity: sensor.bm200_house_temperature
+          - entity: sensor.bm200_house_last_seen
           - entity: sensor.bm200_house_rssi
           - entity: sensor.bm200_house_state
       - type: history-graph

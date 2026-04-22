@@ -517,49 +517,56 @@ def fetch_recent_history(
 ) -> list[dict[str, object]]:
     connection = _connect_database(path)
     try:
-        rows = connection.execute(
+        buffered_limit = max(limit * 4, limit + 64)
+        live_rows = connection.execute(
             """
             SELECT
-                ts,
+                snapshot_generated_at AS ts,
                 voltage,
                 soc,
                 temperature,
                 state,
                 error_code,
                 error_detail,
-                sample_source
-            FROM (
-                SELECT
-                    snapshot_generated_at AS ts,
-                    voltage,
-                    soc,
-                    temperature,
-                    state,
-                    error_code,
-                    error_detail,
-                    'live' AS sample_source
-                FROM device_readings
-                WHERE device_id = ?
-                UNION ALL
-                SELECT
-                    ts,
-                    voltage,
-                    NULL AS soc,
-                    NULL AS temperature,
-                    'archive' AS state,
-                    NULL AS error_code,
-                    NULL AS error_detail,
-                    'device_archive' AS sample_source
-                FROM device_archive_readings
-                WHERE device_id = ?
-            )
+                'live' AS sample_source,
+                2 AS source_priority
+            FROM device_readings
+            WHERE device_id = ?
+            ORDER BY snapshot_generated_at DESC
+            LIMIT ?
+            """,
+            (device_id, buffered_limit),
+        ).fetchall()
+        archive_rows = connection.execute(
+            """
+            SELECT
+                ts,
+                voltage,
+                NULL AS soc,
+                NULL AS temperature,
+                'archive' AS state,
+                NULL AS error_code,
+                NULL AS error_detail,
+                'device_archive' AS sample_source,
+                1 AS source_priority
+            FROM device_archive_readings
+            WHERE device_id = ?
             ORDER BY ts DESC
             LIMIT ?
             """,
-            (device_id, device_id, limit),
+            (device_id, buffered_limit),
         ).fetchall()
     finally:
         connection.close()
+    merged_by_ts: dict[str, tuple[object, ...]] = {}
+    for row in [*live_rows, *archive_rows]:
+        ts = str(row[0])
+        existing = merged_by_ts.get(ts)
+        row_priority = cast(int, row[8])
+        existing_priority = cast(int, existing[8]) if existing is not None else None
+        if existing is None or (existing_priority is not None and row_priority > existing_priority):
+            merged_by_ts[ts] = row
+    rows = sorted(merged_by_ts.values(), key=lambda item: str(item[0]), reverse=True)[:limit]
     return [
         {
             "ts": row[0],
@@ -678,7 +685,7 @@ def fetch_archive_history(
 def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list[dict[str, object]]:
     connection = _connect_database(path)
     try:
-        rows = connection.execute(
+        live_rows = connection.execute(
             """
             SELECT
                 day,
@@ -697,10 +704,27 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
             """,
             (device_id, limit),
         ).fetchall()
+        archive_rows = connection.execute(
+            """
+            SELECT
+                substr(ts, 1, 10) AS day,
+                COUNT(*) AS samples,
+                MIN(voltage) AS min_voltage,
+                MAX(voltage) AS max_voltage,
+                AVG(voltage) AS avg_voltage,
+                MAX(ts) AS last_seen
+            FROM device_archive_readings
+            WHERE device_id = ?
+            GROUP BY day
+            ORDER BY day DESC
+            LIMIT ?
+            """,
+            (device_id, limit * 2),
+        ).fetchall()
     finally:
         connection.close()
-    return [
-        {
+    rows_by_day = {
+        str(row[0]): {
             "device_id": device_id,
             "day": row[0],
             "samples": row[1],
@@ -712,8 +736,55 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
             "error_count": row[7],
             "last_seen": row[8],
         }
-        for row in rows
-    ]
+        for row in live_rows
+    }
+    for row in archive_rows:
+        day = str(row[0])
+        if day in rows_by_day:
+            continue
+        rows_by_day[day] = {
+            "device_id": device_id,
+            "day": row[0],
+            "samples": row[1],
+            "min_voltage": row[2],
+            "max_voltage": row[3],
+            "avg_voltage": row[4],
+            "avg_soc": None,
+            "avg_temperature": None,
+            "error_count": 0,
+            "last_seen": row[5],
+        }
+    return sorted(rows_by_day.values(), key=lambda item: str(item["day"]), reverse=True)[:limit]
+
+
+def latest_history_timestamp(path: Path, *, device_id: str) -> str | None:
+    connection = _connect_database(path)
+    try:
+        row = connection.execute(
+            """
+            SELECT ts
+            FROM (
+                SELECT MAX(snapshot_generated_at) AS ts
+                FROM device_readings
+                WHERE device_id = ?
+                  AND error_code IS NULL
+                  AND voltage > 0
+                UNION ALL
+                SELECT MAX(ts) AS ts
+                FROM device_archive_readings
+                WHERE device_id = ?
+            )
+            WHERE ts IS NOT NULL
+            ORDER BY ts DESC
+            LIMIT 1
+            """,
+            (device_id, device_id),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
 
 
 def fetch_monthly_history(

@@ -1,51 +1,109 @@
 {
   "cmps": {
-    "connected": {
+    "availability_reason": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:lan-disconnect",
+      "name": "Availability Reason",
       "p": "sensor",
       "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_availability_reason",
+      "value_template": "{{ value_json.availability_reason }}"
+    },
+    "connected": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "device_class": "connectivity",
+      "entity_category": "diagnostic",
+      "name": "Connected",
+      "p": "binary_sensor",
+      "payload_off": "OFF",
+      "payload_on": "ON",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
       "unique_id": "bm200_house_connected",
-      "value_template": "{{ value_json.connected }}"
+      "value_template": "{{ 'ON' if value_json.connected else 'OFF' }}"
+    },
+    "error_code": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:alert-circle-outline",
+      "name": "Error Code",
+      "p": "sensor",
+      "state_topic": "bm_gateway/devices/bm200_house/state",
+      "unique_id": "bm200_house_error_code",
+      "value_template": "{{ value_json.error_code }}"
     },
     "last_seen": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "device_class": "timestamp",
+      "entity_category": "diagnostic",
+      "name": "Last Seen",
       "p": "sensor",
       "state_topic": "bm_gateway/devices/bm200_house/state",
       "unique_id": "bm200_house_last_seen",
       "value_template": "{{ value_json.last_seen }}"
     },
     "rssi": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "device_class": "signal_strength",
+      "entity_category": "diagnostic",
+      "name": "RSSI",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm200_house/state",
       "unique_id": "bm200_house_rssi",
+      "unit_of_measurement": "dBm",
       "value_template": "{{ value_json.rssi }}"
     },
     "soc": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "device_class": "battery",
+      "name": "State of Charge",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm200_house/state",
+      "suggested_display_precision": 0,
       "unique_id": "bm200_house_soc",
+      "unit_of_measurement": "%",
       "value_template": "{{ value_json.soc }}"
     },
     "state": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "icon": "mdi:car-battery",
+      "name": "Reported State",
       "p": "sensor",
       "state_topic": "bm_gateway/devices/bm200_house/state",
       "unique_id": "bm200_house_state",
       "value_template": "{{ value_json.state }}"
     },
     "temperature": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "device_class": "temperature",
+      "name": "Temperature",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm200_house/state",
+      "suggested_display_precision": 1,
       "unique_id": "bm200_house_temperature",
+      "unit_of_measurement": "\u00b0C",
       "value_template": "{{ value_json.temperature }}"
     },
     "voltage": {
+      "availability_topic": "bm_gateway/devices/bm200_house/availability",
+      "device_class": "voltage",
+      "name": "Voltage",
       "p": "sensor",
+      "state_class": "measurement",
       "state_topic": "bm_gateway/devices/bm200_house/state",
+      "suggested_display_precision": 2,
       "unique_id": "bm200_house_voltage",
+      "unit_of_measurement": "V",
       "value_template": "{{ value_json.voltage }}"
     }
   },
   "dev": {
     "ids": "bm200_house",
-    "mdl": "bm200",
+    "mdl": "BM200",
+    "mf": "BMGateway",
     "name": "BM200 House",
     "sw": "0.1.0"
   },

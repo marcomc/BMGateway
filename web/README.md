@@ -44,6 +44,11 @@ The current UI contract also includes:
   exposing manual icon picking
 - Bluetooth/add-device warning banners that keep the add-device CTA outside the
   overview grid instead of consuming a fake battery slot
+- imported device-history rows can feed voltage charts without duplicating
+  already persisted timestamps, and the runtime now includes reconnect
+  backfill plumbing for the existing BM200 archive path
+- BM6-family archive download remains incomplete on live hardware; current
+  monitors poll fine but do not yet answer the shipped BM200 history commands
 
 Primary launch command:
 

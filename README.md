@@ -106,6 +106,7 @@ Use one canonical source per topic:
 | Documentation index | [docs/README.md](docs/README.md) |
 | Runtime and packaged Python component | [python/README.md](python/README.md) |
 | Home Assistant MQTT contract | [home-assistant/contract.md](home-assistant/contract.md) |
+| Home Assistant setup flow | [home-assistant/setup.md](home-assistant/setup.md) |
 | Raspberry Pi appliance install | [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md) |
 | Raspberry Pi Imager CLI flow | [rpi-setup/macos-imager-cli.md](rpi-setup/macos-imager-cli.md) |
 | Hardware audit and service tuning | [rpi-setup/hardware-audit.md](rpi-setup/hardware-audit.md) |
@@ -134,7 +135,6 @@ make dev-deploy TARGET=admin@host
 
 See [TODO.md](TODO.md) for the active backlog. Current themes are:
 
-- BM200 live history retrieval
 - BM300 Pro support decisioning
 - richer degradation analytics
 - Home Assistant/MQTT resilience improvements

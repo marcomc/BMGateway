@@ -2,7 +2,7 @@ template:
   - binary_sensor:
       - name: BMGateway Online
         unique_id: bm_gateway_online
-        state: "{{ states('sensor.bm_gateway_running')|lower == 'true' }}"
+        state: "{{ is_state('binary_sensor.bm_gateway_running', 'on') }}"
         icon: mdi:bluetooth-connect
   - sensor:
       - name: BMGateway Device Summary

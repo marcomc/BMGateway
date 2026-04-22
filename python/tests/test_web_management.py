@@ -25,6 +25,7 @@ from bm_gateway.web import (
     render_devices_html,
     render_edit_device_html,
     render_history_html,
+    render_home_html,
     render_management_html,
     render_settings_html,
     update_bluetooth_preferences,
@@ -124,6 +125,36 @@ def test_chart_script_centers_active_controls_in_scroll_rail() -> None:
     assert "requestAnimationFrame(() => {" in script
     assert "setTimeout(() => centerActiveControls(), 80);" in script
     assert 'window.addEventListener("load", () => {' in script
+
+
+def test_chart_points_prefer_daily_last_seen_timestamp_for_right_edge_alignment() -> None:
+    points = _chart_points(
+        [
+            {
+                "ts": "2026-04-22T01:33:56+02:00",
+                "voltage": 13.39,
+                "soc": 99,
+                "temperature": 26.0,
+                "error_code": None,
+            }
+        ],
+        [
+            {
+                "day": "2026-04-22",
+                "samples": 13,
+                "avg_voltage": 13.395,
+                "avg_soc": 99.7,
+                "avg_temperature": 25.1,
+                "last_seen": "2026-04-22T01:33:56+02:00",
+            }
+        ],
+        series="Spare NLP20",
+    )
+
+    daily_points = [point for point in points if point["kind"] == "daily"]
+
+    assert len(daily_points) == 1
+    assert daily_points[0]["ts"] == "2026-04-22T01:33:56+02:00"
 
 
 def test_chart_script_supports_range_paging_and_drag_panning() -> None:
@@ -1271,7 +1302,8 @@ def test_render_battery_html_renders_device_icon() -> None:
     assert "battery-card-status" in html
     assert "battery-card-status-inline" in html
     assert "Battery OK" in html
-    assert "Device Details" in html
+    assert "Touch a device card to open its details." in html
+    assert "battery-overview-card-link" in html
     assert "Open device" not in html
     assert "All" in html
     assert "battery-overview-scroller" in html
@@ -1286,10 +1318,8 @@ def test_render_battery_html_renders_device_icon() -> None:
     )
 
 
-def test_render_battery_html_threads_appearance_to_document_root() -> None:
-    from bm_gateway.web import render_battery_html
-
-    html = render_battery_html(
+def test_render_home_html_threads_appearance_to_document_root() -> None:
+    html = render_home_html(
         snapshot={"devices": []},
         devices=[],
         chart_points=[],
@@ -1298,6 +1328,7 @@ def test_render_battery_html_threads_appearance_to_document_root() -> None:
     )
 
     assert 'data-theme-preference="dark"' in html
+    assert "BMGateway Home" in html
 
 
 def test_render_battery_html_defaults_chart_to_seven_days_and_soc() -> None:
@@ -1429,31 +1460,80 @@ def test_render_battery_html_places_badge_outside_gauge_and_identity_below() -> 
 
     top_index = html.index("<div class='battery-card-top'>")
     hero_index = html.index("<div class='battery-tile-hero'>")
-    footer_index = html.index("<div class='footer-row'>")
+    link_close_index = html.index("</a>", hero_index)
 
-    assert top_index < hero_index < footer_index
+    assert top_index < hero_index < link_close_index
     assert "device-badge-stack" in html[top_index:hero_index]
-    assert "battery-card-gauge-value" in html[hero_index:footer_index]
-    assert "battery-card-status-inline" in html[hero_index:footer_index]
-    assert "battery-card-gauge-label" in html[hero_index:footer_index]
+    assert "battery-card-gauge-value" in html[hero_index:link_close_index]
+    assert "battery-card-status-inline" in html[hero_index:link_close_index]
+    assert "battery-card-gauge-label" in html[hero_index:link_close_index]
+    assert "battery-card-gauge-subvalue" in html[hero_index:link_close_index]
     assert "meta-name" in html[top_index:hero_index]
     assert "meta-context" in html[top_index:hero_index]
-    assert "battery-card-reading" in html[top_index:hero_index]
+    assert "battery-card-reading" not in html[top_index:hero_index]
+
+
+def test_render_battery_html_uses_compact_home_metadata_line_without_year() -> None:
+    from bm_gateway.web import render_battery_html
+
+    html = render_battery_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "spare_nlp5",
+                    "name": "Spare NLP5",
+                    "type": "bm200",
+                    "soc": 88,
+                    "voltage": 13.30,
+                    "temperature": 24.0,
+                    "state": "normal",
+                    "connected": True,
+                    "battery": {
+                        "brand": "NOCO",
+                        "model": "NLP5",
+                        "capacity_ah": 5.0,
+                        "production_year": 2025,
+                    },
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "spare_nlp5",
+                "name": "Spare NLP5",
+                "type": "bm200",
+                "mac": "3C:AB:72:82:86:EA",
+                "enabled": True,
+                "battery": {
+                    "brand": "NOCO",
+                    "model": "NLP5",
+                    "capacity_ah": 5.0,
+                    "production_year": 2025,
+                },
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "NOCO NLP5 5.0 Ah" in html
+    assert "2025" not in html
 
 
 def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     css = base_css()
 
     assert ".battery-card-top {" in css
+    assert ".battery-overview-card {" in css
+    assert ".battery-overview-card-link {" in css
     assert ".device-badge-stack {" in css
     assert ".device-icon-frame {" in css
     assert "aspect-ratio: 1 / 1;" in css
-    assert "min-width: 72px;" in css
-    assert "min-height: 72px;" in css
     assert ".battery-tile-hero {" in css
     assert ".battery-card-badge {" in css
     assert "position: static;" in css
     assert "place-items: center;" in css
+    assert "justify-content: flex-start;" in css
     assert ".history-device-badge {" in css
     assert "min-width: 48px;" in css
     assert "min-height: 48px;" in css
@@ -1535,26 +1615,27 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "background: var(--bg-surface);" in css
     assert ".banner-strip {" in css
     assert "@media (max-width: 640px)" in css
-    assert "width: 90px;" in css
-    assert "width: 34px;" in css
-    assert "height: 34px;" in css
-    assert "flex: 0 0 34px;" in css
-    assert "inline-size: 34px;" in css
-    assert "block-size: 34px;" in css
-    assert "max-inline-size: 34px;" in css
+    assert "width: 116px;" in css
+    assert "width: 36px;" in css
+    assert "height: 36px;" in css
+    assert "flex: 0 0 36px;" in css
+    assert "inline-size: 36px;" in css
+    assert "block-size: 36px;" in css
+    assert "max-inline-size: 36px;" in css
     assert "overflow: hidden;" in css
     assert ".device-icon-frame.history-device-badge {" in css
     assert "inline-size: 40px;" in css
     assert "max-inline-size: 40px;" in css
-    assert "width: 42px;" in css
-    assert "height: 42px;" in css
-    assert "width: 34px;" in css
-    assert "height: 34px;" in css
+    assert "width: 28px;" in css
+    assert "height: 28px;" in css
     assert "width: 30px;" in css
     assert "height: 30px;" in css
-    assert "font-size: clamp(1.2rem, 2.5vw, 1.7rem);" in css
+    assert "width: 24px;" in css
+    assert "height: 24px;" in css
+    assert "font-size: clamp(1.42rem, 2.65vw, 1.96rem);" in css
+    assert "font-size: 0.58rem;" in css
     assert "font-size: 0.54rem;" in css
-    assert "font-size: 0.52rem;" in css
+    assert "font-size: 2rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
     assert ".battery-overview-page.is-single-page.page-two-cards," in css
 
@@ -1586,7 +1667,9 @@ def test_render_devices_html_wraps_single_device_in_grid_layout_hook() -> None:
         theme_preference="dark",
     )
 
-    assert 'class="device-grid devices-grid single-card-grid"' in html
+    assert 'class="device-list-rows"' in html
+    assert "device-list-row tone-card green" in html
+    assert "Edit device" in html
 
 
 def test_render_devices_html_reserves_second_badge_slot_for_non_vehicle_devices() -> None:
@@ -2326,13 +2409,11 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
         ],
     )
 
-    assert "Offline" in html
-    assert "No BLE advertisement seen during the latest scan window." in html
-    assert "No recent sample" in html
-    assert "The adapter did not see this monitor in the latest scan." in html
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert 'href="/devices/new"' in html
     assert "Register new BM devices directly from the device registry." not in html
+    assert "Serial / MAC: 3C:AB:72:82:86:EA" in html
+    assert "Edit device" in html
 
 
 def test_render_devices_html_uses_device_battery_profile_labels() -> None:
@@ -2354,11 +2435,11 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
     )
 
     assert "AGM Battery" in html
-    assert "Lead-Acid Battery" in html
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert "Add Device" in html
     assert "Configured Devices" in html
     assert "Serial / MAC" in html
+    assert "Edit device settings" not in html
 
 
 def test_render_add_device_html_is_dedicated_creation_surface() -> None:
@@ -2463,3 +2544,4 @@ def test_bottom_nav_renders_generated_icons() -> None:
 
     assert "nav-icon" in html
     assert "nav-label" in html
+    assert ">Home<" in html

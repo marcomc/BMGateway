@@ -76,6 +76,8 @@ VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("all", "All"),
 )
 
+RECENT_CHART_HISTORY_LIMIT = 6000
+
 
 def _device_color_key(device: dict[str, object], *, fallback_index: int = 0) -> str:
     color_key = str(device.get("color_key", "")).strip()
@@ -1284,9 +1286,11 @@ def _chart_points(
             continue
         if not isinstance(avg_voltage, (int, float)) or float(avg_voltage) <= 0:
             continue
+        last_seen = str(row.get("last_seen") or "").strip()
+        point_ts = last_seen or f"{row.get('day', '')}T12:00:00"
         points.append(
             {
-                "ts": f"{row.get('day', '')}T12:00:00",
+                "ts": point_ts,
                 "label": str(row.get("day", ""))[5:],
                 "kind": "daily",
                 "voltage": avg_voltage,
@@ -1341,7 +1345,11 @@ def _fleet_chart_points(
         legend.append((device_name, color))
         points.extend(
             _chart_points(
-                fetch_recent_history(database_path, device_id=device_id, limit=576),
+                fetch_recent_history(
+                    database_path,
+                    device_id=device_id,
+                    limit=RECENT_CHART_HISTORY_LIMIT,
+                ),
                 fetch_daily_history(database_path, device_id=device_id, limit=730),
                 series=device_name,
                 series_color=color,
@@ -1351,8 +1359,13 @@ def _fleet_chart_points(
 
 
 def _history_summary(raw_history: list[dict[str, object]]) -> dict[str, str]:
-    valid_rows = [row for row in raw_history if row.get("error_code") is None]
+    valid_rows = [
+        row
+        for row in raw_history
+        if row.get("error_code") is None and isinstance(row.get("voltage"), (int, float))
+    ]
     error_rows = [row for row in raw_history if row.get("error_code") is not None]
+    soc_rows = [row for row in valid_rows if isinstance(row.get("soc"), (int, float))]
     valid_count = len(valid_rows)
     error_count = len(error_rows)
     avg_voltage = (
@@ -1361,8 +1374,8 @@ def _history_summary(raw_history: list[dict[str, object]]) -> dict[str, str]:
         else None
     )
     avg_soc = (
-        sum(float(cast(float | int, row["soc"])) for row in valid_rows) / valid_count
-        if valid_count
+        sum(float(cast(float | int, row["soc"])) for row in soc_rows) / len(soc_rows)
+        if soc_rows
         else None
     )
     return {
@@ -1457,6 +1470,33 @@ def render_management_html(
     )
 
 
+def render_home_html(
+    *,
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+    chart_points: list[dict[str, object]],
+    legend: list[tuple[str, str]],
+    show_chart_markers: bool = False,
+    visible_device_limit: int = 4,
+    appearance: str = "system",
+    default_chart_range: str = "7",
+    default_chart_metric: str = "soc",
+) -> str:
+    from .web_pages_home import render_home_html as _render_home_html
+
+    return _render_home_html(
+        snapshot=snapshot,
+        devices=devices,
+        chart_points=chart_points,
+        legend=legend,
+        show_chart_markers=show_chart_markers,
+        visible_device_limit=visible_device_limit,
+        appearance=appearance,
+        default_chart_range=default_chart_range,
+        default_chart_metric=default_chart_metric,
+    )
+
+
 def render_battery_html(
     *,
     snapshot: dict[str, object],
@@ -1469,9 +1509,7 @@ def render_battery_html(
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
 ) -> str:
-    from .web_pages_battery import render_battery_html as _render_battery_html
-
-    return _render_battery_html(
+    return render_home_html(
         snapshot=snapshot,
         devices=devices,
         chart_points=chart_points,

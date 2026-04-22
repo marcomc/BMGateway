@@ -36,6 +36,7 @@ from .web_actions import (
     update_web_preferences,
 )
 from .web_pages import (
+    RECENT_CHART_HISTORY_LIMIT,
     _add_device_form_html,
     _battery_form_script,
     _bool_from_form,
@@ -54,6 +55,7 @@ from .web_pages import (
     render_devices_html,
     render_edit_device_html,
     render_history_html,
+    render_home_html,
     render_management_html,
     render_reboot_pending_html,
     render_settings_html,
@@ -65,6 +67,7 @@ __all__ = [
     "add_device_from_form",
     "build_run_once_command",
     "render_add_device_html",
+    "render_home_html",
     "render_battery_html",
     "render_device_html",
     "render_devices_html",
@@ -224,7 +227,11 @@ def serve_management(
                             break
                 html = render_device_html(
                     device_id=device_id,
-                    raw_history=fetch_recent_history(database_path, device_id=device_id, limit=576),
+                    raw_history=fetch_recent_history(
+                        database_path,
+                        device_id=device_id,
+                        limit=RECENT_CHART_HISTORY_LIMIT,
+                    ),
                     daily_history=fetch_daily_history(
                         database_path,
                         device_id=device_id,
@@ -267,7 +274,11 @@ def serve_management(
                     device_id=device_id,
                     configured_devices=serialized_devices,
                     raw_history=(
-                        fetch_recent_history(database_path, device_id=device_id, limit=576)
+                        fetch_recent_history(
+                            database_path,
+                            device_id=device_id,
+                            limit=RECENT_CHART_HISTORY_LIMIT,
+                        )
                         if device_id
                         else []
                     ),

@@ -1,42 +1,74 @@
 {
   "cmps": {
     "active_adapter": {
+      "availability_topic": "bm_gateway/gateway/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:bluetooth",
+      "name": "Active Adapter",
       "p": "sensor",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_active_adapter",
       "value_template": "{{ value_json.active_adapter }}"
     },
     "devices_online": {
+      "availability_topic": "bm_gateway/gateway/availability",
+      "icon": "mdi:bluetooth-connect",
+      "name": "Devices Online",
       "p": "sensor",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_devices_online",
       "value_template": "{{ value_json.devices_online }}"
     },
     "devices_total": {
+      "availability_topic": "bm_gateway/gateway/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:counter",
+      "name": "Devices Total",
       "p": "sensor",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_devices_total",
       "value_template": "{{ value_json.devices_total }}"
     },
     "mqtt_connected": {
-      "p": "sensor",
+      "availability_topic": "bm_gateway/gateway/availability",
+      "device_class": "connectivity",
+      "entity_category": "diagnostic",
+      "name": "MQTT Connected",
+      "p": "binary_sensor",
+      "payload_off": "OFF",
+      "payload_on": "ON",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_mqtt_connected",
-      "value_template": "{{ value_json.mqtt_connected }}"
+      "value_template": "{{ 'ON' if value_json.mqtt_connected else 'OFF' }}"
     },
     "running": {
-      "p": "sensor",
+      "availability_topic": "bm_gateway/gateway/availability",
+      "device_class": "connectivity",
+      "entity_category": "diagnostic",
+      "name": "Running",
+      "p": "binary_sensor",
+      "payload_off": "OFF",
+      "payload_on": "ON",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_running",
-      "value_template": "{{ value_json.running }}"
+      "value_template": "{{ 'ON' if value_json.running else 'OFF' }}"
     },
     "uptime": {
+      "availability_topic": "bm_gateway/gateway/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:timer-outline",
+      "name": "Uptime",
       "p": "sensor",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_uptime",
+      "unit_of_measurement": "s",
       "value_template": "{{ value_json.uptime }}"
     },
     "version": {
+      "availability_topic": "bm_gateway/gateway/availability",
+      "entity_category": "diagnostic",
+      "icon": "mdi:identifier",
+      "name": "Version",
       "p": "sensor",
       "state_topic": "bm_gateway/gateway/state",
       "unique_id": "bm_gateway_version",
@@ -45,6 +77,8 @@
   },
   "dev": {
     "ids": "bm_gateway",
+    "mdl": "Gateway",
+    "mf": "BMGateway",
     "name": "BMGateway",
     "sw": "0.1.0"
   },

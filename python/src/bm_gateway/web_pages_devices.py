@@ -13,9 +13,7 @@ from .web_ui import (
     app_document,
     banner_strip,
     button,
-    metric_tile,
     section_card,
-    status_badge,
     top_header,
 )
 
@@ -29,46 +27,11 @@ def render_devices_html(
 ) -> str:
     version_label = display_version()
     primary_device_id = shared._primary_device_id(snapshot, devices)
-    snapshot_devices = {
-        str(device.get("id", "")): device
-        for device in cast(list[object], snapshot.get("devices", []))
-        if isinstance(device, dict)
-    }
-    cards: list[str] = []
+    rows: list[str] = []
     for index, device in enumerate(devices):
         device_id = str(device.get("id", ""))
-        runtime = snapshot_devices.get(device_id, {})
-        runtime_error_code = cast(str | None, runtime.get("error_code"))
-        connected = bool(runtime.get("connected", False))
         tone = shared._device_color_key(device, fallback_index=index)
-        status_value, status_subvalue = shared._device_runtime_summary(runtime)
-        state_tile = metric_tile(
-            label="Status",
-            value=status_value,
-            tone=tone,
-            subvalue=status_subvalue,
-        )
-        signal_grade, _signal_percent, _bars, _signal_rssi_text = shared._signal_quality(
-            rssi=runtime.get("rssi"),
-            connected=connected,
-            error_code=runtime_error_code,
-        )
-        signal_tile = metric_tile(
-            label="Signal Quality",
-            value=signal_grade,
-            tone="blue",
-            detail_html=shared._signal_quality_detail_html(
-                rssi=runtime.get("rssi"),
-                connected=connected,
-                error_code=runtime_error_code,
-            ),
-        )
-        family_label, profile_label = shared._battery_summary(device)
-        battery_type = html.escape(profile_label)
-        enabled_badge = status_badge(
-            "Enabled" if bool(device.get("enabled", False)) else "Disabled",
-            kind="ok" if bool(device.get("enabled", False)) else "offline",
-        )
+        family_label, _profile_label = shared._battery_summary(device)
         device_name_text = html.escape(str(device.get("name", device_id)))
         device_mac_text = html.escape(str(device.get("mac", "")))
         vehicle_text = html.escape(shared._vehicle_summary(device))
@@ -76,56 +39,36 @@ def render_devices_html(
         battery_text = html.escape(
             battery_summary if battery_summary != "Battery details not set" else family_label
         )
-        device_id_text = html.escape(device_id)
-        family_badge_html = (
-            ""
-            if family_label == profile_label
-            else f"<span class='pill-chip'>{html.escape(family_label)}</span>"
-        )
         device_icon_markup = shared._device_badge_stack_markup(
             device,
-            badge_class="device-list-icon",
+            badge_class="battery-tile-icon device-list-badge",
             stack_class="compact",
         )
-        cards.append(
-            section_card(
-                body=(
-                    "<div class='device-list-card'>"
-                    "<div class='device-list-card-head'>"
-                    f"{device_icon_markup}"
-                    "<div class='device-list-card-copy'>"
-                    f"<div class='meta device-list-card-context'>{vehicle_text}</div>"
-                    f"<div class='device-list-card-name'>{device_name_text}</div>"
-                    f"<div class='meta device-list-card-summary'>{battery_text}</div>"
-                    f"<div class='meta device-list-card-id'>ID: {device_id_text}</div>"
-                    f"<div class='meta device-list-card-id'>Serial / MAC: {device_mac_text}</div>"
-                    "</div>"
-                    "</div>"
-                    "<div class='device-list-card-badges'>"
-                    f"<span class='pill-chip'>{battery_type}</span>"
-                    f"{family_badge_html}"
-                    f"{enabled_badge}"
-                    "</div>"
-                    "<div class='two-column-grid compact-device-metrics'>"
-                    f"{state_tile}"
-                    f"{signal_tile}"
-                    "</div>"
-                    "<div class='footer-row device-list-card-actions'>"
-                    f"<a class='ghost-button' href='/devices/edit?device_id={quote(device_id)}'>"
-                    "Edit device settings</a>"
-                    "</div>"
-                    "</div>"
-                ),
-                classes=f"tone-card {tone}",
-            )
+        rows.append(
+            f"<div class='device-list-row tone-card {tone}' "
+            f"style='{shared._tone_card_style(tone)}'>"
+            "<div class='device-list-row-main'>"
+            f"{device_icon_markup}"
+            "<div class='device-list-row-copy'>"
+            f"<div class='meta device-list-row-name'>{device_name_text}</div>"
+            f"<div class='meta device-list-row-context'>{vehicle_text}</div>"
+            f"<div class='meta device-list-row-summary'>{battery_text}</div>"
+            f"<div class='meta device-list-row-id'>Serial / MAC: {device_mac_text}</div>"
+            "</div>"
+            "</div>"
+            "<div class='device-list-row-actions'>"
+            f"<a class='ghost-button' href='/devices/edit?device_id={quote(device_id)}'>"
+            "Edit device</a>"
+            "</div>"
+            "</div>"
         )
     banner = banner_strip(html.escape(message), kind="warning") if message else ""
     body = (
         top_header(
             title="Devices",
             subtitle=(
-                "Gateway-ready device registry with BM300-inspired list cards "
-                "and a direct path to add or edit hardware."
+                "Configured gateway devices shown as a compact list with "
+                "battery identity, badges, and a direct edit action."
             ),
             eyebrow="Devices",
             right=(
@@ -137,14 +80,10 @@ def render_devices_html(
         + banner
         + section_card(
             title="Configured Devices",
-            subtitle="Gateway-ready device registry",
+            subtitle="Configured devices with their assigned overview colors.",
             body=(
-                (
-                    '<div class="device-grid devices-grid'
-                    + (" single-card-grid" if len(cards) == 1 else "")
-                    + f'">{"".join(cards)}</div>'
-                )
-                if cards
+                f'<div class="device-list-rows">{"".join(rows)}</div>'
+                if rows
                 else "<div class='muted-note'>No devices configured yet.</div>"
             ),
         )
