@@ -27,6 +27,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Documented MQTT authentication behavior, retained discovery/state defaults,
   and why the Home Assistant discovery prefix defaults to `homeassistant`.
 - Added a visible MQTT broker connection status row to the settings page.
+- Added a Settings action to republish Home Assistant MQTT discovery and current
+  device state to the configured broker on demand.
 - Compacted the recent raw readings table on history pages with shorter column
   labels, smaller table text, non-wrapping cells, and a bounded scroll area.
 - Made device IDs editable from the device edit form with validation, including

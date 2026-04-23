@@ -1028,6 +1028,24 @@ def serve_management(
                 self.end_headers()
                 return
 
+            if parsed.path == "/actions/republish-discovery":
+                completed = run_once_via_cli(
+                    config_path,
+                    state_dir=state_dir,
+                    publish_discovery=True,
+                )
+                message = (
+                    "Home Assistant discovery republished"
+                    if completed.returncode == 0
+                    else "Home Assistant discovery republish failed"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
             if parsed.path == "/actions/restart-runtime":
                 completed = restart_system_service("bm-gateway.service")
                 message = (

@@ -178,6 +178,9 @@ def render_settings_html(
         '<form method="post" action="/actions/run-once">'
         f"{button('Run One Collection Cycle', kind='primary')}"
         "</form>"
+        '<form method="post" action="/actions/republish-discovery">'
+        f"{button('Republish Home Assistant Discovery', kind='secondary')}"
+        "</form>"
         '<form method="post" action="/actions/restart-runtime">'
         f"{button('Restart bm-gateway service', kind='secondary')}"
         "</form>"

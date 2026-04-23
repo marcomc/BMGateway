@@ -450,7 +450,12 @@ def update_bluetooth_preferences(
     return []
 
 
-def build_run_once_command(config_path: Path, *, state_dir: Path | None = None) -> list[str]:
+def build_run_once_command(
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+    publish_discovery: bool = False,
+) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -460,16 +465,25 @@ def build_run_once_command(config_path: Path, *, state_dir: Path | None = None) 
         "run",
         "--once",
     ]
+    if publish_discovery:
+        command.append("--publish-discovery")
     if state_dir is not None:
         command.extend(["--state-dir", str(state_dir)])
     return command
 
 
 def run_once_via_cli(
-    config_path: Path, *, state_dir: Path | None = None
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+    publish_discovery: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        build_run_once_command(config_path, state_dir=state_dir),
+        build_run_once_command(
+            config_path,
+            state_dir=state_dir,
+            publish_discovery=publish_discovery,
+        ),
         check=False,
         capture_output=True,
         text=True,

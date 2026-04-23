@@ -1042,6 +1042,21 @@ def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> Non
     assert command[-4:] == ["run", "--once", "--state-dir", str(state_dir)]
 
 
+def test_build_run_once_command_can_publish_discovery(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    state_dir = tmp_path / "state"
+
+    command = build_run_once_command(
+        config_path,
+        state_dir=state_dir,
+        publish_discovery=True,
+    )
+
+    assert "--publish-discovery" in command
+    assert command.index("--publish-discovery") > command.index("--once")
+    assert command[-2:] == ["--state-dir", str(state_dir)]
+
+
 def test_render_management_html_includes_contract_and_storage_sections() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     html = render_management_html(
@@ -1172,6 +1187,8 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
     assert "Run One Collection Cycle" in html
+    assert "Republish Home Assistant Discovery" in html
+    assert 'action="/actions/republish-discovery"' in html
     assert "Restart bm-gateway service" in html
     assert "Restart Bluetooth service" in html
     assert "Reboot Raspberry Pi" in html
