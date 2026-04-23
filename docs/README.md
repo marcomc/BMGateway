@@ -28,6 +28,7 @@ Read these in order when you need architectural or implementation context:
 | Topic | Document |
 | --- | --- |
 | Architecture boundary | [architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](architecture/2026-04-20-shared-core-separate-web-runtime-plan.md) |
+| Service account and privilege hardening proposal | [architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md](architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md) |
 | Foundation scope | [specs/2026-04-17-foundation-spec.md](specs/2026-04-17-foundation-spec.md) |
 | Python package and executables | [../python/README.md](../python/README.md) |
 | Web product boundary | [../web/README.md](../web/README.md) |

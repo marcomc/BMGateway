@@ -13,6 +13,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
+from bm_gateway.models import DeviceReading, GatewaySnapshot
+from bm_gateway.state_store import fetch_recent_history, persist_snapshot
 from bm_gateway.web import (
     _add_device_form_html,
     _chart_points,
@@ -29,8 +31,11 @@ from bm_gateway.web import (
     render_settings_html,
     update_bluetooth_preferences,
     update_config_from_text,
+    update_device_from_form,
     update_device_icon,
     update_gateway_preferences,
+    update_home_assistant_preferences,
+    update_mqtt_preferences,
     update_web_preferences,
 )
 from bm_gateway.web import (
@@ -263,7 +268,7 @@ def test_update_gateway_preferences_persists_runtime_and_integration_settings(
                 "enabled = true",
                 'host = "mqtt.local"',
                 "port = 1883",
-                'username = "homeassistant"',
+                'username = "mqtt-user"',
                 'password = "secret"',
                 'base_topic = "bm_gateway"',
                 'discovery_prefix = "homeassistant"',
@@ -297,8 +302,6 @@ def test_update_gateway_preferences_persists_runtime_and_integration_settings(
         timezone="Europe/Rome",
         reader_mode="live",
         poll_interval_seconds=600,
-        mqtt_enabled=False,
-        home_assistant_enabled=False,
         raw_retention_days=90,
         daily_retention_days=30,
     )
@@ -307,8 +310,6 @@ def test_update_gateway_preferences_persists_runtime_and_integration_settings(
     config = load_config(config_path)
     assert config.gateway.reader_mode == "live"
     assert config.gateway.poll_interval_seconds == 600
-    assert config.mqtt.enabled is False
-    assert config.home_assistant.enabled is False
     assert config.retention.raw_retention_days == 90
     assert config.retention.daily_retention_days == 30
 
@@ -343,8 +344,6 @@ def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Pat
         timezone="Europe/Rome",
         reader_mode="fake",
         poll_interval_seconds=0,
-        mqtt_enabled=True,
-        home_assistant_enabled=True,
         raw_retention_days=0,
         daily_retention_days=-1,
     )
@@ -352,6 +351,80 @@ def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Pat
     assert "gateway.poll_interval_seconds must be greater than zero" in errors
     assert "retention.raw_retention_days must be greater than zero" in errors
     assert "retention.daily_retention_days must be zero or greater" in errors
+
+
+def test_update_mqtt_preferences_persists_transport_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_mqtt_preferences(
+        config_path=config_path,
+        mqtt_enabled=False,
+        mqtt_host="broker.local",
+        mqtt_port=2883,
+        mqtt_username="gateway-user",
+        mqtt_password="broker-secret",
+        mqtt_base_topic="garage_gateway",
+        mqtt_discovery_prefix="ha",
+        mqtt_retain_discovery=False,
+        mqtt_retain_state=True,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.mqtt.enabled is False
+    assert config.mqtt.host == "broker.local"
+    assert config.mqtt.port == 2883
+    assert config.mqtt.username == "gateway-user"
+    assert config.mqtt.password == "broker-secret"
+    assert config.mqtt.base_topic == "garage_gateway"
+    assert config.mqtt.discovery_prefix == "ha"
+    assert config.mqtt.retain_discovery is False
+    assert config.mqtt.retain_state is True
+
+
+def test_update_mqtt_preferences_rejects_invalid_transport_values(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_mqtt_preferences(
+        config_path=config_path,
+        mqtt_enabled=True,
+        mqtt_host="",
+        mqtt_port=0,
+        mqtt_username="",
+        mqtt_password="",
+        mqtt_base_topic="",
+        mqtt_discovery_prefix="",
+        mqtt_retain_discovery=True,
+        mqtt_retain_state=False,
+    )
+
+    assert "mqtt.host must not be empty" in errors
+    assert "mqtt.port must be greater than zero" in errors
+    assert "mqtt.base_topic must not be empty" in errors
+    assert "mqtt.discovery_prefix must not be empty" in errors
+
+
+def test_update_home_assistant_preferences_persists_discovery_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_home_assistant_preferences(
+        config_path=config_path,
+        home_assistant_enabled=False,
+        home_assistant_status_topic="hass/status",
+        home_assistant_gateway_device_id="garage_gateway",
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.home_assistant.enabled is False
+    assert config.home_assistant.status_topic == "hass/status"
+    assert config.home_assistant.gateway_device_id == "garage_gateway"
 
 
 def test_add_device_from_form_normalizes_compact_mac_and_enables_live_mode(tmp_path: Path) -> None:
@@ -959,6 +1032,25 @@ def test_empty_device_registry_is_allowed() -> None:
     assert validate_devices([]) == []
 
 
+def test_validate_devices_rejects_mqtt_unsafe_device_ids() -> None:
+    from bm_gateway.device_registry import Device
+
+    errors = validate_devices(
+        [
+            Device(
+                id="spare/nlp5",
+                type="bm200",
+                name="Spare NLP5",
+                mac="AA:BB:CC:DD:EE:01",
+            )
+        ]
+    )
+
+    assert (
+        "device spare/nlp5 id must contain only letters, numbers, underscores, or hyphens" in errors
+    )
+
+
 def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     state_dir = tmp_path / "state"
@@ -967,6 +1059,21 @@ def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> Non
 
     assert command[1:4] == ["-m", "bm_gateway", "--config"]
     assert command[-4:] == ["run", "--once", "--state-dir", str(state_dir)]
+
+
+def test_build_run_once_command_can_publish_discovery(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    state_dir = tmp_path / "state"
+
+    command = build_run_once_command(
+        config_path,
+        state_dir=state_dir,
+        publish_discovery=True,
+    )
+
+    assert "--publish-discovery" in command
+    assert command.index("--publish-discovery") > command.index("--once")
+    assert command[-2:] == ["--state-dir", str(state_dir)]
 
 
 def test_render_management_html_includes_contract_and_storage_sections() -> None:
@@ -1077,11 +1184,20 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     html = render_settings_html(
         config=config,
-        snapshot={"devices": []},
+        snapshot={"devices": [], "mqtt_connected": False},
         devices=[],
     )
 
     assert "Gateway Settings" in html
+    assert "MQTT Settings" in html
+    assert "Home Assistant Settings" in html
+    assert "MQTT broker host" in html
+    assert "MQTT broker connection" in html
+    assert '<span class="status-badge error">Disconnected</span>' in html
+    assert "MQTT broker port" in html
+    assert "MQTT username" in html
+    assert "MQTT password" in html
+    assert "Home Assistant status topic" in html
     assert "Web Service" in html
     assert "Display Settings" in html
     assert "Visible overview cards" in html
@@ -1090,10 +1206,12 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
     assert "Run One Collection Cycle" in html
+    assert "Republish Home Assistant Discovery" in html
+    assert 'action="/actions/republish-discovery"' in html
     assert "Restart bm-gateway service" in html
     assert "Restart Bluetooth service" in html
     assert "Reboot Raspberry Pi" in html
-    assert "Home Assistant Contract" in html
+    assert "Home Assistant MQTT Discovery" in html
     assert "Storage Summary" in html
     assert "Configuration Files" in html
     assert 'id="config-toml-readonly"' in html
@@ -1102,11 +1220,28 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert html.index('section-title">Gateway Overview') < html.index('section-title">Actions')
     assert html.index('section-title">Actions') < html.index('section-title">Gateway Settings')
     assert html.index('section-title">Gateway Settings') < html.index(
-        'section-title">Home Assistant Contract'
+        'section-title">MQTT Settings'
     )
-    assert html.index('section-title">Home Assistant Contract') < html.index(
+    assert html.index('section-title">MQTT Settings') < html.index(
+        'section-title">Home Assistant Settings'
+    )
+    assert html.index('section-title">Home Assistant Settings') < html.index(
+        'section-title">Home Assistant MQTT Discovery'
+    )
+    assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
     )
+
+
+def test_render_settings_html_shows_connected_mqtt_status_in_green() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={"devices": [], "mqtt_connected": True},
+        devices=[],
+    )
+
+    assert '<span class="status-badge ok">Connected</span>' in html
 
 
 def test_render_settings_html_summary_shows_appearance() -> None:
@@ -1116,6 +1251,49 @@ def test_render_settings_html_summary_shows_appearance() -> None:
 
     assert "Appearance" in html
     assert "System" in html
+
+
+def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[
+            {
+                "id": "ancell_bm200",
+                "type": "bm200",
+                "name": "Ancell BM200",
+                "mac": "AA:BB:CC:DD:EE:01",
+            },
+            {
+                "id": "spare_nlp20",
+                "type": "bm200",
+                "name": "Spare NLP20",
+                "mac": "AA:BB:CC:DD:EE:02",
+            },
+        ],
+        edit_mode=False,
+        storage_summary={
+            "counts": {
+                "gateway_snapshots": 3,
+                "device_readings": 30,
+                "device_daily_rollups": 10,
+            },
+            "devices": [
+                {"device_id": "ancell_bm200", "raw_samples": 10},
+                {"device_id": "bm200_house", "raw_samples": 10},
+                {"device_id": "bm300_van", "raw_samples": 10},
+                {"device_id": "fake_serial_test", "raw_samples": 10},
+                {"device_id": "spare_nlp20", "raw_samples": 10},
+            ],
+        },
+    )
+
+    assert "ancell_bm200" in html
+    assert "spare_nlp20" in html
+    assert "bm200_house" not in html
+    assert "bm300_van" not in html
+    assert "fake_serial_test" not in html
 
 
 def test_render_settings_html_summary_shows_chart_defaults() -> None:
@@ -1161,13 +1339,27 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
 
     assert "Gateway Settings" in html
     assert "Gateway Overview" not in html
+    assert "MQTT Settings" in html
+    assert "Home Assistant Settings" in html
     assert "Web Service" in html
     assert "Display Settings" in html
     assert "Save gateway settings" in html
+    assert "Save MQTT settings" in html
+    assert "Save Home Assistant settings" in html
     assert "Save web service settings" in html
     assert "Save display settings" in html
     assert 'name="gateway_name"' in html
     assert 'name="timezone"' in html
+    assert 'name="mqtt_host"' in html
+    assert 'name="mqtt_port"' in html
+    assert 'name="mqtt_username"' in html
+    assert 'name="mqtt_password"' in html
+    assert 'name="mqtt_base_topic"' in html
+    assert 'name="mqtt_discovery_prefix"' in html
+    assert 'name="mqtt_retain_discovery"' in html
+    assert 'name="mqtt_retain_state"' in html
+    assert 'name="home_assistant_status_topic"' in html
+    assert 'name="home_assistant_gateway_device_id"' in html
     assert 'name="web_host"' in html
     assert 'name="web_enabled"' in html
     assert 'name="visible_device_limit"' in html
@@ -1175,11 +1367,20 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="scan_timeout_seconds"' in html
     assert 'name="connect_timeout_seconds"' in html
     assert "Configuration Files" not in html
-    assert "Home Assistant Contract" not in html
+    assert "Home Assistant MQTT Discovery" not in html
     assert "Storage Summary" not in html
     assert "Run One Collection Cycle" not in html
     assert "Recover Bluetooth Adapter" not in html
     assert 'href="/settings"' in html
+    assert "Leave blank if your broker allows anonymous connections." in html
+    assert (
+        "Keeps discovery messages on the broker so Home Assistant can rediscover the gateway "
+        "after restarts."
+    ) in html
+    assert (
+        "Publishes Home Assistant-compatible MQTT discovery messages so entities can appear "
+        "automatically."
+    ) in html
 
 
 def test_render_settings_html_edit_mode_shows_appearance_options() -> None:
@@ -1571,6 +1772,17 @@ def test_base_css_uses_wrapping_flex_layout_for_history_device_selector() -> Non
     assert "flex-wrap: wrap;" in css
     assert "align-items: flex-start;" in css
     assert "gap: 1rem;" in css
+
+
+def test_base_css_compacts_raw_history_table() -> None:
+    css = base_css()
+
+    assert ".raw-readings-scroll {" in css
+    assert "max-height: 24rem;" in css
+    assert "overflow: auto;" in css
+    assert ".raw-readings-table {" in css
+    assert "white-space: nowrap;" in css
+    assert "position: sticky;" in css
 
 
 def test_base_css_strengthens_device_page_cards_with_device_accent() -> None:
@@ -2265,7 +2477,11 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert 'bm200_house"><script>alert(1)</script> History' not in html
     assert "Voltage" in html
     assert "SoC" in html
-    assert "Temperature" in html
+    assert "<th>Time</th>" in html
+    assert "<th>Temp</th>" in html
+    assert "<th>Err</th>" in html
+    assert "raw-readings-scroll" in html
+    assert "raw-readings-table" in html
     assert "1 day" in html
     assert "3 days" in html
     assert "5 days" in html
@@ -2594,6 +2810,198 @@ def test_render_edit_device_html_prefills_device_fields() -> None:
     assert 'name="battery_production_year"' in html
     assert 'name="icon_key"' not in html
     assert "Registry ID:" not in html
+
+
+def test_render_edit_device_html_preserves_original_id_after_validation_error() -> None:
+    html = render_edit_device_html(
+        device={
+            "id": "duplicate_id",
+            "type": "bm200",
+            "name": "Ancell BM200",
+            "mac": "3C:AB:72:82:86:EA",
+            "enabled": True,
+            "battery": {
+                "family": "lead_acid",
+                "profile": "regular_lead_acid",
+            },
+        },
+        message="Validation failed: duplicate device id: duplicate_id",
+        original_device_id="ancell_bm200",
+    )
+
+    assert 'name="old_device_id" value="ancell_bm200"' in html
+    assert 'name="device_id" value="duplicate_id"' in html
+    assert "Validation failed: duplicate device id: duplicate_id" in html
+
+
+def _write_edit_device_config(tmp_path: Path) -> Path:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'device_registry = "devices.toml"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                'color_key = "green"',
+                "",
+                "[[devices]]",
+                'id = "spare_nlp20"',
+                'type = "bm200"',
+                'name = "Spare NLP20"',
+                'mac = "AA:BB:CC:DD:EE:02"',
+                'color_key = "blue"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config_path
+
+
+def _persist_edit_device_snapshot(database_path: Path, *, device_id: str) -> None:
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T00:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=1,
+            poll_interval_seconds=15,
+            devices=[
+                DeviceReading(
+                    id=device_id,
+                    type="bm200",
+                    name="BM200 House",
+                    mac="AA:BB:CC:DD:EE:01",
+                    enabled=True,
+                    connected=True,
+                    voltage=12.73,
+                    soc=58,
+                    temperature=None,
+                    rssi=None,
+                    state="normal",
+                    error_code=None,
+                    error_detail=None,
+                    last_seen="2024-01-01T00:00:00+00:00",
+                    adapter="hci0",
+                    driver="bm200",
+                )
+            ],
+        ),
+    )
+
+
+def test_update_device_from_form_renames_device_id_and_history(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+    database_path = tmp_path / "gateway.db"
+    _persist_edit_device_snapshot(database_path, device_id="bm200_house")
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        database_path=database_path,
+        device_id="bm200_house",
+        new_device_id="starter_battery",
+        device_type="bm200",
+        device_name="Starter Battery",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="green",
+        installed_in_vehicle=False,
+        vehicle_type="",
+        battery_brand="",
+        battery_model="",
+        battery_nominal_voltage=None,
+        battery_capacity_ah=None,
+        battery_production_year=None,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert [device.id for device in devices] == ["starter_battery", "spare_nlp20"]
+    assert fetch_recent_history(database_path, device_id="bm200_house", limit=10) == []
+    assert fetch_recent_history(database_path, device_id="starter_battery", limit=10)
+
+
+def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        device_id="bm200_house",
+        new_device_id="spare_nlp20",
+        device_type="bm200",
+        device_name="Starter Battery",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="green",
+        installed_in_vehicle=False,
+        vehicle_type="",
+        battery_brand="",
+        battery_model="",
+        battery_nominal_voltage=None,
+        battery_capacity_ah=None,
+        battery_production_year=None,
+    )
+
+    assert errors == ["duplicate device id: spare_nlp20"]
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+
+
+def test_update_device_from_form_rejects_history_collision(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+    database_path = tmp_path / "gateway.db"
+    _persist_edit_device_snapshot(database_path, device_id="spare_history")
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        database_path=database_path,
+        device_id="bm200_house",
+        new_device_id="spare_history",
+        device_type="bm200",
+        device_name="Starter Battery",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="green",
+        installed_in_vehicle=False,
+        vehicle_type="",
+        battery_brand="",
+        battery_model="",
+        battery_nominal_voltage=None,
+        battery_capacity_ah=None,
+        battery_production_year=None,
+    )
+
+    assert errors == ["device id spare_history already has stored history; choose a different id"]
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
 
 
 def test_bottom_nav_renders_generated_icons() -> None:

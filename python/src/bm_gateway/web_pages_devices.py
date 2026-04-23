@@ -137,8 +137,10 @@ def render_edit_device_html(
     message: str = "",
     theme_preference: str = "system",
     reserved_color_keys: set[str] | None = None,
+    original_device_id: str | None = None,
 ) -> str:
     device_id = str(device.get("id", ""))
+    hidden_device_id = original_device_id if original_device_id is not None else device_id
     battery = device.get("battery")
     battery_table = battery if isinstance(battery, dict) else {}
     family = str(
@@ -215,7 +217,16 @@ def render_edit_device_html(
             body=(
                 '<form method="post" action="/devices/update" class="two-column-grid" '
                 'data-battery-config-form="true">'
-                f'<input type="hidden" name="device_id" value="{html.escape(device_id)}">'
+                '<input type="hidden" name="old_device_id" '
+                f'value="{html.escape(hidden_device_id)}">'
+                '<div><label class="settings-label" for="edit-device-id-input">Device ID</label>'
+                f'<input id="edit-device-id-input" type="text" '
+                f'name="device_id" value="{html.escape(device_id)}" '
+                'autocomplete="off" spellcheck="false" required>'
+                '<div class="inline-field-help">'
+                "Stable gateway identity. Renaming it also renames stored history; "
+                "choose a unique ID that is not already used by another device or old history."
+                "</div></div>"
                 '<div><label class="settings-label" for="edit-device-name-input">Name</label>'
                 f'<input id="edit-device-name-input" type="text" '
                 f'name="device_name" value="{device_name}" '

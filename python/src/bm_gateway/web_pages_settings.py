@@ -21,6 +21,15 @@ from .web_ui import (
 )
 
 
+def _settings_markup_row(label: str, value_html: str) -> str:
+    return (
+        '<div class="settings-row">'
+        f'<div class="settings-label">{html.escape(label)}</div>'
+        f'<div class="settings-value">{value_html}</div>'
+        "</div>"
+    )
+
+
 def render_management_html(
     *,
     snapshot: dict[str, object],
@@ -72,6 +81,7 @@ def render_settings_html(
         },
         "devices": [],
     }
+    configured_device_ids = {str(device.get("id", "")) for device in devices}
     contract = contract or {}
     detected_bluetooth_adapters = (
         shared._discover_bluetooth_adapters()
@@ -118,6 +128,12 @@ def render_settings_html(
             else "Adapter detected"
         )
     )
+    mqtt_connected = bool(snapshot.get("mqtt_connected", False))
+    mqtt_connection_badge = (
+        '<span class="status-badge ok">Connected</span>'
+        if mqtt_connected
+        else '<span class="status-badge error">Disconnected</span>'
+    )
     detected_adapter_summary = ", ".join(detected_adapter_names) or "No adapters detected"
     api_chips = "".join(
         api_chip(endpoint)
@@ -161,6 +177,9 @@ def render_settings_html(
         '<div class="inline-actions">'
         '<form method="post" action="/actions/run-once">'
         f"{button('Run One Collection Cycle', kind='primary')}"
+        "</form>"
+        '<form method="post" action="/actions/republish-discovery">'
+        f"{button('Republish Home Assistant Discovery', kind='secondary')}"
         "</form>"
         '<form method="post" action="/actions/restart-runtime">'
         f"{button('Restart bm-gateway service', kind='secondary')}"
@@ -240,13 +259,43 @@ def render_settings_html(
         + settings_row("Timezone", config.gateway.timezone)
         + settings_row("Live polling", config.gateway.reader_mode)
         + settings_row("Poll interval", f"{config.gateway.poll_interval_seconds} seconds")
-        + settings_row("MQTT", "Enabled" if config.mqtt.enabled else "Disabled")
-        + settings_row(
-            "Home Assistant",
-            "Enabled" if config.home_assistant.enabled else "Disabled",
-        )
         + settings_row("Raw retention", f"{config.retention.raw_retention_days} days")
         + settings_row("Daily rollup retention", daily_retention)
+    )
+    mqtt_section_body = (
+        settings_row("MQTT", "Enabled" if config.mqtt.enabled else "Disabled")
+        + _settings_markup_row(
+            "MQTT broker connection",
+            mqtt_connection_badge,
+        )
+        + settings_row("MQTT broker host", config.mqtt.host)
+        + settings_row("MQTT broker port", str(config.mqtt.port))
+        + settings_row(
+            "MQTT username",
+            config.mqtt.username or "Anonymous / not set",
+        )
+        + settings_row(
+            "MQTT password",
+            "Configured" if config.mqtt.password else "Empty / anonymous",
+        )
+        + settings_row("MQTT base topic", config.mqtt.base_topic)
+        + settings_row("MQTT discovery prefix", config.mqtt.discovery_prefix)
+        + settings_row(
+            "MQTT retain discovery",
+            "Enabled" if config.mqtt.retain_discovery else "Disabled",
+        )
+        + settings_row(
+            "MQTT retain state",
+            "Enabled" if config.mqtt.retain_state else "Disabled",
+        )
+    )
+    home_assistant_section_body = (
+        settings_row(
+            "Home Assistant MQTT discovery",
+            "Enabled" if config.home_assistant.enabled else "Disabled",
+        )
+        + settings_row("Home Assistant status topic", config.home_assistant.status_topic)
+        + settings_row("Home Assistant gateway device id", config.home_assistant.gateway_device_id)
     )
     if edit_mode:
         reader_mode_options = "".join(
@@ -305,12 +354,16 @@ def render_settings_html(
                     f'<input id="gateway-name-input" type="text" name="gateway_name" '
                     f'value="{html.escape(config.gateway.name)}" autocomplete="off">'
                 ),
+                help_text="Set the display name shown across the gateway UI and status views.",
             )
             + settings_control_row(
                 "Timezone",
                 (
                     f'<input id="timezone-input" type="text" name="timezone" '
                     f'value="{html.escape(config.gateway.timezone)}" autocomplete="off">'
+                ),
+                help_text=(
+                    "Use an IANA timezone such as Europe/Rome so timestamps render correctly."
                 ),
             )
             + settings_control_row(
@@ -320,6 +373,10 @@ def render_settings_html(
                     f"{reader_mode_options}"
                     "</select>"
                 ),
+                help_text=(
+                    "Choose live to read real devices over Bluetooth, or fake for offline "
+                    "UI testing."
+                ),
             )
             + settings_control_row(
                 "Poll interval",
@@ -328,24 +385,7 @@ def render_settings_html(
                     f'value="{config.gateway.poll_interval_seconds}" inputmode="numeric" '
                     'autocomplete="off">'
                 ),
-            )
-            + settings_control_row(
-                "MQTT",
-                (
-                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
-                    f'<input type="checkbox" name="mqtt_enabled"'
-                    f"{shared._checked_attr(config.mqtt.enabled)}>"
-                    "<span>Enable MQTT publishing</span></label>"
-                ),
-            )
-            + settings_control_row(
-                "Home Assistant",
-                (
-                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
-                    '<input type="checkbox" name="home_assistant_enabled"'
-                    f"{shared._checked_attr(config.home_assistant.enabled)}>"
-                    "<span>Enable Home Assistant contract</span></label>"
-                ),
+                help_text="Set how often the gateway performs a full collection cycle.",
             )
             + settings_control_row(
                 "Raw retention",
@@ -354,6 +394,7 @@ def render_settings_html(
                     f'value="{config.retention.raw_retention_days}" inputmode="numeric" '
                     'autocomplete="off">'
                 ),
+                help_text="Keep detailed raw readings for this many days before pruning.",
             )
             + settings_control_row(
                 "Daily rollup retention",
@@ -362,9 +403,155 @@ def render_settings_html(
                     f'value="{config.retention.daily_retention_days}" inputmode="numeric" '
                     'autocomplete="off">'
                 ),
+                help_text="Use 0 to keep daily summaries indefinitely, or set a day limit.",
             )
             + '<div style="margin-top:1rem">'
             + f"{button('Save gateway settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
+        mqtt_section_body = (
+            '<form method="post" action="/settings/mqtt">'
+            + settings_control_row(
+                "MQTT publishing",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    f'<input type="checkbox" name="mqtt_enabled"'
+                    f"{shared._checked_attr(config.mqtt.enabled)}>"
+                    "<span>Enable MQTT publishing</span></label>"
+                ),
+                help_text="Turn this on to publish gateway and device updates to an MQTT broker.",
+            )
+            + settings_control_row(
+                "MQTT broker host",
+                (
+                    f'<input id="mqtt-host-input" type="text" name="mqtt_host" '
+                    f'value="{html.escape(config.mqtt.host)}" autocomplete="off">'
+                ),
+                help_text="Set the hostname or IP address of the MQTT broker.",
+            )
+            + settings_control_row(
+                "MQTT broker port",
+                (
+                    f'<input id="mqtt-port-input" type="text" name="mqtt_port" '
+                    f'value="{config.mqtt.port}" inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Use the TCP port exposed by your broker, usually 1883 for unencrypted MQTT."
+                ),
+            )
+            + settings_control_row(
+                "MQTT username",
+                (
+                    f'<input id="mqtt-username-input" type="text" name="mqtt_username" '
+                    f'value="{html.escape(config.mqtt.username)}" autocomplete="off">'
+                ),
+                help_text="Leave blank if your broker allows anonymous connections.",
+            )
+            + settings_control_row(
+                "MQTT password",
+                (
+                    f'<input id="mqtt-password-input" type="password" name="mqtt_password" '
+                    f'value="{html.escape(config.mqtt.password)}" autocomplete="off">'
+                ),
+                help_text=(
+                    "Used only when a username is provided. Leave blank for anonymous brokers."
+                ),
+            )
+            + settings_control_row(
+                "MQTT base topic",
+                (
+                    f'<input id="mqtt-base-topic-input" type="text" name="mqtt_base_topic" '
+                    f'value="{html.escape(config.mqtt.base_topic)}" autocomplete="off">'
+                ),
+                help_text=(
+                    "This is the root topic under which gateway and device state messages are "
+                    "published."
+                ),
+            )
+            + settings_control_row(
+                "MQTT discovery prefix",
+                (
+                    f'<input id="mqtt-discovery-prefix-input" type="text" '
+                    f'name="mqtt_discovery_prefix" '
+                    f'value="{html.escape(config.mqtt.discovery_prefix)}" autocomplete="off">'
+                ),
+                help_text="Home Assistant listens under this prefix for MQTT discovery payloads.",
+            )
+            + settings_control_row(
+                "Retain discovery",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    f'<input type="checkbox" name="mqtt_retain_discovery"'
+                    f"{shared._checked_attr(config.mqtt.retain_discovery)}>"
+                    "<span>Keep MQTT discovery topics retained</span></label>"
+                ),
+                help_text=(
+                    "Keeps discovery messages on the broker so Home Assistant can rediscover the "
+                    "gateway after restarts."
+                ),
+            )
+            + settings_control_row(
+                "Retain state",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    f'<input type="checkbox" name="mqtt_retain_state"'
+                    f"{shared._checked_attr(config.mqtt.retain_state)}>"
+                    "<span>Keep MQTT state topics retained</span></label>"
+                ),
+                help_text=(
+                    "Keeps the last known gateway and battery state on the broker for new "
+                    "subscribers."
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save MQTT settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
+        home_assistant_section_body = (
+            '<form method="post" action="/settings/home-assistant">'
+            + settings_control_row(
+                "Home Assistant MQTT discovery",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="home_assistant_enabled"'
+                    f"{shared._checked_attr(config.home_assistant.enabled)}>"
+                    "<span>Enable Home Assistant MQTT discovery</span></label>"
+                ),
+                help_text=(
+                    "Publishes Home Assistant-compatible MQTT discovery messages so entities can "
+                    "appear automatically."
+                ),
+            )
+            + settings_control_row(
+                "Home Assistant status topic",
+                (
+                    '<input id="home-assistant-status-topic-input" type="text" '
+                    f'name="home_assistant_status_topic" '
+                    f'value="{html.escape(config.home_assistant.status_topic)}" '
+                    'autocomplete="off">'
+                ),
+                help_text=(
+                    "Home Assistant publishes its online status here so the gateway can align "
+                    "discovery behavior."
+                ),
+            )
+            + settings_control_row(
+                "Home Assistant gateway device id",
+                (
+                    '<input id="home-assistant-gateway-device-id-input" type="text" '
+                    f'name="home_assistant_gateway_device_id" '
+                    f'value="{html.escape(config.home_assistant.gateway_device_id)}" '
+                    'autocomplete="off">'
+                ),
+                help_text=(
+                    "This becomes the stable device identifier Home Assistant uses for the "
+                    "gateway device."
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save Home Assistant settings', kind='primary')}"
             + "</div>"
             + "</form>"
         )
@@ -379,12 +566,19 @@ def render_settings_html(
                     f"{shared._checked_attr(config.web.enabled)}>"
                     "<span>Enable web interface</span></label>"
                 ),
+                help_text=(
+                    "Turn this off if you only want CLI and MQTT behavior without the local web UI."
+                ),
             )
             + settings_control_row(
                 "Host",
                 (
                     f'<input id="web-host-input" type="text" name="web_host" '
                     f'value="{html.escape(config.web.host)}" autocomplete="off">'
+                ),
+                help_text=(
+                    "Choose which network interface the web server listens on, for example "
+                    "0.0.0.0 or 127.0.0.1."
                 ),
             )
             + settings_control_row(
@@ -394,6 +588,7 @@ def render_settings_html(
                     f'value="{config.web.port}" '
                     'inputmode="numeric" autocomplete="off">'
                 ),
+                help_text="Set the TCP port used by the web UI, such as 80 or 8080.",
             )
             + '<div style="margin-top:1rem">'
             + f"{button('Save web service settings', kind='primary')}"
@@ -494,6 +689,10 @@ def render_settings_html(
                     f'value="{config.bluetooth.scan_timeout_seconds}" inputmode="numeric" '
                     'autocomplete="off">'
                 ),
+                help_text=(
+                    "Controls how long the gateway searches for each Bluetooth device before "
+                    "giving up."
+                ),
             )
             + settings_control_row(
                 "Connect timeout",
@@ -502,6 +701,9 @@ def render_settings_html(
                     f'name="connect_timeout_seconds" '
                     f'value="{config.bluetooth.connect_timeout_seconds}" '
                     'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Controls how long the gateway waits for a Bluetooth connection to complete."
                 ),
             )
             + '<div style="margin-top:1rem">'
@@ -545,6 +747,14 @@ def render_settings_html(
             body=gateway_section_body,
         )
         + section_card(
+            title="MQTT Settings",
+            body=mqtt_section_body,
+        )
+        + section_card(
+            title="Home Assistant Settings",
+            body=home_assistant_section_body,
+        )
+        + section_card(
             title="Web Service",
             body=web_section_body,
         )
@@ -560,7 +770,7 @@ def render_settings_html(
             ""
             if edit_mode
             else section_card(
-                title="Home Assistant Contract",
+                title="Home Assistant MQTT Discovery",
                 body=(
                     settings_row("Gateway state topic", gateway_state_topic)
                     + settings_row("Gateway discovery topic", gateway_discovery_topic)
@@ -577,7 +787,9 @@ def render_settings_html(
                     '<div class="table-shell"><table><thead><tr><th>Device</th><th>Raw samples</th>'
                     "<th>Raw first</th><th>Raw last</th>"
                     "<th>Daily days</th><th>Daily first</th><th>Daily last</th></tr></thead>"
-                    f"<tbody>{shared._storage_rows(storage_summary)}</tbody></table></div>"
+                    "<tbody>"
+                    f"{shared._storage_rows(storage_summary, device_ids=configured_device_ids)}"
+                    "</tbody></table></div>"
                 ),
             )
         )

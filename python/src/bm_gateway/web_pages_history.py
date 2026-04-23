@@ -152,7 +152,7 @@ def render_device_html(
         + history_sections
     )
     return app_document(
-        title=f"{device_id} Device",
+        title=f"{device_name} Device",
         body=body,
         active_nav="home",
         version_label=version_label,
@@ -296,8 +296,9 @@ def _render_history_sections(
             body=(
                 '<div class="raw-table-shell"><details open><summary class="settings-label">'
                 "Raw readings table</summary>"
-                '<div class="table-shell"><table><thead><tr><th>Timestamp</th><th>Voltage</th>'
-                "<th>SoC</th><th>Temperature</th><th>State</th><th>Error</th></tr></thead>"
+                '<div class="table-shell raw-readings-scroll">'
+                '<table class="raw-readings-table"><thead><tr><th>Time</th><th>V</th>'
+                "<th>SoC</th><th>Temp</th><th>State</th><th>Err</th></tr></thead>"
                 f"<tbody>{raw_rows_html}</tbody></table></div></details></div>"
             ),
         )

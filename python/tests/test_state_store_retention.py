@@ -13,11 +13,13 @@ from bm_gateway.state_store import (
     fetch_recent_history,
     fetch_storage_summary,
     fetch_yearly_history,
+    history_device_id_exists,
     import_archive_history,
     latest_history_timestamp,
     persist_snapshot,
     prune_history,
     rebuild_daily_rollups,
+    rename_history_device_id,
 )
 
 
@@ -104,6 +106,81 @@ def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> N
             "archive_last_ts": None,
         }
     ]
+
+
+def test_rename_history_device_id_updates_raw_daily_and_archive_tables(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.7,
+                "min_crank_voltage": None,
+                "event_type": None,
+            }
+        ],
+    )
+
+    rename_history_device_id(
+        database_path,
+        old_device_id="bm200_house",
+        new_device_id="starter",
+        device_type="bm200",
+        name="Starter Battery",
+        mac="AA:BB:CC:DD:EE:99",
+    )
+
+    assert not history_device_id_exists(database_path, "bm200_house")
+    assert history_device_id_exists(database_path, "starter")
+    assert (
+        fetch_recent_history(database_path, device_id="starter", limit=10)[0]["sample_source"]
+        == "live"
+    )
+    assert (
+        fetch_daily_history(database_path, device_id="starter", limit=10)[0]["day"] == "2024-01-01"
+    )
+    assert (
+        fetch_archive_history(database_path, device_id="starter", limit=10)[0]["sample_source"]
+        == "device_archive"
+    )
+    connection = sqlite3.connect(database_path)
+    try:
+        raw_metadata = connection.execute(
+            "SELECT DISTINCT device_type, name, mac FROM device_readings WHERE device_id = ?",
+            ("starter",),
+        ).fetchall()
+        archive_metadata = connection.execute(
+            """
+            SELECT DISTINCT device_type, name, mac
+            FROM device_archive_readings
+            WHERE device_id = ?
+            """,
+            ("starter",),
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert raw_metadata == [("bm200", "Starter Battery", "AA:BB:CC:DD:EE:99")]
+    assert archive_metadata == [("bm200", "Starter Battery", "AA:BB:CC:DD:EE:99")]
+
+
+def test_history_device_id_exists_detects_existing_storage_identity(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+
+    assert history_device_id_exists(database_path, "bm200_house")
+    assert not history_device_id_exists(database_path, "starter")
 
 
 def test_fetch_yearly_history_groups_daily_rollups_by_year(tmp_path: Path) -> None:

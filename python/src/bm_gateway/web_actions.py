@@ -21,6 +21,7 @@ from .device_registry import (
     validate_devices,
     write_device_registry,
 )
+from .state_store import history_device_id_exists, rename_history_device_id
 from .web_support import default_curve_pairs, read_text
 
 
@@ -156,7 +157,9 @@ def add_device_from_form(
 def update_device_from_form(
     *,
     config_path: Path,
+    database_path: Path | None = None,
     device_id: str,
+    new_device_id: str | None = None,
     device_type: str,
     device_name: str,
     device_mac: str,
@@ -176,13 +179,18 @@ def update_device_from_form(
 ) -> list[str]:
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
+    resolved_device_id = device_id.strip()
+    resolved_new_device_id = (
+        new_device_id.strip() if new_device_id is not None else resolved_device_id
+    )
     updated_devices: list[Device] = []
     found = False
     for device in devices:
-        if device.id == device_id:
+        if device.id == resolved_device_id:
             updated_devices.append(
                 replace(
                     device,
+                    id=resolved_new_device_id,
                     type=device_type.strip(),
                     name=device_name.strip(),
                     mac=normalize_mac_address(device_mac),
@@ -212,10 +220,27 @@ def update_device_from_form(
         else:
             updated_devices.append(device)
     if not found:
-        return [f"device {device_id} was not found"]
+        return [f"device {resolved_device_id} was not found"]
     errors = validate_devices(updated_devices)
     if errors:
         return errors
+    if (
+        database_path is not None
+        and resolved_new_device_id != resolved_device_id
+        and history_device_id_exists(database_path, resolved_new_device_id)
+    ):
+        return [
+            f"device id {resolved_new_device_id} already has stored history; choose a different id"
+        ]
+    if database_path is not None:
+        rename_history_device_id(
+            database_path,
+            old_device_id=resolved_device_id,
+            new_device_id=resolved_new_device_id,
+            device_type=device_type.strip(),
+            name=device_name.strip(),
+            mac=normalize_mac_address(device_mac),
+        )
     write_device_registry(config.device_registry_path, updated_devices)
     return []
 
@@ -307,8 +332,6 @@ def update_gateway_preferences(
     timezone: str,
     reader_mode: str,
     poll_interval_seconds: int,
-    mqtt_enabled: bool,
-    home_assistant_enabled: bool,
     raw_retention_days: int,
     daily_retention_days: int,
 ) -> list[str]:
@@ -322,18 +345,74 @@ def update_gateway_preferences(
             reader_mode=reader_mode,
             poll_interval_seconds=poll_interval_seconds,
         ),
-        mqtt=replace(
-            config.mqtt,
-            enabled=mqtt_enabled,
-        ),
-        home_assistant=replace(
-            config.home_assistant,
-            enabled=home_assistant_enabled,
-        ),
         retention=replace(
             config.retention,
             raw_retention_days=raw_retention_days,
             daily_retention_days=daily_retention_days,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
+def update_mqtt_preferences(
+    *,
+    config_path: Path,
+    mqtt_enabled: bool,
+    mqtt_host: str,
+    mqtt_port: int,
+    mqtt_username: str,
+    mqtt_password: str,
+    mqtt_base_topic: str,
+    mqtt_discovery_prefix: str,
+    mqtt_retain_discovery: bool,
+    mqtt_retain_state: bool,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        mqtt=replace(
+            config.mqtt,
+            enabled=mqtt_enabled,
+            host=mqtt_host,
+            port=mqtt_port,
+            username=mqtt_username,
+            password=mqtt_password,
+            base_topic=mqtt_base_topic,
+            discovery_prefix=mqtt_discovery_prefix,
+            retain_discovery=mqtt_retain_discovery,
+            retain_state=mqtt_retain_state,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
+def update_home_assistant_preferences(
+    *,
+    config_path: Path,
+    home_assistant_enabled: bool,
+    home_assistant_status_topic: str,
+    home_assistant_gateway_device_id: str,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        home_assistant=replace(
+            config.home_assistant,
+            enabled=home_assistant_enabled,
+            status_topic=home_assistant_status_topic,
+            gateway_device_id=home_assistant_gateway_device_id,
         ),
     )
     from .config import validate_config
@@ -371,7 +450,12 @@ def update_bluetooth_preferences(
     return []
 
 
-def build_run_once_command(config_path: Path, *, state_dir: Path | None = None) -> list[str]:
+def build_run_once_command(
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+    publish_discovery: bool = False,
+) -> list[str]:
     command = [
         sys.executable,
         "-m",
@@ -381,16 +465,25 @@ def build_run_once_command(config_path: Path, *, state_dir: Path | None = None) 
         "run",
         "--once",
     ]
+    if publish_discovery:
+        command.append("--publish-discovery")
     if state_dir is not None:
         command.extend(["--state-dir", str(state_dir)])
     return command
 
 
 def run_once_via_cli(
-    config_path: Path, *, state_dir: Path | None = None
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+    publish_discovery: bool = False,
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        build_run_once_command(config_path, state_dir=state_dir),
+        build_run_once_command(
+            config_path,
+            state_dir=state_dir,
+            publish_discovery=publish_discovery,
+        ),
         check=False,
         capture_output=True,
         text=True,

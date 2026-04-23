@@ -33,6 +33,8 @@ from .web_actions import (
     update_device_from_form,
     update_device_icon,
     update_gateway_preferences,
+    update_home_assistant_preferences,
+    update_mqtt_preferences,
     update_web_preferences,
 )
 from .web_assets import (
@@ -88,6 +90,8 @@ __all__ = [
     "update_device_from_form",
     "update_device_icon",
     "update_gateway_preferences",
+    "update_home_assistant_preferences",
+    "update_mqtt_preferences",
     "update_web_preferences",
     "_add_device_form_html",
     "_battery_form_script",
@@ -562,9 +566,14 @@ def serve_management(
                 return
 
             if parsed.path == "/devices/update":
+                config = load_config(config_path)
+                old_device_id = form.get("old_device_id", form.get("device_id", [""]))[0]
+                submitted_device_id = form.get("device_id", [""])[0]
                 errors = update_device_from_form(
                     config_path=config_path,
-                    device_id=form.get("device_id", [""])[0],
+                    database_path=database_file_path(config, state_dir=state_dir),
+                    device_id=old_device_id,
+                    new_device_id=submitted_device_id,
                     device_type=form.get("device_type", ["bm200"])[0],
                     device_name=form.get("device_name", [""])[0],
                     device_mac=form.get("device_mac", [""])[0],
@@ -588,13 +597,11 @@ def serve_management(
                     ),
                 )
                 if errors:
-                    config = load_config(config_path)
                     configured_devices = load_device_registry(config.device_registry_path)
-                    device_id = form.get("device_id", [""])[0]
                     device = next(
-                        (item.to_dict() for item in configured_devices if item.id == device_id),
+                        (item.to_dict() for item in configured_devices if item.id == old_device_id),
                         {
-                            "id": device_id,
+                            "id": submitted_device_id,
                             "type": form.get("device_type", ["bm200"])[0],
                             "name": form.get("device_name", [""])[0],
                             "mac": form.get("device_mac", [""])[0],
@@ -631,6 +638,10 @@ def serve_management(
                             },
                         },
                     )
+                    device["id"] = submitted_device_id
+                    device["type"] = form.get("device_type", ["bm200"])[0]
+                    device["name"] = form.get("device_name", [""])[0]
+                    device["mac"] = form.get("device_mac", [""])[0]
                     self._send_html(
                         render_edit_device_html(
                             device=device,
@@ -639,8 +650,9 @@ def serve_management(
                             reserved_color_keys={
                                 item.color_key
                                 for item in configured_devices
-                                if item.id != device_id
+                                if item.id != old_device_id
                             },
+                            original_device_id=old_device_id,
                         ),
                         status=400,
                     )
@@ -652,7 +664,7 @@ def serve_management(
                     "/devices/edit?"
                     + urlencode(
                         {
-                            "device_id": form.get("device_id", [""])[0],
+                            "device_id": submitted_device_id,
                             "message": "Device saved",
                         }
                     ),
@@ -712,10 +724,105 @@ def serve_management(
                     timezone=form.get("timezone", ["Europe/Rome"])[0],
                     reader_mode=form.get("reader_mode", ["fake"])[0],
                     poll_interval_seconds=poll_interval_seconds,
-                    mqtt_enabled=_bool_from_form(form, "mqtt_enabled"),
-                    home_assistant_enabled=_bool_from_form(form, "home_assistant_enabled"),
                     raw_retention_days=raw_retention_days,
                     daily_retention_days=daily_retention_days,
+                )
+                if errors:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/mqtt":
+                try:
+                    mqtt_port = int(form.get("mqtt_port", ["1883"])[0])
+                except ValueError:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: MQTT port must be numeric",
+                            theme_preference=config.web.appearance,
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_mqtt_preferences(
+                    config_path=config_path,
+                    mqtt_enabled=_bool_from_form(form, "mqtt_enabled"),
+                    mqtt_host=form.get("mqtt_host", ["mqtt.local"])[0],
+                    mqtt_port=mqtt_port,
+                    mqtt_username=form.get("mqtt_username", ["mqtt-user"])[0],
+                    mqtt_password=form.get("mqtt_password", ["CHANGE_ME"])[0],
+                    mqtt_base_topic=form.get("mqtt_base_topic", ["bm_gateway"])[0],
+                    mqtt_discovery_prefix=form.get("mqtt_discovery_prefix", ["homeassistant"])[0],
+                    mqtt_retain_discovery=_bool_from_form(form, "mqtt_retain_discovery"),
+                    mqtt_retain_state=_bool_from_form(form, "mqtt_retain_state"),
+                )
+                if errors:
+                    config, snapshot, current_database_path = self._load_current()
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/home-assistant":
+                errors = update_home_assistant_preferences(
+                    config_path=config_path,
+                    home_assistant_enabled=_bool_from_form(form, "home_assistant_enabled"),
+                    home_assistant_status_topic=form.get(
+                        "home_assistant_status_topic", ["homeassistant/status"]
+                    )[0],
+                    home_assistant_gateway_device_id=form.get(
+                        "home_assistant_gateway_device_id", ["bm_gateway"]
+                    )[0],
                 )
                 if errors:
                     config, snapshot, current_database_path = self._load_current()
@@ -914,6 +1021,24 @@ def serve_management(
             if parsed.path == "/actions/run-once":
                 completed = run_once_via_cli(config_path, state_dir=state_dir)
                 message = "Run completed" if completed.returncode == 0 else "Run failed"
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/republish-discovery":
+                completed = run_once_via_cli(
+                    config_path,
+                    state_dir=state_dir,
+                    publish_discovery=True,
+                )
+                message = (
+                    "Home Assistant discovery republished"
+                    if completed.returncode == 0
+                    else "Home Assistant discovery republish failed"
+                )
                 if completed.stderr:
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)

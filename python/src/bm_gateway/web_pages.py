@@ -1052,15 +1052,18 @@ def _parse_custom_curve_from_form(form: dict[str, list[str]]) -> tuple[tuple[int
     return tuple(rows)
 
 
-def _storage_rows(summary: dict[str, object]) -> str:
+def _storage_rows(summary: dict[str, object], *, device_ids: set[str] | None = None) -> str:
     rows: list[str] = []
     devices = cast(list[object], summary.get("devices", []))
     for device in devices:
         if not isinstance(device, dict):
             continue
+        device_id = str(device.get("device_id", ""))
+        if device_ids is not None and device_id not in device_ids:
+            continue
         rows.append(
             "<tr>"
-            f"<td>{html.escape(str(device.get('device_id', '')))}</td>"
+            f"<td>{html.escape(device_id)}</td>"
             f"<td>{html.escape(str(device.get('raw_samples', 0)))}</td>"
             f"<td>{html.escape(str(device.get('raw_first_ts', '-')))}</td>"
             f"<td>{html.escape(str(device.get('raw_last_ts', '-')))}</td>"
@@ -1599,6 +1602,7 @@ def render_edit_device_html(
     message: str = "",
     theme_preference: str = "system",
     reserved_color_keys: set[str] | None = None,
+    original_device_id: str | None = None,
 ) -> str:
     from .web_pages_devices import render_edit_device_html as _render_edit_device_html
 
@@ -1607,6 +1611,7 @@ def render_edit_device_html(
         message=message,
         theme_preference=theme_preference,
         reserved_color_keys=reserved_color_keys,
+        original_device_id=original_device_id,
     )
 
 

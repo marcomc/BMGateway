@@ -1841,6 +1841,27 @@ details summary::-webkit-details-marker { display: none; }
 .raw-table-shell details > div {
   margin-top: 0.8rem;
 }
+.raw-readings-scroll {
+  max-height: 24rem;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.raw-readings-table {
+  min-width: max-content;
+  font-size: 0.82rem;
+  line-height: 1.25;
+}
+.raw-readings-table th,
+.raw-readings-table td {
+  padding: 0.55rem 0.6rem;
+  white-space: nowrap;
+}
+.raw-readings-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--bg-surface);
+}
 .battery-form-section {
   display: grid;
   gap: 0.9rem;
@@ -2235,6 +2256,16 @@ details summary::-webkit-details-marker { display: none; }
   .history-device-summary,
   .history-device-current {
     font-size: 0.74rem;
+  }
+  .raw-readings-scroll {
+    max-height: 18rem;
+  }
+  .raw-readings-table {
+    font-size: 0.76rem;
+  }
+  .raw-readings-table th,
+  .raw-readings-table td {
+    padding: 0.45rem 0.5rem;
   }
   .chart-card {
     padding: 0.9rem;

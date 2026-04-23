@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.1] - 2024-07-31
+
+### Added
+
+- Added a new architecture proposal documenting a dedicated service-account and
+  privilege-hardening plan for `BMGateway`, including the current permission
+  inventory, sudo scope, `systemd` hardening opportunities, and phased
+  implementation guidance.
+- Added a backlog proposition that references the service-account and
+  privilege-hardening proposal so the investigation can be reused when the work
+  is scheduled.
+- Added editable gateway settings for MQTT broker and Home Assistant topic
+  parameters, and updated the default MQTT username placeholder from
+  `homeassistant` to `mqtt-user`.
+- Documented Home Assistant auto-discovery in user-facing English, including
+  the required MQTT broker path and a clearer explanation of
+  `Home Assistant MQTT discovery`.
+- Split editable settings into separate Gateway, MQTT, and Home Assistant
+  sections and added inline help text for MQTT, Home Assistant, web, gateway,
+  and Bluetooth options.
+- Documented MQTT authentication behavior, retained discovery/state defaults,
+  and why the Home Assistant discovery prefix defaults to `homeassistant`.
+- Added a visible MQTT broker connection status row to the settings page.
+- Added a Settings action to republish Home Assistant MQTT discovery and current
+  device state to the configured broker on demand.
+- Compacted the recent raw readings table on history pages with shorter column
+  labels, smaller table text, non-wrapping cells, and a bounded scroll area.
+- Made device IDs editable from the device edit form with validation, including
+  stored-history ID collision checks and history-table renaming when an ID
+  changes.
+- Validated editable device IDs so MQTT topic paths stay limited to letters,
+  numbers, underscores, and hyphens.
+- Updated device ID renames to also normalize stored raw/archive metadata such
+  as the device name, type, and MAC address so charts do not split old and new
+  labels after a rename.
+- Filtered the settings storage summary to configured devices so removed test
+  devices no longer appear in the normal settings view.
+
 ## [0.1.0] - 2024-06-30
 
 ### Included
