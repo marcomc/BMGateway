@@ -15,12 +15,20 @@ This directory contains the Home Assistant-facing assets and documentation for
 `BMGateway` uses Home Assistant's built-in MQTT integration. There is no
 separate custom Home Assistant integration required for the normal setup path.
 
+When describing this behavior for operators, prefer `Home Assistant MQTT
+discovery` over `Home Assistant contract`. The latter is repository/developer
+language for the MQTT topic and payload definition.
+
 ## Start Here
 
 Use these documents in order:
 
 1. [setup.md](setup.md)
 2. [contract.md](contract.md)
+
+The setup guide is the operator-facing source of truth for MQTT broker
+placement, anonymous versus authenticated MQTT connections, retained discovery
+versus retained state, and the default `homeassistant` discovery prefix.
 
 ## Included Assets
 

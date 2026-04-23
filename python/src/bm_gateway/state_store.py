@@ -509,6 +509,73 @@ def fetch_storage_summary(path: Path) -> dict[str, object]:
     }
 
 
+def history_device_id_exists(path: Path, device_id: str) -> bool:
+    connection = _connect_database(path)
+    try:
+        for table_name in (
+            "device_readings",
+            "device_daily_rollups",
+            "device_archive_readings",
+        ):
+            row = connection.execute(
+                f"SELECT 1 FROM {table_name} WHERE device_id = ? LIMIT 1",
+                (device_id,),
+            ).fetchone()
+            if row is not None:
+                return True
+    finally:
+        connection.close()
+    return False
+
+
+def rename_history_device_id(
+    path: Path,
+    *,
+    old_device_id: str,
+    new_device_id: str,
+    device_type: str | None = None,
+    name: str | None = None,
+    mac: str | None = None,
+) -> None:
+    metadata_supplied = device_type is not None or name is not None or mac is not None
+    if old_device_id == new_device_id and not metadata_supplied:
+        return
+
+    connection = _connect_database(path)
+    try:
+        with connection:
+            if old_device_id != new_device_id:
+                for table_name in (
+                    "device_readings",
+                    "device_daily_rollups",
+                    "device_archive_readings",
+                ):
+                    connection.execute(
+                        f"UPDATE {table_name} SET device_id = ? WHERE device_id = ?",
+                        (new_device_id, old_device_id),
+                    )
+            if metadata_supplied:
+                metadata_assignments: list[str] = []
+                metadata_values: list[str] = []
+                if device_type is not None:
+                    metadata_assignments.append("device_type = ?")
+                    metadata_values.append(device_type)
+                if name is not None:
+                    metadata_assignments.append("name = ?")
+                    metadata_values.append(name)
+                if mac is not None:
+                    metadata_assignments.append("mac = ?")
+                    metadata_values.append(mac)
+                metadata_clause = ", ".join(metadata_assignments)
+                for table_name in ("device_readings", "device_archive_readings"):
+                    connection.execute(
+                        f"UPDATE {table_name} SET {metadata_clause} WHERE device_id = ?",
+                        (*metadata_values, new_device_id),
+                    )
+    finally:
+        connection.close()
+
+
 def fetch_recent_history(
     path: Path,
     *,

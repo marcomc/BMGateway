@@ -30,9 +30,9 @@ class BluetoothConfig:
 @dataclass(frozen=True)
 class MQTTConfig:
     enabled: bool = True
-    host: str = "localhost"
+    host: str = "mqtt.local"
     port: int = 1883
-    username: str = "homeassistant"
+    username: str = "mqtt-user"
     password: str = "CHANGE_ME"
     base_topic: str = "bm_gateway"
     discovery_prefix: str = "homeassistant"
@@ -257,9 +257,9 @@ def load_config(path: Path) -> AppConfig:
     )
     mqtt = MQTTConfig(
         enabled=bool(mqtt_table.get("enabled", True)),
-        host=str(mqtt_table.get("host", "localhost")),
+        host=str(mqtt_table.get("host", "mqtt.local")),
         port=int(mqtt_table.get("port", 1883)),
-        username=str(mqtt_table.get("username", "homeassistant")),
+        username=str(mqtt_table.get("username", "mqtt-user")),
         password=str(mqtt_table.get("password", "CHANGE_ME")),
         base_topic=str(mqtt_table.get("base_topic", "bm_gateway")),
         discovery_prefix=str(mqtt_table.get("discovery_prefix", "homeassistant")),
@@ -312,6 +312,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("bluetooth.scan_timeout_seconds must be greater than zero")
     if config.bluetooth.connect_timeout_seconds <= 0:
         errors.append("bluetooth.connect_timeout_seconds must be greater than zero")
+    if not config.mqtt.host.strip():
+        errors.append("mqtt.host must not be empty")
     if config.mqtt.port <= 0:
         errors.append("mqtt.port must be greater than zero")
     if not config.mqtt.base_topic.strip():

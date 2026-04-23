@@ -32,6 +32,21 @@
 
 ## Propositions
 
+- [ ] Implement a dedicated `bm-gateway` service account and privilege-hardening plan.
+  Rework the appliance runtime so it no longer depends on a human user account
+  and so host-admin operations are exposed through a narrower privileged
+  boundary.
+  Reference:
+  - [docs/architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md](docs/architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md)
+  Actions:
+  - add a dedicated non-login `bm-gateway` service user for runtime and web
+  - move install, config, and state ownership to system-managed paths
+  - replace broad sudo guidance with exact command-scoped privilege rules
+  - remove unneeded `systemd` capabilities from the web unit
+  - decide whether privileged host actions should use a narrow helper or
+    dedicated oneshot units instead of direct `sudo systemctl ...`
+  - add follow-up web hardening for authentication and mutating-route safety
+
 - [ ] Add camera-based barcode scanning for device MAC or serial capture.
   Manual MAC entry is error-prone on phones and laptops. The original mobile
   app supports scanning the device barcode, and the web UI should offer the

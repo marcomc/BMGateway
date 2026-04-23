@@ -4,6 +4,9 @@
 
 `BMGateway` integrates with Home Assistant through MQTT discovery.
 
+In user-facing terms, this is best described as `Home Assistant MQTT
+discovery`, not as a `contract`.
+
 You do not need a custom Home Assistant integration for the normal setup path.
 The required Home Assistant-side integration already exists: the built-in MQTT
 integration.
@@ -29,6 +32,36 @@ Common broker choices:
 - Home Assistant Mosquitto add-on
 - An external broker such as Mosquitto on another host
 
+## How Auto-Discovery Works
+
+Home Assistant does not detect `BMGateway` by scanning the LAN or by opening
+the gateway web UI directly.
+
+Home Assistant auto-discovers `BMGateway` only when all of these are true:
+
+- Home Assistant has the built-in `MQTT` integration configured
+- `BMGateway` can connect to the same MQTT broker
+- `BMGateway` publishes Home Assistant MQTT discovery payloads to that broker
+- Home Assistant is listening on the same discovery prefix, normally
+  `homeassistant`
+
+The practical message flow is:
+
+```text
+BMGateway -> MQTT broker -> Home Assistant
+```
+
+In configuration terms:
+
+- `mqtt.enabled = true` means `BMGateway` will try to connect to an MQTT broker
+  and publish MQTT messages
+- `home_assistant.enabled = true` means `BMGateway` will publish the
+  Home Assistant-specific MQTT discovery and topic layout on top of that MQTT
+  connection
+
+If MQTT is not connected, Home Assistant discovery cannot succeed even when the
+Home Assistant integration flag is enabled.
+
 ## 1. Configure MQTT in Home Assistant
 
 In Home Assistant:
@@ -49,7 +82,7 @@ In the gateway config file:
 enabled = true
 host = "mqtt.local"
 port = 1883
-username = "homeassistant"
+username = "mqtt-user"
 password = "CHANGE_ME"
 base_topic = "bm_gateway"
 discovery_prefix = "homeassistant"
@@ -63,6 +96,42 @@ gateway_device_id = "bm_gateway"
 ```
 
 The broker details must match the Home Assistant MQTT integration.
+
+### MQTT authentication
+
+`BMGateway` does not need a separate anonymous-broker flag.
+
+Use these rules:
+
+- for an authenticated broker, set both `mqtt.username` and `mqtt.password`
+- for an anonymous broker, leave both `mqtt.username` and `mqtt.password`
+  empty
+
+At runtime, `BMGateway` only sends MQTT credentials when `mqtt.username` is
+non-empty. If the username is empty, the gateway attempts an anonymous MQTT
+connection and the password value is not used.
+
+### Retained MQTT messages
+
+`retain_discovery = true` is the recommended default. Home Assistant discovery
+payloads describe which entities should exist, and retaining them lets Home
+Assistant recreate the gateway and battery entities after Home Assistant or the
+broker restarts.
+
+`retain_state = false` is the recommended default. Battery readings are live
+telemetry, and retaining state can make old values look current after gateway
+downtime. Leave state retention disabled unless you explicitly want the broker
+to keep the last published gateway and battery state for new subscribers.
+
+### Discovery prefix
+
+`discovery_prefix = "homeassistant"` is the Home Assistant MQTT discovery
+default. Keep this value unless your Home Assistant MQTT integration has been
+configured with a different discovery prefix.
+
+Changing the prefix only on `BMGateway` will prevent Home Assistant
+auto-discovery, because Home Assistant will keep listening under its configured
+prefix.
 
 ## 3. Publish discovery payloads
 
@@ -105,6 +174,11 @@ After discovery succeeds, Home Assistant should create:
 The discovery payloads now classify connectivity states correctly, so Home
 Assistant will receive binary sensors for gateway/device connectivity and
 sensors with proper units and device classes for battery data.
+
+If no entities appear in Home Assistant, the first thing to verify is whether
+`BMGateway` is actually connected to the MQTT broker. A gateway with Home
+Assistant discovery enabled but `mqtt_connected = false` will not be visible to
+Home Assistant.
 
 ## 5. Optional package and dashboard
 
@@ -167,3 +241,8 @@ bm-gateway --config ./python/config/gateway.toml.example ha discovery \
 
 `retain_discovery = true` is the safest default. It lets Home Assistant rebuild
 entities from retained discovery topics without waiting for a manual reinstall.
+
+If telemetry values look stale after gateway downtime, keep
+`retain_state = false`. State retention is intentionally separate from
+discovery retention so Home Assistant can remember the entity definitions
+without preserving old battery measurements as if they were fresh.
