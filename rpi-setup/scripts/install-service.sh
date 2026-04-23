@@ -171,6 +171,7 @@ bluetooth = dict(data.get("bluetooth", {}))
 mqtt = dict(data.get("mqtt", {}))
 home_assistant = dict(data.get("home_assistant", {}))
 web = dict(data.get("web", {}))
+usb_otg = dict(data.get("usb_otg", {}))
 retention = dict(data.get("retention", {}))
 
 if str(gateway.get("name", "")).startswith("__"):
@@ -221,6 +222,16 @@ payload = "\n".join(
         f'host = {string_to_toml(web.get("host", web_host))}',
         f'port = {int(web.get("port", web_port))}',
         f'show_chart_markers = {bool_to_toml(bool(web.get("show_chart_markers", False)))}',
+        f'visible_device_limit = {int(web.get("visible_device_limit", 4))}',
+        f'appearance = {string_to_toml(web.get("appearance", "system"))}',
+        f'default_chart_range = {string_to_toml(web.get("default_chart_range", "7"))}',
+        f'default_chart_metric = {string_to_toml(web.get("default_chart_metric", "soc"))}',
+        "",
+        "[usb_otg]",
+        f'enabled = {bool_to_toml(bool(usb_otg.get("enabled", False)))}',
+        f'image_path = {string_to_toml(usb_otg.get("image_path", "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"))}',
+        f'size_mb = {int(usb_otg.get("size_mb", 64))}',
+        f'gadget_name = {string_to_toml(usb_otg.get("gadget_name", "bmgw_frame"))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',

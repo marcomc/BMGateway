@@ -47,6 +47,9 @@ Web-facing config under `[web]` currently includes:
 - `default_chart_range`
 - `default_chart_metric`
 
+The appliance-level `[usb_otg]` section is also visible in Settings for the
+disabled-by-default USB OTG image-export option.
+
 ## Canonical References
 
 - Project overview: [../README.md](../README.md)

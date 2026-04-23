@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -60,6 +60,14 @@ class WebConfig:
 
 
 @dataclass(frozen=True)
+class USBOTGConfig:
+    enabled: bool = False
+    image_path: str = "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"
+    size_mb: int = 64
+    gadget_name: str = "bmgw_frame"
+
+
+@dataclass(frozen=True)
 class RetentionConfig:
     raw_retention_days: int = 180
     daily_retention_days: int = 0
@@ -75,6 +83,7 @@ class AppConfig:
     home_assistant: HomeAssistantConfig
     web: WebConfig
     retention: RetentionConfig
+    usb_otg: USBOTGConfig = field(default_factory=USBOTGConfig)
     verbose: bool = False
 
     def with_cli_overrides(self, *, verbose: bool) -> "AppConfig":
@@ -89,6 +98,7 @@ class AppConfig:
             home_assistant=self.home_assistant,
             web=self.web,
             retention=self.retention,
+            usb_otg=self.usb_otg,
             verbose=True,
         )
 
@@ -134,6 +144,12 @@ class AppConfig:
                 "appearance": self.web.appearance,
                 "default_chart_range": self.web.default_chart_range,
                 "default_chart_metric": self.web.default_chart_metric,
+            },
+            "usb_otg": {
+                "enabled": self.usb_otg.enabled,
+                "image_path": self.usb_otg.image_path,
+                "size_mb": self.usb_otg.size_mb,
+                "gadget_name": self.usb_otg.gadget_name,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -224,6 +240,12 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"default_chart_range = {_string_to_toml(config.web.default_chart_range)}",
             f"default_chart_metric = {_string_to_toml(config.web.default_chart_metric)}",
             "",
+            "[usb_otg]",
+            f"enabled = {_bool_to_toml(config.usb_otg.enabled)}",
+            f"image_path = {_string_to_toml(config.usb_otg.image_path)}",
+            f"size_mb = {config.usb_otg.size_mb}",
+            f"gadget_name = {_string_to_toml(config.usb_otg.gadget_name)}",
+            "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
             f"daily_retention_days = {config.retention.daily_retention_days}",
@@ -240,6 +262,7 @@ def load_config(path: Path) -> AppConfig:
     mqtt_table = _require_table(data, "mqtt")
     home_assistant_table = _require_table(data, "home_assistant")
     web_table = _require_table(data, "web")
+    usb_otg_table = _require_table(data, "usb_otg")
     retention_table = _require_table(data, "retention")
 
     gateway = GatewayConfig(
@@ -281,6 +304,14 @@ def load_config(path: Path) -> AppConfig:
         default_chart_range=str(web_table.get("default_chart_range", "7")),
         default_chart_metric=str(web_table.get("default_chart_metric", "soc")),
     )
+    usb_otg = USBOTGConfig(
+        enabled=bool(usb_otg_table.get("enabled", False)),
+        image_path=str(
+            usb_otg_table.get("image_path", "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img")
+        ),
+        size_mb=int(usb_otg_table.get("size_mb", 64)),
+        gadget_name=str(usb_otg_table.get("gadget_name", "bmgw_frame")),
+    )
     retention = RetentionConfig(
         raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
         daily_retention_days=int(retention_table.get("daily_retention_days", 0)),
@@ -297,6 +328,7 @@ def load_config(path: Path) -> AppConfig:
         home_assistant=home_assistant,
         web=web,
         retention=retention,
+        usb_otg=usb_otg,
     )
 
 
@@ -337,6 +369,12 @@ def validate_config(config: AppConfig) -> list[str]:
         )
     if config.web.default_chart_metric not in {"voltage", "soc", "temperature"}:
         errors.append("web.default_chart_metric must be one of: voltage, soc, temperature")
+    if not config.usb_otg.image_path.strip():
+        errors.append("usb_otg.image_path must not be empty")
+    if config.usb_otg.size_mb <= 0:
+        errors.append("usb_otg.size_mb must be greater than zero")
+    if not config.usb_otg.gadget_name.strip():
+        errors.append("usb_otg.gadget_name must not be empty")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:

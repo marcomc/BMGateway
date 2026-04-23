@@ -8,6 +8,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Unreleased Added
 
+- Added a Raspberry Pi USB-OTG image-export hardware test helper and
+  Samsung `SPF-71E` compatibility image generator for validating a
+  read-only mass-storage gadget before implementing automated exports.
+- Added a disabled-by-default USB OTG image-export setting with device
+  controller detection, warning text when the gadget path is unavailable, and
+  installer support for USB-OTG helper packages.
 - Added a Settings action to shut down the Raspberry Pi safely from the web UI,
   plus installer-managed scoped sudo permissions for restart, reboot, and
   shutdown host-control actions.

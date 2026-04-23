@@ -36,6 +36,7 @@ from .web_actions import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_usb_otg_preferences,
     update_web_preferences,
 )
 from .web_assets import (
@@ -95,6 +96,7 @@ __all__ = [
     "update_gateway_preferences",
     "update_home_assistant_preferences",
     "update_mqtt_preferences",
+    "update_usb_otg_preferences",
     "update_web_preferences",
     "_add_device_form_html",
     "_battery_form_script",
@@ -1010,6 +1012,38 @@ def serve_management(
                             snapshot=snapshot,
                             config=config,
                             storage_summary=fetch_storage_summary(current_database_path),
+                            devices=[device.to_dict() for device in configured_devices],
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/usb-otg":
+                config, _, _ = self._load_current()
+                errors = update_usb_otg_preferences(
+                    config_path=config_path,
+                    enabled=_bool_from_form(form, "usb_otg_enabled"),
+                )
+                if errors:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_management_html(
+                            snapshot=load_snapshot(state_file_path(config, state_dir=state_dir)),
+                            config=config,
+                            storage_summary=fetch_storage_summary(
+                                database_file_path(config, state_dir=state_dir)
+                            ),
                             devices=[device.to_dict() for device in configured_devices],
                             config_text=read_text(config_path),
                             devices_text=read_text(config.device_registry_path),

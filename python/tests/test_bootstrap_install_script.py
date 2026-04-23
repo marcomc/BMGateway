@@ -98,13 +98,48 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text(encoding="utf-8")
     assert "apt-get update" in commands
-    assert "apt-get install -y bluetooth bluez curl git make python3 python3-venv" in commands
+    assert (
+        "apt-get install -y bluetooth bluez curl git make python3 python3-venv dosfstools"
+        in commands
+    )
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
     assert f"bash {repo_dir}/rpi-setup/scripts/install-service.sh --user" in commands
     assert "markdownlint" not in commands
     assert "shellcheck" not in commands
+
+
+def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None:
+    script_path = Path("scripts/bootstrap-install.sh").resolve()
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+    repo_dir = tmp_path / "BMGateway"
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        [
+            str(script_path),
+            "--repo-url",
+            "https://example.invalid/BMGateway.git",
+            "--repo-dir",
+            str(repo_dir),
+            "--skip-usb-otg-tools",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = command_log.read_text(encoding="utf-8")
+    assert "apt-get install -y bluetooth bluez curl git make python3 python3-venv" in commands
+    assert "dosfstools" not in commands
 
 
 def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> None:

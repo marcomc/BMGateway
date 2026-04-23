@@ -136,6 +136,7 @@ Useful options:
 - `--hostname <name>`
 - `--enable-glances`
 - `--enable-cockpit`
+- `--skip-usb-otg-tools`
 - `--skip-services`
 - `--web-port <port>`
 - `--glances-port <port>`

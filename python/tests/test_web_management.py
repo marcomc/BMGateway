@@ -36,6 +36,7 @@ from bm_gateway.web import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_usb_otg_preferences,
     update_web_preferences,
 )
 from bm_gateway.web import (
@@ -1003,6 +1004,21 @@ def test_update_web_preferences_persists_chart_defaults(tmp_path: Path) -> None:
     assert config.web.default_chart_metric == "temperature"
 
 
+def test_update_usb_otg_preferences_persists_enabled_flag(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_usb_otg_preferences(config_path=config_path, enabled=True)
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is True
+
+
 def test_settings_display_post_persists_appearance_visible_limit_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
@@ -1053,6 +1069,45 @@ def test_settings_display_post_persists_appearance_visible_limit_and_chart_defau
     assert config.web.visible_device_limit == 4
     assert config.web.default_chart_range == "90"
     assert config.web.default_chart_metric == "temperature"
+
+
+def test_settings_usb_otg_post_persists_enabled_flag(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode({"usb_otg_enabled": "on"}).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        assert response.status == 200
+        assert response.url.endswith("/settings?edit=1&message=Settings+saved")
+
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is True
 
 
 def test_compact_mac_address_is_normalized() -> None:
@@ -1264,6 +1319,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
         'section-title">Home Assistant MQTT Discovery'
     )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
+        'section-title">Web Service'
+    )
+    assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
     )
 
@@ -1345,6 +1403,32 @@ def test_render_settings_html_summary_shows_chart_defaults() -> None:
     assert "State of Charge" in html
 
 
+def test_render_settings_html_shows_disabled_usb_otg_export_by_default() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "USB OTG Image Export" in html
+    assert "USB OTG image export" in html
+    assert "Disabled" in html
+    assert "USB OTG device controller" in html
+
+
+def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, usb_otg=replace(config.usb_otg, enabled=True))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_device_controller_detected=False,
+    )
+
+    assert "USB OTG image export is enabled" in html
+    assert "no USB OTG device controller is currently detected" in html
+    assert "Zero USB Plug" in html
+
+
 def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     html = render_settings_html(
@@ -1378,11 +1462,13 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert "Home Assistant Settings" in html
     assert "Web Service" in html
     assert "Display Settings" in html
+    assert "USB OTG Image Export" in html
     assert "Save gateway settings" in html
     assert "Save MQTT settings" in html
     assert "Save Home Assistant settings" in html
     assert "Save web service settings" in html
     assert "Save display settings" in html
+    assert "Save USB OTG settings" in html
     assert 'name="gateway_name"' in html
     assert 'name="timezone"' in html
     assert 'name="mqtt_host"' in html
@@ -1396,6 +1482,7 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="home_assistant_status_topic"' in html
     assert 'name="home_assistant_gateway_device_id"' in html
     assert 'name="web_host"' in html
+    assert 'name="usb_otg_enabled"' in html
     assert 'name="web_enabled"' in html
     assert 'name="visible_device_limit"' in html
     assert 'name="bluetooth_adapter"' in html

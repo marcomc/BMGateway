@@ -1627,6 +1627,7 @@ def render_settings_html(
     devices_text: str | None = None,
     contract: dict[str, object] | None = None,
     detected_bluetooth_adapters: list[dict[str, str]] | None = None,
+    usb_otg_device_controller_detected: bool | None = None,
     theme_preference: str = "system",
 ) -> str:
     from .web_pages_settings import render_settings_html as _render_settings_html
@@ -1642,6 +1643,7 @@ def render_settings_html(
         devices_text=devices_text,
         contract=contract,
         detected_bluetooth_adapters=detected_bluetooth_adapters,
+        usb_otg_device_controller_detected=usb_otg_device_controller_detected,
         theme_preference=theme_preference,
     )
 

@@ -1388,6 +1388,15 @@ details summary::-webkit-details-marker { display: none; }
     color-mix(in srgb, var(--accent-yellow-soft) 36%, var(--bg-surface))
   );
 }
+.banner-strip.error {
+  border-color: rgba(239, 68, 68, 0.34);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, rgba(239, 68, 68, 0.16) 62%, var(--bg-elevated)),
+    color-mix(in srgb, rgba(239, 68, 68, 0.1) 36%, var(--bg-surface))
+  );
+  color: var(--state-error);
+}
 .home-add-device-strip {
   display: flex;
   align-items: stretch;

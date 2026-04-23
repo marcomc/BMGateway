@@ -14,6 +14,7 @@ Options:
   --disable-home-assistant        Disable MQTT and Home Assistant in the installed config
   --enable-glances                Install and enable a Glances API service for Home Assistant
   --enable-cockpit                Install and enable Cockpit on HTTPS port 9090
+  --skip-usb-otg-tools            Do not install USB-OTG image-export helper packages
   --service-user <name>           User that owns the services and config. Default: current user
   --skip-apt                      Skip apt package installation
   --skip-uv                       Skip uv bootstrap
@@ -37,6 +38,7 @@ enable_web=1
 enable_home_assistant=1
 enable_glances=0
 enable_cockpit=0
+install_usb_otg_tools=1
 web_port="80"
 glances_port="61208"
 hostname_override=""
@@ -129,6 +131,10 @@ while [[ "$#" -gt 0 ]]; do
       enable_cockpit=1
       shift
       ;;
+    --skip-usb-otg-tools)
+      install_usb_otg_tools=0
+      shift
+      ;;
     --service-user)
       service_user="${2:?missing value for --service-user}"
       shift 2
@@ -168,6 +174,9 @@ fi
 if [[ "${skip_apt}" -eq 0 ]]; then
   sudo apt-get update
   apt_packages=(bluetooth bluez curl git make python3 python3-venv)
+  if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
+    apt_packages+=(dosfstools)
+  fi
   if [[ "${enable_glances}" -eq 1 ]]; then
     apt_packages+=(glances)
   fi

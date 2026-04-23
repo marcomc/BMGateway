@@ -325,6 +325,18 @@ def update_web_preferences(
     return []
 
 
+def update_usb_otg_preferences(*, config_path: Path, enabled: bool) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(config, usb_otg=replace(config.usb_otg, enabled=enabled))
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
 def update_gateway_preferences(
     *,
     config_path: Path,

@@ -46,6 +46,12 @@ appearance = "system"
 default_chart_range = "7"
 default_chart_metric = "soc"
 
+[usb_otg]
+enabled = false
+image_path = "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"
+size_mb = 64
+gadget_name = "bmgw_frame"
+
 [retention]
 raw_retention_days = 180
 daily_retention_days = 0

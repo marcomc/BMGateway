@@ -8,6 +8,7 @@ from typing import cast
 from . import display_version
 from . import web_pages as shared
 from .config import AppConfig
+from .usb_otg import usb_otg_device_controller_detected as detect_usb_otg_device_controller
 from .web_ui import (
     api_chip,
     app_document,
@@ -68,6 +69,7 @@ def render_settings_html(
     devices_text: str | None = None,
     contract: dict[str, object] | None = None,
     detected_bluetooth_adapters: list[dict[str, str]] | None = None,
+    usb_otg_device_controller_detected: bool | None = None,
     theme_preference: str = "system",
 ) -> str:
     version_label = display_version()
@@ -87,6 +89,11 @@ def render_settings_html(
         shared._discover_bluetooth_adapters()
         if detected_bluetooth_adapters is None
         else detected_bluetooth_adapters
+    )
+    detected_usb_otg_controller = (
+        detect_usb_otg_device_controller()
+        if usb_otg_device_controller_detected is None
+        else usb_otg_device_controller_detected
     )
     device_tabs = (
         "".join(
@@ -251,6 +258,34 @@ def render_settings_html(
                 "system": "System",
             }.get(config.web.appearance, config.web.appearance),
         )
+    )
+    usb_otg_warning = (
+        banner_strip(
+            html.escape(
+                "USB OTG image export is enabled, but no USB OTG device controller is "
+                "currently detected. Check that the Zero USB Plug or OTG cable is connected "
+                "and that dwc2 peripheral mode is enabled."
+            ),
+            kind="error",
+        )
+        if config.usb_otg.enabled and not detected_usb_otg_controller
+        else ""
+    )
+    usb_otg_controller_badge = (
+        '<span class="status-badge ok">Detected</span>'
+        if detected_usb_otg_controller
+        else '<span class="status-badge error">Not detected</span>'
+    )
+    usb_otg_section_body = (
+        usb_otg_warning
+        + settings_row(
+            "USB OTG image export",
+            "Enabled" if config.usb_otg.enabled else "Disabled",
+        )
+        + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
+        + settings_row("Backing image", config.usb_otg.image_path)
+        + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
+        + settings_row("Gadget name", config.usb_otg.gadget_name)
     )
     bluetooth_section_body = (
         settings_row("Adapter", config.bluetooth.adapter)
@@ -669,6 +704,32 @@ def render_settings_html(
             + "</div>"
             + "</form>"
         )
+        usb_otg_section_body = (
+            '<form method="post" action="/settings/usb-otg">'
+            + usb_otg_warning
+            + settings_control_row(
+                "USB OTG image export",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="usb_otg_enabled"'
+                    f"{shared._checked_attr(config.usb_otg.enabled)}>"
+                    "<span>Enable USB OTG image export</span></label>"
+                ),
+                help_text=(
+                    "Expose generated frame images through a Raspberry Pi USB gadget mass "
+                    "storage drive. This remains inactive until the USB gadget hardware path "
+                    "is available."
+                ),
+            )
+            + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
+            + settings_row("Backing image", config.usb_otg.image_path)
+            + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
+            + settings_row("Gadget name", config.usb_otg.gadget_name)
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save USB OTG settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
         bluetooth_section_body = (
             '<form method="post" action="/settings/bluetooth">'
             + settings_control_row(
@@ -760,18 +821,6 @@ def render_settings_html(
             title="Home Assistant Settings",
             body=home_assistant_section_body,
         )
-        + section_card(
-            title="Web Service",
-            body=web_section_body,
-        )
-        + section_card(
-            title="Display Settings",
-            body=display_section_body,
-        )
-        + section_card(
-            title="Bluetooth",
-            body=bluetooth_section_body,
-        )
         + (
             ""
             if edit_mode
@@ -783,6 +832,22 @@ def render_settings_html(
                     + settings_row("Device discovery payloads", str(device_contract_count))
                 ),
             )
+        )
+        + section_card(
+            title="Web Service",
+            body=web_section_body,
+        )
+        + section_card(
+            title="Display Settings",
+            body=display_section_body,
+        )
+        + section_card(
+            title="USB OTG Image Export",
+            body=usb_otg_section_body,
+        )
+        + section_card(
+            title="Bluetooth",
+            body=bluetooth_section_body,
         )
         + (
             ""
