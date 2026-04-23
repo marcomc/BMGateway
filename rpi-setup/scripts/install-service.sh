@@ -118,6 +118,7 @@ web_cli_path="${service_home}/.local/bin/bm-gateway-web"
 unit_path="/etc/systemd/system/bm-gateway.service"
 web_unit_path="/etc/systemd/system/bm-gateway-web.service"
 glances_unit_path="/etc/systemd/system/glances-web.service"
+sudoers_path="/etc/sudoers.d/bm-gateway-web"
 
 install -d -m 0755 "${config_dir}" "${state_dir}" /usr/local/bin
 chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
@@ -295,6 +296,14 @@ WorkingDirectory=${state_dir}
 WantedBy=multi-user.target
 EOF
 
+cat >"${sudoers_path}" <<EOF
+${service_user} ALL=(root) NOPASSWD: /usr/bin/systemctl restart bm-gateway.service, /usr/bin/systemctl restart bluetooth.service, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff
+EOF
+chmod 0440 "${sudoers_path}"
+if command -v visudo >/dev/null 2>&1; then
+  visudo -cf "${sudoers_path}"
+fi
+
 if [[ "${enable_glances}" -eq 1 ]]; then
   if ! command -v glances >/dev/null 2>&1; then
     apt-get update
@@ -355,6 +364,7 @@ fi
 
 printf 'Installed runtime service to %s\n' "${unit_path}"
 printf 'Installed web service to %s\n' "${web_unit_path}"
+printf 'Installed web action sudoers policy to %s\n' "${sudoers_path}"
 if [[ "${enable_glances}" -eq 1 ]]; then
   printf 'Installed Glances service to %s\n' "${glances_unit_path}"
   printf 'Glances API: http://%s:%s/api/4/status\n' "${glances_bind}" "${glances_port}"

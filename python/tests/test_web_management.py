@@ -41,8 +41,8 @@ from bm_gateway.web import (
 from bm_gateway.web import (
     render_reboot_pending_html as render_reboot_pending_html_wrapper,
 )
-from bm_gateway.web_actions import restart_system_service
-from bm_gateway.web_pages_settings import render_reboot_pending_html
+from bm_gateway.web_actions import restart_system_service, schedule_host_shutdown
+from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import base_css, chart_script
 
 
@@ -228,6 +228,28 @@ def test_restart_system_service_uses_non_interactive_sudo(monkeypatch: MonkeyPat
     assert captured["command"] == ["sudo", "-n", "systemctl", "restart", "bm-gateway.service"]
 
 
+def test_schedule_host_shutdown_uses_non_interactive_systemctl_poweroff(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_popen(command: list[str], **kwargs: object) -> object:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.Popen", _fake_popen)
+
+    schedule_host_shutdown()
+
+    assert captured["command"] == ["/bin/sh", "-lc", "sleep 1 && sudo -n systemctl poweroff"]
+    assert captured["kwargs"] == {
+        "stdout": -3,
+        "stderr": -3,
+        "start_new_session": True,
+    }
+
+
 def test_render_reboot_pending_html_contains_polling_status_page() -> None:
     html = render_reboot_pending_html(theme_preference="dark")
 
@@ -242,6 +264,15 @@ def test_render_reboot_pending_html_wrapper_delegates() -> None:
     html = render_reboot_pending_html_wrapper(theme_preference="light")
 
     assert "BMGateway Reboot" in html
+
+
+def test_render_shutdown_pending_html_contains_safe_poweroff_guidance() -> None:
+    html = render_shutdown_pending_html(theme_preference="dark")
+
+    assert "Shutdown In Progress" in html
+    assert "Shutdown scheduled" in html
+    assert "Wait for the Raspberry Pi activity LED to stop blinking" in html
+    assert "BMGateway Shutdown" in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -1211,6 +1242,10 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Restart bm-gateway service" in html
     assert "Restart Bluetooth service" in html
     assert "Reboot Raspberry Pi" in html
+    assert "Reboot the Raspberry Pi now?" in html
+    assert "Shut Down Raspberry Pi" in html
+    assert 'action="/actions/shutdown-host"' in html
+    assert "Shut down the Raspberry Pi now?" in html
     assert "Home Assistant MQTT Discovery" in html
     assert "Storage Summary" in html
     assert "Configuration Files" in html

@@ -187,8 +187,14 @@ def render_settings_html(
         '<form method="post" action="/actions/restart-bluetooth-service">'
         f"{button('Restart Bluetooth service', kind='secondary')}"
         "</form>"
-        '<form method="post" action="/actions/reboot-host">'
+        '<form method="post" action="/actions/reboot-host" '
+        "onsubmit=\"return confirm('Reboot the Raspberry Pi now?')\">"
         f"{button('Reboot Raspberry Pi', kind='secondary')}"
+        "</form>"
+        '<form method="post" action="/actions/shutdown-host" '
+        "onsubmit=\"return confirm('Shut down the Raspberry Pi now? Wait for the activity LED "
+        "to stop blinking before unplugging power.')\">"
+        f"{button('Shut Down Raspberry Pi', kind='secondary')}"
         "</form>"
         '<form method="post" action="/actions/recover-bluetooth">'
         f"{button('Recover Bluetooth Adapter', kind='secondary')}"
@@ -923,4 +929,43 @@ def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
         version_label=display_version(),
         theme_preference=theme_preference,
         script=polling_script,
+    )
+
+
+def render_shutdown_pending_html(*, theme_preference: str = "system") -> str:
+    body = top_header(
+        title="Shutdown In Progress",
+    ) + section_card(
+        title="Gateway Shutdown",
+        body=(
+            '<div class="metrics-grid compact-overview-grid">'
+            + summary_card(
+                "Status",
+                "Shutdown scheduled",
+                subvalue="The shutdown command was accepted by the gateway.",
+                classes="compact-summary",
+            )
+            + "</div>"
+            + (
+                '<div class="settings-row" style="margin-top:1rem">'
+                '<div class="settings-label">Next step</div>'
+                '<div class="settings-value">'
+                "Wait for the Raspberry Pi activity LED to stop blinking before unplugging power."
+                "</div>"
+                "</div>"
+            )
+            + '<div class="section-subtitle" style="margin-top:0.75rem">'
+            + (
+                "The web interface will stop responding once the host powers off. "
+                "Start it again by reconnecting power."
+            )
+            + "</div>"
+        ),
+    )
+    return app_document(
+        title="BMGateway Shutdown",
+        body=body,
+        active_nav="settings",
+        version_label=display_version(),
+        theme_preference=theme_preference,
     )

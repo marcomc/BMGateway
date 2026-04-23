@@ -510,3 +510,12 @@ def schedule_host_reboot() -> None:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+
+
+def schedule_host_shutdown() -> None:
+    subprocess.Popen(  # noqa: S603
+        ["/bin/sh", "-lc", "sleep 1 && sudo -n systemctl poweroff"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )

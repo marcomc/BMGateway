@@ -28,6 +28,7 @@ from .web_actions import (
     restart_system_service,
     run_once_via_cli,
     schedule_host_reboot,
+    schedule_host_shutdown,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -66,6 +67,7 @@ from .web_pages import (
     render_management_html,
     render_reboot_pending_html,
     render_settings_html,
+    render_shutdown_pending_html,
     render_snapshot_html,
 )
 from .web_support import read_text
@@ -82,6 +84,7 @@ __all__ = [
     "render_management_html",
     "render_reboot_pending_html",
     "render_settings_html",
+    "render_shutdown_pending_html",
     "render_snapshot_html",
     "serve_management",
     "serve_snapshot",
@@ -370,6 +373,12 @@ def serve_management(
 
             if parsed.path == "/rebooting":
                 self._send_html(render_reboot_pending_html(theme_preference=config.web.appearance))
+                return
+
+            if parsed.path == "/shutting-down":
+                self._send_html(
+                    render_shutdown_pending_html(theme_preference=config.web.appearance)
+                )
                 return
 
             if parsed.path == "/devices/new":
@@ -1080,6 +1089,16 @@ def serve_management(
                 self.send_header(
                     "Location",
                     "/rebooting",
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/shutdown-host":
+                schedule_host_shutdown()
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/shutting-down",
                 )
                 self.end_headers()
                 return

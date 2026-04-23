@@ -58,3 +58,19 @@ def test_install_service_script_uses_current_mqtt_username_placeholder() -> None
 
     assert 'mqtt.get("username", "mqtt-user")' in payload
     assert 'mqtt.get("username", "homeassistant")' not in payload
+
+
+def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert 'sudoers_path="/etc/sudoers.d/bm-gateway-web"' in payload
+    assert "NOPASSWD:" in payload
+    assert "/usr/bin/systemctl restart bm-gateway.service" in payload
+    assert "/usr/bin/systemctl restart bluetooth.service" in payload
+    assert "/usr/bin/systemctl reboot" in payload
+    assert "/usr/bin/systemctl poweroff" in payload
+    assert 'chmod 0440 "${sudoers_path}"' in payload
+    assert 'visudo -cf "${sudoers_path}"' in payload

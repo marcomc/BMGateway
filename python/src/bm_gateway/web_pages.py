@@ -1652,6 +1652,12 @@ def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
     return _render_reboot_pending_html(theme_preference=theme_preference)
 
 
+def render_shutdown_pending_html(*, theme_preference: str = "system") -> str:
+    from .web_pages_settings import render_shutdown_pending_html as _render_shutdown_pending_html
+
+    return _render_shutdown_pending_html(theme_preference=theme_preference)
+
+
 def render_device_html(
     *,
     device_id: str,
