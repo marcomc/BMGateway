@@ -1032,6 +1032,25 @@ def test_empty_device_registry_is_allowed() -> None:
     assert validate_devices([]) == []
 
 
+def test_validate_devices_rejects_mqtt_unsafe_device_ids() -> None:
+    from bm_gateway.device_registry import Device
+
+    errors = validate_devices(
+        [
+            Device(
+                id="spare/nlp5",
+                type="bm200",
+                name="Spare NLP5",
+                mac="AA:BB:CC:DD:EE:01",
+            )
+        ]
+    )
+
+    assert (
+        "device spare/nlp5 id must contain only letters, numbers, underscores, or hyphens" in errors
+    )
+
+
 def test_build_run_once_command_targets_module_entrypoint(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     state_dir = tmp_path / "state"

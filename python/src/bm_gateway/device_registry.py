@@ -11,6 +11,7 @@ from pathlib import Path
 VALID_DEVICE_TYPES = {"bm200", "bm300pro"}
 MAC_ADDRESS_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
 COMPACT_MAC_RE = re.compile(r"^[0-9A-F]{12}$")
+DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 BATTERY_FAMILIES = {
     "lead_acid": "Lead-Acid Battery",
     "lithium": "Lithium Battery",
@@ -407,6 +408,10 @@ def validate_devices(devices: list[Device]) -> list[str]:
     for device in devices:
         if not device.id:
             errors.append("device.id must not be empty")
+        elif DEVICE_ID_RE.fullmatch(device.id) is None:
+            errors.append(
+                f"device {device.id} id must contain only letters, numbers, underscores, or hyphens"
+            )
         elif device.id in seen_ids:
             errors.append(f"duplicate device id: {device.id}")
         else:

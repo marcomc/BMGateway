@@ -34,6 +34,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Made device IDs editable from the device edit form with validation, including
   stored-history ID collision checks and history-table renaming when an ID
   changes.
+- Validated editable device IDs so MQTT topic paths stay limited to letters,
+  numbers, underscores, and hyphens.
 - Updated device ID renames to also normalize stored raw/archive metadata such
   as the device name, type, and MAC address so charts do not split old and new
   labels after a rename.

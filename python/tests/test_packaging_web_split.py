@@ -48,3 +48,13 @@ def test_install_service_script_uses_dedicated_web_executable() -> None:
     assert 'web_cli_path="${service_home}/.local/bin/bm-gateway-web"' in payload
     assert 'ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web' in payload
     assert "ExecStart=/usr/local/bin/bm-gateway-web --config \\${BMGATEWAY_CONFIG}" in payload
+
+
+def test_install_service_script_uses_current_mqtt_username_placeholder() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert 'mqtt.get("username", "mqtt-user")' in payload
+    assert 'mqtt.get("username", "homeassistant")' not in payload
