@@ -42,7 +42,13 @@ from bm_gateway.web import (
 from bm_gateway.web import (
     render_reboot_pending_html as render_reboot_pending_html_wrapper,
 )
-from bm_gateway.web_actions import restart_system_service, schedule_host_shutdown
+from bm_gateway.web_actions import (
+    prepare_usb_otg_boot_mode,
+    refresh_usb_otg_drive,
+    restart_system_service,
+    restore_usb_otg_boot_mode,
+    schedule_host_shutdown,
+)
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import base_css, chart_script
 
@@ -229,6 +235,94 @@ def test_restart_system_service_uses_non_interactive_sudo(monkeypatch: MonkeyPat
     assert captured["command"] == ["sudo", "-n", "systemctl", "restart", "bm-gateway.service"]
 
 
+def test_prepare_usb_otg_boot_mode_uses_non_interactive_sudo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    prepare_usb_otg_boot_mode()
+
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-boot-mode",
+        "prepare",
+    ]
+
+
+def test_restore_usb_otg_boot_mode_uses_non_interactive_sudo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    restore_usb_otg_boot_mode()
+
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-boot-mode",
+        "restore",
+    ]
+
+
+def test_refresh_usb_otg_drive_uses_configured_drive_helper(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    refresh_usb_otg_drive(config_path)
+
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-frame-test",
+        "refresh",
+        "--image-path",
+        "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img",
+        "--gadget-name",
+        "bmgw_frame",
+    ]
+
+
 def test_schedule_host_shutdown_uses_non_interactive_systemctl_poweroff(
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -383,6 +477,24 @@ def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Pat
     assert "gateway.poll_interval_seconds must be greater than zero" in errors
     assert "retention.raw_retention_days must be greater than zero" in errors
     assert "retention.daily_retention_days must be zero or greater" in errors
+
+
+def test_render_settings_html_warns_when_poll_interval_is_aggressive() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, gateway=replace(config.gateway, poll_interval_seconds=120))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "Poll interval warning" in html
+    assert "Polling faster than 300 seconds can increase Bluetooth discovery failures" in html
+
+
+def test_render_settings_html_edit_mode_warns_when_poll_interval_is_aggressive() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, gateway=replace(config.gateway, poll_interval_seconds=120))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert "Poll interval warning" in html
+    assert "Polling faster than 300 seconds can increase Bluetooth discovery failures" in html
 
 
 def test_update_mqtt_preferences_persists_transport_settings(tmp_path: Path) -> None:
@@ -1019,6 +1131,40 @@ def test_update_usb_otg_preferences_persists_enabled_flag(tmp_path: Path) -> Non
     assert config.usb_otg.enabled is True
 
 
+def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_usb_otg_preferences(
+        config_path=config_path,
+        enabled=True,
+        image_width_px=800,
+        image_height_px=480,
+        image_format="png",
+        appearance="dark",
+        refresh_interval_seconds=120,
+        overview_devices_per_image=10,
+        export_battery_overview=True,
+        export_fleet_trend=False,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is True
+    assert config.usb_otg.image_width_px == 800
+    assert config.usb_otg.image_height_px == 480
+    assert config.usb_otg.image_format == "png"
+    assert config.usb_otg.appearance == "dark"
+    assert config.usb_otg.refresh_interval_seconds == 120
+    assert config.usb_otg.overview_devices_per_image == 10
+    assert config.usb_otg.export_battery_overview is True
+    assert config.usb_otg.export_fleet_trend is False
+
+
 def test_settings_display_post_persists_appearance_visible_limit_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
@@ -1405,12 +1551,63 @@ def test_render_settings_html_summary_shows_chart_defaults() -> None:
 
 def test_render_settings_html_shows_disabled_usb_otg_export_by_default() -> None:
     config = load_config(Path("python/config/config.toml.example"))
-    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
 
     assert "USB OTG Image Export" in html
     assert "USB OTG image export" in html
     assert "Disabled" in html
+    assert "USB OTG support" in html
+    assert "Installed" in html
     assert "USB OTG device controller" in html
+    assert "Output size" in html
+    assert "480 x 234 px" in html
+    assert "Output format" in html
+    assert "JPEG" in html
+    assert "Devices per overview image" in html
+    assert "Backing disk image" in html
+
+
+def test_render_settings_html_warns_when_usb_otg_support_not_installed() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=False,
+    )
+
+    assert "USB OTG support was not installed on this system" in html
+    assert "--skip-usb-otg-tools" in html
+    assert "Not installed" in html
+    assert "Prepare USB OTG Mode" not in html
+    assert "Export Frame Images" not in html
+    assert "Export Frame Images Now" not in html
+    assert "Refresh USB OTG Drive" not in html
+
+
+def test_render_settings_html_non_edit_actions_show_usb_otg_drive_actions() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert "Actions" in html
+    assert "Refresh USB OTG Drive" in html
+    assert 'action="/actions/refresh-usb-otg-drive"' in html
+    assert "Export Frame Images" in html
+    assert "Export Frame Images Now" not in html
+    assert 'action="/actions/export-usb-otg-images"' in html
 
 
 def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:
@@ -1422,11 +1619,50 @@ def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() ->
         devices=[],
         edit_mode=False,
         usb_otg_device_controller_detected=False,
+        usb_otg_support_installed=True,
     )
 
     assert "USB OTG image export is enabled" in html
     assert "no USB OTG device controller is currently detected" in html
     assert "Zero USB Plug" in html
+
+
+def test_render_settings_html_edit_mode_shows_prepare_when_usb_otg_boot_mode_not_prepared() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_boot_mode_prepared=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert "Prepare USB OTG Mode" in html
+    assert 'action="/actions/prepare-usb-otg-mode"' in html
+    assert "Restore USB Host Mode" not in html
+    assert 'action="/actions/restore-usb-host-mode"' not in html
+
+
+def test_render_settings_html_edit_mode_shows_restore_when_usb_otg_boot_mode_prepared() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_boot_mode_prepared=True,
+        usb_otg_support_installed=True,
+    )
+
+    assert "Prepare USB OTG Mode" not in html
+    assert 'action="/actions/prepare-usb-otg-mode"' not in html
+    assert "Restore USB Host Mode" in html
+    assert 'action="/actions/restore-usb-host-mode"' in html
+    assert "Refresh USB OTG Drive" not in html
+    assert 'action="/actions/refresh-usb-otg-drive"' not in html
+    assert "Export Frame Images" not in html
+    assert 'action="/actions/export-usb-otg-images"' not in html
 
 
 def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
@@ -1483,6 +1719,14 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="home_assistant_gateway_device_id"' in html
     assert 'name="web_host"' in html
     assert 'name="usb_otg_enabled"' in html
+    assert 'name="image_width_px"' in html
+    assert 'name="image_height_px"' in html
+    assert 'name="image_format"' in html
+    assert 'name="appearance"' in html
+    assert 'name="refresh_interval_seconds"' in html
+    assert 'name="overview_devices_per_image"' in html
+    assert 'name="export_battery_overview"' in html
+    assert 'name="export_fleet_trend"' in html
     assert 'name="web_enabled"' in html
     assert 'name="visible_device_limit"' in html
     assert 'name="bluetooth_adapter"' in html

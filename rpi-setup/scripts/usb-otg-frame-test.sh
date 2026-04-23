@@ -5,6 +5,7 @@ usage() {
   cat <<'EOF'
 Usage:
   usb-otg-frame-test.sh setup --source-dir <path> [options]
+  usb-otg-frame-test.sh refresh [options]
   usb-otg-frame-test.sh teardown [options]
   usb-otg-frame-test.sh status [options]
 
@@ -139,7 +140,7 @@ populate_image() {
     printf 'source directory not found: %s\n' "${source_dir}" >&2
     exit 1
   fi
-  if ! find "${source_dir}" -maxdepth 1 -type f | grep -q .; then
+  if ! find "${source_dir}" -maxdepth 1 -type f -readable | grep -q .; then
     printf 'source directory has no files: %s\n' "${source_dir}" >&2
     exit 1
   fi
@@ -151,13 +152,21 @@ populate_image() {
 
   unmount_image_mounts
   install -d -m 0755 "$(dirname "${image_path}")"
+  rm -f "${image_path}"
   truncate -s "${size_mb}M" "${image_path}"
+  chmod 0644 "${image_path}"
   mkfs.vfat -F 32 -n BMGWTEST "${image_path}" >/dev/null
 
   mount_dir="$(mktemp -d)"
   trap 'umount "${mount_dir}" 2>/dev/null || true; rmdir "${mount_dir}" 2>/dev/null || true' RETURN
   mount -o loop,rw "${image_path}" "${mount_dir}"
-  cp -R "${source_dir}/." "${mount_dir}/"
+  if ! touch "${mount_dir}/.bmgw-write-test" 2>/dev/null; then
+    printf 'mounted backing image is not writable: %s\n' "${image_path}" >&2
+    exit 1
+  fi
+  rm -f "${mount_dir}/.bmgw-write-test"
+  find "${mount_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  find "${source_dir}" -maxdepth 1 -type f -readable -exec cp -t "${mount_dir}" -- {} +
   sync
   umount "${mount_dir}"
   rmdir "${mount_dir}"
@@ -196,6 +205,18 @@ setup_gadget() {
   printf '%s\n' "${udc}" >"${path}/UDC"
 }
 
+ensure_backing_image() {
+  if [[ ! -f "${image_path}" ]]; then
+    printf 'backing image not found: %s\n' "${image_path}" >&2
+    exit 1
+  fi
+}
+
+refresh_gadget() {
+  ensure_backing_image
+  setup_gadget
+}
+
 show_status() {
   local path udc_available udc_value
   path="$(gadget_path)"
@@ -220,7 +241,15 @@ case "${command_name}" in
   setup)
     require_root
     ensure_usb_device_controller
+    detach_gadget
     populate_image
+    setup_gadget
+    show_status
+    ;;
+  refresh)
+    ensure_backing_image
+    require_root
+    ensure_usb_device_controller
     setup_gadget
     show_status
     ;;

@@ -11,6 +11,7 @@ htmlcov/
 *.egg-info/
 python/config/data/
 output/images/
+output/spf71e-layout-tests/
 output/spf71e-test-images/
 BMGateway-v2-premium-scaffold/
 *.img

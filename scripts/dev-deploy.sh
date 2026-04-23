@@ -94,6 +94,8 @@ export PATH="${HOME}/.local/bin:${PATH}"
 cd "${remote_dir}"
 command -v uv >/dev/null 2>&1 || { echo 'uv not found on remote host' >&2; exit 1; }
 python_path="$(command -v python3)"
+sudo apt-get update
+sudo apt-get install -y dosfstools libjpeg-dev python3-dev zlib1g-dev
 make install "PYTHON_VERSION=${python_path}"
 service_args=(--user "${remote_user}")
 if sudo systemctl is-active --quiet glances-web.service \

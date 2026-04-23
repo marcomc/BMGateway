@@ -64,3 +64,11 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.usb_otg.image_path == "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"
     assert config.usb_otg.size_mb == 64
     assert config.usb_otg.gadget_name == "bmgw_frame"
+    assert config.usb_otg.image_width_px == 480
+    assert config.usb_otg.image_height_px == 234
+    assert config.usb_otg.image_format == "jpeg"
+    assert config.usb_otg.appearance == "light"
+    assert config.usb_otg.refresh_interval_seconds == 0
+    assert config.usb_otg.overview_devices_per_image == 5
+    assert config.usb_otg.export_battery_overview is True
+    assert config.usb_otg.export_fleet_trend is True

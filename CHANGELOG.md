@@ -14,6 +14,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a disabled-by-default USB OTG image-export setting with device
   controller detection, warning text when the gadget path is unavailable, and
   installer support for USB-OTG helper packages.
+- Added reversible USB OTG boot-mode preparation and restore actions for the
+  Settings page, backed by a root-scoped helper that edits Raspberry Pi boot
+  config with timestamped backups.
+- Added automated USB OTG frame-image export for battery overview pages and a
+  Fleet Trend chart, including configurable output size, format, light/dark
+  appearance, refresh cadence, overview density, and a manual export action.
+- Added a USB OTG drive refresh action that reattaches the existing backing
+  disk image without regenerating frame images.
+- Added Settings warnings for aggressive gateway polling intervals below
+  300 seconds and for USB OTG exports that run faster than gateway polling,
+  plus clearer USB OTG `Backing disk image` wording.
 - Added a Settings action to shut down the Raspberry Pi safely from the web UI,
   plus installer-managed scoped sudo permissions for restart, reboot, and
   shutdown host-control actions.

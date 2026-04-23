@@ -8,7 +8,15 @@ from typing import cast
 from . import display_version
 from . import web_pages as shared
 from .config import AppConfig
-from .usb_otg import usb_otg_device_controller_detected as detect_usb_otg_device_controller
+from .usb_otg import (
+    usb_otg_boot_mode_prepared as detect_usb_otg_boot_mode_prepared,
+)
+from .usb_otg import (
+    usb_otg_device_controller_detected as detect_usb_otg_device_controller,
+)
+from .usb_otg import (
+    usb_otg_support_installed as detect_usb_otg_support_installed,
+)
 from .web_ui import (
     api_chip,
     app_document,
@@ -28,6 +36,43 @@ def _settings_markup_row(label: str, value_html: str) -> str:
         f'<div class="settings-label">{html.escape(label)}</div>'
         f'<div class="settings-value">{value_html}</div>'
         "</div>"
+    )
+
+
+def _poll_interval_warning(config: AppConfig) -> str:
+    if config.gateway.poll_interval_seconds >= 300:
+        return ""
+    return banner_strip(
+        html.escape(
+            "Poll interval warning: Polling faster than 300 seconds can increase Bluetooth "
+            "discovery failures, device contention, and error-heavy history on BM6/BM200 "
+            "monitors."
+        ),
+        kind="error",
+    )
+
+
+def _usb_otg_refresh_interval_label(config: AppConfig) -> str:
+    if config.usb_otg.refresh_interval_seconds == 0:
+        return f"Use gateway poll interval ({config.gateway.poll_interval_seconds} seconds)"
+    return f"{config.usb_otg.refresh_interval_seconds} seconds"
+
+
+def _usb_otg_refresh_interval_warning(config: AppConfig) -> str:
+    refresh_interval = (
+        config.gateway.poll_interval_seconds
+        if config.usb_otg.refresh_interval_seconds == 0
+        else config.usb_otg.refresh_interval_seconds
+    )
+    if refresh_interval >= config.gateway.poll_interval_seconds:
+        return ""
+    return banner_strip(
+        html.escape(
+            "USB OTG export interval warning: exporting faster than the gateway poll interval "
+            "can repeat stale battery data and detach/reattach the USB drive more often than "
+            "the picture frame can reliably rescan it."
+        ),
+        kind="error",
     )
 
 
@@ -70,6 +115,8 @@ def render_settings_html(
     contract: dict[str, object] | None = None,
     detected_bluetooth_adapters: list[dict[str, str]] | None = None,
     usb_otg_device_controller_detected: bool | None = None,
+    usb_otg_boot_mode_prepared: bool | None = None,
+    usb_otg_support_installed: bool | None = None,
     theme_preference: str = "system",
 ) -> str:
     version_label = display_version()
@@ -94,6 +141,16 @@ def render_settings_html(
         detect_usb_otg_device_controller()
         if usb_otg_device_controller_detected is None
         else usb_otg_device_controller_detected
+    )
+    prepared_usb_otg_boot_mode = (
+        detect_usb_otg_boot_mode_prepared()
+        if usb_otg_boot_mode_prepared is None
+        else usb_otg_boot_mode_prepared
+    )
+    installed_usb_otg_support = (
+        detect_usb_otg_support_installed()
+        if usb_otg_support_installed is None
+        else usb_otg_support_installed
     )
     device_tabs = (
         "".join(
@@ -188,7 +245,17 @@ def render_settings_html(
         '<form method="post" action="/actions/republish-discovery">'
         f"{button('Republish Home Assistant Discovery', kind='secondary')}"
         "</form>"
-        '<form method="post" action="/actions/restart-runtime">'
+        + (
+            '<form method="post" action="/actions/refresh-usb-otg-drive">'
+            f"{button('Refresh USB OTG Drive', kind='secondary')}"
+            "</form>"
+            '<form method="post" action="/actions/export-usb-otg-images">'
+            f"{button('Export Frame Images', kind='secondary')}"
+            "</form>"
+            if installed_usb_otg_support
+            else ""
+        )
+        + '<form method="post" action="/actions/restart-runtime">'
         f"{button('Restart bm-gateway service', kind='secondary')}"
         "</form>"
         '<form method="post" action="/actions/restart-bluetooth-service">'
@@ -271,19 +338,59 @@ def render_settings_html(
         if config.usb_otg.enabled and not detected_usb_otg_controller
         else ""
     )
+    usb_otg_install_warning = (
+        banner_strip(
+            html.escape(
+                "USB OTG support was not installed on this system. Re-run the Raspberry Pi "
+                "installer without --skip-usb-otg-tools to install dosfstools, the drive "
+                "export helper, and the web sudo policy."
+            ),
+            kind="error",
+        )
+        if not installed_usb_otg_support
+        else ""
+    )
     usb_otg_controller_badge = (
         '<span class="status-badge ok">Detected</span>'
         if detected_usb_otg_controller
         else '<span class="status-badge error">Not detected</span>'
     )
+    usb_otg_support_badge = (
+        '<span class="status-badge ok">Installed</span>'
+        if installed_usb_otg_support
+        else '<span class="status-badge error">Not installed</span>'
+    )
     usb_otg_section_body = (
-        usb_otg_warning
+        usb_otg_install_warning
+        + usb_otg_warning
+        + _usb_otg_refresh_interval_warning(config)
         + settings_row(
             "USB OTG image export",
             "Enabled" if config.usb_otg.enabled else "Disabled",
         )
+        + _settings_markup_row("USB OTG support", usb_otg_support_badge)
         + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
-        + settings_row("Backing image", config.usb_otg.image_path)
+        + settings_row(
+            "Output size",
+            f"{config.usb_otg.image_width_px} x {config.usb_otg.image_height_px} px",
+        )
+        + settings_row("Output format", config.usb_otg.image_format.upper())
+        + settings_row("Frame appearance", config.usb_otg.appearance.title())
+        + settings_row("Export interval", _usb_otg_refresh_interval_label(config))
+        + settings_row("Devices per overview image", str(config.usb_otg.overview_devices_per_image))
+        + settings_row(
+            "Exported images",
+            ", ".join(
+                label
+                for enabled, label in (
+                    (config.usb_otg.export_battery_overview, "battery overview"),
+                    (config.usb_otg.export_fleet_trend, "fleet trend"),
+                )
+                if enabled
+            )
+            or "None",
+        )
+        + settings_row("Backing disk image", config.usb_otg.image_path)
         + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
         + settings_row("Gadget name", config.usb_otg.gadget_name)
     )
@@ -295,7 +402,8 @@ def render_settings_html(
         + settings_row("Connect timeout", f"{config.bluetooth.connect_timeout_seconds} seconds")
     )
     gateway_section_body = (
-        f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
+        _poll_interval_warning(config)
+        + f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
         + settings_row("Gateway name", config.gateway.name)
         + settings_row("Timezone", config.gateway.timezone)
         + settings_row("Live polling", config.gateway.reader_mode)
@@ -370,6 +478,18 @@ def render_settings_html(
                 ("system", "System"),
             )
         )
+        usb_otg_format_options = "".join(
+            _option_html(value, label, config.usb_otg.image_format)
+            for value, label in (("jpeg", "JPEG"), ("png", "PNG"), ("bmp", "BMP"))
+        )
+        usb_otg_appearance_options = "".join(
+            _option_html(value, label, config.usb_otg.appearance)
+            for value, label in (("light", "Light"), ("dark", "Dark"))
+        )
+        usb_otg_devices_per_image_options = "".join(
+            _option_html(str(value), str(value), str(config.usb_otg.overview_devices_per_image))
+            for value in range(1, 11)
+        )
         bluetooth_adapter_options = (
             _option_html("auto", "Auto", config.bluetooth.adapter)
             + "".join(
@@ -388,6 +508,7 @@ def render_settings_html(
         )
         gateway_section_body = (
             '<form method="post" action="/settings/gateway">'
+            + _poll_interval_warning(config)
             + f'<div class="chip-grid" style="margin-bottom:1rem">{device_tabs}</div>'
             + settings_control_row(
                 "Gateway name",
@@ -706,13 +827,16 @@ def render_settings_html(
         )
         usb_otg_section_body = (
             '<form method="post" action="/settings/usb-otg">'
+            + usb_otg_install_warning
             + usb_otg_warning
+            + _usb_otg_refresh_interval_warning(config)
             + settings_control_row(
                 "USB OTG image export",
                 (
                     f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
                     '<input type="checkbox" name="usb_otg_enabled"'
-                    f"{shared._checked_attr(config.usb_otg.enabled)}>"
+                    f"{shared._checked_attr(config.usb_otg.enabled)}"
+                    f"{' disabled' if not installed_usb_otg_support else ''}>"
                     "<span>Enable USB OTG image export</span></label>"
                 ),
                 help_text=(
@@ -721,14 +845,109 @@ def render_settings_html(
                     "is available."
                 ),
             )
+            + _settings_markup_row("USB OTG support", usb_otg_support_badge)
             + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
-            + settings_row("Backing image", config.usb_otg.image_path)
+            + settings_control_row(
+                "Image width",
+                (
+                    f'<input id="usb-otg-width-input" type="text" name="image_width_px" '
+                    f'value="{config.usb_otg.image_width_px}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+                help_text="Set the exported frame image width in pixels.",
+            )
+            + settings_control_row(
+                "Image height",
+                (
+                    f'<input id="usb-otg-height-input" type="text" name="image_height_px" '
+                    f'value="{config.usb_otg.image_height_px}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+                help_text="Set the exported frame image height in pixels.",
+            )
+            + settings_control_row(
+                "Image format",
+                (
+                    '<select id="usb-otg-format-input" name="image_format" autocomplete="off">'
+                    f"{usb_otg_format_options}</select>"
+                ),
+                help_text="JPEG is the safest format for most digital picture frames.",
+            )
+            + settings_control_row(
+                "Frame appearance",
+                (
+                    '<select id="usb-otg-appearance-input" name="appearance" autocomplete="off">'
+                    f"{usb_otg_appearance_options}</select>"
+                ),
+                help_text="Choose the light or dark visual style for generated frame images.",
+            )
+            + settings_control_row(
+                "Export interval",
+                (
+                    '<input id="usb-otg-refresh-input" type="text" '
+                    'name="refresh_interval_seconds" '
+                    f'value="{config.usb_otg.refresh_interval_seconds}" inputmode="numeric" '
+                    'autocomplete="off">'
+                ),
+                help_text=(
+                    "Use 0 to export after each gateway poll, or set a custom interval in seconds."
+                ),
+            )
+            + settings_control_row(
+                "Devices per overview image",
+                (
+                    '<select id="usb-otg-overview-count-input" '
+                    'name="overview_devices_per_image" autocomplete="off">'
+                    f"{usb_otg_devices_per_image_options}</select>"
+                ),
+                help_text="Choose how many batteries can appear on one overview image.",
+            )
+            + settings_control_row(
+                "Battery overview image",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="export_battery_overview"'
+                    f"{shared._checked_attr(config.usb_otg.export_battery_overview)}>"
+                    "<span>Export battery overview pages</span></label>"
+                ),
+                help_text="Generate one or more overview images sized for the picture frame.",
+            )
+            + settings_control_row(
+                "Fleet trend image",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="export_fleet_trend"'
+                    f"{shared._checked_attr(config.usb_otg.export_fleet_trend)}>"
+                    "<span>Export fleet trend chart</span></label>"
+                ),
+                help_text="Generate a compact fleet trend chart using stored battery history.",
+            )
+            + settings_row("Backing disk image", config.usb_otg.image_path)
             + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
             + settings_row("Gadget name", config.usb_otg.gadget_name)
             + '<div style="margin-top:1rem">'
             + f"{button('Save USB OTG settings', kind='primary')}"
             + "</div>"
             + "</form>"
+            + '<div class="inline-actions" style="margin-top:1rem">'
+            + (
+                '<form method="post" action="/actions/restore-usb-host-mode" '
+                "onsubmit=\"return confirm('Restore Raspberry Pi USB host boot mode? "
+                "A reboot will be required.')\">"
+                f"{button('Restore USB Host Mode', kind='secondary')}"
+                "</form>"
+                if prepared_usb_otg_boot_mode
+                else (
+                    '<form method="post" action="/actions/prepare-usb-otg-mode" '
+                    "onsubmit=\"return confirm('Prepare Raspberry Pi USB OTG peripheral "
+                    "boot mode? A reboot will be required.')\">"
+                    f"{button('Prepare USB OTG Mode', kind='secondary')}"
+                    "</form>"
+                    if installed_usb_otg_support
+                    else ""
+                )
+            )
+            + "</div>"
         )
         bluetooth_section_body = (
             '<form method="post" action="/settings/bluetooth">'

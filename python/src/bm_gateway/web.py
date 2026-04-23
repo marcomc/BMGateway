@@ -25,7 +25,11 @@ from .web_actions import (
     _config_and_registry_texts,
     add_device_from_form,
     build_run_once_command,
+    export_usb_otg_images_now,
+    prepare_usb_otg_boot_mode,
+    refresh_usb_otg_drive,
     restart_system_service,
+    restore_usb_otg_boot_mode,
     run_once_via_cli,
     schedule_host_reboot,
     schedule_host_shutdown,
@@ -76,6 +80,7 @@ from .web_support import read_text
 __all__ = [
     "add_device_from_form",
     "build_run_once_command",
+    "export_usb_otg_images_now",
     "render_add_device_html",
     "render_home_html",
     "render_device_html",
@@ -89,6 +94,9 @@ __all__ = [
     "render_snapshot_html",
     "serve_management",
     "serve_snapshot",
+    "prepare_usb_otg_boot_mode",
+    "refresh_usb_otg_drive",
+    "restore_usb_otg_boot_mode",
     "update_bluetooth_preferences",
     "update_config_from_text",
     "update_device_from_form",
@@ -1034,6 +1042,16 @@ def serve_management(
                 errors = update_usb_otg_preferences(
                     config_path=config_path,
                     enabled=_bool_from_form(form, "usb_otg_enabled"),
+                    image_width_px=int(form.get("image_width_px", ["480"])[0]),
+                    image_height_px=int(form.get("image_height_px", ["234"])[0]),
+                    image_format=form.get("image_format", [config.usb_otg.image_format])[0],
+                    appearance=form.get("appearance", [config.usb_otg.appearance])[0],
+                    refresh_interval_seconds=int(form.get("refresh_interval_seconds", ["0"])[0]),
+                    overview_devices_per_image=int(
+                        form.get("overview_devices_per_image", ["5"])[0]
+                    ),
+                    export_battery_overview=_bool_from_form(form, "export_battery_overview"),
+                    export_fleet_trend=_bool_from_form(form, "export_fleet_trend"),
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)
@@ -1057,6 +1075,22 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/export-usb-otg-images":
+                completed = export_usb_otg_images_now(config_path=config_path, state_dir=state_dir)
+                message = (
+                    "USB OTG frame images exported"
+                    if completed.returncode == 0
+                    else "USB OTG frame image export failed"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
                 )
                 self.end_headers()
                 return
@@ -1114,6 +1148,54 @@ def serve_management(
                     message += f": {completed.stderr.strip()}"
                 self.send_response(303)
                 self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/prepare-usb-otg-mode":
+                completed = prepare_usb_otg_boot_mode()
+                message = (
+                    "USB OTG boot mode prepared; reboot required"
+                    if completed.returncode == 0
+                    else "Failed to prepare USB OTG boot mode"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/restore-usb-host-mode":
+                completed = restore_usb_otg_boot_mode()
+                message = (
+                    "USB host boot mode restored; reboot required"
+                    if completed.returncode == 0
+                    else "Failed to restore USB host boot mode"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/refresh-usb-otg-drive":
+                completed = refresh_usb_otg_drive(config_path)
+                message = (
+                    "USB OTG drive refreshed"
+                    if completed.returncode == 0
+                    else "Failed to refresh USB OTG drive"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
                 self.end_headers()
                 return
 

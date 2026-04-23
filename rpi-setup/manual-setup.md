@@ -337,9 +337,94 @@ The installed config keeps:
 - `web.show_chart_markers = false`
 - `web.visible_device_limit = 4`
 - `web.appearance = "system"`
+- `usb_otg.enabled = false`
+- `usb_otg.image_width_px = 480`
+- `usb_otg.image_height_px = 234`
+- `usb_otg.image_format = "jpeg"`
+- `usb_otg.refresh_interval_seconds = 0`
 
 The devices registry starts empty on purpose so the web UI can be the first
 real configuration surface instead of shipping fake sample hardware.
+
+The poll interval is editable in Settings. Values below `300` seconds are
+allowed for testing, but the Settings page shows a red warning because frequent
+BM6/BM200 polling can increase Bluetooth discovery failures, device contention,
+and error-heavy history.
+
+## Optional: Prepare USB OTG Image Export
+
+`BMGateway` includes a disabled-by-default USB OTG image-export setting for
+external monitors and digital picture frames.
+
+This setting is intentionally split into three parts in the web UI:
+
+- `Enable USB OTG image export` controls whether `BMGateway` should use the
+  feature when the host is capable of it.
+- `USB OTG support` reports whether the installer placed the OTG helper
+  commands and `dosfstools` on the system.
+- `USB OTG device controller` reports whether Linux currently exposes a USB
+  gadget device controller under `/sys/class/udc`.
+- `Prepare USB OTG Mode` or `Restore USB Host Mode` edits Raspberry Pi boot
+  configuration and requires a reboot before taking effect.
+
+If the installer was run with `--skip-usb-otg-tools`, the Settings page shows
+USB OTG support as not installed and hides the prepare/export actions. Re-run
+the bootstrap installer without that skip option, or run
+`sudo rpi-setup/scripts/install-service.sh` from the checkout without
+`--skip-usb-otg-tools`, to install:
+
+- `dosfstools`
+- `libjpeg-dev`, `python3-dev`, and `zlib1g-dev`
+- `/usr/local/bin/bm-gateway-usb-otg-boot-mode`
+- `/usr/local/bin/bm-gateway-usb-otg-frame-test`
+- the scoped sudoers entries used by the web actions and runtime exporter
+
+The web service keeps the extra USB OTG capabilities out of its ambient
+capability set, but leaves them in the `systemd` capability bounding set so the
+root-scoped sudo helper can rewrite, mount, and attach the backing disk image.
+
+Use `Prepare USB OTG Mode` when the Settings page reports no USB OTG device
+controller and the Pi is connected through the Zero USB Plug or an OTG cable.
+The action adds a BMGateway-managed `dwc2` peripheral-mode block under `[all]`
+in:
+
+```text
+/boot/firmware/config.txt
+```
+
+The web UI shows only the action that matches the current boot-mode state:
+prepare when USB OTG peripheral mode is not prepared, or restore when it is.
+The restore action removes the managed block. If prepare replaced an existing
+`dtoverlay=dwc2...` line under `[all]`, restore puts the previous line back.
+Both actions create timestamped backups beside the boot config before writing.
+
+When USB OTG image export is enabled, the runtime generates configured frame
+images after each gateway polling cycle by default. Set
+`usb_otg.refresh_interval_seconds` to a positive number to use a custom export
+cadence. The Settings page warns if that export interval is shorter than the
+gateway polling interval because the picture frame may see repeated stale data
+and extra USB detach/reattach churn.
+
+The generated image settings include:
+
+- image width and height in pixels
+- image format: JPEG, PNG, or BMP
+- light or dark appearance
+- overview devices per image, from 1 through 10
+- whether to export battery overview pages, Fleet Trend, or both
+
+In non-editing Settings mode, use `Export Frame Images` to regenerate the
+configured images and expose a fresh drive immediately. Use
+`Refresh USB OTG Drive` when the picture frame does not recognize the current drive
+and you only want to detach and reattach the existing backing disk image.
+
+The bootstrap installer installs USB OTG tools by default. If you are
+installing on a host that will never use USB OTG image export, skip those
+packages, helpers, and sudoers entries with:
+
+```bash
+./scripts/bootstrap-install.sh --skip-usb-otg-tools
+```
 
 ## Validate the Setup
 

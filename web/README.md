@@ -48,7 +48,22 @@ Web-facing config under `[web]` currently includes:
 - `default_chart_metric`
 
 The appliance-level `[usb_otg]` section is also visible in Settings for the
-disabled-by-default USB OTG image-export option.
+disabled-by-default USB OTG image-export option. The Settings card keeps the
+runtime export checkbox separate from platform status and host-preparation
+actions because preparing or restoring Raspberry Pi USB OTG boot mode edits
+boot configuration and requires a reboot. The card shows only the action that
+matches the current boot-mode state.
+
+The same card reports whether USB OTG support was installed by the Raspberry Pi
+installer. If `--skip-usb-otg-tools` was used, Settings shows that support is
+not installed and hides the prepare/export actions until the installer is run
+again without that skip option. When support is installed, Settings can also
+configure generated frame image width, height, format, light/dark appearance,
+refresh cadence, overview density, and which image types are exported.
+The non-editing Settings Actions panel exposes `Export Frame Images`, which
+regenerates the images and reattaches the drive, and `Refresh USB OTG Drive`, which
+only detaches and reattaches the existing backing disk image so a picture frame
+can re-enumerate it.
 
 ## Canonical References
 

@@ -5,8 +5,7 @@
 This note captures the first hardware test for presenting a Raspberry Pi Zero
 2 W as a USB mass-storage device to a Samsung `SPF-71E` digital photo frame.
 
-The goal of this slice is not the full automated `BMGateway` image-export
-runtime. The goal is to prove the hardware path and image compatibility first:
+The first goal was to prove the hardware path and image compatibility:
 
 - enable USB gadget peripheral mode on the Pi
 - expose a FAT32 read-only backing image through USB mass storage
@@ -69,9 +68,14 @@ The helper creates:
 Status and teardown:
 
 ```bash
+sudo ./rpi-setup/scripts/usb-otg-frame-test.sh refresh
 sudo ./rpi-setup/scripts/usb-otg-frame-test.sh status
 sudo ./rpi-setup/scripts/usb-otg-frame-test.sh teardown
 ```
+
+`refresh` detaches and reattaches the existing backing image without
+regenerating files. Use it when a picture frame does not recognize the drive
+or needs USB re-enumeration after the image was already created.
 
 ## Boot Configuration
 
@@ -86,16 +90,22 @@ dtoverlay=dwc2,dr_mode=peripheral
 If this line is placed under a model-specific section that does not match the
 Zero 2 W, `/sys/class/udc` remains empty and the gadget cannot attach.
 
-## Automation Follow-Up
+## Production Export Flow
 
-The production image-export feature should build on this only after the frame
-displays the baseline JPEG files. The next implementation design should decide:
+The production feature now builds on the same gadget path:
 
-- whether the exported drive stays read-only to the frame
-- how `BMGateway` updates images without concurrent host/frame writes
-- which generated views and filenames are stable
-- whether updates require gadget detach, image rebuild, and reattach
-- how the web UI exposes status and manual refresh controls
+- `BMGateway` renders frame-sized bitmap files from the latest gateway snapshot
+  and retained history.
+- The exported drive stays read-only from the attached frame's point of view.
+- Each export rebuilds the FAT backing disk image, detaches any existing gadget,
+  copies the generated files, and reattaches the gadget.
+- The default cadence is the gateway polling interval. A custom refresh interval
+  can be set, but the Settings page warns when it is shorter than the gateway
+  polling interval.
+- The non-editing Settings Actions panel includes a manual
+  `Export Frame Images` action for hardware validation.
+- The same Actions panel includes `Refresh USB OTG Drive`, which detaches and
+  reattaches the existing backing image without rendering new files.
 
 ## Application Setting
 
@@ -107,18 +117,85 @@ enabled = false
 image_path = "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"
 size_mb = 64
 gadget_name = "bmgw_frame"
+image_width_px = 480
+image_height_px = 234
+image_format = "jpeg"
+appearance = "light"
+refresh_interval_seconds = 0
+overview_devices_per_image = 5
+export_battery_overview = true
+export_fleet_trend = true
 ```
 
 The Settings page exposes this as `USB OTG Image Export`. It checks whether
-Linux currently exposes a USB gadget device controller under `/sys/class/udc`.
+the required helper command and `mkfs.vfat` are installed, and whether Linux
+currently exposes a USB gadget device controller under `/sys/class/udc`. If
+the helper package path is missing, the page shows a red warning explaining
+that the Raspberry Pi installer must be run without `--skip-usb-otg-tools`.
 If the feature is enabled but no controller is detected, the page shows a red
-warning explaining that the export cannot do anything until the Zero USB Plug
-or OTG cable and `dwc2` peripheral mode are available.
+warning explaining that the export cannot attach a gadget until the Zero USB
+Plug or OTG cable and `dwc2` peripheral mode are available.
 
-The bootstrap installer installs `dosfstools` by default because FAT image
-creation needs `mkfs.vfat`. Installers that do not need USB OTG support can
-skip that package with:
+The Settings page also exposes one explicit host-preparation action at a time:
+
+- `Prepare USB OTG Mode`
+- `Restore USB Host Mode`
+
+The page shows prepare when USB OTG peripheral mode is not prepared, and restore
+when it is. These actions are separate from the export checkbox because they
+edit Raspberry Pi boot configuration and require a reboot before taking effect.
+The prepare action installs a BMGateway-managed
+`dtoverlay=dwc2,dr_mode=peripheral` block under `[all]` in
+`/boot/firmware/config.txt`. If it replaces an existing `dtoverlay=dwc2...`
+line in `[all]`, it preserves that line inside the managed block so the restore
+action can put it back later.
+
+Both actions create timestamped backups beside the boot config before writing.
+
+The bootstrap and service installers install USB OTG support by default:
+
+- `dosfstools`, which provides `mkfs.vfat`
+- `libjpeg-dev`, `python3-dev`, and `zlib1g-dev`, which allow the `pillow`
+  USB OTG image renderer dependency to build on 32-bit Raspberry Pi Python
+  versions when a wheel is unavailable
+- `/usr/local/bin/bm-gateway-usb-otg-boot-mode`
+- `/usr/local/bin/bm-gateway-usb-otg-frame-test`
+- scoped sudoers entries for boot-mode prepare/restore and drive export
+
+Installations that do not need USB OTG support can skip those packages and
+helpers with:
 
 ```bash
 ./scripts/bootstrap-install.sh --skip-usb-otg-tools
 ```
+
+Running `rpi-setup/scripts/install-service.sh --skip-usb-otg-tools` directly
+also removes the installed OTG helpers and omits their sudoers entries.
+
+## Poll And Export Cadence
+
+Gateway polling is controlled by `gateway.poll_interval_seconds`. The shipped
+default is `300` seconds; the current live gateway may choose a longer interval
+such as `600` seconds for reduced Bluetooth pressure.
+
+Image export defaults to the same cadence as gateway polling because
+`usb_otg.refresh_interval_seconds = 0` means "use the poll interval". Exporting
+more often than polling mostly republishes the same data and adds extra USB
+gadget detach/attach churn. The Settings page warns when gateway polling is set
+below `300` seconds because BM6/BM200 discovery and connection cycles can
+become less reliable at aggressive intervals. It also warns when the USB OTG
+export interval is shorter than the configured gateway poll interval.
+
+## Generated Images
+
+The current exporter writes:
+
+- `battery-overview-01.jpg`, `battery-overview-02.jpg`, and so on, with up to
+  `usb_otg.overview_devices_per_image` configured batteries per image
+- `fleet-trend.jpg`, a compact state-of-charge chart for all configured
+  batteries using the same device color keys as the web UI
+
+The image size, format, light/dark appearance, enabled image types, refresh
+interval, and overview page density are editable from Settings. Backing disk
+image path, disk size, and gadget name remain read-only for now because safe
+changes require detach, migration, and reattach lifecycle handling.

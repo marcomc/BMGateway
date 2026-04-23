@@ -74,3 +74,19 @@ def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> N
     assert "/usr/bin/systemctl poweroff" in payload
     assert 'chmod 0440 "${sudoers_path}"' in payload
     assert 'visudo -cf "${sudoers_path}"' in payload
+
+
+def test_web_service_bounding_set_allows_privileged_usb_otg_helper_capabilities() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE" in (
+        payload
+    )
+    assert "CAP_CHOWN" in payload
+    assert "CAP_DAC_OVERRIDE" in payload
+    assert "CAP_FOWNER" in payload
+    assert "CAP_SYS_ADMIN" in payload
+    assert "CAP_SYS_MODULE" in payload

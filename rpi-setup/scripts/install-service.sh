@@ -18,6 +18,7 @@ Options:
   --enable-cockpit             Install and enable Cockpit on HTTPS port 9090
   --disable-web                Do not enable/start the web service
   --disable-home-assistant     Disable MQTT and Home Assistant in the installed config
+  --skip-usb-otg-tools         Do not install USB OTG helper commands or sudoers entries
   --skip-start                 Enable services but do not start or restart them
   --help                       Show this help text
 EOF
@@ -40,6 +41,7 @@ glances_port="61208"
 enable_cockpit=0
 enable_web=1
 enable_home_assistant=1
+install_usb_otg_tools=1
 start_services=1
 
 while [[ "$#" -gt 0 ]]; do
@@ -88,6 +90,10 @@ while [[ "$#" -gt 0 ]]; do
       enable_home_assistant=0
       shift
       ;;
+    --skip-usb-otg-tools)
+      install_usb_otg_tools=0
+      shift
+      ;;
     --skip-start)
       start_services=0
       shift
@@ -115,6 +121,8 @@ config_dir="$(dirname "${config_path}")"
 devices_path="${config_dir}/devices.toml"
 cli_path="${service_home}/.local/bin/bm-gateway"
 web_cli_path="${service_home}/.local/bin/bm-gateway-web"
+usb_otg_boot_mode_path="/usr/local/bin/bm-gateway-usb-otg-boot-mode"
+usb_otg_drive_helper_path="/usr/local/bin/bm-gateway-usb-otg-frame-test"
 unit_path="/etc/systemd/system/bm-gateway.service"
 web_unit_path="/etc/systemd/system/bm-gateway-web.service"
 glances_unit_path="/etc/systemd/system/glances-web.service"
@@ -125,6 +133,16 @@ chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
+if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
+  apt-get update
+  apt-get install -y dosfstools libjpeg-dev python3-dev zlib1g-dev
+  install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-boot-mode.sh" \
+    "${usb_otg_boot_mode_path}"
+  install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-frame-test.sh" \
+    "${usb_otg_drive_helper_path}"
+else
+  rm -f "${usb_otg_boot_mode_path}" "${usb_otg_drive_helper_path}"
+fi
 
 if [[ ! -f "${config_path}" ]]; then
   install -m 0644 "${project_root}/python/config/config.toml.example" "${config_path}"
@@ -232,6 +250,14 @@ payload = "\n".join(
         f'image_path = {string_to_toml(usb_otg.get("image_path", "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"))}',
         f'size_mb = {int(usb_otg.get("size_mb", 64))}',
         f'gadget_name = {string_to_toml(usb_otg.get("gadget_name", "bmgw_frame"))}',
+        f'image_width_px = {int(usb_otg.get("image_width_px", 480))}',
+        f'image_height_px = {int(usb_otg.get("image_height_px", 234))}',
+        f'image_format = {string_to_toml(usb_otg.get("image_format", "jpeg"))}',
+        f'appearance = {string_to_toml(usb_otg.get("appearance", "light"))}',
+        f'refresh_interval_seconds = {int(usb_otg.get("refresh_interval_seconds", 0))}',
+        f'overview_devices_per_image = {int(usb_otg.get("overview_devices_per_image", 5))}',
+        f'export_battery_overview = {bool_to_toml(bool(usb_otg.get("export_battery_overview", True)))}',
+        f'export_fleet_trend = {bool_to_toml(bool(usb_otg.get("export_fleet_trend", True)))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',
@@ -298,7 +324,7 @@ ExecStart=/usr/local/bin/bm-gateway-web --config \${BMGATEWAY_CONFIG} --state-di
 Restart=always
 RestartSec=10
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE CAP_CHOWN CAP_DAC_OVERRIDE CAP_FOWNER CAP_SYS_ADMIN CAP_SYS_MODULE
 User=${service_user}
 Group=${service_user}
 WorkingDirectory=${state_dir}
@@ -307,8 +333,12 @@ WorkingDirectory=${state_dir}
 WantedBy=multi-user.target
 EOF
 
+sudoers_commands="/usr/bin/systemctl restart bm-gateway.service, /usr/bin/systemctl restart bluetooth.service, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff"
+if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
+  sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare, ${usb_otg_boot_mode_path} restore, ${usb_otg_drive_helper_path} setup *, ${usb_otg_drive_helper_path} refresh *"
+fi
 cat >"${sudoers_path}" <<EOF
-${service_user} ALL=(root) NOPASSWD: /usr/bin/systemctl restart bm-gateway.service, /usr/bin/systemctl restart bluetooth.service, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff
+${service_user} ALL=(root) NOPASSWD: ${sudoers_commands}
 EOF
 chmod 0440 "${sudoers_path}"
 if command -v visudo >/dev/null 2>&1; then
@@ -376,6 +406,12 @@ fi
 printf 'Installed runtime service to %s\n' "${unit_path}"
 printf 'Installed web service to %s\n' "${web_unit_path}"
 printf 'Installed web action sudoers policy to %s\n' "${sudoers_path}"
+if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
+  printf 'Installed USB OTG helpers to %s and %s\n' \
+    "${usb_otg_boot_mode_path}" "${usb_otg_drive_helper_path}"
+else
+  printf 'Skipped USB OTG helper installation\n'
+fi
 if [[ "${enable_glances}" -eq 1 ]]; then
   printf 'Installed Glances service to %s\n' "${glances_unit_path}"
   printf 'Glances API: http://%s:%s/api/4/status\n' "${glances_bind}" "${glances_port}"

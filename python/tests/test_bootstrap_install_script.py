@@ -99,8 +99,8 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     commands = command_log.read_text(encoding="utf-8")
     assert "apt-get update" in commands
     assert (
-        "apt-get install -y bluetooth bluez curl git make python3 python3-venv dosfstools"
-        in commands
+        "apt-get install -y bluetooth bluez curl git make python3 python3-venv "
+        "dosfstools libjpeg-dev python3-dev zlib1g-dev" in commands
     )
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
@@ -140,6 +140,11 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     commands = command_log.read_text(encoding="utf-8")
     assert "apt-get install -y bluetooth bluez curl git make python3 python3-venv" in commands
     assert "dosfstools" not in commands
+    assert "libjpeg-dev" not in commands
+    assert "python3-dev" not in commands
+    assert "zlib1g-dev" not in commands
+    assert f"make install PYTHON_VERSION={fake_bin / 'python3'} INSTALL_EXTRAS=" in commands
+    assert "--skip-usb-otg-tools" in commands
 
 
 def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> None:

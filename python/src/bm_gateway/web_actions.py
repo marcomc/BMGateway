@@ -325,9 +325,55 @@ def update_web_preferences(
     return []
 
 
-def update_usb_otg_preferences(*, config_path: Path, enabled: bool) -> list[str]:
+def update_usb_otg_preferences(
+    *,
+    config_path: Path,
+    enabled: bool,
+    image_width_px: int | None = None,
+    image_height_px: int | None = None,
+    image_format: str | None = None,
+    appearance: str | None = None,
+    refresh_interval_seconds: int | None = None,
+    overview_devices_per_image: int | None = None,
+    export_battery_overview: bool | None = None,
+    export_fleet_trend: bool | None = None,
+) -> list[str]:
     config = load_config(config_path)
-    updated = replace(config, usb_otg=replace(config.usb_otg, enabled=enabled))
+    updated = replace(
+        config,
+        usb_otg=replace(
+            config.usb_otg,
+            enabled=enabled,
+            image_width_px=(
+                config.usb_otg.image_width_px if image_width_px is None else image_width_px
+            ),
+            image_height_px=(
+                config.usb_otg.image_height_px if image_height_px is None else image_height_px
+            ),
+            image_format=config.usb_otg.image_format if image_format is None else image_format,
+            appearance=config.usb_otg.appearance if appearance is None else appearance,
+            refresh_interval_seconds=(
+                config.usb_otg.refresh_interval_seconds
+                if refresh_interval_seconds is None
+                else refresh_interval_seconds
+            ),
+            overview_devices_per_image=(
+                config.usb_otg.overview_devices_per_image
+                if overview_devices_per_image is None
+                else overview_devices_per_image
+            ),
+            export_battery_overview=(
+                config.usb_otg.export_battery_overview
+                if export_battery_overview is None
+                else export_battery_overview
+            ),
+            export_fleet_trend=(
+                config.usb_otg.export_fleet_trend
+                if export_fleet_trend is None
+                else export_fleet_trend
+            ),
+        ),
+    )
     from .config import validate_config
 
     errors = validate_config(updated)
@@ -512,6 +558,79 @@ def restart_system_service(service_name: str) -> subprocess.CompletedProcess[str
         check=False,
         capture_output=True,
         text=True,
+    )
+
+
+def _usb_otg_boot_mode_command(action: str) -> list[str]:
+    return ["sudo", "-n", "/usr/local/bin/bm-gateway-usb-otg-boot-mode", action]
+
+
+def _usb_otg_drive_helper_command(config_path: Path, action: str) -> list[str]:
+    config = load_config(config_path)
+    return [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-frame-test",
+        action,
+        "--image-path",
+        config.usb_otg.image_path,
+        "--gadget-name",
+        config.usb_otg.gadget_name,
+    ]
+
+
+def prepare_usb_otg_boot_mode() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _usb_otg_boot_mode_command("prepare"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def restore_usb_otg_boot_mode() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _usb_otg_boot_mode_command("restore"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def refresh_usb_otg_drive(config_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _usb_otg_drive_helper_command(config_path, "refresh"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def export_usb_otg_images_now(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "bm_gateway",
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--export-usb-otg-now",
+            "--dry-run",
+            *(["--state-dir", str(state_dir)] if state_dir is not None else []),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=180,
     )
 
 

@@ -65,6 +65,14 @@ class USBOTGConfig:
     image_path: str = "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"
     size_mb: int = 64
     gadget_name: str = "bmgw_frame"
+    image_width_px: int = 480
+    image_height_px: int = 234
+    image_format: str = "jpeg"
+    appearance: str = "light"
+    refresh_interval_seconds: int = 0
+    overview_devices_per_image: int = 5
+    export_battery_overview: bool = True
+    export_fleet_trend: bool = True
 
 
 @dataclass(frozen=True)
@@ -150,6 +158,14 @@ class AppConfig:
                 "image_path": self.usb_otg.image_path,
                 "size_mb": self.usb_otg.size_mb,
                 "gadget_name": self.usb_otg.gadget_name,
+                "image_width_px": self.usb_otg.image_width_px,
+                "image_height_px": self.usb_otg.image_height_px,
+                "image_format": self.usb_otg.image_format,
+                "appearance": self.usb_otg.appearance,
+                "refresh_interval_seconds": self.usb_otg.refresh_interval_seconds,
+                "overview_devices_per_image": self.usb_otg.overview_devices_per_image,
+                "export_battery_overview": self.usb_otg.export_battery_overview,
+                "export_fleet_trend": self.usb_otg.export_fleet_trend,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -245,6 +261,14 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"image_path = {_string_to_toml(config.usb_otg.image_path)}",
             f"size_mb = {config.usb_otg.size_mb}",
             f"gadget_name = {_string_to_toml(config.usb_otg.gadget_name)}",
+            f"image_width_px = {config.usb_otg.image_width_px}",
+            f"image_height_px = {config.usb_otg.image_height_px}",
+            f"image_format = {_string_to_toml(config.usb_otg.image_format)}",
+            f"appearance = {_string_to_toml(config.usb_otg.appearance)}",
+            f"refresh_interval_seconds = {config.usb_otg.refresh_interval_seconds}",
+            f"overview_devices_per_image = {config.usb_otg.overview_devices_per_image}",
+            f"export_battery_overview = {_bool_to_toml(config.usb_otg.export_battery_overview)}",
+            f"export_fleet_trend = {_bool_to_toml(config.usb_otg.export_fleet_trend)}",
             "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
@@ -311,6 +335,14 @@ def load_config(path: Path) -> AppConfig:
         ),
         size_mb=int(usb_otg_table.get("size_mb", 64)),
         gadget_name=str(usb_otg_table.get("gadget_name", "bmgw_frame")),
+        image_width_px=int(usb_otg_table.get("image_width_px", 480)),
+        image_height_px=int(usb_otg_table.get("image_height_px", 234)),
+        image_format=str(usb_otg_table.get("image_format", "jpeg")),
+        appearance=str(usb_otg_table.get("appearance", "light")),
+        refresh_interval_seconds=int(usb_otg_table.get("refresh_interval_seconds", 0)),
+        overview_devices_per_image=int(usb_otg_table.get("overview_devices_per_image", 5)),
+        export_battery_overview=bool(usb_otg_table.get("export_battery_overview", True)),
+        export_fleet_trend=bool(usb_otg_table.get("export_fleet_trend", True)),
     )
     retention = RetentionConfig(
         raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
@@ -375,6 +407,18 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("usb_otg.size_mb must be greater than zero")
     if not config.usb_otg.gadget_name.strip():
         errors.append("usb_otg.gadget_name must not be empty")
+    if config.usb_otg.image_width_px < 160:
+        errors.append("usb_otg.image_width_px must be at least 160")
+    if config.usb_otg.image_height_px < 120:
+        errors.append("usb_otg.image_height_px must be at least 120")
+    if config.usb_otg.image_format not in {"jpeg", "png", "bmp"}:
+        errors.append("usb_otg.image_format must be one of: jpeg, png, bmp")
+    if config.usb_otg.appearance not in {"light", "dark"}:
+        errors.append("usb_otg.appearance must be one of: light, dark")
+    if config.usb_otg.refresh_interval_seconds < 0:
+        errors.append("usb_otg.refresh_interval_seconds must be zero or greater")
+    if not 1 <= config.usb_otg.overview_devices_per_image <= 10:
+        errors.append("usb_otg.overview_devices_per_image must be between 1 and 10")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:
