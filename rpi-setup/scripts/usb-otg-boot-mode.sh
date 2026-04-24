@@ -103,18 +103,6 @@ def is_peripheral_line(line: str) -> bool:
     return stripped.startswith("dtoverlay=dwc2") and "dr_mode=peripheral" in stripped
 
 
-def remove_all_section_peripheral_lines(lines: list[str]) -> list[str]:
-    all_index = find_all_section(lines)
-    if all_index is None:
-        return lines
-    section_end = next_section_index(lines, all_index)
-    return [
-        line
-        for index, line in enumerate(lines)
-        if not (all_index < index < section_end and is_peripheral_line(line))
-    ]
-
-
 def has_all_section_peripheral_line(lines: list[str]) -> bool:
     all_index = find_all_section(lines)
     if all_index is None:
@@ -142,8 +130,7 @@ def prepare() -> None:
     output: list[str] = []
     for index, line in enumerate(lines):
         if all_index < index < section_end and is_dwc2_line(line):
-            if not is_peripheral_line(line):
-                preserved.append(line)
+            preserved.append(line)
             continue
         output.append(line)
 
@@ -159,7 +146,6 @@ def restore() -> None:
         raise SystemExit(f"boot config not found: {path}")
     backup()
     lines = strip_managed_block(path.read_text(encoding="utf-8").splitlines())
-    lines = remove_all_section_peripheral_lines(lines)
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("restored: BMGateway USB OTG boot overlay removed")
 

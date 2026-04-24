@@ -224,7 +224,58 @@ def test_usb_otg_boot_mode_restore_preserves_previous_all_dwc2_line(tmp_path: Pa
     assert "dtoverlay=dwc2,dr_mode=peripheral" not in text
 
 
-def test_usb_otg_boot_mode_restore_removes_existing_unmanaged_peripheral_line(
+def test_usb_otg_boot_mode_restore_preserves_previous_peripheral_line(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.txt"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[all]",
+                "dtoverlay=dwc2,dr_mode=peripheral",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    prepare = subprocess.run(
+        [
+            "bash",
+            "rpi-setup/scripts/usb-otg-boot-mode.sh",
+            "prepare",
+            "--config-path",
+            str(config_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+    assert prepare.returncode == 0, prepare.stderr
+    assert "# BMGateway previous: dtoverlay=dwc2,dr_mode=peripheral" in config_path.read_text(
+        encoding="utf-8"
+    )
+
+    restore = subprocess.run(
+        [
+            "bash",
+            "rpi-setup/scripts/usb-otg-boot-mode.sh",
+            "restore",
+            "--config-path",
+            str(config_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert restore.returncode == 0, restore.stderr
+    text = config_path.read_text(encoding="utf-8")
+    assert "BMGateway USB OTG image export" not in text
+    assert "dtoverlay=dwc2,dr_mode=peripheral" in text
+
+
+def test_usb_otg_boot_mode_restore_preserves_existing_unmanaged_peripheral_line(
     tmp_path: Path,
 ) -> None:
     config_path = tmp_path / "config.txt"
@@ -270,4 +321,5 @@ def test_usb_otg_boot_mode_restore_removes_existing_unmanaged_peripheral_line(
 
     assert restore.returncode == 0, restore.stderr
     text = config_path.read_text(encoding="utf-8")
-    assert "dtoverlay=dwc2,dr_mode=peripheral" not in text
+    assert "BMGateway USB OTG image export" not in text
+    assert "dtoverlay=dwc2,dr_mode=peripheral" in text

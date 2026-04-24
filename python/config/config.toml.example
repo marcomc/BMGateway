@@ -63,7 +63,7 @@ export_battery_overview = true
 export_fleet_trend = true
 fleet_trend_metrics = ["soc"]
 fleet_trend_range = "7"
-# Empty means all configured devices. Settings writes explicit IDs when saved.
+# Empty means all configured devices. Selecting a subset writes explicit IDs.
 fleet_trend_device_ids = []
 
 [retention]

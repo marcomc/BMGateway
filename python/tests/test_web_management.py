@@ -1317,6 +1317,68 @@ def test_settings_usb_otg_post_persists_enabled_flag(
     assert export_calls == [(config_path, None)]
 
 
+def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "spare_nlp5"',
+                'type = "bm200"',
+                'name = "Spare NLP5"',
+                'mac = "A1:B2:C3:D4:E5:F6"',
+                "",
+                "[[devices]]",
+                'id = "spare_nlp20"',
+                'type = "bm200"',
+                'name = "Spare NLP20"',
+                'mac = "A1:B2:C3:D4:E5:F7"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode(
+            [
+                ("fleet_trend_device_ids", ""),
+                ("fleet_trend_device_ids", "spare_nlp5"),
+                ("fleet_trend_device_ids", "spare_nlp20"),
+            ]
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        assert response.status == 200
+
+    config = load_config(config_path)
+    assert config.usb_otg.fleet_trend_device_ids == ()
+
+
 def test_settings_usb_otg_post_starts_export_without_waiting(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,

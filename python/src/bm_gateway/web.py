@@ -295,6 +295,31 @@ def _start_usb_otg_image_export(
     return thread
 
 
+def _usb_otg_fleet_trend_device_ids_from_form(
+    form: dict[str, list[str]],
+    config: AppConfig,
+) -> tuple[str, ...]:
+    if "fleet_trend_device_ids" not in form:
+        return config.usb_otg.fleet_trend_device_ids
+
+    selected_ids = tuple(
+        device_id.strip()
+        for device_id in form.get("fleet_trend_device_ids", [])
+        if device_id.strip()
+    )
+    if config.usb_otg.fleet_trend_device_ids:
+        return selected_ids
+
+    configured_ids = {
+        device.id
+        for device in load_device_registry(config.device_registry_path)
+        if device.id.strip()
+    }
+    if not configured_ids or set(selected_ids) == configured_ids:
+        return ()
+    return selected_ids
+
+
 def serve_snapshot(*, host: str, port: int, snapshot_path: Path) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -1392,13 +1417,7 @@ def serve_management(
                         [config.usb_otg.fleet_trend_range],
                     )[0],
                     fleet_trend_device_ids=(
-                        tuple(
-                            device_id
-                            for device_id in form.get("fleet_trend_device_ids", [])
-                            if device_id.strip()
-                        )
-                        if "fleet_trend_device_ids" in form
-                        else config.usb_otg.fleet_trend_device_ids
+                        _usb_otg_fleet_trend_device_ids_from_form(form, config)
                     ),
                 )
                 if errors:
