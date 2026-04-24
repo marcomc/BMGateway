@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import socket
 import subprocess
 import threading
@@ -16,6 +17,7 @@ from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import fetch_recent_history, persist_snapshot
+from bm_gateway.usb_otg_export import USBOTGExportResult
 from bm_gateway.web import (
     _add_device_form_html,
     _chart_points,
@@ -33,6 +35,7 @@ from bm_gateway.web import (
     render_home_html,
     render_management_html,
     render_settings_html,
+    render_usb_otg_export_pending_html,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -381,6 +384,18 @@ def test_render_shutdown_pending_html_contains_safe_poweroff_guidance() -> None:
     assert "Shutdown scheduled" in html
     assert "Wait for the Raspberry Pi activity LED to stop blinking" in html
     assert "BMGateway Shutdown" in html
+
+
+def test_render_usb_otg_export_pending_html_contains_progress_status_page() -> None:
+    html = render_usb_otg_export_pending_html(theme_preference="dark")
+
+    assert "Frame Image Export" in html
+    assert 'id="usb-otg-export-progress-bar"' in html
+    assert 'id="usb-otg-export-percent"' in html
+    assert 'id="usb-otg-export-status-text"' in html
+    assert 'fetch("/api/usb-otg-export/status", { cache: "no-store" })' in html
+    assert 'window.location.replace("/settings?message=" + message)' in html
+    assert 'window.location.replace("/settings?edit=1&message=" + message)' not in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -1372,6 +1387,82 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
     assert export_calls == [(config_path, None)]
 
 
+def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    export_finished = threading.Event()
+    marker_calls: list[Path | None] = []
+
+    def _update_drive(**kwargs: object) -> USBOTGExportResult:
+        progress = kwargs.get("progress")
+        if callable(progress):
+            progress(0, 3, "Preparing USB OTG frame image export")
+            progress(1, 3, "Rendered frame image")
+            progress(2, 3, "Writing images to USB OTG drive")
+            progress(3, 3, "USB OTG frame images exported")
+        export_finished.set()
+        return USBOTGExportResult(exported=True, reason="exported")
+
+    def _mark_exported(**kwargs: object) -> None:
+        state_dir = kwargs.get("state_dir")
+        marker_calls.append(state_dir if isinstance(state_dir, Path) else None)
+
+    monkeypatch.setattr("bm_gateway.web.update_usb_otg_drive", _update_drive)
+    monkeypatch.setattr("bm_gateway.web.mark_usb_otg_exported", _mark_exported)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/actions/export-usb-otg-images",
+        data=b"",
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        html = response.read().decode("utf-8")
+        assert response.status == 200
+        assert urlparse(response.url).path == "/usb-otg-export/progress"
+        assert "Frame Image Export" in html
+
+    assert export_finished.wait(timeout=1.0)
+    assert marker_calls == [tmp_path]
+
+    status_request = urllib.request.Request(
+        f"http://{host}:{port}/api/usb-otg-export/status",
+        headers={"Accept-Language": "it"},
+    )
+    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    assert payload["status"] == "completed"
+    assert payload["completed"] == 3
+    assert payload["total"] == 3
+    assert payload["percent"] == 100
+    assert payload["message"] == "Immagini cornice USB OTG esportate"
+
+
 def test_compact_mac_address_is_normalized() -> None:
     assert normalize_mac_address("A1B2C3D4E5F6") == "A1:B2:C3:D4:E5:F6"
 
@@ -1784,7 +1875,8 @@ def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
         height=234,
     )
 
-    assert "Fleet Trend · SoC · 7 days · Latest:" in html
+    assert "<span>Fleet Trend</span> · <span>SoC</span> · <span>7 days</span>" in html
+    assert "<span>Latest:</span> <span>No data</span>" in html
     assert "Spare NLP5" in html
     assert 'id="frame-fleet-trend-chart"' in html
     assert 'class="bottom-nav"' not in html
@@ -1808,6 +1900,35 @@ def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
     assert "display: none;" in html
     assert "--frame-width: 480px;" in html
     assert "--frame-height: 234px;" in html
+
+
+def test_render_frame_fleet_trend_html_localizes_latest_label_to_italian() -> None:
+    html = render_frame_fleet_trend_html(
+        chart_points=[
+            {
+                "ts": "2026-04-24T01:05:00+02:00",
+                "series": "Spare NLP20",
+                "series_color": "#ec5c86",
+                "soc": 91,
+                "voltage": 13.31,
+                "temperature": 24.0,
+            },
+        ],
+        legend=[("Spare NLP20", "#ec5c86")],
+        show_chart_markers=False,
+        appearance="dark",
+        default_chart_range="30",
+        default_chart_metric="voltage",
+        width=480,
+        height=234,
+        language="it",
+    )
+
+    assert "Andamento flotta" in html
+    assert "Voltaggio" in html
+    assert "30 giorni" in html
+    assert "Ultimo:" in html
+    assert "Latest:" not in html
 
 
 def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_values() -> None:
@@ -1839,7 +1960,8 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
         height=234,
     )
 
-    assert "Fleet Trend · Temperature · 30 days · Latest: 2026-04-24 01:05" in html
+    assert "<span>Fleet Trend</span> · <span>Temperature</span> · <span>30 days</span>" in html
+    assert "<span>Latest:</span> <span>2026-04-24 01:05</span>" in html
     assert "Spare NLP5 23.0°C" in html
     assert "Spare NLP20 24.0°C" in html
     assert 'data-metric="temperature" class="active"' in html
@@ -1877,7 +1999,8 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
         height=234,
     )
 
-    assert "Battery Overview · Latest: 2026-04-24 03:12" in html
+    assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
+    assert "<span>2026-04-24 03:12</span>" in html
     assert "Spare NLP5" in html
     assert "frame-battery-card" in html
     assert "frame-battery-soc" in html
@@ -1918,7 +2041,8 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     assert "left: 17.0px; top: 22.0px;" in html
     assert "conic-gradient(" in html
     assert "font-size: 12px;" in html
-    assert "Battery Overview · Latest: 2026-04-24 03:20" in html
+    assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
+    assert "<span>2026-04-24 03:20</span>" in html
 
 
 def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:

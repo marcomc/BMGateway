@@ -213,6 +213,68 @@ def test_render_usb_otg_export_images_creates_selected_fleet_metric_images(
     ]
 
 
+def test_render_usb_otg_export_images_uses_configured_web_language(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        web=replace(config.web, language="it"),
+        usb_otg=replace(
+            config.usb_otg,
+            image_format="png",
+            export_battery_overview=True,
+            export_fleet_trend=True,
+        ),
+    )
+    devices = [
+        Device(
+            id="spare_nlp5",
+            type="bm200",
+            name="Spare NLP5",
+            mac="AA:BB:CC:DD:EE:01",
+            color_key="green",
+            installed_in_vehicle=True,
+            vehicle_type="bench",
+        )
+    ]
+    base_snapshot = _snapshot()
+    snapshot = replace(
+        base_snapshot,
+        devices=[
+            replace(base_snapshot.devices[0], id="spare_nlp5", name="Spare NLP5"),
+            replace(base_snapshot.devices[1], id="spare_nlp20", name="Spare NLP20"),
+        ],
+    )
+    rendered_pages: list[str] = []
+
+    def _capturing_frame_renderer(
+        html_text: str,
+        output_path: Path,
+        width: int,
+        height: int,
+        image_format: str,
+    ) -> None:
+        rendered_pages.append(html_text)
+        _fake_frame_renderer(html_text, output_path, width, height, image_format)
+
+    render_usb_otg_export_images(
+        config=config,
+        devices=devices,
+        snapshot=snapshot,
+        database_path=tmp_path / "gateway.db",
+        output_dir=tmp_path,
+        page_renderer=_capturing_frame_renderer,
+    )
+
+    combined_html = "\n".join(rendered_pages)
+    assert '<html lang="it" dir="ltr">' in combined_html
+    assert "Panoramica batteria" in combined_html
+    assert "Andamento flotta" in combined_html
+    assert "Banco" in combined_html
+    assert "Battery Overview" not in combined_html
+    assert "Fleet Trend" not in combined_html
+    assert "Bench" not in combined_html
+
+
 def test_build_drive_export_command_targets_installed_usb_otg_helper(tmp_path: Path) -> None:
     config = load_config(Path("python/config/config.toml.example"))
 

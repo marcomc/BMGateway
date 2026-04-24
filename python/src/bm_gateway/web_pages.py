@@ -1739,6 +1739,19 @@ def render_reboot_pending_html(*, theme_preference: str = "system", language: st
     return _render_reboot_pending_html(theme_preference=theme_preference, language=language)
 
 
+def render_usb_otg_export_pending_html(
+    *, theme_preference: str = "system", language: str = "en"
+) -> str:
+    from .web_pages_settings import (
+        render_usb_otg_export_pending_html as _render_usb_otg_export_pending_html,
+    )
+
+    return _render_usb_otg_export_pending_html(
+        theme_preference=theme_preference,
+        language=language,
+    )
+
+
 def render_shutdown_pending_html(*, theme_preference: str = "system", language: str = "en") -> str:
     from .web_pages_settings import render_shutdown_pending_html as _render_shutdown_pending_html
 

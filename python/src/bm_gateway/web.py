@@ -11,7 +11,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import COLOR_CATALOG, default_color_key, load_device_registry
-from .localization import resolve_locale_preference
+from .localization import resolve_locale_preference, translation_for
+from .models import DeviceReading, GatewaySnapshot
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
     fetch_daily_history,
@@ -23,6 +24,7 @@ from .state_store import (
     load_snapshot,
     prune_history,
 )
+from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_actions import (
     _config_and_registry_texts,
     add_device_from_form,
@@ -79,6 +81,7 @@ from .web_pages import (
     render_settings_html,
     render_shutdown_pending_html,
     render_snapshot_html,
+    render_usb_otg_export_pending_html,
 )
 from .web_support import read_text
 
@@ -99,6 +102,7 @@ __all__ = [
     "render_reboot_pending_html",
     "render_settings_html",
     "render_shutdown_pending_html",
+    "render_usb_otg_export_pending_html",
     "render_snapshot_html",
     "serve_management",
     "serve_snapshot",
@@ -119,6 +123,160 @@ __all__ = [
     "_chart_points",
     "_discover_bluetooth_adapters",
 ]
+
+_USB_OTG_EXPORT_LOCK = threading.Lock()
+_USB_OTG_EXPORT_STATUS: dict[str, object] = {
+    "status": "idle",
+    "completed": 0,
+    "total": 0,
+    "message": "Preparing USB OTG frame image export",
+    "detail": "",
+    "redirect_message": "",
+}
+
+
+def _set_usb_otg_export_status(**updates: object) -> None:
+    with _USB_OTG_EXPORT_LOCK:
+        _USB_OTG_EXPORT_STATUS.update(updates)
+
+
+def _usb_otg_export_status_snapshot() -> dict[str, object]:
+    with _USB_OTG_EXPORT_LOCK:
+        snapshot = dict(_USB_OTG_EXPORT_STATUS)
+    completed = _int_from_mapping(snapshot, "completed")
+    total = _int_from_mapping(snapshot, "total")
+    snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
+    return snapshot
+
+
+def _int_from_mapping(mapping: dict[str, object], key: str, default: int = 0) -> int:
+    value = mapping.get(key, default)
+    if not isinstance(value, str | int | float):
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapshot:
+    readings: list[DeviceReading] = []
+    snapshot_devices = snapshot.get("devices", [])
+    if isinstance(snapshot_devices, list):
+        for item in snapshot_devices:
+            if not isinstance(item, dict):
+                continue
+            readings.append(
+                DeviceReading(
+                    id=str(item.get("id", "")),
+                    type=str(item.get("type", "bm200")),
+                    name=str(item.get("name") or item.get("id") or "Battery"),
+                    mac=str(item.get("mac", "")),
+                    enabled=bool(item.get("enabled", True)),
+                    connected=bool(item.get("connected", False)),
+                    voltage=float(item.get("voltage", 0.0) or 0.0),
+                    soc=int(float(item.get("soc", 0) or 0)),
+                    temperature=(
+                        float(item["temperature"]) if item.get("temperature") is not None else None
+                    ),
+                    rssi=int(item["rssi"]) if item.get("rssi") is not None else None,
+                    state=str(item.get("state", "unknown")),
+                    error_code=(
+                        str(item["error_code"]) if item.get("error_code") is not None else None
+                    ),
+                    error_detail=(
+                        str(item["error_detail"]) if item.get("error_detail") is not None else None
+                    ),
+                    last_seen=str(item.get("last_seen", snapshot.get("generated_at", ""))),
+                    adapter=str(item.get("adapter", "")),
+                    driver=str(item.get("driver", "")),
+                )
+            )
+    return GatewaySnapshot(
+        generated_at=str(snapshot.get("generated_at", "")),
+        gateway_name=str(snapshot.get("gateway_name", "BMGateway")),
+        active_adapter=str(snapshot.get("active_adapter", "")),
+        mqtt_enabled=bool(snapshot.get("mqtt_enabled", False)),
+        mqtt_connected=bool(snapshot.get("mqtt_connected", False)),
+        devices_total=_int_from_mapping(snapshot, "devices_total", len(readings)),
+        devices_online=_int_from_mapping(snapshot, "devices_online"),
+        poll_interval_seconds=_int_from_mapping(snapshot, "poll_interval_seconds"),
+        devices=readings,
+    )
+
+
+def _start_tracked_usb_otg_image_export(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> threading.Thread | None:
+    with _USB_OTG_EXPORT_LOCK:
+        if _USB_OTG_EXPORT_STATUS.get("status") == "running":
+            return None
+        _USB_OTG_EXPORT_STATUS.update(
+            {
+                "status": "running",
+                "completed": 0,
+                "total": 0,
+                "message": "Preparing USB OTG frame image export",
+                "detail": "",
+                "redirect_message": "",
+            }
+        )
+
+    def _progress(completed: int, total: int, message: str) -> None:
+        _set_usb_otg_export_status(
+            status="running",
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    def _worker() -> None:
+        try:
+            config = load_config(config_path)
+            devices = load_device_registry(config.device_registry_path)
+            snapshot_path = state_file_path(config, state_dir=state_dir)
+            empty_snapshot: dict[str, object] = {"generated_at": "", "devices": []}
+            snapshot_mapping = (
+                load_snapshot(snapshot_path) if snapshot_path.exists() else empty_snapshot
+            )
+            result = update_usb_otg_drive(
+                config=config,
+                devices=devices,
+                snapshot=_gateway_snapshot_from_mapping(snapshot_mapping),
+                database_path=database_file_path(config, state_dir=state_dir),
+                progress=_progress,
+            )
+            if result.exported:
+                mark_usb_otg_exported(config=config, state_dir=state_dir)
+                _set_usb_otg_export_status(
+                    status="completed",
+                    message="USB OTG frame images exported",
+                    detail="",
+                    redirect_message="USB OTG frame images exported",
+                )
+            else:
+                _set_usb_otg_export_status(
+                    status="failed",
+                    message="USB OTG frame image export failed",
+                    detail=result.reason,
+                    redirect_message=f"USB OTG frame image export failed: {result.reason}",
+                )
+        except Exception as exc:  # pragma: no cover - defensive web boundary
+            detail = str(exc) or exc.__class__.__name__
+            export_status = _usb_otg_export_status_snapshot()
+            _set_usb_otg_export_status(
+                status="failed",
+                completed=_int_from_mapping(export_status, "total"),
+                message="USB OTG frame image export failed",
+                detail=detail,
+                redirect_message=f"USB OTG frame image export failed: {detail}",
+            )
+
+    thread = threading.Thread(target=_worker, daemon=True, name="usb-otg-image-export")
+    thread.start()
+    return thread
 
 
 def _start_usb_otg_image_export(
@@ -247,6 +405,20 @@ def serve_management(
             if parsed.path == "/api/status":
                 self._send_json(_snapshot_with_version(snapshot))
                 return
+            if parsed.path == "/api/usb-otg-export/status":
+                status = _usb_otg_export_status_snapshot()
+                translation = translation_for(request_language)
+                message = str(status.get("message", ""))
+                redirect_message = str(status.get("redirect_message", ""))
+                status["message"] = translation.gettext(message)
+                if redirect_message:
+                    if ": " in redirect_message:
+                        prefix, detail = redirect_message.split(": ", 1)
+                        status["redirect_message"] = f"{translation.gettext(prefix)}: {detail}"
+                    else:
+                        status["redirect_message"] = translation.gettext(redirect_message)
+                self._send_json(status)
+                return
             if parsed.path == "/api/devices":
                 self._send_json({"devices": serialized_devices})
                 return
@@ -290,6 +462,15 @@ def serve_management(
                     self._send_json(
                         fetch_daily_history(database_path, device_id=device_id, limit=limit)
                     )
+                return
+
+            if parsed.path == "/usb-otg-export/progress":
+                self._send_html(
+                    render_usb_otg_export_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
                 return
 
             if parsed.path == "/device":
@@ -1235,18 +1416,12 @@ def serve_management(
                 return
 
             if parsed.path == "/actions/export-usb-otg-images":
-                completed = export_usb_otg_images_now(config_path=config_path, state_dir=state_dir)
-                message = (
-                    "USB OTG frame images exported"
-                    if completed.returncode == 0
-                    else "USB OTG frame image export failed"
+                _start_tracked_usb_otg_image_export(
+                    config_path=config_path,
+                    state_dir=state_dir,
                 )
-                if completed.stderr:
-                    message += f": {completed.stderr.strip()}"
                 self.send_response(303)
-                self.send_header(
-                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
-                )
+                self.send_header("Location", "/usb-otg-export/progress")
                 self.end_headers()
                 return
 

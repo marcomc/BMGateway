@@ -111,9 +111,10 @@ def render_frame_fleet_trend_html(
         '<section class="frame-fleet-trend-section">'
         '<div class="frame-fleet-header">'
         '<h1 class="frame-title">'
-        f"Fleet Trend · {html.escape(_metric_label(metric_value))} "
-        f"· {html.escape(_range_label(range_value))} "
-        f"· Latest: {html.escape(latest_timestamp)}"
+        "<span>Fleet Trend</span>"
+        f" · <span>{html.escape(_metric_label(metric_value))}</span>"
+        f" · <span>{html.escape(_range_label(range_value))}</span>"
+        f" · <span>Latest:</span> <span>{html.escape(latest_timestamp)}</span>"
         "</h1>"
         f'<div class="frame-device-values">{device_value_markup}</div>'
         "</div>"
@@ -189,7 +190,7 @@ def _fleet_trend_latest_values(
         if (timestamp := _parse_point_timestamp(point.get("ts"))) is not None
     ]
     if not timestamped_points:
-        return "no data", [(label, color, "--") for label, color in legend]
+        return "No data", [(label, color, "--") for label, color in legend]
 
     newest = max(timestamp for timestamp, _point in timestamped_points)
     if range_value not in {"all", "raw"}:
@@ -258,7 +259,8 @@ def render_frame_battery_overview_html(
     body = (
         '<section class="frame-overview-section">'
         '<h1 class="frame-title">'
-        f"Battery Overview · Latest: {html.escape(latest_timestamp)}"
+        "<span>Battery Overview</span>"
+        f" · <span>Latest:</span> <span>{html.escape(latest_timestamp)}</span>"
         "</h1>"
         f'<div class="frame-battery-stage" style="--frame-overview-card-size: {card_size}px;">'
         f"{grid_markup}"
@@ -385,7 +387,7 @@ def _battery_overview_latest_timestamp(snapshot: dict[str, object]) -> str:
         if generated_at is not None:
             timestamps.append(generated_at)
     if not timestamps:
-        return "no data"
+        return "No data"
     return max(timestamps).strftime("%Y-%m-%d %H:%M")
 
 

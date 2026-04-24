@@ -1375,6 +1375,120 @@ def render_reboot_pending_html(*, theme_preference: str = "system", language: st
     )
 
 
+def render_usb_otg_export_pending_html(
+    *, theme_preference: str = "system", language: str = "en"
+) -> str:
+    polling_script = """
+<script>
+(() => {
+  const bar = document.getElementById("usb-otg-export-progress-bar");
+  const percentValue = document.getElementById("usb-otg-export-percent");
+  const statusValue = document.getElementById("usb-otg-export-status-text");
+  const detailValue = document.getElementById("usb-otg-export-detail-text");
+  const completedValue = document.getElementById("usb-otg-export-completed");
+  const totalValue = document.getElementById("usb-otg-export-total");
+  const update = (payload) => {
+    const percent = Math.max(0, Math.min(100, Number(payload.percent || 0)));
+    if (bar) {
+      bar.style.width = `${percent}%`;
+      bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+    }
+    if (percentValue) {
+      percentValue.textContent = `${Math.round(percent)}%`;
+    }
+    if (statusValue && payload.message) {
+      statusValue.textContent = payload.message;
+    }
+    if (detailValue && payload.detail) {
+      detailValue.textContent = payload.detail;
+    }
+    if (completedValue) {
+      completedValue.textContent = String(payload.completed || 0);
+    }
+    if (totalValue) {
+      totalValue.textContent = String(payload.total || 0);
+    }
+  };
+  const poll = async () => {
+    try {
+      const response = await fetch("/api/usb-otg-export/status", { cache: "no-store" });
+      if (response.ok) {
+        const payload = await response.json();
+        update(payload);
+        if (payload.status === "completed" || payload.status === "failed") {
+          const message = encodeURIComponent(payload.redirect_message || payload.message || "");
+          window.setTimeout(() => {
+            window.location.replace("/settings?message=" + message);
+          }, 900);
+          return;
+        }
+      }
+    } catch (_error) {
+    }
+    window.setTimeout(poll, 900);
+  };
+  poll();
+})();
+</script>
+"""
+    progress_bar = (
+        '<div class="soc-progress" style="margin-top:1rem">'
+        '<div class="soc-progress-header">'
+        '<span class="settings-label">Progress</span>'
+        '<span class="soc-progress-value" id="usb-otg-export-percent">0%</span>'
+        "</div>"
+        '<div class="soc-progress-track" role="progressbar" aria-valuemin="0" '
+        'aria-valuemax="100" aria-valuenow="0">'
+        '<div class="soc-progress-fill" id="usb-otg-export-progress-bar" '
+        'style="width:0%; background:var(--accent-green)"></div>'
+        "</div>"
+        "</div>"
+    )
+    body = top_header(title="Frame Image Export") + section_card(
+        title="USB OTG image export",
+        body=(
+            '<div class="metrics-grid compact-overview-grid">'
+            + summary_card(
+                "Status",
+                "Preparing USB OTG frame image export",
+                subvalue="Frame images are being generated for the picture frame.",
+                classes="compact-summary",
+            )
+            + (
+                '<div class="summary-card compact-summary">'
+                '<div class="label">Completed</div>'
+                '<div class="value"><span id="usb-otg-export-completed">0</span> / '
+                '<span id="usb-otg-export-total">0</span></div>'
+                '<div class="subvalue">Updated automatically while waiting.</div>'
+                "</div>"
+            )
+            + "</div>"
+            + progress_bar
+            + (
+                '<div class="settings-row" style="margin-top:1rem">'
+                '<div class="settings-label">Export status</div>'
+                '<div class="settings-value" id="usb-otg-export-status-text">'
+                "Preparing USB OTG frame image export"
+                "</div>"
+                "</div>"
+            )
+            + '<div class="section-subtitle" id="usb-otg-export-detail-text" '
+            'style="margin-top:0.75rem">'
+            + "This page updates automatically and returns to settings when the export finishes."
+            + "</div>"
+        ),
+    )
+    return app_document(
+        title="Frame Image Export",
+        body=body,
+        active_nav="settings",
+        version_label=display_version(),
+        theme_preference=theme_preference,
+        language=language,
+        script=polling_script,
+    )
+
+
 def render_shutdown_pending_html(*, theme_preference: str = "system", language: str = "en") -> str:
     body = top_header(
         title="Shutdown In Progress",

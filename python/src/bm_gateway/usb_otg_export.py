@@ -14,6 +14,7 @@ from PIL import Image
 
 from .config import AppConfig
 from .device_registry import Device
+from .localization import resolve_locale_preference
 from .models import GatewaySnapshot
 from .web_pages import _fleet_chart_points
 from .web_pages_frame import (
@@ -23,6 +24,7 @@ from .web_pages_frame import (
 
 DriveCommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 FramePageRenderer = Callable[[str, Path, int, int, str], None]
+ProgressReporter = Callable[[int, int, str], None]
 _CHROMIUM_HEADLESS_WINDOW_VERTICAL_INSET_PX = 87
 
 
@@ -43,6 +45,19 @@ def _extension(image_format: str) -> str:
     return "jpg" if image_format == "jpeg" else image_format
 
 
+def expected_usb_otg_export_steps(config: AppConfig, devices: list[Device]) -> int:
+    image_count = 0
+    if config.usb_otg.export_battery_overview:
+        per_image = config.usb_otg.overview_devices_per_image
+        real_devices = [device for device in devices if device.enabled]
+        if not real_devices:
+            real_devices = devices
+        image_count += max(1, (len(real_devices) + per_image - 1) // per_image)
+    if config.usb_otg.export_fleet_trend:
+        image_count += len(config.usb_otg.fleet_trend_metrics)
+    return image_count + 1
+
+
 def _save_screenshot_as_format(source_png: Path, path: Path, image_format: str) -> None:
     image = Image.open(source_png)
     if image_format == "jpeg":
@@ -51,6 +66,10 @@ def _save_screenshot_as_format(source_png: Path, path: Path, image_format: str) 
         image.save(path, format="PNG", optimize=True)
     else:
         image.convert("RGB").save(path, format="BMP")
+
+
+def _export_language(config: AppConfig) -> str:
+    return resolve_locale_preference(config.web.language, None)
 
 
 def _crop_screenshot_to_frame(source_png: Path, path: Path, width: int, height: int) -> None:
@@ -120,6 +139,9 @@ def render_battery_overview_images(
     snapshot: GatewaySnapshot,
     output_dir: Path,
     page_renderer: FramePageRenderer = _render_frame_page_with_chromium,
+    progress: ProgressReporter | None = None,
+    completed_offset: int = 0,
+    total_steps: int = 0,
 ) -> tuple[Path, ...]:
     width = config.usb_otg.image_width_px
     height = config.usb_otg.image_height_px
@@ -146,9 +168,12 @@ def render_battery_overview_images(
             appearance=config.usb_otg.appearance,
             width=width,
             height=height,
+            language=_export_language(config),
         )
         page_renderer(page_html, path, width, height, config.usb_otg.image_format)
         files.append(path)
+        if progress is not None:
+            progress(completed_offset + len(files), total_steps, "Rendered frame image")
     return tuple(files)
 
 
@@ -165,6 +190,9 @@ def render_fleet_trend_image(
     output_dir: Path,
     metric: str,
     page_renderer: FramePageRenderer = _render_frame_page_with_chromium,
+    progress: ProgressReporter | None = None,
+    completed_step: int = 0,
+    total_steps: int = 0,
 ) -> Path:
     width = config.usb_otg.image_width_px
     height = config.usb_otg.image_height_px
@@ -185,8 +213,11 @@ def render_fleet_trend_image(
         default_chart_metric=metric,
         width=width,
         height=height,
+        language=_export_language(config),
     )
     page_renderer(page_html, path, width, height, config.usb_otg.image_format)
+    if progress is not None:
+        progress(completed_step, total_steps, "Rendered frame image")
     return path
 
 
@@ -205,9 +236,12 @@ def render_usb_otg_export_images(
     database_path: Path,
     output_dir: Path,
     page_renderer: FramePageRenderer = _render_frame_page_with_chromium,
+    progress: ProgressReporter | None = None,
+    total_steps: int | None = None,
 ) -> tuple[Path, ...]:
     output_dir.mkdir(parents=True, exist_ok=True)
     files: list[Path] = []
+    resolved_total_steps = total_steps or expected_usb_otg_export_steps(config, devices)
     if config.usb_otg.export_battery_overview:
         files.extend(
             render_battery_overview_images(
@@ -216,6 +250,9 @@ def render_usb_otg_export_images(
                 snapshot=snapshot,
                 output_dir=output_dir,
                 page_renderer=page_renderer,
+                progress=progress,
+                completed_offset=len(files),
+                total_steps=resolved_total_steps,
             )
         )
     if config.usb_otg.export_fleet_trend:
@@ -229,6 +266,9 @@ def render_usb_otg_export_images(
                     output_dir=output_dir,
                     metric=metric,
                     page_renderer=page_renderer,
+                    progress=progress,
+                    completed_step=len(files) + 1,
+                    total_steps=resolved_total_steps,
                 )
             )
     return tuple(files)
@@ -269,11 +309,15 @@ def update_usb_otg_drive(
     database_path: Path,
     runner: DriveCommandRunner = _default_runner,
     page_renderer: FramePageRenderer = _render_frame_page_with_chromium,
+    progress: ProgressReporter | None = None,
 ) -> USBOTGExportResult:
     if not config.usb_otg.enabled:
         return USBOTGExportResult(exported=False, reason="disabled")
     if not config.usb_otg.export_battery_overview and not config.usb_otg.export_fleet_trend:
         return USBOTGExportResult(exported=False, reason="no images enabled")
+    total_steps = expected_usb_otg_export_steps(config, devices)
+    if progress is not None:
+        progress(0, total_steps, "Preparing USB OTG frame image export")
     with tempfile.TemporaryDirectory(prefix="bm-gateway-usb-otg-") as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         files = render_usb_otg_export_images(
@@ -283,12 +327,20 @@ def update_usb_otg_drive(
             database_path=database_path,
             output_dir=temp_dir,
             page_renderer=page_renderer,
+            progress=progress,
+            total_steps=total_steps,
         )
         _prepare_source_dir_for_root_helper(temp_dir, files)
+        if progress is not None:
+            progress(max(0, total_steps - 1), total_steps, "Writing images to USB OTG drive")
         completed = runner(build_drive_export_command(config, temp_dir))
         if completed.returncode != 0:
             reason = completed.stderr.strip() or completed.stdout.strip() or "drive helper failed"
+            if progress is not None:
+                progress(total_steps, total_steps, "USB OTG frame image export failed")
             return USBOTGExportResult(exported=False, reason=reason, files=files)
+    if progress is not None:
+        progress(total_steps, total_steps, "USB OTG frame images exported")
     return USBOTGExportResult(exported=True, reason="exported", files=files)
 
 

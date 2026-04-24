@@ -28,6 +28,7 @@ from bm_gateway.web_pages import (
     render_history_html,
     render_reboot_pending_html,
     render_shutdown_pending_html,
+    render_usb_otg_export_pending_html,
 )
 from bm_gateway.web_ui import chart_script
 
@@ -75,7 +76,29 @@ def test_catalog_translates_known_labels_and_falls_back_to_english() -> None:
 
     assert italian.gettext("Battery Overview") == "Panoramica batteria"
     assert italian.gettext("Settings") == "Impostazioni"
+    assert italian.gettext("Voltage") == "Voltaggio"
+    assert italian.gettext("Battery voltage") == "Voltaggio batteria"
+    assert italian.gettext("Average voltage") == "Voltaggio medio"
     assert italian.gettext("BMGateway") == "BMGateway"
+
+
+def test_voltage_ui_terms_are_translated_in_all_supported_locales() -> None:
+    message_keys = (
+        "Average voltage",
+        "Battery voltage",
+        "Pick whether charts should open on Voltage, State of Charge, or Temperature.",
+        "Select nominal voltage",
+        "Voltage",
+        "Voltage corresponding to power",
+        "Latest:",
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        translation = translation_for(locale.code)
+        missing = [key for key in message_keys if translation.gettext(key) == key]
+        assert missing == [], f"{locale.code} missing voltage UI translations: {missing}"
 
 
 def test_localize_html_sets_lang_dir_and_translates_text_nodes() -> None:
@@ -167,6 +190,9 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
         "Settings saved; USB OTG frame image export started",
         "USB OTG frame images exported",
         "USB OTG frame image export failed",
+        "Preparing USB OTG frame image export",
+        "Rendered frame image",
+        "Writing images to USB OTG drive",
     )
 
     for locale in SUPPORTED_LOCALES:
@@ -575,4 +601,5 @@ def _representative_english_pages() -> list[str]:
         ),
         render_reboot_pending_html(),
         render_shutdown_pending_html(),
+        render_usb_otg_export_pending_html(),
     ]
