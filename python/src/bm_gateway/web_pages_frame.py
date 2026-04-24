@@ -431,7 +431,7 @@ def _frame_document(
       }}
       .frame-capture-root .chart-card {{
         position: absolute;
-        inset: 26px 0 0;
+        inset: 30px 0 0;
         min-height: 0;
         height: auto;
         padding: 0;
@@ -508,7 +508,7 @@ def _frame_document(
       }}
       .frame-fleet-header {{
         position: absolute;
-        top: 6px;
+        top: 10px;
         right: 2px;
         left: 5px;
         z-index: 2;
@@ -518,7 +518,7 @@ def _frame_document(
       .frame-fleet-header .frame-title {{
         margin-bottom: 1px;
         font-size: 8px;
-        line-height: 1.05;
+        line-height: 1.25;
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;

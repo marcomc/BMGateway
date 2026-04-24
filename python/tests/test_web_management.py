@@ -1795,13 +1795,14 @@ def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
     assert ".frame-capture-root .chart-nav-arrow" in html
     assert ".frame-capture-root .chart-tooltip" in html
     assert ".frame-capture-root .chart-meta" in html
-    assert "inset: 26px 0 0;" in html
+    assert "inset: 30px 0 0;" in html
     assert "padding: 0;" in html
     assert "background: transparent;" in html
-    assert "top: 6px;" in html
+    assert "top: 10px;" in html
     assert "left: 5px;" in html
     assert "const padLeft = isCompact ? 30 : 68;" in html
     assert "const padBottom = isCompact ? 20 : 44;" in html
+    assert "line-height: 1.25;" in html
     assert "font-size: 8px;" in html
     assert "border: 0;" in html
     assert "display: none;" in html

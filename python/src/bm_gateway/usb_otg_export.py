@@ -23,6 +23,7 @@ from .web_pages_frame import (
 
 DriveCommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 FramePageRenderer = Callable[[str, Path, int, int, str], None]
+_CHROMIUM_HEADLESS_WINDOW_VERTICAL_INSET_PX = 87
 
 
 @dataclass(frozen=True)
@@ -57,6 +58,10 @@ def _crop_screenshot_to_frame(source_png: Path, path: Path, width: int, height: 
         image.crop((0, 0, width, height)).save(path, format="PNG")
 
 
+def _chromium_capture_height(frame_height: int) -> int:
+    return frame_height + _CHROMIUM_HEADLESS_WINDOW_VERTICAL_INSET_PX
+
+
 def _find_chromium() -> str:
     for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
         candidate = which(name)
@@ -85,7 +90,7 @@ def _render_frame_page_with_chromium(
         png_path = temp_dir / "frame.png"
         cropped_png_path = temp_dir / "frame-cropped.png"
         html_path.write_text(html_text, encoding="utf-8")
-        capture_height = max(height, 400)
+        capture_height = _chromium_capture_height(height)
         command = [
             _find_chromium(),
             "--headless=new",

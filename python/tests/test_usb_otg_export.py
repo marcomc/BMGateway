@@ -11,6 +11,7 @@ from bm_gateway.device_registry import Device
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.usb_otg import usb_otg_support_installed
 from bm_gateway.usb_otg_export import (
+    _chromium_capture_height,
     _crop_screenshot_to_frame,
     build_drive_export_command,
     effective_refresh_interval_seconds,
@@ -66,6 +67,11 @@ def test_crop_screenshot_to_frame_preserves_top_left_frame(tmp_path: Path) -> No
         assert cropped.size == (3, 2)
         assert cropped.getpixel((0, 0)) == (255, 0, 0)
         assert cropped.getpixel((2, 1)) == (0, 255, 0)
+
+
+def test_chromium_capture_height_compensates_headless_window_inset() -> None:
+    assert _chromium_capture_height(234) == 321
+    assert _chromium_capture_height(1080) == 1167
 
 
 def _snapshot() -> GatewaySnapshot:

@@ -110,6 +110,45 @@ The production feature now builds on the same gadget path:
   embeds hidden screenshot-ready render routes such as `/frame/fleet-trend` and
   `/frame/battery-overview?page=1` inside a simulated picture-frame viewport.
 
+## Chromium Screenshot Notes
+
+The exporter uses Chromium screenshots rather than an ImageMagick-only drawing
+path so the frame images can reuse the same HTML, CSS, chart script, colors,
+and typography as the web UI. This decision was made after the generated
+ImageMagick charts worked functionally on the Samsung frame but did not match
+the application visuals closely enough.
+
+On the Raspberry Pi test host, Chromium `147.0.7727.101` showed an important
+headless sizing behavior: `--window-size` controls the outer browser window,
+not the JavaScript viewport available to the page. With
+`--window-size=480,234`, Chromium produced a `480 x 234` screenshot, but the
+page reported only `innerHeight = 147`. The lower part of both a minimal test
+page and the frame-render pages was therefore left black. With
+`--window-size=480,321`, the page reported `innerHeight = 234` and rendered the
+full target frame.
+
+The measured difference was consistently `87` pixels on the Pi across tested
+sizes, including larger windows. The export code therefore requests a Chromium
+window height of:
+
+```text
+target frame height + 87 pixels
+```
+
+and then crops the top-left `target width x target height` rectangle before
+saving the configured output format. The crop is not intended to add hidden
+content to the generated picture. It compensates for Chromium's outer-window
+inset so the page viewport itself matches the configured picture-frame size.
+This is especially important for future higher-resolution frames: rendering at
+the exact configured `--window-size` would still lose the bottom `87` pixels of
+the page viewport on this Chromium/Pi path.
+
+The Fleet Trend header also needs enough vertical room inside the frame image.
+The title uses very small bold text, and Chromium rasterization made it look
+clipped when the header was too close to the top of the image. The header is
+therefore placed a few pixels lower than the absolute edge, and the chart starts
+below it, while the chart surface still fills the remaining frame area.
+
 ## Application Setting
 
 `BMGateway` now includes a disabled-by-default `[usb_otg]` config section:
