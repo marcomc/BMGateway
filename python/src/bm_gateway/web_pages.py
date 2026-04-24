@@ -1340,6 +1340,7 @@ def _chart_points(
     daily_history: list[dict[str, object]],
     *,
     series: str = "Series",
+    series_id: str | None = None,
     series_color: str = "#4f8df7",
 ) -> list[dict[str, object]]:
     points: list[dict[str, object]] = []
@@ -1362,6 +1363,7 @@ def _chart_points(
                 "soc": avg_soc,
                 "temperature": row.get("avg_temperature"),
                 "series": series,
+                "series_id": series_id or series,
                 "series_color": series_color,
             }
         )
@@ -1388,6 +1390,7 @@ def _chart_points(
                 "soc": soc,
                 "temperature": temperature,
                 "series": series,
+                "series_id": series_id or series,
                 "series_color": series_color,
             }
         )
@@ -1417,6 +1420,7 @@ def _fleet_chart_points(
                 ),
                 fetch_daily_history(database_path, device_id=device_id, limit=730),
                 series=device_name,
+                series_id=device_id,
                 series_color=color,
             )
         )

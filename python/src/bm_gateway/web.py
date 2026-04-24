@@ -238,10 +238,46 @@ def _start_usb_otg_image_export(
     *,
     config_path: Path,
     state_dir: Path | None = None,
-) -> threading.Thread:
+) -> threading.Thread | None:
+    with _USB_OTG_EXPORT_LOCK:
+        if _USB_OTG_EXPORT_STATUS.get("status") == "running":
+            return None
+        _USB_OTG_EXPORT_STATUS.update(
+            {
+                "status": "running",
+                "completed": 0,
+                "total": 0,
+                "message": "Preparing USB OTG frame image export",
+                "detail": "",
+                "redirect_message": "",
+            }
+        )
+
+    def _worker() -> None:
+        completed = export_usb_otg_images_now(config_path=config_path, state_dir=state_dir)
+        if completed.returncode == 0:
+            _set_usb_otg_export_status(
+                status="completed",
+                completed=1,
+                total=1,
+                message="USB OTG frame images exported",
+                detail="",
+                redirect_message="USB OTG frame images exported",
+            )
+            return
+
+        detail = completed.stderr.strip() or completed.stdout.strip() or "USB OTG export failed"
+        _set_usb_otg_export_status(
+            status="failed",
+            completed=1,
+            total=1,
+            message="USB OTG frame image export failed",
+            detail=detail,
+            redirect_message=f"USB OTG frame image export failed: {detail}",
+        )
+
     thread = threading.Thread(
-        target=export_usb_otg_images_now,
-        kwargs={"config_path": config_path, "state_dir": state_dir},
+        target=_worker,
         daemon=True,
         name="usb-otg-image-export",
     )

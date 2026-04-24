@@ -67,6 +67,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   one-off image generation even when automatic USB OTG exports are disabled.
 - Fixed web-triggered background USB OTG frame exports so saving settings
   reuses the last stored snapshot instead of starting a concurrent polling run.
+- Fixed settings-triggered USB OTG frame exports so repeated saves do not start
+  concurrent drive-update workers.
+- Fixed USB OTG Fleet Trend frame latest-value rows for duplicate device names
+  by matching values with unique series identifiers.
 - Updated the config schema for `web.language` and the `[usb_otg]` settings so
   packaged examples, runtime validation, and schema documentation stay aligned.
 - Tightened the USB OTG root helper so sudo-launched drive exports copy only

@@ -1530,6 +1530,90 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
     assert export_calls == [(config_path, None)]
 
 
+def test_settings_usb_otg_post_does_not_start_second_export_while_running(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    export_calls: list[tuple[Path, Path | None]] = []
+    export_started = threading.Event()
+    second_export_started = threading.Event()
+    export_finished = threading.Event()
+    release_export = threading.Event()
+
+    def _export_now(
+        *,
+        config_path: Path,
+        state_dir: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        export_calls.append((config_path, state_dir))
+        if len(export_calls) > 1:
+            second_export_started.set()
+        export_started.set()
+        release_export.wait(timeout=5.0)
+        export_finished.set()
+        return subprocess.CompletedProcess(["export"], 0, "", "")
+
+    monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request_body = urllib.parse.urlencode(
+        {
+            "usb_otg_enabled": "on",
+            "export_fleet_trend": "on",
+            "fleet_trend_metrics": "soc",
+        }
+    ).encode("utf-8")
+
+    try:
+        first_request = urllib.request.Request(
+            f"http://{host}:{port}/settings/usb-otg",
+            data=request_body,
+            method="POST",
+        )
+        with urllib.request.urlopen(first_request, timeout=1.0) as response:
+            assert response.status == 200
+
+        assert export_started.wait(timeout=1.0)
+
+        second_request = urllib.request.Request(
+            f"http://{host}:{port}/settings/usb-otg",
+            data=request_body,
+            method="POST",
+        )
+        with urllib.request.urlopen(second_request, timeout=1.0) as response:
+            assert response.status == 200
+
+        assert not second_export_started.wait(timeout=0.2)
+    finally:
+        release_export.set()
+
+    assert export_finished.wait(timeout=2.0)
+    assert export_calls == [(config_path, None)]
+
+
 def test_settings_usb_otg_post_rejects_non_numeric_values_without_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -2164,6 +2248,41 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
     assert "Spare NLP20 24.0°C" in html
     assert 'data-metric="temperature" class="active"' in html
     assert 'data-range="30" data-range-label="30 days" class="active"' in html
+
+
+def test_render_frame_fleet_trend_html_keeps_duplicate_device_names_distinct() -> None:
+    html = render_frame_fleet_trend_html(
+        chart_points=[
+            {
+                "ts": "2026-04-24T01:00:00+02:00",
+                "series": "Spare",
+                "series_id": "spare_nlp5",
+                "series_color": "#f0b429",
+                "soc": 88,
+                "voltage": 13.29,
+                "temperature": 23.0,
+            },
+            {
+                "ts": "2026-04-24T01:05:00+02:00",
+                "series": "Spare",
+                "series_id": "spare_nlp20",
+                "series_color": "#ec5c86",
+                "soc": 91,
+                "voltage": 13.31,
+                "temperature": 27.0,
+            },
+        ],
+        legend=[("Spare", "#f0b429"), ("Spare", "#ec5c86")],
+        show_chart_markers=False,
+        appearance="dark",
+        default_chart_range="30",
+        default_chart_metric="temperature",
+        width=480,
+        height=234,
+    )
+
+    assert "Spare 23.0°C" in html
+    assert "Spare 27.0°C" in html
 
 
 def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
@@ -3395,6 +3514,7 @@ def test_chart_points_include_daily_temperature_rollups() -> None:
             "soc": 91,
             "temperature": 22.4,
             "series": "Series",
+            "series_id": "Series",
             "series_color": "#4f8df7",
         }
     ]

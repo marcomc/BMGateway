@@ -177,6 +177,36 @@ def _parse_point_timestamp(value: object) -> datetime | None:
         return None
 
 
+def _point_series_key(point: dict[str, object]) -> str:
+    return str(point.get("series_id") or point.get("series") or "")
+
+
+def _legend_series_keys(
+    *,
+    legend: list[tuple[str, str]],
+    chart_points: list[dict[str, object]],
+) -> list[tuple[str, str, str]]:
+    keys_by_label: dict[str, list[str]] = {}
+    for point in chart_points:
+        label = str(point.get("series", ""))
+        key = _point_series_key(point)
+        if not label or not key:
+            continue
+        label_keys = keys_by_label.setdefault(label, [])
+        if key not in label_keys:
+            label_keys.append(key)
+
+    consumed_by_label: dict[str, int] = {}
+    output: list[tuple[str, str, str]] = []
+    for label, color in legend:
+        consumed = consumed_by_label.get(label, 0)
+        candidates = keys_by_label.get(label, [])
+        key = candidates[consumed] if consumed < len(candidates) else label
+        consumed_by_label[label] = consumed + 1
+        output.append((label, color, key))
+    return output
+
+
 def _fleet_trend_latest_values(
     *,
     chart_points: list[dict[str, object]],
@@ -184,13 +214,14 @@ def _fleet_trend_latest_values(
     metric: str,
     range_value: str,
 ) -> tuple[str, list[tuple[str, str, str]]]:
+    legend_keys = _legend_series_keys(legend=legend, chart_points=chart_points)
     timestamped_points = [
         (timestamp, point)
         for point in chart_points
         if (timestamp := _parse_point_timestamp(point.get("ts"))) is not None
     ]
     if not timestamped_points:
-        return "No data", [(label, color, "--") for label, color in legend]
+        return "No data", [(label, color, "--") for label, color, _key in legend_keys]
 
     newest = max(timestamp for timestamp, _point in timestamped_points)
     if range_value not in {"all", "raw"}:
@@ -203,7 +234,7 @@ def _fleet_trend_latest_values(
             pass
     latest_by_series: dict[str, tuple[datetime, dict[str, object]]] = {}
     for timestamp, point in timestamped_points:
-        series = str(point.get("series", ""))
+        series = _point_series_key(point)
         if not series:
             continue
         previous = latest_by_series.get(series)
@@ -218,11 +249,11 @@ def _fleet_trend_latest_values(
         (
             label,
             color,
-            _metric_value(latest_by_series[label][1].get(metric), metric)
-            if label in latest_by_series
+            _metric_value(latest_by_series[key][1].get(metric), metric)
+            if key in latest_by_series
             else "--",
         )
-        for label, color in legend
+        for label, color, key in legend_keys
     ]
     return latest_timestamp, device_values
 
