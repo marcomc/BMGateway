@@ -32,6 +32,7 @@ size_mb="64"
 gadget_name="bmgw_spf71e"
 configfs_root="/sys/kernel/config/usb_gadget"
 safe_image_dir="/var/lib/bm-gateway/usb-otg"
+populate_mount_dir=""
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -171,8 +172,16 @@ unmount_image_mounts() {
   done
 }
 
+cleanup_populate_mount_dir() {
+  if [[ -z "${populate_mount_dir}" ]]; then
+    return
+  fi
+
+  umount "${populate_mount_dir}" 2>/dev/null || true
+  rmdir "${populate_mount_dir}" 2>/dev/null || true
+}
+
 populate_image() {
-  local mount_dir
   local -a source_find_args
 
   if [[ -z "${source_dir}" ]]; then
@@ -204,20 +213,21 @@ populate_image() {
   chmod 0644 "${image_path}"
   mkfs.vfat -F 32 -n BMGWTEST "${image_path}" >/dev/null
 
-  mount_dir="$(mktemp -d)"
-  trap 'umount "${mount_dir}" 2>/dev/null || true; rmdir "${mount_dir}" 2>/dev/null || true' RETURN
-  mount -o loop,rw "${image_path}" "${mount_dir}"
-  if ! touch "${mount_dir}/.bmgw-write-test" 2>/dev/null; then
+  populate_mount_dir="$(mktemp -d)"
+  trap cleanup_populate_mount_dir EXIT
+  mount -o loop,rw "${image_path}" "${populate_mount_dir}"
+  if ! touch "${populate_mount_dir}/.bmgw-write-test" 2>/dev/null; then
     printf 'mounted backing image is not writable: %s\n' "${image_path}" >&2
     exit 1
   fi
-  rm -f "${mount_dir}/.bmgw-write-test"
-  find "${mount_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  find "${source_find_args[@]}" -exec cp -t "${mount_dir}" -- {} +
+  rm -f "${populate_mount_dir}/.bmgw-write-test"
+  find "${populate_mount_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+  find "${source_find_args[@]}" -exec cp -t "${populate_mount_dir}" -- {} +
   sync
-  umount "${mount_dir}"
-  rmdir "${mount_dir}"
-  trap - RETURN
+  umount "${populate_mount_dir}"
+  rmdir "${populate_mount_dir}"
+  populate_mount_dir=""
+  trap - EXIT
 }
 
 setup_gadget() {

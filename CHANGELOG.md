@@ -4,9 +4,9 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.0] - 2026-06-30
 
-### Unreleased Added
+### Added
 
 - Added modular web localization with packaged locale catalogs, a Settings
   language selector, persisted `web.language` config, automatic browser/system
@@ -43,7 +43,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   plus installer-managed scoped sudo permissions for restart, reboot, and
   shutdown host-control actions.
 
-### Unreleased Fixed
+### Fixed
 
 - Fixed Raspberry Pi service refreshes so deployments preserve USB OTG Fleet
   Trend metric, range, and device-selection settings instead of dropping them

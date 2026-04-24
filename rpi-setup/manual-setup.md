@@ -380,9 +380,9 @@ the bootstrap installer without that skip option, or run
 - `/usr/local/bin/bm-gateway-usb-otg-frame-test`
 - the scoped sudoers entries used by the web actions and runtime exporter
 
-The web service keeps the extra USB OTG capabilities out of its ambient
-capability set, but leaves them in the `systemd` capability bounding set so the
-root-scoped sudo helper can rewrite, mount, and attach the backing disk image.
+The web service keeps USB OTG privileges out of its ambient capability set.
+Operations that must rewrite, mount, or attach the backing disk image run
+through the scoped root helper installed by the service script.
 
 Use `Prepare USB OTG Mode` when the Settings page reports no USB OTG device
 controller and the Pi is connected through the Zero USB Plug or an OTG cable.

@@ -116,6 +116,21 @@ def test_localize_html_sets_lang_dir_and_translates_text_nodes() -> None:
     assert ">BMGateway<" in localized
 
 
+def test_localize_html_keeps_nested_translate_no_content_literal() -> None:
+    source_html = (
+        '<!doctype html><html lang="en"><body>'
+        '<select translate="no"><option>Battery Overview</option>'
+        "<option>Fleet Trend</option></select>"
+        "<p>Battery Overview</p></body></html>"
+    )
+
+    localized = localize_html(source_html, "it")
+
+    assert "<option>Battery Overview</option>" in localized
+    assert "<option>Fleet Trend</option>" in localized
+    assert "<p>Panoramica batteria</p>" in localized
+
+
 def test_localize_html_warns_when_catalog_is_missing_translatable_text() -> None:
     source_html = (
         '<!doctype html><html lang="en"><body><h1>Settings</h1><p>New Label</p></body></html>'

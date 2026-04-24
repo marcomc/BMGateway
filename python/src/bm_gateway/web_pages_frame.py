@@ -285,11 +285,23 @@ def _battery_overview_page_devices(
     page: int,
     devices_per_page: int,
 ) -> list[dict[str, object]]:
+    snapshot_devices = snapshot.get("devices", [])
+    snapshot_device_rows = snapshot_devices if isinstance(snapshot_devices, list) else []
+    snapshot_by_id = {
+        str(device.get("id", "")): device
+        for device in snapshot_device_rows
+        if isinstance(device, dict) and str(device.get("id", ""))
+    }
     merged_devices = [
-        device
-        for device in shared._merge_snapshot_devices(snapshot, devices)
+        {**snapshot_by_id.get(str(device.get("id", "")), {}), **device}
+        for device in devices
         if isinstance(device, dict)
     ]
+    if not merged_devices:
+        merged_devices = [device for device in snapshot_device_rows if isinstance(device, dict)]
+    enabled_devices = [device for device in merged_devices if bool(device.get("enabled", True))]
+    if enabled_devices:
+        merged_devices = enabled_devices
     page_index = max(0, page - 1)
     return merged_devices[page_index * devices_per_page : (page_index + 1) * devices_per_page]
 

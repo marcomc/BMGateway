@@ -309,12 +309,14 @@ class _SourceTextCollector(HTMLParser):
         self.values: list[str] = []
         self._skip_depth = 0
         self._translate_disabled_depth = 0
+        self._translate_disabled_tags: list[str] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _SKIP_TAGS:
             self._skip_depth += 1
         if _LocalizingHTMLParser._has_translate_no(attrs):
             self._translate_disabled_depth += 1
+            self._translate_disabled_tags.append(tag)
         for name, value in attrs:
             if value is not None and name in _TRANSLATABLE_ATTRIBUTES:
                 confirm_message = _confirm_message_from_attribute(name, value)
@@ -323,7 +325,8 @@ class _SourceTextCollector(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in _SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
-        if self._translate_disabled_depth > 0:
+        if self._translate_disabled_tags and self._translate_disabled_tags[-1] == tag:
+            self._translate_disabled_tags.pop()
             self._translate_disabled_depth -= 1
 
     def handle_data(self, data: str) -> None:
@@ -379,6 +382,7 @@ class _LocalizingHTMLParser(HTMLParser):
         self._pieces: list[str] = []
         self._skip_depth = 0
         self._translate_disabled_depth = 0
+        self._translate_disabled_tags: list[str] = []
 
     @property
     def output(self) -> str:
@@ -392,6 +396,7 @@ class _LocalizingHTMLParser(HTMLParser):
             self._skip_depth += 1
         if self._has_translate_no(attrs):
             self._translate_disabled_depth += 1
+            self._translate_disabled_tags.append(tag)
         self._pieces.append(self._start_tag(tag, attrs, closed=False))
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -401,7 +406,8 @@ class _LocalizingHTMLParser(HTMLParser):
         self._pieces.append(f"</{tag}>")
         if tag in _SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
-        if self._translate_disabled_depth > 0:
+        if self._translate_disabled_tags and self._translate_disabled_tags[-1] == tag:
+            self._translate_disabled_tags.pop()
             self._translate_disabled_depth -= 1
 
     def handle_data(self, data: str) -> None:

@@ -2064,6 +2064,54 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
     assert 'class="bottom-nav"' not in html
 
 
+def test_render_frame_battery_overview_html_uses_configured_enabled_devices_only() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "enabled_battery",
+                    "name": "Enabled Runtime Name",
+                    "soc": 91,
+                    "voltage": 13.1,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "enabled": True,
+                },
+                {
+                    "id": "disabled_battery",
+                    "name": "Disabled Runtime Name",
+                    "soc": 44,
+                    "voltage": 12.1,
+                    "last_seen": "2026-04-24T03:13:24+02:00",
+                    "enabled": True,
+                },
+                {
+                    "id": "removed_battery",
+                    "name": "Removed Runtime Name",
+                    "soc": 55,
+                    "voltage": 12.4,
+                    "last_seen": "2026-04-24T03:14:24+02:00",
+                    "enabled": True,
+                },
+            ]
+        },
+        devices=[
+            {"id": "enabled_battery", "name": "Enabled Config Name", "enabled": True},
+            {"id": "disabled_battery", "name": "Disabled Config Name", "enabled": False},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "Enabled Config Name" in html
+    assert "91%" in html
+    assert "Disabled Config Name" not in html
+    assert "Disabled Runtime Name" not in html
+    assert "Removed Runtime Name" not in html
+
+
 def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     html = render_frame_battery_overview_html(
         snapshot={
