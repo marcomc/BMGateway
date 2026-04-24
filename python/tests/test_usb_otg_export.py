@@ -351,6 +351,23 @@ def test_usb_otg_export_due_uses_poll_interval_when_refresh_interval_is_zero(
         state_dir=tmp_path,
         now=datetime(2026, 4, 23, 10, 1, tzinfo=timezone.utc),
     )
+    mark_usb_otg_exported(
+        config=config,
+        state_dir=tmp_path,
+        now=datetime(2026, 4, 23, 10, 10, tzinfo=timezone.utc),
+    )
+
+    assert export_due(
+        config=config,
+        state_dir=tmp_path,
+        now=datetime(2026, 4, 23, 10, 2, tzinfo=timezone.utc),
+    )
+    mark_usb_otg_exported(
+        config=config,
+        state_dir=tmp_path,
+        now=datetime(2026, 4, 23, 10, 0, tzinfo=timezone.utc),
+    )
+
     assert export_due(
         config=config,
         state_dir=tmp_path,

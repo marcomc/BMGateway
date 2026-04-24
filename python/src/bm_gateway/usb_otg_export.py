@@ -372,7 +372,8 @@ def export_due(
         previous = datetime.fromisoformat(marker.read_text(encoding="utf-8").strip())
     except ValueError:
         return True
-    return (current - previous).total_seconds() >= effective_refresh_interval_seconds(config)
+    elapsed_seconds = (current - previous).total_seconds()
+    return elapsed_seconds < 0 or elapsed_seconds >= effective_refresh_interval_seconds(config)
 
 
 def usb_otg_export_marker_path(config: AppConfig, *, state_dir: Path | None = None) -> Path:

@@ -413,6 +413,7 @@ and extra USB detach/reattach churn.
 The generated image settings include:
 
 - image width and height in pixels
+- backing disk image size, from 1 through 4096 MB
 - image format: JPEG, PNG, or BMP
 - light or dark appearance
 - overview devices per image, from 1 through 10

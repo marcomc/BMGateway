@@ -446,6 +446,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("usb_otg.image_path must not be empty")
     if config.usb_otg.size_mb <= 0:
         errors.append("usb_otg.size_mb must be greater than zero")
+    if config.usb_otg.size_mb > 4096:
+        errors.append("usb_otg.size_mb must be less than or equal to 4096")
     if not config.usb_otg.gadget_name.strip():
         errors.append("usb_otg.gadget_name must not be empty")
     if config.usb_otg.image_width_px < 160:

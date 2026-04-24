@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
-from bm_gateway.config import load_config
+from bm_gateway.config import load_config, validate_config
 
 
 def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None:
@@ -87,7 +88,15 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     assert web_properties["port"]["maximum"] == 65535
     assert "auto" in web_properties["language"]["enum"]
     assert "zh-Hans" in web_properties["language"]["enum"]
+    assert usb_otg_properties["size_mb"]["maximum"] == 4096
     assert usb_otg_properties["image_width_px"]["minimum"] == 160
     assert usb_otg_properties["image_height_px"]["minimum"] == 120
     assert usb_otg_properties["image_format"]["enum"] == ["jpeg", "png", "bmp"]
     assert usb_otg_properties["fleet_trend_metrics"]["minItems"] == 1
+
+
+def test_validate_config_caps_usb_otg_image_size_to_helper_limit() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    oversized = replace(config, usb_otg=replace(config.usb_otg, size_mb=4097))
+
+    assert "usb_otg.size_mb must be less than or equal to 4096" in validate_config(oversized)

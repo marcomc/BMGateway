@@ -73,6 +73,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   export started while an existing export is already running.
 - Fixed `bm-gateway run --dry-run --export-usb-otg-now` so dry-run mode skips
   USB OTG drive writes instead of forcing an export.
+- Fixed USB OTG export scheduling so future-dated export markers are treated as
+  stale and exports can resume immediately.
+- Fixed USB OTG image-size validation so config values above the helper's
+  4096 MB limit are rejected before export.
 - Fixed USB OTG Fleet Trend frame latest-value rows for duplicate device names
   by matching values with unique series identifiers.
 - Updated the config schema for `web.language` and the `[usb_otg]` settings so
