@@ -55,10 +55,6 @@
         "host": { "type": "string" },
         "port": { "type": "integer", "minimum": 1, "maximum": 65535 },
         "show_chart_markers": { "type": "boolean" },
-        "visible_device_limit": {
-          "type": "integer",
-          "enum": [2, 4, 6, 8]
-        },
         "appearance": {
           "type": "string",
           "enum": ["light", "dark", "system"]

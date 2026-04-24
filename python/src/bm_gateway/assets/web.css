@@ -768,10 +768,15 @@ details summary::-webkit-details-marker { display: none; }
   gap: 0.7rem;
   margin-bottom: 0.9rem;
 }
+.home-overview-controls[hidden] {
+  display: none;
+}
 .home-overview-arrow {
   min-width: 88px;
 }
 .home-overview-scroller {
+  --overview-card-min: 162px;
+  --overview-gap: 1rem;
   display: flex;
   overflow-x: auto;
   overflow-y: hidden;
@@ -784,7 +789,7 @@ details summary::-webkit-details-marker { display: none; }
 }
 .home-overview-page {
   display: grid;
-  gap: 1rem;
+  gap: var(--overview-gap);
   grid-template-columns: repeat(var(--overview-columns), minmax(0, 1fr));
   grid-template-rows: repeat(var(--overview-rows), minmax(0, 1fr));
   min-width: 100%;
@@ -797,20 +802,21 @@ details summary::-webkit-details-marker { display: none; }
 }
 .home-overview-page.is-single-page {
   min-width: 0;
-  width: auto;
+  width: 100%;
   max-width: 100%;
   flex: none;
-  grid-template-columns: repeat(var(--overview-columns), minmax(162px, 198px));
 }
 .home-overview-page.is-single-page.page-two-cards {
   justify-content: flex-start;
   margin: 0;
   grid-template-columns: repeat(2, minmax(162px, 198px));
+  width: fit-content;
 }
 .home-overview-page.is-single-page.page-one-card {
   justify-content: flex-start;
   margin: 0;
   grid-template-columns: minmax(162px, 198px);
+  width: fit-content;
 }
 .battery-card-top {
   display: grid;
@@ -2128,18 +2134,9 @@ details summary::-webkit-details-marker { display: none; }
   .settings-value {
     text-align: left;
   }
-  .home-overview-page,
-  .home-overview-page.is-single-page {
-    grid-template-columns: repeat(2, minmax(132px, 1fr));
-    min-width: 100%;
-    width: 100%;
-  }
-  .home-overview-page.is-single-page.page-two-cards,
-  .home-overview-page.is-single-page.page-one-card,
-  .home-overview-page.page-multi-cards {
-    grid-template-columns: repeat(2, minmax(132px, 1fr));
-    width: 100%;
-    margin: 0;
+  .home-overview-scroller {
+    --overview-card-min: 132px;
+    --overview-gap: 0.75rem;
   }
   .home-overview-page.is-single-page.page-one-card {
     grid-template-columns: minmax(148px, 172px);

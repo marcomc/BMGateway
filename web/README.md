@@ -46,7 +46,6 @@ Web-facing config under `[web]` currently includes:
 
 - `appearance`
 - `show_chart_markers`
-- `visible_device_limit`
 - `default_chart_range`
 - `default_chart_metric`
 - `language`

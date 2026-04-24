@@ -325,7 +325,6 @@ def render_settings_html(
             "Chart point markers",
             "Enabled" if config.web.show_chart_markers else "Disabled",
         )
-        + settings_row("Visible overview cards", str(config.web.visible_device_limit))
         + settings_row(
             "Default chart range",
             {
@@ -515,10 +514,6 @@ def render_settings_html(
     if edit_mode:
         reader_mode_options = "".join(
             _option_html(value, value, config.gateway.reader_mode) for value in ("fake", "live")
-        )
-        visible_device_limit_options = "".join(
-            _option_html(str(value), str(value), str(config.web.visible_device_limit))
-            for value in (2, 4, 6, 8)
         )
         default_chart_range_options = "".join(
             _option_html(
@@ -897,19 +892,6 @@ def render_settings_html(
                 help_text=(
                     "Turn point markers back on if you prefer exact sample dots "
                     "over the cleaner default BM-style lines."
-                ),
-            )
-            + settings_control_row(
-                "Visible overview cards",
-                (
-                    '<select id="visible-device-limit-input" name="visible_device_limit" '
-                    'autocomplete="off">'
-                    f"{visible_device_limit_options}"
-                    "</select>"
-                ),
-                help_text=(
-                    "Choose how many monitored batteries stay visible before the "
-                    "overview pages horizontally on larger fleets."
                 ),
             )
             + settings_control_row(

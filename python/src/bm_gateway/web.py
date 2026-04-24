@@ -790,7 +790,6 @@ def serve_management(
                 chart_points=battery_chart_points,
                 legend=battery_legend,
                 show_chart_markers=config.web.show_chart_markers,
-                visible_device_limit=config.web.visible_device_limit,
                 appearance=config.web.appearance,
                 default_chart_range=config.web.default_chart_range,
                 default_chart_metric=config.web.default_chart_metric,
@@ -1248,7 +1247,6 @@ def serve_management(
                 web_host: str | None = None
                 web_port: int | None = None
                 show_chart_markers: bool | None = None
-                visible_device_limit: int | None = None
                 appearance: str | None = None
                 default_chart_range: str | None = None
                 default_chart_metric: str | None = None
@@ -1278,26 +1276,6 @@ def serve_management(
                     web_host = form.get("web_host", ["0.0.0.0"])[0]
                 elif settings_section == "display":
                     show_chart_markers = _bool_from_form(form, "show_chart_markers")
-                    try:
-                        visible_device_limit = int(form.get("visible_device_limit", ["4"])[0])
-                    except ValueError:
-                        configured_devices = load_device_registry(config.device_registry_path)
-                        self._send_html(
-                            render_management_html(
-                                snapshot=snapshot,
-                                config=config,
-                                storage_summary=fetch_storage_summary(current_database_path),
-                                devices=[device.to_dict() for device in configured_devices],
-                                config_text=read_text(config_path),
-                                devices_text=read_text(config.device_registry_path),
-                                contract=build_contract(config, configured_devices),
-                                message="Validation failed: visible device limit must be numeric",
-                                theme_preference=config.web.appearance,
-                                language=self._request_language(config),
-                            ),
-                            status=400,
-                        )
-                        return
                     appearance = form.get("appearance", [config.web.appearance])[0]
                     default_chart_range = form.get(
                         "default_chart_range", [config.web.default_chart_range]
@@ -1330,7 +1308,6 @@ def serve_management(
                     web_host=web_host,
                     web_port=web_port,
                     show_chart_markers=show_chart_markers,
-                    visible_device_limit=visible_device_limit,
                     appearance=appearance,
                     default_chart_range=default_chart_range,
                     default_chart_metric=default_chart_metric,

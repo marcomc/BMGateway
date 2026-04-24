@@ -1028,7 +1028,6 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1045,7 +1044,6 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
         web_host=None,
         web_port=None,
         show_chart_markers=True,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,
@@ -1055,7 +1053,6 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
     config = load_config(config_path)
     assert config.web.port == 9091
     assert config.web.show_chart_markers is True
-    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -> None:
@@ -1098,7 +1095,6 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1115,7 +1111,6 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
         web_host="127.0.0.1",
         web_port=8088,
         show_chart_markers=None,
-        visible_device_limit=4,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,
@@ -1126,7 +1121,6 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
     assert config.web.enabled is False
     assert config.web.host == "127.0.0.1"
     assert config.web.port == 8088
-    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
@@ -1171,7 +1165,6 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
                 'host = "0.0.0.0"',
                 "port = 80",
                 "show_chart_markers = true",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1188,7 +1181,6 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
         web_host=None,
         web_port=8088,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,
@@ -1198,7 +1190,6 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
     config = load_config(config_path)
     assert config.web.port == 8088
     assert config.web.show_chart_markers is True
-    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
@@ -1241,7 +1232,6 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1258,7 +1248,6 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
         web_host=None,
         web_port=None,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance="dark",
         default_chart_range=None,
         default_chart_metric=None,
@@ -1283,7 +1272,6 @@ def test_update_web_preferences_persists_chart_defaults(tmp_path: Path) -> None:
         web_host=None,
         web_port=None,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range="90",
         default_chart_metric="temperature",
@@ -1350,7 +1338,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.fleet_trend_device_ids == ("spare_nlp5", "spare_nlp20")
 
 
-def test_settings_display_post_persists_appearance_visible_limit_and_chart_defaults(
+def test_settings_display_post_persists_appearance_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
@@ -1383,7 +1371,6 @@ def test_settings_display_post_persists_appearance_visible_limit_and_chart_defau
             {
                 "settings_section": "display",
                 "show_chart_markers": "on",
-                "visible_device_limit": "4",
                 "default_chart_range": "90",
                 "default_chart_metric": "temperature",
                 "appearance": "dark",
@@ -1397,7 +1384,6 @@ def test_settings_display_post_persists_appearance_visible_limit_and_chart_defau
 
     config = load_config(config_path)
     assert config.web.appearance == "dark"
-    assert config.web.visible_device_limit == 4
     assert config.web.default_chart_range == "90"
     assert config.web.default_chart_metric == "temperature"
 
@@ -1995,7 +1981,7 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Home Assistant status topic" in html
     assert "Web Service" in html
     assert "Display Settings" in html
-    assert "Visible overview cards" in html
+    assert "Visible overview cards" not in html
     assert "Edit settings" in html
     assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
@@ -2609,7 +2595,7 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="fleet_trend_range"' in html
     assert 'name="fleet_trend_device_ids"' in html
     assert 'name="web_enabled"' in html
-    assert 'name="visible_device_limit"' in html
+    assert 'name="visible_device_limit"' not in html
     assert 'name="bluetooth_adapter"' in html
     assert 'name="scan_timeout_seconds"' in html
     assert 'name="connect_timeout_seconds"' in html
@@ -2756,8 +2742,9 @@ def test_render_home_html_renders_device_icon() -> None:
     assert "Open device" not in html
     assert "All" in html
     assert "home-overview-scroller" in html
-    assert 'aria-label="Show previous home cards"' not in html
-    assert 'aria-label="Show next home cards"' not in html
+    assert 'aria-label="Show previous home cards"' in html
+    assert 'aria-label="Show next home cards"' in html
+    assert 'class="home-overview-controls" hidden' in html
     assert "home-overview-page" in html
     assert "--overview-columns:" in html
     assert "Add Device" in html
@@ -3115,7 +3102,7 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "font-size: 0.82rem;" in css
     assert "font-size: 2.2rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
-    assert ".home-overview-page.is-single-page.page-two-cards," in css
+    assert ".home-overview-controls[hidden] {" in css
 
 
 def test_render_devices_html_threads_appearance_to_document_root() -> None:
@@ -3246,7 +3233,7 @@ def test_render_settings_html_threads_appearance_to_document_root() -> None:
     assert 'data-theme-preference="dark"' in html
 
 
-def test_render_home_html_pages_cards_by_visible_device_limit() -> None:
+def test_render_home_html_defers_overview_pagination_to_browser_layout() -> None:
     from bm_gateway.web import render_home_html
 
     snapshot_devices = [
@@ -3278,13 +3265,14 @@ def test_render_home_html_pages_cards_by_visible_device_limit() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=4,
     )
 
-    assert html.count('class="home-overview-page page-multi-cards"') == 2
-    assert 'class="home-overview-page page-one-card"' not in html
-    assert "--overview-columns: 2;" in html
-    assert "--overview-rows: 2;" in html
+    assert html.count('class="home-overview-page is-single-page page-multi-cards"') == 1
+    assert html.count("class='home-overview-card home-overview-orb-shell'") == 7
+    assert "function buildPages()" in html
+    assert "const capacity = Math.max(1, columns * 2);" in html
+    assert "--overview-columns: 1;" in html
+    assert "--overview-rows: 1;" in html
     assert "Battery 7" in html
     assert 'data-direction="previous"' in html
     assert 'data-direction="next"' in html
@@ -3323,10 +3311,9 @@ def test_render_home_html_marks_single_page_card_count() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=4,
     )
 
-    assert "home-overview-page is-single-page page-one-card" in html
+    assert "home-overview-page is-single-page page-multi-cards" in html
 
 
 def test_render_home_html_uses_four_by_two_layout_for_eight_visible_cards() -> None:
@@ -3363,13 +3350,12 @@ def test_render_home_html_uses_four_by_two_layout_for_eight_visible_cards() -> N
         devices=registry_devices,
         chart_points=[],
         legend=[],
-        visible_device_limit=8,
     )
 
     assert 'class="home-overview-page is-single-page page-multi-cards"' in html
-    assert "--overview-columns: 4;" in html
-    assert "--overview-rows: 2;" in html
-    assert 'class="home-overview-controls"' not in html
+    assert "--overview-columns: 1;" in html
+    assert "--overview-rows: 1;" in html
+    assert 'class="home-overview-controls" hidden' in html
 
 
 def test_render_home_html_keeps_registry_only_devices_visible() -> None:
@@ -3410,7 +3396,6 @@ def test_render_home_html_keeps_registry_only_devices_visible() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=4,
     )
 
     assert "Live Device" in html

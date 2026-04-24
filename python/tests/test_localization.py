@@ -366,7 +366,6 @@ def test_update_web_preferences_persists_language(tmp_path: Path) -> None:
         web_host=None,
         web_port=None,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,

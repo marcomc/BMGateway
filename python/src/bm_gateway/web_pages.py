@@ -325,13 +325,54 @@ def _home_overview_script(track_id: str) -> str:
   }}
   const previousButton = document.querySelector('{previous_selector}');
   const nextButton = document.querySelector('{next_selector}');
-  const pages = Array.from(track.querySelectorAll(".home-overview-page"));
-  if (pages.length <= 1) {{
-    if (previousButton) previousButton.hidden = true;
-    if (nextButton) nextButton.hidden = true;
-    return;
-  }}
+  const controls = previousButton ? previousButton.closest(".home-overview-controls") : null;
+  const cards = Array.from(track.querySelectorAll(".home-overview-card"));
+  let pages = [];
   let currentPage = 0;
+  function cardClass(count, isSinglePage) {{
+    const classes = ["home-overview-page"];
+    if (isSinglePage) classes.push("is-single-page");
+    if (count <= 1) classes.push("page-one-card");
+    else if (count === 2) classes.push("page-two-cards");
+    else classes.push("page-multi-cards");
+    return classes.join(" ");
+  }}
+  function pageSizing() {{
+    const styles = window.getComputedStyle(track);
+    const minCard = parseFloat(styles.getPropertyValue("--overview-card-min")) || 162;
+    const gap = parseFloat(styles.getPropertyValue("--overview-gap")) || 16;
+    const width = Math.max(track.clientWidth, minCard);
+    const rawColumns = Math.floor((width + gap) / (minCard + gap));
+    const columns = Math.max(1, Math.min(cards.length || 1, rawColumns));
+    const capacity = Math.max(1, columns * 2);
+    return {{ columns, capacity }};
+  }}
+  function buildPages() {{
+    const {{ columns, capacity }} = pageSizing();
+    const groupedCards = [];
+    for (let index = 0; index < cards.length; index += capacity) {{
+      groupedCards.push(cards.slice(index, index + capacity));
+    }}
+    if (groupedCards.length === 0) {{
+      groupedCards.push([]);
+    }}
+    const isSinglePage = groupedCards.length <= 1;
+    track.classList.toggle("is-single-page", isSinglePage);
+    track.replaceChildren();
+    pages = groupedCards.map((group) => {{
+      const rows = isSinglePage && group.length <= columns ? 1 : 2;
+      const page = document.createElement("div");
+      page.className = cardClass(group.length, isSinglePage);
+      page.style.setProperty("--overview-columns", String(columns));
+      page.style.setProperty("--overview-rows", String(rows));
+      group.forEach((card) => page.appendChild(card));
+      track.appendChild(page);
+      return page;
+    }});
+    currentPage = Math.max(0, Math.min(currentPage, pages.length - 1));
+    if (controls) controls.hidden = pages.length <= 1;
+    syncButtons();
+  }}
   function syncButtons() {{
     if (previousButton) previousButton.disabled = currentPage <= 0;
     if (nextButton) nextButton.disabled = currentPage >= pages.length - 1;
@@ -361,7 +402,23 @@ def _home_overview_script(track_id: str) -> str:
     currentPage = bestIndex;
     syncButtons();
   }}, {{ passive: true }});
-  syncButtons();
+  let resizeFrame = 0;
+  const scheduleBuild = () => {{
+    if (controls) controls.hidden = true;
+    if (resizeFrame) {{
+      window.cancelAnimationFrame(resizeFrame);
+    }}
+    resizeFrame = window.requestAnimationFrame(() => {{
+      resizeFrame = 0;
+      buildPages();
+    }});
+  }};
+  buildPages();
+  if ("ResizeObserver" in window) {{
+    new ResizeObserver(scheduleBuild).observe(track);
+  }} else {{
+    window.addEventListener("resize", scheduleBuild);
+  }}
 }})();
 </script>
 """
@@ -1548,7 +1605,6 @@ def render_home_html(
     chart_points: list[dict[str, object]],
     legend: list[tuple[str, str]],
     show_chart_markers: bool = False,
-    visible_device_limit: int = 4,
     appearance: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
@@ -1562,7 +1618,6 @@ def render_home_html(
         chart_points=chart_points,
         legend=legend,
         show_chart_markers=show_chart_markers,
-        visible_device_limit=visible_device_limit,
         appearance=appearance,
         default_chart_range=default_chart_range,
         default_chart_metric=default_chart_metric,

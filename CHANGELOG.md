@@ -90,6 +90,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   sudoers policy instead of leaving passwordless web-service actions installed.
 - Fixed device creation from the web UI so saving a new device redirects
   immediately while the first live polling cycle starts in the background.
+- Reworked the Home Battery Overview so it uses responsive browser-measured
+  pagination with at most two rows, instead of a user-configured visible-card
+  limit.
 
 ## [0.1.1] - 2026-04-23
 
