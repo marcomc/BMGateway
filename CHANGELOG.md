@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.0] - 2026-06-30
+## [0.2.0] - 2026-04-25
 
 ### Added
 
@@ -93,6 +93,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Reworked the Home Battery Overview so it uses responsive browser-measured
   pagination with at most two rows, instead of a user-configured visible-card
   limit.
+- Refined History and Devices card lists with a clearer Batteries selector,
+  responsive selector pagination, larger device badges, and shorter mobile edit
+  actions.
 
 ## [0.1.1] - 2026-04-23
 

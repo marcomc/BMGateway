@@ -50,6 +50,9 @@ def app_document(
     {head_extra}
   </head>
   <body{theme_attr}>
+    <div class="pull-refresh-indicator" aria-hidden="true">
+      <div class="pull-refresh-spinner"></div>
+    </div>
     <div class="app-shell">
       <a class="skip-link" href="#main-content">Skip to main content</a>
       <main class="page-shell" id="main-content">
@@ -57,6 +60,7 @@ def app_document(
       </main>
       {bottom_nav(active_nav, primary_device_id=primary_device_id)}
     </div>
+    {_pull_to_refresh_script()}
     {script}
   </body>
 </html>
@@ -66,6 +70,91 @@ def app_document(
 
 def base_css() -> str:
     return web_css_source()
+
+
+def _pull_to_refresh_script() -> str:
+    return """
+<script>
+(() => {
+  if (!("ontouchstart" in window) || window.matchMedia("(pointer: fine)").matches) {
+    return;
+  }
+  const indicator = document.querySelector(".pull-refresh-indicator");
+  if (!indicator) {
+    return;
+  }
+  const threshold = 88;
+  const maxPull = 132;
+  let startX = 0;
+  let startY = 0;
+  let pullDistance = 0;
+  let tracking = false;
+  let pulling = false;
+  let refreshing = false;
+  function setProgress(distance) {
+    pullDistance = Math.max(0, Math.min(distance, maxPull));
+    const progress = Math.min(1, pullDistance / threshold);
+    indicator.style.setProperty("--pull-refresh-progress", String(progress));
+    indicator.style.setProperty("--pull-refresh-offset", `${Math.round(pullDistance)}px`);
+    indicator.classList.toggle("is-visible", pullDistance > 0);
+    indicator.classList.toggle("is-ready", pullDistance >= threshold);
+  }
+  function reset() {
+    tracking = false;
+    pulling = false;
+    if (!refreshing) {
+      setProgress(0);
+    }
+  }
+  window.addEventListener("touchstart", (event) => {
+    if (refreshing || event.touches.length !== 1 || window.scrollY > 0) {
+      reset();
+      return;
+    }
+    const touch = event.touches[0];
+    startX = touch.clientX;
+    startY = touch.clientY;
+    tracking = true;
+    pulling = false;
+    setProgress(0);
+  }, { passive: true });
+  window.addEventListener("touchmove", (event) => {
+    if (!tracking || refreshing || event.touches.length !== 1) {
+      return;
+    }
+    const touch = event.touches[0];
+    const deltaX = touch.clientX - startX;
+    const deltaY = touch.clientY - startY;
+    if (!pulling && Math.abs(deltaX) > Math.max(12, Math.abs(deltaY))) {
+      reset();
+      return;
+    }
+    if (window.scrollY > 0 || deltaY <= 0) {
+      reset();
+      return;
+    }
+    pulling = true;
+    event.preventDefault();
+    setProgress(deltaY * 0.65);
+  }, { passive: false });
+  window.addEventListener("touchend", () => {
+    if (!pulling || refreshing) {
+      reset();
+      return;
+    }
+    if (pullDistance >= threshold) {
+      refreshing = true;
+      indicator.classList.add("is-refreshing");
+      indicator.classList.add("is-visible");
+      window.setTimeout(() => window.location.reload(), 120);
+      return;
+    }
+    reset();
+  }, { passive: true });
+  window.addEventListener("touchcancel", reset, { passive: true });
+})();
+</script>
+"""
 
 
 def top_header(

@@ -173,6 +173,7 @@ def _history_device_selector_html(
         )
 
     device_cards: list[str] = []
+    track_id = "history-device-track"
     for index, device in enumerate(configured_devices):
         device_id = str(device.get("id", ""))
         is_selected = device_id == selected_device_id
@@ -203,8 +204,25 @@ def _history_device_selector_html(
             "</a>"
         )
     return section_card(
-        title="History Device",
-        body=f'<div class="device-grid history-device-grid">{"".join(device_cards)}</div>',
+        title="Batteries",
+        body=(
+            '<div class="history-device-stage">'
+            '<div class="history-device-controls" hidden>'
+            f'<button type="button" class="ghost-button home-overview-arrow history-device-arrow" '
+            f'data-history-device-target="{track_id}" data-direction="previous" '
+            'aria-label="Show previous history devices">‹</button>'
+            f'<button type="button" class="ghost-button home-overview-arrow history-device-arrow" '
+            f'data-history-device-target="{track_id}" data-direction="next" '
+            'aria-label="Show next history devices">›</button>'
+            "</div>"
+            f'<div id="{track_id}" class="history-device-scroller is-single-page">'
+            '<div class="history-device-page is-single-page page-multi-cards" '
+            'style="--history-device-columns: 1; --history-device-rows: 1">'
+            f"{''.join(device_cards)}"
+            "</div>"
+            "</div>"
+            "</div>"
+        ),
     )
 
 
@@ -340,11 +358,130 @@ def _home_overview_script(track_id: str) -> str:
   function pageSizing() {{
     const styles = window.getComputedStyle(track);
     const minCard = parseFloat(styles.getPropertyValue("--overview-card-min")) || 162;
+    const maxCard = parseFloat(styles.getPropertyValue("--overview-card-max")) || minCard;
     const gap = parseFloat(styles.getPropertyValue("--overview-gap")) || 16;
+    const pagePadding = parseFloat(styles.getPropertyValue("--overview-page-padding")) || 0;
+    const width = Math.max(track.clientWidth - (pagePadding * 2), minCard);
+    const rawColumns = Math.floor((width + gap) / (maxCard + gap));
+    const columns = Math.max(1, Math.min(cards.length || 1, rawColumns));
+    const availableCard = (width - (gap * Math.max(0, columns - 1))) / columns;
+    const cardSize = Math.max(minCard, Math.min(maxCard, availableCard));
+    const capacity = Math.max(1, columns * 2);
+    return {{ columns, capacity, cardSize }};
+  }}
+  function buildPages() {{
+    const {{ columns, capacity, cardSize }} = pageSizing();
+    const groupedCards = [];
+    for (let index = 0; index < cards.length; index += capacity) {{
+      groupedCards.push(cards.slice(index, index + capacity));
+    }}
+    if (groupedCards.length === 0) {{
+      groupedCards.push([]);
+    }}
+    const isSinglePage = groupedCards.length <= 1;
+    track.classList.toggle("is-single-page", isSinglePage);
+    track.replaceChildren();
+    pages = groupedCards.map((group) => {{
+      const rows = isSinglePage && group.length <= columns ? 1 : 2;
+      const page = document.createElement("div");
+      page.className = cardClass(group.length, isSinglePage);
+      page.style.setProperty("--overview-columns", String(columns));
+      page.style.setProperty("--overview-rows", String(rows));
+      page.style.setProperty("--overview-card-size", `${{Math.round(cardSize)}}px`);
+      group.forEach((card) => page.appendChild(card));
+      track.appendChild(page);
+      return page;
+    }});
+    currentPage = Math.max(0, Math.min(currentPage, pages.length - 1));
+    if (controls) controls.hidden = pages.length <= 1;
+    syncButtons();
+  }}
+  function syncButtons() {{
+    if (previousButton) previousButton.disabled = currentPage <= 0;
+    if (nextButton) nextButton.disabled = currentPage >= pages.length - 1;
+  }}
+  function scrollToPage(index) {{
+    currentPage = Math.max(0, Math.min(index, pages.length - 1));
+    pages[currentPage].scrollIntoView({{ behavior: "smooth", inline: "start", block: "nearest" }});
+    syncButtons();
+  }}
+  if (previousButton) {{
+    previousButton.addEventListener("click", () => scrollToPage(currentPage - 1));
+  }}
+  if (nextButton) {{
+    nextButton.addEventListener("click", () => scrollToPage(currentPage + 1));
+  }}
+  track.addEventListener("scroll", () => {{
+    const trackLeft = track.getBoundingClientRect().left;
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    pages.forEach((page, index) => {{
+      const distance = Math.abs(page.getBoundingClientRect().left - trackLeft);
+      if (distance < bestDistance) {{
+        bestDistance = distance;
+        bestIndex = index;
+      }}
+    }});
+    currentPage = bestIndex;
+    syncButtons();
+  }}, {{ passive: true }});
+  let resizeFrame = 0;
+  const scheduleBuild = () => {{
+    if (controls) controls.hidden = true;
+    if (resizeFrame) {{
+      window.cancelAnimationFrame(resizeFrame);
+    }}
+    resizeFrame = window.requestAnimationFrame(() => {{
+      resizeFrame = 0;
+      buildPages();
+    }});
+  }};
+  buildPages();
+  if ("ResizeObserver" in window) {{
+    new ResizeObserver(scheduleBuild).observe(track);
+  }} else {{
+    window.addEventListener("resize", scheduleBuild);
+  }}
+  if (window.visualViewport) {{
+    window.visualViewport.addEventListener("resize", scheduleBuild, {{ passive: true }});
+  }}
+}})();
+</script>
+"""
+
+
+def _history_device_selector_script(track_id: str = "history-device-track") -> str:
+    previous_selector = f'[data-history-device-target="{track_id}"][data-direction="previous"]'
+    next_selector = f'[data-history-device-target="{track_id}"][data-direction="next"]'
+    return f"""
+<script>
+(() => {{
+  const track = document.getElementById("{track_id}");
+  if (!track) {{
+    return;
+  }}
+  const previousButton = document.querySelector('{previous_selector}');
+  const nextButton = document.querySelector('{next_selector}');
+  const controls = previousButton ? previousButton.closest(".history-device-controls") : null;
+  const cards = Array.from(track.querySelectorAll(".history-device-card"));
+  let pages = [];
+  let currentPage = 0;
+  function pageClass(count, isSinglePage) {{
+    const classes = ["history-device-page"];
+    if (isSinglePage) classes.push("is-single-page");
+    if (count <= 1) classes.push("page-one-card");
+    else if (count === 2) classes.push("page-two-cards");
+    else classes.push("page-multi-cards");
+    return classes.join(" ");
+  }}
+  function pageSizing() {{
+    const styles = window.getComputedStyle(track);
+    const minCard = parseFloat(styles.getPropertyValue("--history-device-card-min")) || 220;
+    const gap = parseFloat(styles.getPropertyValue("--history-device-gap")) || 16;
     const width = Math.max(track.clientWidth, minCard);
     const rawColumns = Math.floor((width + gap) / (minCard + gap));
-    const columns = Math.max(1, Math.min(cards.length || 1, rawColumns));
-    const capacity = Math.max(1, columns * 2);
+    const columns = Math.max(1, Math.min(4, cards.length || 1, rawColumns));
+    const capacity = Math.max(1, Math.min(4, columns * 2));
     return {{ columns, capacity }};
   }}
   function buildPages() {{
@@ -362,9 +499,9 @@ def _home_overview_script(track_id: str) -> str:
     pages = groupedCards.map((group) => {{
       const rows = isSinglePage && group.length <= columns ? 1 : 2;
       const page = document.createElement("div");
-      page.className = cardClass(group.length, isSinglePage);
-      page.style.setProperty("--overview-columns", String(columns));
-      page.style.setProperty("--overview-rows", String(rows));
+      page.className = pageClass(group.length, isSinglePage);
+      page.style.setProperty("--history-device-columns", String(columns));
+      page.style.setProperty("--history-device-rows", String(rows));
       group.forEach((card) => page.appendChild(card));
       track.appendChild(page);
       return page;

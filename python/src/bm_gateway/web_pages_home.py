@@ -158,17 +158,18 @@ def home_overview_scroller_html(
             '<div class="home-overview-controls" hidden>'
             f'<button type="button" class="ghost-button home-overview-arrow" '
             f'data-overview-target="{track_id}" data-direction="previous" '
-            'aria-label="Show previous home cards">Prev</button>'
+            'aria-label="Show previous home cards">‹</button>'
             f'<button type="button" class="ghost-button home-overview-arrow" '
             f'data-overview-target="{track_id}" data-direction="next" '
-            'aria-label="Show next home cards">Next</button>'
+            'aria-label="Show next home cards">›</button>'
             "</div>"
         )
     return (
-        overview_controls
+        '<div class="home-overview-stage">'
+        + overview_controls
         + f'<div id="{track_id}" class="home-overview-scroller is-single-page">'
         + '<div class="home-overview-page is-single-page page-multi-cards" '
         + 'style="--overview-columns: 1; --overview-rows: 1;">'
         + "".join(device_cards)
-        + "</div></div>"
+        + "</div></div></div>"
     )

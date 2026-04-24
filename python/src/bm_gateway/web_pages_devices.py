@@ -46,7 +46,8 @@ def render_devices_html(
             stack_class="compact",
         )
         rows.append(
-            f"<div class='device-list-row tone-card {tone}' "
+            f"<a class='device-list-row tone-card {tone}' "
+            f"href='/devices/edit?device_id={quote(device_id)}' "
             f"style='{shared._tone_card_style(tone)}'>"
             "<div class='device-list-row-main'>"
             f"{device_icon_markup}"
@@ -57,11 +58,7 @@ def render_devices_html(
             f"<div class='meta device-list-row-id'>Serial / MAC: {device_mac_text}</div>"
             "</div>"
             "</div>"
-            "<div class='device-list-row-actions'>"
-            f"<a class='ghost-button' href='/devices/edit?device_id={quote(device_id)}'>"
-            "Edit device</a>"
-            "</div>"
-            "</div>"
+            "</a>"
         )
     banner = banner_strip(html.escape(message), kind="warning") if message else ""
     body = (
@@ -76,8 +73,9 @@ def render_devices_html(
         )
         + banner
         + section_card(
-            title="Configured Devices",
+            classes="device-list-section",
             body=(
+                '<div class="device-list-help">Touch a device card to edit it.</div>'
                 f'<div class="device-list-rows">{"".join(rows)}</div>'
                 if rows
                 else "<div class='muted-note'>No devices configured yet.</div>"

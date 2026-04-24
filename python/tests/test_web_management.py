@@ -59,7 +59,7 @@ from bm_gateway.web_actions import (
     schedule_host_shutdown,
 )
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
-from bm_gateway.web_ui import base_css, chart_script
+from bm_gateway.web_ui import app_document, base_css, chart_script
 
 
 def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: Path) -> None:
@@ -206,6 +206,18 @@ def test_chart_script_renders_multi_series_tooltip_rows() -> None:
     assert 'class="tooltip-series-swatch"' in script
     assert 'class="tooltip-series-value"' in script
     assert "const rows = entries.map((entry) => (" in script
+
+
+def test_chart_script_offsets_touch_tooltips_above_finger() -> None:
+    script = chart_script("history-chart")
+
+    assert "function showTooltip(frame, chart, targetX, pointer = null)" in script
+    assert 'pointer.pointerType === "touch"' in script
+    assert 'window.matchMedia("(pointer: coarse)").matches' in script
+    assert "const anchorY = isTouchPointer && Number.isFinite(pointer.clientY)" in script
+    assert "const touchOffset = isTouchPointer ? 42 : 16;" in script
+    assert 'requestRender(event.clientX, event.clientY, event.pointerType || "");' in script
+    assert "showTooltip(frame, currentChart, targetX, event);" in script
 
 
 def test_chart_script_keeps_compact_frame_chart_inside_edges() -> None:
@@ -2744,6 +2756,8 @@ def test_render_home_html_renders_device_icon() -> None:
     assert "home-overview-scroller" in html
     assert 'aria-label="Show previous home cards"' in html
     assert 'aria-label="Show next home cards"' in html
+    assert ">Prev<" not in html
+    assert ">Next<" not in html
     assert 'class="home-overview-controls" hidden' in html
     assert "home-overview-page" in html
     assert "--overview-columns:" in html
@@ -2771,6 +2785,17 @@ def test_render_home_html_threads_appearance_to_document_root() -> None:
     assert 'rel="icon" href="/favicon.svg"' in html
     assert 'rel="apple-touch-icon" href="/apple-touch-icon.png"' in html
     assert 'rel="manifest" href="/site.webmanifest"' in html
+
+
+def test_app_document_installs_mobile_pull_to_refresh() -> None:
+    html = app_document(title="Test", body="<p>Body</p>", language="en")
+
+    assert 'class="pull-refresh-indicator"' in html
+    assert 'class="pull-refresh-spinner"' in html
+    assert '"ontouchstart" in window' in html
+    assert "window.location.reload()" in html
+    assert "event.preventDefault();" in html
+    assert 'window.matchMedia("(pointer: fine)").matches' in html
 
 
 def test_render_home_html_defaults_chart_to_seven_days_and_soc() -> None:
@@ -2982,6 +3007,8 @@ def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     assert "min-width: 48px;" in css
     assert "min-height: 48px;" in css
     assert "padding: 0.85rem 0.95rem 0.85rem 1.1rem;" in css
+    assert ".device-icon-frame.device-list-badge {" in css
+    assert ".device-icon-frame.device-list-badge .device-icon-svg {" in css
 
 
 def test_base_css_highlights_selected_history_device_with_device_accent() -> None:
@@ -2993,6 +3020,12 @@ def test_base_css_highlights_selected_history_device_with_device_accent() -> Non
     assert ".history-device-card.selected {" in css
     assert "border-color: color-mix(in srgb, var(--card-accent) 72%, var(--border-soft));" in css
     assert "0 16px 34px color-mix(in srgb, var(--card-accent) 18%, transparent)," in css
+    assert (
+        "transform: translateY(-1px);"
+        not in css[
+            css.index(".history-device-card.selected {") : css.index(".history-device-head {")
+        ]
+    )
     assert ".history-device-card.selected .history-device-current {" in css
     assert "color: var(--card-accent);" in css
     assert "font-weight: 800;" in css
@@ -3001,11 +3034,16 @@ def test_base_css_highlights_selected_history_device_with_device_accent() -> Non
 def test_base_css_uses_wrapping_flex_layout_for_history_device_selector() -> None:
     css = base_css()
 
-    assert ".history-device-grid {" in css
+    assert ".history-device-stage {" in css
+    assert "margin-top: 1.15rem;" in css
+    assert ".history-device-scroller {" in css
+    assert "--history-device-page-padding: calc(var(--history-device-gap) / 2);" in css
+    assert ".history-device-page {" in css
     assert "display: flex;" in css
-    assert "flex-wrap: wrap;" in css
-    assert "align-items: flex-start;" in css
+    assert "scroll-padding-inline: var(--history-device-page-padding);" in css
+    assert "grid-template-columns: repeat(var(--history-device-columns), minmax(0, 1fr));" in css
     assert "gap: 1rem;" in css
+    assert ".history-device-page .history-device-card {" in css
 
 
 def test_base_css_compacts_raw_history_table() -> None:
@@ -3103,6 +3141,26 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "font-size: 2.2rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
     assert ".home-overview-controls[hidden] {" in css
+    assert ".home-overview-stage {" in css
+    assert "align-self: start;" in css
+    assert "align-items: start;" in css
+    assert "aspect-ratio: 1 / 1;" in css
+    assert "--overview-card-max: 198px;" in css
+    assert "--overview-card-size: min(var(--overview-card-max), 100%);" in css
+    assert "width: var(--overview-card-size);" in css
+    assert "height: var(--overview-card-size);" in css
+    assert "inline-size: var(--overview-card-size);" in css
+    assert "block-size: var(--overview-card-size);" in css
+    assert "max-height: var(--overview-card-size);" in css
+    assert "justify-items: center;" in css
+    assert "grid-template-columns: repeat(var(--overview-columns), minmax(0, 1fr));" in css
+    assert "grid-template-rows: repeat(var(--overview-rows), auto);" in css
+    assert "--overview-page-padding: calc(var(--overview-gap) / 2);" in css
+    assert "scroll-padding-inline: var(--overview-page-padding);" in css
+    assert '.home-overview-arrow[data-direction="previous"] {' in css
+    assert ".pull-refresh-indicator {" in css
+    assert ".pull-refresh-indicator.is-refreshing .pull-refresh-spinner {" in css
+    assert "@keyframes pull-refresh-spin" in css
 
 
 def test_render_devices_html_threads_appearance_to_document_root() -> None:
@@ -3134,7 +3192,9 @@ def test_render_devices_html_wraps_single_device_in_grid_layout_hook() -> None:
 
     assert 'class="device-list-rows"' in html
     assert "device-list-row tone-card green" in html
-    assert "Edit device" in html
+    assert "Touch a device card to edit it." in html
+    assert ">Edit</a>" not in html
+    assert "Edit device" not in html
 
 
 def test_render_devices_html_reserves_second_badge_slot_for_non_vehicle_devices() -> None:
@@ -3270,7 +3330,11 @@ def test_render_home_html_defers_overview_pagination_to_browser_layout() -> None
     assert html.count('class="home-overview-page is-single-page page-multi-cards"') == 1
     assert html.count("class='home-overview-card home-overview-orb-shell'") == 7
     assert "function buildPages()" in html
+    assert 'styles.getPropertyValue("--overview-card-max")' in html
+    assert 'page.style.setProperty("--overview-card-size"' in html
     assert "const capacity = Math.max(1, columns * 2);" in html
+    assert 'window.visualViewport.addEventListener("resize", scheduleBuild' in html
+    assert "track.clientWidth - (pagePadding * 2)" in html
     assert "--overview-columns: 1;" in html
     assert "--overview-rows: 1;" in html
     assert "Battery 7" in html
@@ -3763,12 +3827,17 @@ def test_render_history_html_shows_device_selector_and_quick_switch_links() -> N
         monthly_history=[],
     )
 
-    assert "History Device" in html
+    assert "Batteries" in html
+    assert "History Device" not in html
     assert 'action="/history"' not in html
     assert 'name="device_id"' not in html
     assert 'href="/history?device_id=bm200_house"' in html
     assert 'href="/history?device_id=starter_battery"' in html
     assert 'aria-current="page"' in html
+    assert 'class="history-device-controls" hidden' in html
+    assert "history-device-scroller" in html
+    assert "history-device-page" in html
+    assert "function buildPages()" in html
     assert "Open History" not in html
     assert "Configured batteries" not in html
     assert "history-device-card" in html
@@ -3788,7 +3857,8 @@ def test_render_history_html_marks_single_selector_grid_layout() -> None:
         monthly_history=[],
     )
 
-    assert 'class="device-grid history-device-grid"' in html
+    assert 'class="history-device-scroller is-single-page"' in html
+    assert 'class="history-device-page is-single-page page-multi-cards"' in html
 
 
 def test_render_history_html_uses_compact_history_selector_cards() -> None:
@@ -3900,6 +3970,7 @@ def test_render_history_html_handles_no_configured_devices() -> None:
     assert "No Devices Configured" in html
     assert 'href="/devices/new"' in html
     assert "History Device" not in html
+    assert "Batteries" not in html
 
 
 def test_render_devices_html_explains_offline_device_not_found_state() -> None:
@@ -3932,7 +4003,10 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert 'href="/devices/new"' in html
     assert "Register new BM devices directly from the device registry." not in html
     assert "Serial / MAC: 3C:AB:72:82:86:EA" in html
-    assert "Edit device" in html
+    assert "Touch a device card to edit it." in html
+    assert "device-list-row tone-card green" in html
+    assert "Edit device" not in html
+    assert ">Edit</a>" not in html
 
 
 def test_render_devices_html_uses_device_battery_profile_labels() -> None:
@@ -3956,8 +4030,9 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
     assert "AGM Battery" in html
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert "Add Device" in html
-    assert "Configured Devices" in html
+    assert "Configured Devices" not in html
     assert "Serial / MAC" in html
+    assert "Touch a device card to edit it." in html
     assert "Edit device settings" not in html
 
 
