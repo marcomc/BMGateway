@@ -65,10 +65,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   in-page validation error instead of disconnecting the web request.
 - Fixed manual USB OTG frame exports so the explicit export action can force a
   one-off image generation even when automatic USB OTG exports are disabled.
+- Fixed web-triggered background USB OTG frame exports so saving settings
+  reuses the last stored snapshot instead of starting a concurrent polling run.
 - Updated the config schema for `web.language` and the `[usb_otg]` settings so
   packaged examples, runtime validation, and schema documentation stay aligned.
 - Tightened the USB OTG root helper so sudo-launched drive exports copy only
   top-level readable files owned by the original sudo caller.
+- Tightened installer privilege setup so `--disable-web` removes the web action
+  sudoers policy instead of leaving passwordless web-service actions installed.
 
 ## [0.1.1] - 2026-04-23
 

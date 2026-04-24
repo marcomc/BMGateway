@@ -342,16 +342,20 @@ WorkingDirectory=${state_dir}
 WantedBy=multi-user.target
 EOF
 
-sudoers_commands="/usr/bin/systemctl restart bm-gateway.service, /usr/bin/systemctl restart bluetooth.service, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff"
-if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
-  sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare, ${usb_otg_boot_mode_path} restore, ${usb_otg_drive_helper_path} setup *, ${usb_otg_drive_helper_path} refresh *"
-fi
-cat >"${sudoers_path}" <<EOF
+if [[ "${enable_web}" -eq 1 ]]; then
+  sudoers_commands="/usr/bin/systemctl restart bm-gateway.service, /usr/bin/systemctl restart bluetooth.service, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff"
+  if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
+    sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare, ${usb_otg_boot_mode_path} restore, ${usb_otg_drive_helper_path} setup *, ${usb_otg_drive_helper_path} refresh *"
+  fi
+  cat >"${sudoers_path}" <<EOF
 ${service_user} ALL=(root) NOPASSWD: ${sudoers_commands}
 EOF
-chmod 0440 "${sudoers_path}"
-if command -v visudo >/dev/null 2>&1; then
-  visudo -cf "${sudoers_path}"
+  chmod 0440 "${sudoers_path}"
+  if command -v visudo >/dev/null 2>&1; then
+    visudo -cf "${sudoers_path}"
+  fi
+else
+  rm -f "${sudoers_path}"
 fi
 
 if [[ "${enable_glances}" -eq 1 ]]; then
@@ -414,7 +418,11 @@ fi
 
 printf 'Installed runtime service to %s\n' "${unit_path}"
 printf 'Installed web service to %s\n' "${web_unit_path}"
-printf 'Installed web action sudoers policy to %s\n' "${sudoers_path}"
+if [[ "${enable_web}" -eq 1 ]]; then
+  printf 'Installed web action sudoers policy to %s\n' "${sudoers_path}"
+else
+  printf 'Skipped web action sudoers policy because web service is disabled\n'
+fi
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   printf 'Installed USB OTG helpers to %s and %s\n' \
     "${usb_otg_boot_mode_path}" "${usb_otg_drive_helper_path}"

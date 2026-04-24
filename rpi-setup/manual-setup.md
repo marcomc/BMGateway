@@ -141,6 +141,9 @@ Useful options:
 - `--web-port <port>`
 - `--glances-port <port>`
 
+When `--disable-web` is used, the installer disables the web service and removes
+the `/etc/sudoers.d/bm-gateway-web` web-action policy.
+
 ## Install `uv`
 
 Install `uv` with the official bootstrap command:

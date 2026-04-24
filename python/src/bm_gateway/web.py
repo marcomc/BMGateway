@@ -12,7 +12,6 @@ from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import COLOR_CATALOG, default_color_key, load_device_registry
 from .localization import resolve_locale_preference, translation_for
-from .models import DeviceReading, GatewaySnapshot
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
     fetch_daily_history,
@@ -27,6 +26,7 @@ from .state_store import (
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_actions import (
     _config_and_registry_texts,
+    _gateway_snapshot_from_mapping,
     add_device_from_form,
     build_run_once_command,
     export_usb_otg_images_now,
@@ -157,52 +157,6 @@ def _int_from_mapping(mapping: dict[str, object], key: str, default: int = 0) ->
         return int(value)
     except ValueError:
         return default
-
-
-def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapshot:
-    readings: list[DeviceReading] = []
-    snapshot_devices = snapshot.get("devices", [])
-    if isinstance(snapshot_devices, list):
-        for item in snapshot_devices:
-            if not isinstance(item, dict):
-                continue
-            readings.append(
-                DeviceReading(
-                    id=str(item.get("id", "")),
-                    type=str(item.get("type", "bm200")),
-                    name=str(item.get("name") or item.get("id") or "Battery"),
-                    mac=str(item.get("mac", "")),
-                    enabled=bool(item.get("enabled", True)),
-                    connected=bool(item.get("connected", False)),
-                    voltage=float(item.get("voltage", 0.0) or 0.0),
-                    soc=int(float(item.get("soc", 0) or 0)),
-                    temperature=(
-                        float(item["temperature"]) if item.get("temperature") is not None else None
-                    ),
-                    rssi=int(item["rssi"]) if item.get("rssi") is not None else None,
-                    state=str(item.get("state", "unknown")),
-                    error_code=(
-                        str(item["error_code"]) if item.get("error_code") is not None else None
-                    ),
-                    error_detail=(
-                        str(item["error_detail"]) if item.get("error_detail") is not None else None
-                    ),
-                    last_seen=str(item.get("last_seen", snapshot.get("generated_at", ""))),
-                    adapter=str(item.get("adapter", "")),
-                    driver=str(item.get("driver", "")),
-                )
-            )
-    return GatewaySnapshot(
-        generated_at=str(snapshot.get("generated_at", "")),
-        gateway_name=str(snapshot.get("gateway_name", "BMGateway")),
-        active_adapter=str(snapshot.get("active_adapter", "")),
-        mqtt_enabled=bool(snapshot.get("mqtt_enabled", False)),
-        mqtt_connected=bool(snapshot.get("mqtt_connected", False)),
-        devices_total=_int_from_mapping(snapshot, "devices_total", len(readings)),
-        devices_online=_int_from_mapping(snapshot, "devices_online"),
-        poll_interval_seconds=_int_from_mapping(snapshot, "poll_interval_seconds"),
-        devices=readings,
-    )
 
 
 def _start_tracked_usb_otg_image_export(

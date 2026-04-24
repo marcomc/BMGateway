@@ -21,7 +21,14 @@ from .device_registry import (
     validate_devices,
     write_device_registry,
 )
-from .state_store import history_device_id_exists, rename_history_device_id
+from .models import DeviceReading, GatewaySnapshot
+from .runtime import database_file_path, state_file_path
+from .state_store import (
+    history_device_id_exists,
+    load_snapshot,
+    rename_history_device_id,
+)
+from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
 
 
@@ -33,6 +40,66 @@ def _config_and_registry_texts(config_path: Path) -> tuple[str, str]:
     except Exception:
         devices_text = ""
     return config_text, devices_text
+
+
+def _int_from_snapshot_mapping(
+    mapping: dict[str, object],
+    key: str,
+    default: int = 0,
+) -> int:
+    value = mapping.get(key, default)
+    if not isinstance(value, str | int | float):
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapshot:
+    readings: list[DeviceReading] = []
+    snapshot_devices = snapshot.get("devices", [])
+    if isinstance(snapshot_devices, list):
+        for item in snapshot_devices:
+            if not isinstance(item, dict):
+                continue
+            readings.append(
+                DeviceReading(
+                    id=str(item.get("id", "")),
+                    type=str(item.get("type", "bm200")),
+                    name=str(item.get("name") or item.get("id") or "Battery"),
+                    mac=str(item.get("mac", "")),
+                    enabled=bool(item.get("enabled", True)),
+                    connected=bool(item.get("connected", False)),
+                    voltage=float(item.get("voltage", 0.0) or 0.0),
+                    soc=int(float(item.get("soc", 0) or 0)),
+                    temperature=(
+                        float(item["temperature"]) if item.get("temperature") is not None else None
+                    ),
+                    rssi=int(item["rssi"]) if item.get("rssi") is not None else None,
+                    state=str(item.get("state", "unknown")),
+                    error_code=(
+                        str(item["error_code"]) if item.get("error_code") is not None else None
+                    ),
+                    error_detail=(
+                        str(item["error_detail"]) if item.get("error_detail") is not None else None
+                    ),
+                    last_seen=str(item.get("last_seen", snapshot.get("generated_at", ""))),
+                    adapter=str(item.get("adapter", "")),
+                    driver=str(item.get("driver", "")),
+                )
+            )
+    return GatewaySnapshot(
+        generated_at=str(snapshot.get("generated_at", "")),
+        gateway_name=str(snapshot.get("gateway_name", "BMGateway")),
+        active_adapter=str(snapshot.get("active_adapter", "")),
+        mqtt_enabled=bool(snapshot.get("mqtt_enabled", False)),
+        mqtt_connected=bool(snapshot.get("mqtt_connected", False)),
+        devices_total=_int_from_snapshot_mapping(snapshot, "devices_total", len(readings)),
+        devices_online=_int_from_snapshot_mapping(snapshot, "devices_online"),
+        poll_interval_seconds=_int_from_snapshot_mapping(snapshot, "poll_interval_seconds"),
+        devices=readings,
+    )
 
 
 def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml: str) -> list[str]:
@@ -642,24 +709,29 @@ def export_usb_otg_images_now(
     config_path: Path,
     state_dir: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "bm_gateway",
-            "--config",
-            str(config_path),
-            "run",
-            "--once",
-            "--export-usb-otg-now",
-            "--dry-run",
-            *(["--state-dir", str(state_dir)] if state_dir is not None else []),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=180,
-    )
+    command = ["export-usb-otg-images"]
+    try:
+        config = load_config(config_path)
+        devices = load_device_registry(config.device_registry_path)
+        snapshot_path = state_file_path(config, state_dir=state_dir)
+        empty_snapshot: dict[str, object] = {"generated_at": "", "devices": []}
+        snapshot_mapping = (
+            load_snapshot(snapshot_path) if snapshot_path.exists() else empty_snapshot
+        )
+        result = update_usb_otg_drive(
+            config=config,
+            devices=devices,
+            snapshot=_gateway_snapshot_from_mapping(snapshot_mapping),
+            database_path=database_file_path(config, state_dir=state_dir),
+            force=True,
+        )
+        if result.exported:
+            mark_usb_otg_exported(config=config, state_dir=state_dir)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, 1, "", result.reason)
+    except Exception as exc:  # pragma: no cover - defensive web action boundary
+        detail = str(exc) or exc.__class__.__name__
+        return subprocess.CompletedProcess(command, 1, "", detail)
 
 
 def schedule_host_reboot() -> None:

@@ -51,6 +51,7 @@ from bm_gateway.web import (
     render_reboot_pending_html as render_reboot_pending_html_wrapper,
 )
 from bm_gateway.web_actions import (
+    export_usb_otg_images_now,
     prepare_usb_otg_boot_mode,
     refresh_usb_otg_drive,
     restart_system_service,
@@ -338,6 +339,85 @@ def test_refresh_usb_otg_drive_uses_configured_drive_helper(
         "--gadget-name",
         "bmgw_frame",
     ]
+
+
+def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "spare_nlp5"',
+                'type = "bm200"',
+                'name = "Spare NLP5"',
+                'mac = "A1:B2:C3:D4:E5:F6"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    snapshot_dir = tmp_path / "state" / "runtime"
+    snapshot_dir.mkdir(parents=True)
+    (snapshot_dir / "latest_snapshot.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-04-24T12:00:00+00:00",
+                "gateway_name": "BMGateway",
+                "active_adapter": "hci0",
+                "mqtt_enabled": False,
+                "mqtt_connected": False,
+                "devices_total": 1,
+                "devices_online": 1,
+                "poll_interval_seconds": 300,
+                "devices": [
+                    {
+                        "id": "spare_nlp5",
+                        "type": "bm200",
+                        "name": "Spare NLP5",
+                        "mac": "A1:B2:C3:D4:E5:F6",
+                        "enabled": True,
+                        "connected": True,
+                        "voltage": 12.8,
+                        "soc": 92,
+                        "temperature": 21.5,
+                        "rssi": -41,
+                        "state": "normal",
+                        "last_seen": "2026-04-24T12:00:00+00:00",
+                        "adapter": "hci0",
+                        "driver": "bm200",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict[str, object]] = []
+
+    def _fail_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("background export must not start bm_gateway run")
+
+    def _update_drive(**kwargs: object) -> USBOTGExportResult:
+        calls.append(kwargs)
+        return USBOTGExportResult(exported=True, reason="exported")
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fail_run)
+    monkeypatch.setattr("bm_gateway.web_actions.update_usb_otg_drive", _update_drive)
+
+    result = export_usb_otg_images_now(config_path=config_path, state_dir=tmp_path / "state")
+
+    assert result.returncode == 0
+    assert len(calls) == 1
+    snapshot = calls[0]["snapshot"]
+    assert isinstance(snapshot, GatewaySnapshot)
+    assert snapshot.devices[0].id == "spare_nlp5"
+    assert calls[0]["force"] is True
 
 
 def test_schedule_host_shutdown_uses_non_interactive_systemctl_poweroff(
