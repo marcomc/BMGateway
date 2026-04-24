@@ -88,6 +88,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   top-level readable files owned by the original sudo caller.
 - Tightened installer privilege setup so `--disable-web` removes the web action
   sudoers policy instead of leaving passwordless web-service actions installed.
+- Fixed device creation from the web UI so saving a new device redirects
+  immediately while the first live polling cycle starts in the background.
 
 ## [0.1.1] - 2026-04-23
 

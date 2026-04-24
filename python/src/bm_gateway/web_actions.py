@@ -643,6 +643,25 @@ def run_once_via_cli(
     )
 
 
+def start_run_once_via_cli(
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+    publish_discovery: bool = False,
+) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        build_run_once_command(
+            config_path,
+            state_dir=state_dir,
+            publish_discovery=publish_discovery,
+        ),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
+    )
+
+
 def _privileged_systemctl_command(*args: str) -> list[str]:
     return ["sudo", "-n", "systemctl", *args]
 

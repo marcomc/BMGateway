@@ -37,6 +37,7 @@ from .web_actions import (
     run_once_via_cli,
     schedule_host_reboot,
     schedule_host_shutdown,
+    start_run_once_via_cli,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -109,6 +110,7 @@ __all__ = [
     "prepare_usb_otg_boot_mode",
     "refresh_usb_otg_drive",
     "restore_usb_otg_boot_mode",
+    "start_run_once_via_cli",
     "update_bluetooth_preferences",
     "update_config_from_text",
     "update_device_from_form",
@@ -880,11 +882,11 @@ def serve_management(
                     )
                     return
 
-                run_once_via_cli(config_path, state_dir=state_dir)
+                start_run_once_via_cli(config_path, state_dir=state_dir)
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/devices?" + urlencode({"message": "Device added. Live polling enabled."}),
+                    "/devices?" + urlencode({"message": "Device added. First poll started."}),
                 )
                 self.end_headers()
                 return

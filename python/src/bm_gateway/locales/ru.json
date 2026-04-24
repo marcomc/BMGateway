@@ -270,6 +270,7 @@
   "Retain discovery": "Retain discovery",
   "Retain state": "Retain state",
   "Run One Collection Cycle": "Run One Collection Cycle",
+  "Device added. First poll started.": "Устройство добавлено. Первый опрос запущен.",
   "Run completed": "Запуск завершен",
   "Run failed": "Запуск не удался",
   "Runtime Status": "Состояние выполнения",

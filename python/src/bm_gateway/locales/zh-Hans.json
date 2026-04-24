@@ -270,6 +270,7 @@
   "Retain discovery": "保留发现",
   "Retain state": "保留状态",
   "Run One Collection Cycle": "运行一个收集周期",
+  "Device added. First poll started.": "设备已添加。首次轮询已开始。",
   "Run completed": "运行完成",
   "Run failed": "运行失败",
   "Runtime Status": "运行状态",

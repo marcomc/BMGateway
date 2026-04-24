@@ -278,6 +278,7 @@
   "Retain discovery": "Retain discovery",
   "Retain state": "Retain state",
   "Run One Collection Cycle": "تشغيل دورة جمع واحدة",
+  "Device added. First poll started.": "تمت إضافة الجهاز. بدأ أول استطلاع.",
   "Run completed": "اكتمل التشغيل",
   "Run failed": "فشل التشغيل",
   "Runtime Status": "حالة التشغيل",

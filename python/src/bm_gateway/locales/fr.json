@@ -278,6 +278,7 @@
   "Retain discovery": "Retain discovery",
   "Retain state": "Retain state",
   "Run One Collection Cycle": "Exécuter un cycle de collecte",
+  "Device added. First poll started.": "Appareil ajoute. Premiere interrogation lancee.",
   "Run completed": "Execution terminee",
   "Run failed": "Execution echouee",
   "Runtime Status": "État d’exécution",

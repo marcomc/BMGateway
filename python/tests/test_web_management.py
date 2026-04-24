@@ -838,6 +838,76 @@ def test_add_device_from_form_accepts_serial_style_identifier(tmp_path: Path) ->
     assert devices[0].mac == "FAKE SERIAL 123"
 
 
+def test_devices_add_post_redirects_before_first_poll(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    from bm_gateway.web import serve_management
+
+    started_polls: list[tuple[Path, Path | None]] = []
+
+    def _start_run_once(config_path: Path, *, state_dir: Path | None = None) -> object:
+        started_polls.append((config_path, state_dir))
+        return object()
+
+    def _run_once(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("device creation must not wait for a synchronous poll")
+
+    monkeypatch.setattr("bm_gateway.web.start_run_once_via_cli", _start_run_once)
+    monkeypatch.setattr("bm_gateway.web.run_once_via_cli", _run_once)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path / "state",
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/devices/add",
+        data=urllib.parse.urlencode(
+            {
+                "device_type": "bm200",
+                "device_name": "Ancell BM200",
+                "device_mac": "A1B2C3D4E5F6",
+                "battery_family": "lead_acid",
+                "battery_profile": "regular_lead_acid",
+                "custom_soc_mode": "intelligent_algorithm",
+                "color_key": "green",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        body = response.read().decode("utf-8")
+        assert response.status == 200
+        assert "/devices?message=Device+added.+First+poll+started." in response.url
+        assert "Device added. First poll started." in body
+
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert config.gateway.reader_mode == "live"
+    assert [device.id for device in devices] == ["ancell_bm200"]
+    assert started_polls == [(config_path, tmp_path / "state")]
+
+
 def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
