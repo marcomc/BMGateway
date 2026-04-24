@@ -29,6 +29,7 @@ from bm_gateway.web_pages import (
     render_reboot_pending_html,
     render_shutdown_pending_html,
 )
+from bm_gateway.web_ui import chart_script
 
 
 def test_supported_locales_cover_common_interface_languages() -> None:
@@ -124,6 +125,129 @@ def test_dynamic_prefixes_do_not_require_device_value_specific_catalog_entries()
     assert "Apri dettagli per Spare NLP5" in localized
     assert "Seriale / MAC: AA:BB:CC:DD:EE:01" in localized
     assert missing_translations_for_html(source_html, "it") == ()
+
+
+def test_dynamic_error_messages_localize_stable_prefixes() -> None:
+    source_html = (
+        '<!doctype html><html lang="en"><body>'
+        '<div class="banner-strip warning">'
+        "USB OTG frame image export failed: sudo: unable to change to root gid"
+        "</div></body></html>"
+    )
+
+    localized = localize_html(source_html, "it")
+
+    assert "Esportazione immagini cornice USB OTG non riuscita" in localized
+    assert "sudo: unable to change to root gid" in localized
+    assert "USB OTG frame image export failed" not in localized
+    assert missing_translations_for_html(source_html, "it") == ()
+
+
+def test_common_web_action_messages_are_translated_in_all_supported_locales() -> None:
+    message_keys = (
+        "Validation failed",
+        "Run completed",
+        "Run failed",
+        "Home Assistant discovery republished",
+        "Home Assistant discovery republish failed",
+        "bm-gateway service restarted",
+        "Failed to restart bm-gateway service",
+        "Bluetooth service restarted",
+        "Failed to restart Bluetooth service",
+        "USB OTG boot mode prepared; reboot required",
+        "Failed to prepare USB OTG boot mode",
+        "USB host boot mode restored; reboot required",
+        "Failed to restore USB host boot mode",
+        "USB OTG drive refreshed",
+        "Failed to refresh USB OTG drive",
+        "Bluetooth adapter recovery triggered",
+        "History pruned",
+        "Settings saved",
+        "USB OTG frame image export started",
+        "Settings saved; USB OTG frame image export started",
+        "USB OTG frame images exported",
+        "USB OTG frame image export failed",
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        translation = translation_for(locale.code)
+        missing = [key for key in message_keys if translation.gettext(key) == key]
+        assert missing == [], f"{locale.code} missing action message translations: {missing}"
+
+
+def test_chart_script_uses_selected_language_for_generated_summary_text() -> None:
+    script = chart_script("history-chart", language="it")
+
+    assert '"Window":"Finestra"' in script
+    assert '"Visible devices":"Dispositivi visibili"' in script
+    assert '"Average":"Media"' in script
+    assert '"Range":"Intervallo"' in script
+    assert "Window:" not in script
+    assert "Visible devices:" not in script
+    assert '"Showing all available history":"Mostra tutta la cronologia disponibile"' in script
+
+
+def test_device_status_explainer_uses_selected_language() -> None:
+    html = render_device_html(
+        device_id="spare_nlp5",
+        raw_history=[
+            {
+                "ts": "2026-04-24T12:23:40+02:00",
+                "voltage": 13.29,
+                "soc": 85,
+                "temperature": 24.0,
+                "state": "normal",
+                "error_code": None,
+            },
+            {
+                "ts": "2026-04-24T11:26:14+02:00",
+                "voltage": 0.0,
+                "soc": 0,
+                "temperature": None,
+                "state": "offline",
+                "error_code": "device_not_found",
+            },
+        ],
+        daily_history=[],
+        monthly_history=[],
+        yearly_history=[],
+        analytics={"windows": []},
+        device_summary={
+            "name": "Spare NLP5",
+            "soc": 85,
+            "voltage": 13.29,
+            "temperature": 24.0,
+            "state": "normal",
+            "error_code": None,
+            "last_seen": "2026-04-24T12:23:40+02:00",
+            "connected": True,
+            "battery": {
+                "brand": "NOCO",
+                "model": "NLP5",
+                "nominal_voltage": 12,
+                "capacity_ah": 5.0,
+                "production_year": 2025,
+            },
+            "vehicle": {"installed": True, "type": "bench"},
+            "installed_in_vehicle": True,
+            "vehicle_type": "bench",
+        },
+        language="it",
+    )
+
+    assert "Banco" in html
+    assert "Nessuno" in html
+    assert "normale" in html
+    assert "non in linea" in html
+    assert "dispositivo_non_trovato" in html
+    assert "Normale" in html
+    assert "La condizione della batteria e stabile" in html
+    assert "Battery condition is stable" not in html
+    assert 'data-label="Normal"' not in html
+    assert ">offline<" not in html
+    assert "Bench" not in html
 
 
 def test_confirmation_prompts_are_translated_and_audited() -> None:

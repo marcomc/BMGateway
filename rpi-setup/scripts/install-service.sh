@@ -250,6 +250,7 @@ payload = "\n".join(
         f'appearance = {string_to_toml(web.get("appearance", "system"))}',
         f'default_chart_range = {string_to_toml(web.get("default_chart_range", "7"))}',
         f'default_chart_metric = {string_to_toml(web.get("default_chart_metric", "soc"))}',
+        f'language = {string_to_toml(web.get("language", "auto"))}',
         "",
         "[usb_otg]",
         f'enabled = {bool_to_toml(bool(usb_otg.get("enabled", False)))}',

@@ -159,7 +159,7 @@ def render_device_html(
         version_label=version_label,
         theme_preference=theme_preference,
         language=language,
-        script=chart_script(chart_id),
+        script=chart_script(chart_id, language=language or "en"),
     )
 
 
@@ -240,7 +240,7 @@ def render_history_html(
         version_label=version_label,
         theme_preference=theme_preference,
         language=language,
-        script=chart_script(chart_id),
+        script=chart_script(chart_id, language=language or "en"),
     )
 
 

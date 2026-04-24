@@ -8,7 +8,7 @@ import html
 import json
 from typing import Iterable
 
-from .localization import localize_html
+from .localization import localize_html, translation_for
 from .web_assets import chart_script_source, web_css_source
 
 
@@ -530,8 +530,39 @@ def chart_card(
     )
 
 
-def chart_script(*chart_ids: str) -> str:
+def chart_script(*chart_ids: str, language: str = "en") -> str:
     ids = json.dumps(list(chart_ids))
+    translation = translation_for(language)
+    i18n = json.dumps(
+        {
+            key: translation.gettext(key)
+            for key in (
+                "Voltage",
+                "Temperature",
+                "No retained history for this metric",
+                "Less than 1 day available",
+                "day available",
+                "days available",
+                "month available",
+                "months available",
+                "year available",
+                "years available",
+                "No",
+                "data available for",
+                "Window",
+                "Visible devices",
+                "No usable",
+                "samples in this range",
+                "Showing all available history",
+                "samples",
+                "Average",
+                "Range",
+            )
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     script = chart_script_source()
     script = script.replace("{ids}", ids).replace("{{", "{").replace("}}", "}")
+    script = script.replace("{i18n}", i18n)
     return script

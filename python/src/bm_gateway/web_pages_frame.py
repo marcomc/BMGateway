@@ -137,7 +137,7 @@ def render_frame_fleet_trend_html(
     return _frame_document(
         title="Fleet Trend",
         body=body,
-        script=chart_script(chart_id),
+        script=chart_script(chart_id, language=language or "en"),
         appearance=appearance,
         width=width,
         height=height,

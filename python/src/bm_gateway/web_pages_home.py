@@ -80,7 +80,8 @@ def render_home_html(
         version_label=version_label,
         theme_preference=appearance,
         language=language,
-        script=chart_script(chart_id) + shared._home_overview_script(overview_track_id),
+        script=chart_script(chart_id, language=language)
+        + shared._home_overview_script(overview_track_id),
     )
 
 

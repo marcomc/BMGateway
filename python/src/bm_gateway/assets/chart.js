@@ -1,12 +1,14 @@
 <script>
 (() => {{
   const chartIds = {ids};
+  const I18N = {i18n};
+  const t = (key) => I18N[key] || key;
   const themeStyles = window.getComputedStyle(document.body);
   const themeValue = (name, fallback) => themeStyles.getPropertyValue(name).trim() || fallback;
   const METRICS = {{
-    voltage: {{ label: "Voltage", color: "#4f8df7", format: (value) => `${{value.toFixed(2)}} V` }},
+    voltage: {{ label: t("Voltage"), color: "#4f8df7", format: (value) => `${{value.toFixed(2)}} V` }},
     soc: {{ label: "SoC", color: "#17c45a", format: (value) => `${{value.toFixed(0)}}%` }},
-    temperature: {{ label: "Temperature", color: "#9a57f5", format: (value) => `${{value.toFixed(1)}} C` }},
+    temperature: {{ label: t("Temperature"), color: "#9a57f5", format: (value) => `${{value.toFixed(1)}} C` }},
   }};
   const AXIS_FORMATTERS = {{
     time: new Intl.DateTimeFormat(undefined, {{ hour: "2-digit", minute: "2-digit" }}),
@@ -151,24 +153,24 @@
     const usable = points.filter((point) => typeof point[metric] === "number");
     const timestamps = usable.map((point) => parseTime(point.ts)).filter((point) => point !== null);
     if (timestamps.length === 0) {{
-      return "No retained history for this metric";
+      return t("No retained history for this metric");
     }}
     const earliest = Math.min(...timestamps);
     const latest = Math.max(...timestamps);
     const spanMs = Math.max(latest - earliest, 0);
     if (spanMs < 36 * 60 * 60 * 1000) {{
-      return "Less than 1 day available";
+      return t("Less than 1 day available");
     }}
     const spanDays = Math.max(1, Math.round(spanMs / (24 * 60 * 60 * 1000)));
     if (spanDays < 45) {{
-      return `${{spanDays}} days available`;
+      return `${{spanDays}} ${{spanDays === 1 ? t("day available") : t("days available")}}`;
     }}
     const spanMonths = Math.max(1, Math.round(spanDays / 30));
     if (spanMonths < 24) {{
-      return `${{spanMonths}} months available`;
+      return `${{spanMonths}} ${{spanMonths === 1 ? t("month available") : t("months available")}}`;
     }}
     const spanYears = Math.max(1, Math.round(spanDays / 365));
-    return `${{spanYears}} years available`;
+    return `${{spanYears}} ${{spanYears === 1 ? t("year available") : t("years available")}}`;
   }}
   function metricBounds(metric, values) {{
     if (metric === "soc") {{
@@ -192,7 +194,7 @@
     const usable = points.filter((point) => typeof point[metric] === "number");
     if (usable.length === 0) {{
       return {{
-        svg: '<div class="chart-empty">No ' + METRICS[metric].label + ' data available for ' + windowLabel + '.</div>',
+        svg: '<div class="chart-empty">' + t("No") + ' ' + METRICS[metric].label.toLowerCase() + ' ' + t("data available for") + ' ' + windowLabel + '.</div>',
         coords: [],
         width: 960,
         height: 360,
@@ -541,9 +543,9 @@
       const visibleCount = visibleSeries.size;
       if (usable.length === 0) {{
         meta.innerHTML = [
-          `<span>Window: ${{windowLabel}}</span>`,
-          `<span>Visible devices: ${{visibleCount}}</span>`,
-          `<span>No usable ${{METRICS[currentMetric].label.toLowerCase()}} samples in this range</span>`,
+          `<span>${{t("Window")}}: ${{windowLabel}}</span>`,
+          `<span>${{t("Visible devices")}}: ${{visibleCount}}</span>`,
+          `<span>${{t("No usable")}} ${{METRICS[currentMetric].label.toLowerCase()}} ${{t("samples in this range")}}</span>`,
           `<span>${{coverageLabel}}</span>`
         ].join("");
         hideTooltip(frame);
@@ -553,14 +555,14 @@
       const average = values.reduce((sum, value) => sum + value, 0) / values.length;
       const usesAllAvailable = currentRange !== "all" && currentRange !== "raw" && usable.length === allUsable.length;
       const coverageSummary = usesAllAvailable
-        ? `Showing all available history (${{coverageLabel}})`
+        ? `${{t("Showing all available history")}} (${{coverageLabel}})`
         : coverageLabel;
       meta.innerHTML = [
-        `<span>Window: ${{windowLabel}}</span>`,
-        `<span>Visible devices: ${{visibleCount}}</span>`,
-        `<span>${{METRICS[currentMetric].label}} samples: ${{usable.length}}</span>`,
-        `<span>Average: ${{METRICS[currentMetric].format(average)}}</span>`,
-        `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
+        `<span>${{t("Window")}}: ${{windowLabel}}</span>`,
+        `<span>${{t("Visible devices")}}: ${{visibleCount}}</span>`,
+        `<span>${{METRICS[currentMetric].label}} ${{t("samples")}}: ${{usable.length}}</span>`,
+        `<span>${{t("Average")}}: ${{METRICS[currentMetric].format(average)}}</span>`,
+        `<span>${{t("Range")}}: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
         `<span>${{coverageSummary}}</span>`
       ].join("");
       if (chart.coords.length > 0) {{

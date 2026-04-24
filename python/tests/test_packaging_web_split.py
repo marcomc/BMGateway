@@ -72,6 +72,16 @@ def test_install_service_script_preserves_usb_otg_fleet_trend_preferences() -> N
     assert 'usb_otg.get("fleet_trend_device_ids", [])' in payload
 
 
+def test_install_service_script_preserves_web_language_preference() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert 'web.get("language", "auto")' in payload
+    assert 'f\'language = {string_to_toml(web.get("language", "auto"))}\'' in payload
+
+
 def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"

@@ -61,11 +61,31 @@ _VOID_TAGS: Final = {
     "wbr",
 }
 _SKIP_TAGS: Final = {"script", "style", "textarea", "code", "pre"}
-_TRANSLATABLE_ATTRIBUTES: Final = {"aria-label", "placeholder", "title", "alt", "onsubmit"}
+_TRANSLATABLE_ATTRIBUTES: Final = {
+    "aria-label",
+    "placeholder",
+    "title",
+    "alt",
+    "onsubmit",
+    "data-label",
+    "data-range-label",
+}
 _DYNAMIC_TRANSLATION_PREFIXES: Final = (
     ("Gateway: ", "Gateway"),
     ("Devices online: ", "Devices online"),
     ("MQTT connected: ", "MQTT connected"),
+    ("Validation failed: ", "Validation failed"),
+    ("Run failed: ", "Run failed"),
+    ("USB OTG frame image export failed: ", "USB OTG frame image export failed"),
+    (
+        "Home Assistant discovery republish failed: ",
+        "Home Assistant discovery republish failed",
+    ),
+    ("Failed to restart bm-gateway service: ", "Failed to restart bm-gateway service"),
+    ("Failed to restart Bluetooth service: ", "Failed to restart Bluetooth service"),
+    ("Failed to prepare USB OTG boot mode: ", "Failed to prepare USB OTG boot mode"),
+    ("Failed to restore USB host boot mode: ", "Failed to restore USB host boot mode"),
+    ("Failed to refresh USB OTG drive: ", "Failed to refresh USB OTG drive"),
     ("Detected adapters: ", "Detected adapters"),
     ("Edit Device ", "Edit Device"),
     ("Serial / MAC: ", "Serial / MAC"),
