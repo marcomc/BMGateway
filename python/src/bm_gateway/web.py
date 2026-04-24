@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -10,6 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import COLOR_CATALOG, default_color_key, load_device_registry
+from .localization import resolve_locale_preference, translation_for
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
     fetch_daily_history,
@@ -21,13 +23,20 @@ from .state_store import (
     load_snapshot,
     prune_history,
 )
+from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_actions import (
     _config_and_registry_texts,
+    _gateway_snapshot_from_mapping,
     add_device_from_form,
     build_run_once_command,
+    export_usb_otg_images_now,
+    prepare_usb_otg_boot_mode,
+    refresh_usb_otg_drive,
     restart_system_service,
+    restore_usb_otg_boot_mode,
     run_once_via_cli,
     schedule_host_reboot,
+    schedule_host_shutdown,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -35,6 +44,7 @@ from .web_actions import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_usb_otg_preferences,
     update_web_preferences,
 )
 from .web_assets import (
@@ -60,31 +70,45 @@ from .web_pages import (
     render_add_device_html,
     render_device_html,
     render_devices_html,
+    render_diagnostics_html,
     render_edit_device_html,
+    render_frame_battery_overview_html,
+    render_frame_fleet_trend_html,
     render_history_html,
     render_home_html,
     render_management_html,
     render_reboot_pending_html,
     render_settings_html,
+    render_shutdown_pending_html,
     render_snapshot_html,
+    render_usb_otg_export_pending_html,
 )
 from .web_support import read_text
 
 __all__ = [
     "add_device_from_form",
     "build_run_once_command",
+    "export_usb_otg_images_now",
     "render_add_device_html",
+    "render_diagnostics_html",
     "render_home_html",
     "render_device_html",
     "render_devices_html",
     "render_edit_device_html",
+    "render_frame_battery_overview_html",
+    "render_frame_fleet_trend_html",
     "render_history_html",
     "render_management_html",
     "render_reboot_pending_html",
     "render_settings_html",
+    "render_shutdown_pending_html",
+    "render_usb_otg_export_pending_html",
     "render_snapshot_html",
     "serve_management",
     "serve_snapshot",
+    "prepare_usb_otg_boot_mode",
+    "refresh_usb_otg_drive",
+    "restore_usb_otg_boot_mode",
     "update_bluetooth_preferences",
     "update_config_from_text",
     "update_device_from_form",
@@ -92,12 +116,198 @@ __all__ = [
     "update_gateway_preferences",
     "update_home_assistant_preferences",
     "update_mqtt_preferences",
+    "update_usb_otg_preferences",
     "update_web_preferences",
     "_add_device_form_html",
     "_battery_form_script",
     "_chart_points",
     "_discover_bluetooth_adapters",
 ]
+
+_USB_OTG_EXPORT_LOCK = threading.Lock()
+_USB_OTG_EXPORT_STATUS: dict[str, object] = {
+    "status": "idle",
+    "completed": 0,
+    "total": 0,
+    "message": "Preparing USB OTG frame image export",
+    "detail": "",
+    "redirect_message": "",
+}
+
+
+def _set_usb_otg_export_status(**updates: object) -> None:
+    with _USB_OTG_EXPORT_LOCK:
+        _USB_OTG_EXPORT_STATUS.update(updates)
+
+
+def _usb_otg_export_status_snapshot() -> dict[str, object]:
+    with _USB_OTG_EXPORT_LOCK:
+        snapshot = dict(_USB_OTG_EXPORT_STATUS)
+    completed = _int_from_mapping(snapshot, "completed")
+    total = _int_from_mapping(snapshot, "total")
+    snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
+    return snapshot
+
+
+def _int_from_mapping(mapping: dict[str, object], key: str, default: int = 0) -> int:
+    value = mapping.get(key, default)
+    if not isinstance(value, str | int | float):
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _start_tracked_usb_otg_image_export(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> threading.Thread | None:
+    with _USB_OTG_EXPORT_LOCK:
+        if _USB_OTG_EXPORT_STATUS.get("status") == "running":
+            return None
+        _USB_OTG_EXPORT_STATUS.update(
+            {
+                "status": "running",
+                "completed": 0,
+                "total": 0,
+                "message": "Preparing USB OTG frame image export",
+                "detail": "",
+                "redirect_message": "",
+            }
+        )
+
+    def _progress(completed: int, total: int, message: str) -> None:
+        _set_usb_otg_export_status(
+            status="running",
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    def _worker() -> None:
+        try:
+            config = load_config(config_path)
+            devices = load_device_registry(config.device_registry_path)
+            snapshot_path = state_file_path(config, state_dir=state_dir)
+            empty_snapshot: dict[str, object] = {"generated_at": "", "devices": []}
+            snapshot_mapping = (
+                load_snapshot(snapshot_path) if snapshot_path.exists() else empty_snapshot
+            )
+            result = update_usb_otg_drive(
+                config=config,
+                devices=devices,
+                snapshot=_gateway_snapshot_from_mapping(snapshot_mapping),
+                database_path=database_file_path(config, state_dir=state_dir),
+                progress=_progress,
+                force=True,
+            )
+            if result.exported:
+                mark_usb_otg_exported(config=config, state_dir=state_dir)
+                _set_usb_otg_export_status(
+                    status="completed",
+                    message="USB OTG frame images exported",
+                    detail="",
+                    redirect_message="USB OTG frame images exported",
+                )
+            else:
+                _set_usb_otg_export_status(
+                    status="failed",
+                    message="USB OTG frame image export failed",
+                    detail=result.reason,
+                    redirect_message=f"USB OTG frame image export failed: {result.reason}",
+                )
+        except Exception as exc:  # pragma: no cover - defensive web boundary
+            detail = str(exc) or exc.__class__.__name__
+            export_status = _usb_otg_export_status_snapshot()
+            _set_usb_otg_export_status(
+                status="failed",
+                completed=_int_from_mapping(export_status, "total"),
+                message="USB OTG frame image export failed",
+                detail=detail,
+                redirect_message=f"USB OTG frame image export failed: {detail}",
+            )
+
+    thread = threading.Thread(target=_worker, daemon=True, name="usb-otg-image-export")
+    thread.start()
+    return thread
+
+
+def _start_usb_otg_image_export(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> threading.Thread | None:
+    with _USB_OTG_EXPORT_LOCK:
+        if _USB_OTG_EXPORT_STATUS.get("status") == "running":
+            return None
+        _USB_OTG_EXPORT_STATUS.update(
+            {
+                "status": "running",
+                "completed": 0,
+                "total": 0,
+                "message": "Preparing USB OTG frame image export",
+                "detail": "",
+                "redirect_message": "",
+            }
+        )
+
+    def _worker() -> None:
+        completed = export_usb_otg_images_now(config_path=config_path, state_dir=state_dir)
+        if completed.returncode == 0:
+            _set_usb_otg_export_status(
+                status="completed",
+                completed=1,
+                total=1,
+                message="USB OTG frame images exported",
+                detail="",
+                redirect_message="USB OTG frame images exported",
+            )
+            return
+
+        detail = completed.stderr.strip() or completed.stdout.strip() or "USB OTG export failed"
+        _set_usb_otg_export_status(
+            status="failed",
+            completed=1,
+            total=1,
+            message="USB OTG frame image export failed",
+            detail=detail,
+            redirect_message=f"USB OTG frame image export failed: {detail}",
+        )
+
+    thread = threading.Thread(
+        target=_worker,
+        daemon=True,
+        name="usb-otg-image-export",
+    )
+    thread.start()
+    return thread
+
+
+def _usb_otg_fleet_trend_device_ids_from_form(
+    form: dict[str, list[str]],
+    config: AppConfig,
+) -> tuple[str, ...]:
+    if "fleet_trend_device_ids" not in form:
+        return config.usb_otg.fleet_trend_device_ids
+
+    selected_ids = tuple(
+        device_id.strip()
+        for device_id in form.get("fleet_trend_device_ids", [])
+        if device_id.strip()
+    )
+    if config.usb_otg.fleet_trend_device_ids:
+        return selected_ids
+
+    configured_ids = {
+        device.id
+        for device in load_device_registry(config.device_registry_path)
+        if device.id.strip()
+    }
+    if not configured_ids or set(selected_ids) == configured_ids:
+        return ()
+    return selected_ids
 
 
 def serve_snapshot(*, host: str, port: int, snapshot_path: Path) -> None:
@@ -170,9 +380,16 @@ def serve_management(
             database_path = database_file_path(config, state_dir=state_dir)
             return config, snapshot, database_path
 
+        def _request_language(self, config: AppConfig) -> str:
+            return resolve_locale_preference(
+                config.web.language,
+                self.headers.get("Accept-Language"),
+            )
+
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             config, snapshot, database_path = self._load_current()
+            request_language = self._request_language(config)
             devices = load_device_registry(config.device_registry_path)
             serialized_devices = [device.to_dict() for device in devices]
             contract = build_contract(config, devices)
@@ -203,6 +420,20 @@ def serve_management(
 
             if parsed.path == "/api/status":
                 self._send_json(_snapshot_with_version(snapshot))
+                return
+            if parsed.path == "/api/usb-otg-export/status":
+                status = _usb_otg_export_status_snapshot()
+                translation = translation_for(request_language)
+                message = str(status.get("message", ""))
+                redirect_message = str(status.get("redirect_message", ""))
+                status["message"] = translation.gettext(message)
+                if redirect_message:
+                    if ": " in redirect_message:
+                        prefix, detail = redirect_message.split(": ", 1)
+                        status["redirect_message"] = f"{translation.gettext(prefix)}: {detail}"
+                    else:
+                        status["redirect_message"] = translation.gettext(redirect_message)
+                self._send_json(status)
                 return
             if parsed.path == "/api/devices":
                 self._send_json({"devices": serialized_devices})
@@ -247,6 +478,15 @@ def serve_management(
                     self._send_json(
                         fetch_daily_history(database_path, device_id=device_id, limit=limit)
                     )
+                return
+
+            if parsed.path == "/usb-otg-export/progress":
+                self._send_html(
+                    render_usb_otg_export_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
                 return
 
             if parsed.path == "/device":
@@ -302,6 +542,7 @@ def serve_management(
                     theme_preference=config.web.appearance,
                     default_chart_range=config.web.default_chart_range,
                     default_chart_metric=config.web.default_chart_metric,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -353,6 +594,7 @@ def serve_management(
                     theme_preference=config.web.appearance,
                     default_chart_range=config.web.default_chart_range,
                     default_chart_metric=config.web.default_chart_metric,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -364,12 +606,27 @@ def serve_management(
                     devices=serialized_devices,
                     message=message,
                     theme_preference=config.web.appearance,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
 
             if parsed.path == "/rebooting":
-                self._send_html(render_reboot_pending_html(theme_preference=config.web.appearance))
+                self._send_html(
+                    render_reboot_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
+                return
+
+            if parsed.path == "/shutting-down":
+                self._send_html(
+                    render_shutdown_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
                 return
 
             if parsed.path == "/devices/new":
@@ -385,6 +642,7 @@ def serve_management(
                         theme_preference=config.web.appearance,
                         selected_color_key=default_color_key(used_colors=reserved_color_keys),
                         reserved_color_keys=reserved_color_keys,
+                        language=request_language,
                     )
                 )
                 return
@@ -402,6 +660,7 @@ def serve_management(
                             snapshot=snapshot,
                             devices=serialized_devices,
                             theme_preference=config.web.appearance,
+                            language=request_language,
                         ),
                         status=404,
                     )
@@ -419,6 +678,7 @@ def serve_management(
                         message=message,
                         theme_preference=config.web.appearance,
                         reserved_color_keys=reserved_color_keys,
+                        language=request_language,
                     )
                 )
                 return
@@ -436,8 +696,68 @@ def serve_management(
                     devices_text=read_text(config.device_registry_path),
                     contract=contract,
                     theme_preference=config.web.appearance,
+                    language=request_language,
                 )
                 self._send_html(html)
+                return
+
+            if parsed.path in {"/diagnostics", "/debug"}:
+                self._send_html(
+                    render_diagnostics_html(
+                        theme_preference=config.web.appearance,
+                        fleet_trend_metrics=config.usb_otg.fleet_trend_metrics,
+                        language=request_language,
+                    )
+                )
+                return
+
+            if parsed.path == "/frame/fleet-trend":
+                params = parse_qs(parsed.query)
+                selected_metrics = config.usb_otg.fleet_trend_metrics or ("soc",)
+                requested_metric = params.get("metric", [selected_metrics[0]])[0]
+                frame_metric = (
+                    requested_metric
+                    if requested_metric in selected_metrics
+                    else selected_metrics[0]
+                )
+                frame_devices = _usb_otg_fleet_trend_devices(config, serialized_devices)
+                battery_chart_points, battery_legend = _fleet_chart_points(
+                    database_path=database_path,
+                    devices=frame_devices,
+                )
+                self._send_html(
+                    render_frame_fleet_trend_html(
+                        chart_points=battery_chart_points,
+                        legend=battery_legend,
+                        show_chart_markers=config.web.show_chart_markers,
+                        appearance=config.usb_otg.appearance,
+                        default_chart_range=config.usb_otg.fleet_trend_range,
+                        default_chart_metric=frame_metric,
+                        width=config.usb_otg.image_width_px,
+                        height=config.usb_otg.image_height_px,
+                        language=request_language,
+                    )
+                )
+                return
+
+            if parsed.path == "/frame/battery-overview":
+                params = parse_qs(parsed.query)
+                try:
+                    page = max(1, int(params.get("page", ["1"])[0]))
+                except ValueError:
+                    page = 1
+                self._send_html(
+                    render_frame_battery_overview_html(
+                        snapshot=snapshot,
+                        devices=serialized_devices,
+                        page=page,
+                        devices_per_page=config.usb_otg.overview_devices_per_image,
+                        appearance=config.usb_otg.appearance,
+                        width=config.usb_otg.image_width_px,
+                        height=config.usb_otg.image_height_px,
+                        language=request_language,
+                    )
+                )
                 return
 
             if parsed.path in {"/management", "/gateway"}:
@@ -453,6 +773,7 @@ def serve_management(
                     devices_text=read_text(config.device_registry_path),
                     contract=contract,
                     theme_preference=config.web.appearance,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -471,6 +792,7 @@ def serve_management(
                 appearance=config.web.appearance,
                 default_chart_range=config.web.default_chart_range,
                 default_chart_metric=config.web.default_chart_metric,
+                language=request_language,
             )
             self._send_html(html)
 
@@ -507,6 +829,7 @@ def serve_management(
                         contract={},
                         message="Validation failed: " + "; ".join(errors),
                         theme_preference=config.web.appearance,
+                        language=self._request_language(config),
                     )
                     self._send_html(html, status=400)
                     return
@@ -551,6 +874,7 @@ def serve_management(
                                 device.color_key
                                 for device in load_device_registry(config.device_registry_path)
                             },
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -569,6 +893,7 @@ def serve_management(
                 config = load_config(config_path)
                 old_device_id = form.get("old_device_id", form.get("device_id", [""]))[0]
                 submitted_device_id = form.get("device_id", [""])[0]
+                normalized_submitted_device_id = submitted_device_id.strip()
                 errors = update_device_from_form(
                     config_path=config_path,
                     database_path=database_file_path(config, state_dir=state_dir),
@@ -653,6 +978,7 @@ def serve_management(
                                 if item.id != old_device_id
                             },
                             original_device_id=old_device_id,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -664,7 +990,7 @@ def serve_management(
                     "/devices/edit?"
                     + urlencode(
                         {
-                            "device_id": submitted_device_id,
+                            "device_id": normalized_submitted_device_id,
                             "message": "Device saved",
                         }
                     ),
@@ -685,6 +1011,7 @@ def serve_management(
                         snapshot=snapshot,
                         devices=[device.to_dict() for device in configured_devices],
                         theme_preference=config.web.appearance,
+                        language=self._request_language(config),
                     )
                     self._send_html(html, status=400)
                     return
@@ -714,6 +1041,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: settings values must be numeric",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -742,6 +1070,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -771,6 +1100,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: MQTT port must be numeric",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -802,6 +1132,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -839,6 +1170,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -869,6 +1201,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: bluetooth values must be numeric",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -894,6 +1227,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -916,6 +1250,7 @@ def serve_management(
                 appearance: str | None = None
                 default_chart_range: str | None = None
                 default_chart_metric: str | None = None
+                language: str | None = None
                 if settings_section == "web":
                     try:
                         web_port = int(form.get("web_port", ["80"])[0])
@@ -932,6 +1267,7 @@ def serve_management(
                                 contract=build_contract(config, configured_devices),
                                 message="Validation failed: web port must be numeric",
                                 theme_preference=config.web.appearance,
+                                language=self._request_language(config),
                             ),
                             status=400,
                         )
@@ -955,6 +1291,7 @@ def serve_management(
                                 contract=build_contract(config, configured_devices),
                                 message="Validation failed: visible device limit must be numeric",
                                 theme_preference=config.web.appearance,
+                                language=self._request_language(config),
                             ),
                             status=400,
                         )
@@ -966,6 +1303,7 @@ def serve_management(
                     default_chart_metric = form.get(
                         "default_chart_metric", [config.web.default_chart_metric]
                     )[0]
+                    language = form.get("language", [config.web.language])[0]
                 else:
                     configured_devices = load_device_registry(config.device_registry_path)
                     self._send_html(
@@ -979,6 +1317,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: unknown settings section",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -993,6 +1332,7 @@ def serve_management(
                     appearance=appearance,
                     default_chart_range=default_chart_range,
                     default_chart_metric=default_chart_metric,
+                    language=language,
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)
@@ -1007,6 +1347,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -1015,6 +1356,104 @@ def serve_management(
                 self.send_header(
                     "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
                 )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/usb-otg":
+                config, snapshot, current_database_path = self._load_current()
+                try:
+                    image_width_px = int(form.get("image_width_px", ["480"])[0])
+                    image_height_px = int(form.get("image_height_px", ["234"])[0])
+                    refresh_interval_seconds = int(form.get("refresh_interval_seconds", ["0"])[0])
+                    overview_devices_per_image = int(
+                        form.get("overview_devices_per_image", ["5"])[0]
+                    )
+                except ValueError:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_management_html(
+                            snapshot=snapshot,
+                            config=config,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            devices=[device.to_dict() for device in configured_devices],
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: USB OTG settings values must be numeric",
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_usb_otg_preferences(
+                    config_path=config_path,
+                    enabled=_bool_from_form(form, "usb_otg_enabled"),
+                    image_width_px=image_width_px,
+                    image_height_px=image_height_px,
+                    image_format=form.get("image_format", [config.usb_otg.image_format])[0],
+                    appearance=form.get("appearance", [config.usb_otg.appearance])[0],
+                    refresh_interval_seconds=refresh_interval_seconds,
+                    overview_devices_per_image=overview_devices_per_image,
+                    export_battery_overview=_bool_from_form(form, "export_battery_overview"),
+                    export_fleet_trend=_bool_from_form(form, "export_fleet_trend"),
+                    fleet_trend_metrics=(
+                        tuple(form.get("fleet_trend_metrics", []))
+                        if "fleet_trend_metrics" in form
+                        else config.usb_otg.fleet_trend_metrics
+                    ),
+                    fleet_trend_range=form.get(
+                        "fleet_trend_range",
+                        [config.usb_otg.fleet_trend_range],
+                    )[0],
+                    fleet_trend_device_ids=(
+                        _usb_otg_fleet_trend_device_ids_from_form(form, config)
+                    ),
+                )
+                if errors:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_management_html(
+                            snapshot=snapshot,
+                            config=config,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            devices=[device.to_dict() for device in configured_devices],
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                updated_config = load_config(config_path)
+                message = "Settings saved"
+                if updated_config.usb_otg.enabled and (
+                    updated_config.usb_otg.export_battery_overview
+                    or updated_config.usb_otg.export_fleet_trend
+                ):
+                    export_thread = _start_usb_otg_image_export(
+                        config_path=config_path,
+                        state_dir=state_dir,
+                    )
+                    if export_thread is not None:
+                        message += "; USB OTG frame image export started"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/export-usb-otg-images":
+                _start_tracked_usb_otg_image_export(
+                    config_path=config_path,
+                    state_dir=state_dir,
+                )
+                self.send_response(303)
+                self.send_header("Location", "/usb-otg-export/progress")
                 self.end_headers()
                 return
 
@@ -1074,12 +1513,70 @@ def serve_management(
                 self.end_headers()
                 return
 
+            if parsed.path == "/actions/prepare-usb-otg-mode":
+                completed = prepare_usb_otg_boot_mode()
+                message = (
+                    "USB OTG boot mode prepared; reboot required"
+                    if completed.returncode == 0
+                    else "Failed to prepare USB OTG boot mode"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/restore-usb-host-mode":
+                completed = restore_usb_otg_boot_mode()
+                message = (
+                    "USB host boot mode restored; reboot required"
+                    if completed.returncode == 0
+                    else "Failed to restore USB host boot mode"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/refresh-usb-otg-drive":
+                completed = refresh_usb_otg_drive(config_path)
+                message = (
+                    "USB OTG drive refreshed"
+                    if completed.returncode == 0
+                    else "Failed to refresh USB OTG drive"
+                )
+                if completed.stderr:
+                    message += f": {completed.stderr.strip()}"
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
+                )
+                self.end_headers()
+                return
+
             if parsed.path == "/actions/reboot-host":
                 schedule_host_reboot()
                 self.send_response(303)
                 self.send_header(
                     "Location",
                     "/rebooting",
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/shutdown-host":
+                schedule_host_shutdown()
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/shutting-down",
                 )
                 self.end_headers()
                 return
@@ -1122,3 +1619,13 @@ def serve_management(
         server.serve_forever()
     finally:
         server.server_close()
+
+
+def _usb_otg_fleet_trend_devices(
+    config: AppConfig,
+    devices: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    selected_ids = set(config.usb_otg.fleet_trend_device_ids)
+    if not selected_ids:
+        return devices
+    return [device for device in devices if str(device.get("id", "")) in selected_ids]

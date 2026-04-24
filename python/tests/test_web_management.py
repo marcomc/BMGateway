@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
 import socket
+import subprocess
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import replace
@@ -15,6 +18,7 @@ from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import fetch_recent_history, persist_snapshot
+from bm_gateway.usb_otg_export import USBOTGExportResult
 from bm_gateway.web import (
     _add_device_form_html,
     _chart_points,
@@ -24,11 +28,15 @@ from bm_gateway.web import (
     render_add_device_html,
     render_device_html,
     render_devices_html,
+    render_diagnostics_html,
     render_edit_device_html,
+    render_frame_battery_overview_html,
+    render_frame_fleet_trend_html,
     render_history_html,
     render_home_html,
     render_management_html,
     render_settings_html,
+    render_usb_otg_export_pending_html,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -36,13 +44,21 @@ from bm_gateway.web import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_usb_otg_preferences,
     update_web_preferences,
 )
 from bm_gateway.web import (
     render_reboot_pending_html as render_reboot_pending_html_wrapper,
 )
-from bm_gateway.web_actions import restart_system_service
-from bm_gateway.web_pages_settings import render_reboot_pending_html
+from bm_gateway.web_actions import (
+    export_usb_otg_images_now,
+    prepare_usb_otg_boot_mode,
+    refresh_usb_otg_drive,
+    restart_system_service,
+    restore_usb_otg_boot_mode,
+    schedule_host_shutdown,
+)
+from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import base_css, chart_script
 
 
@@ -192,6 +208,15 @@ def test_chart_script_renders_multi_series_tooltip_rows() -> None:
     assert "const rows = entries.map((entry) => (" in script
 
 
+def test_chart_script_keeps_compact_frame_chart_inside_edges() -> None:
+    script = chart_script("frame-fleet-trend-chart")
+
+    assert 'dataset.chartCompact === "true"' in script
+    assert "const padRight = isCompact ? 14 : 18;" in script
+    assert "const padBottom = isCompact ? 20 : 44;" in script
+    assert 'rx="${isCompact ? 12 : 22}"' in script
+
+
 def test_chart_card_markup_includes_side_navigation_buttons() -> None:
     html = render_home_html(
         snapshot={"devices": []},
@@ -228,6 +253,195 @@ def test_restart_system_service_uses_non_interactive_sudo(monkeypatch: MonkeyPat
     assert captured["command"] == ["sudo", "-n", "systemctl", "restart", "bm-gateway.service"]
 
 
+def test_prepare_usb_otg_boot_mode_uses_non_interactive_sudo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    prepare_usb_otg_boot_mode()
+
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-boot-mode",
+        "prepare",
+    ]
+
+
+def test_restore_usb_otg_boot_mode_uses_non_interactive_sudo(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    restore_usb_otg_boot_mode()
+
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-boot-mode",
+        "restore",
+    ]
+
+
+def test_refresh_usb_otg_drive_uses_configured_drive_helper(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def _fake_run(command: list[str], **kwargs: object) -> Any:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+            stderr = ""
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fake_run)
+
+    refresh_usb_otg_drive(config_path)
+
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-frame-test",
+        "refresh",
+        "--image-path",
+        "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img",
+        "--gadget-name",
+        "bmgw_frame",
+    ]
+
+
+def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "spare_nlp5"',
+                'type = "bm200"',
+                'name = "Spare NLP5"',
+                'mac = "A1:B2:C3:D4:E5:F6"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    snapshot_dir = tmp_path / "state" / "runtime"
+    snapshot_dir.mkdir(parents=True)
+    (snapshot_dir / "latest_snapshot.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-04-24T12:00:00+00:00",
+                "gateway_name": "BMGateway",
+                "active_adapter": "hci0",
+                "mqtt_enabled": False,
+                "mqtt_connected": False,
+                "devices_total": 1,
+                "devices_online": 1,
+                "poll_interval_seconds": 300,
+                "devices": [
+                    {
+                        "id": "spare_nlp5",
+                        "type": "bm200",
+                        "name": "Spare NLP5",
+                        "mac": "A1:B2:C3:D4:E5:F6",
+                        "enabled": True,
+                        "connected": True,
+                        "voltage": 12.8,
+                        "soc": 92,
+                        "temperature": 21.5,
+                        "rssi": -41,
+                        "state": "normal",
+                        "last_seen": "2026-04-24T12:00:00+00:00",
+                        "adapter": "hci0",
+                        "driver": "bm200",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    calls: list[dict[str, object]] = []
+
+    def _fail_run(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("background export must not start bm_gateway run")
+
+    def _update_drive(**kwargs: object) -> USBOTGExportResult:
+        calls.append(kwargs)
+        return USBOTGExportResult(exported=True, reason="exported")
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.run", _fail_run)
+    monkeypatch.setattr("bm_gateway.web_actions.update_usb_otg_drive", _update_drive)
+
+    result = export_usb_otg_images_now(config_path=config_path, state_dir=tmp_path / "state")
+
+    assert result.returncode == 0
+    assert len(calls) == 1
+    snapshot = calls[0]["snapshot"]
+    assert isinstance(snapshot, GatewaySnapshot)
+    assert snapshot.devices[0].id == "spare_nlp5"
+    assert calls[0]["force"] is True
+
+
+def test_schedule_host_shutdown_uses_non_interactive_systemctl_poweroff(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _fake_popen(command: list[str], **kwargs: object) -> object:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return object()
+
+    monkeypatch.setattr("bm_gateway.web_actions.subprocess.Popen", _fake_popen)
+
+    schedule_host_shutdown()
+
+    assert captured["command"] == ["/bin/sh", "-lc", "sleep 1 && sudo -n systemctl poweroff"]
+    assert captured["kwargs"] == {
+        "stdout": -3,
+        "stderr": -3,
+        "start_new_session": True,
+    }
+
+
 def test_render_reboot_pending_html_contains_polling_status_page() -> None:
     html = render_reboot_pending_html(theme_preference="dark")
 
@@ -242,6 +456,27 @@ def test_render_reboot_pending_html_wrapper_delegates() -> None:
     html = render_reboot_pending_html_wrapper(theme_preference="light")
 
     assert "BMGateway Reboot" in html
+
+
+def test_render_shutdown_pending_html_contains_safe_poweroff_guidance() -> None:
+    html = render_shutdown_pending_html(theme_preference="dark")
+
+    assert "Shutdown In Progress" in html
+    assert "Shutdown scheduled" in html
+    assert "Wait for the Raspberry Pi activity LED to stop blinking" in html
+    assert "BMGateway Shutdown" in html
+
+
+def test_render_usb_otg_export_pending_html_contains_progress_status_page() -> None:
+    html = render_usb_otg_export_pending_html(theme_preference="dark")
+
+    assert "Frame Image Export" in html
+    assert 'id="usb-otg-export-progress-bar"' in html
+    assert 'id="usb-otg-export-percent"' in html
+    assert 'id="usb-otg-export-status-text"' in html
+    assert 'fetch("/api/usb-otg-export/status", { cache: "no-store" })' in html
+    assert 'window.location.replace("/settings?message=" + message)' in html
+    assert 'window.location.replace("/settings?edit=1&message=" + message)' not in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -351,6 +586,24 @@ def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Pat
     assert "gateway.poll_interval_seconds must be greater than zero" in errors
     assert "retention.raw_retention_days must be greater than zero" in errors
     assert "retention.daily_retention_days must be zero or greater" in errors
+
+
+def test_render_settings_html_warns_when_poll_interval_is_aggressive() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, gateway=replace(config.gateway, poll_interval_seconds=120))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "Poll interval warning" in html
+    assert "Polling faster than 300 seconds can increase Bluetooth discovery failures" in html
+
+
+def test_render_settings_html_edit_mode_warns_when_poll_interval_is_aggressive() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, gateway=replace(config.gateway, poll_interval_seconds=120))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert "Poll interval warning" in html
+    assert "Polling faster than 300 seconds can increase Bluetooth discovery failures" in html
 
 
 def test_update_mqtt_preferences_persists_transport_settings(tmp_path: Path) -> None:
@@ -972,6 +1225,61 @@ def test_update_web_preferences_persists_chart_defaults(tmp_path: Path) -> None:
     assert config.web.default_chart_metric == "temperature"
 
 
+def test_update_usb_otg_preferences_persists_enabled_flag(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_usb_otg_preferences(config_path=config_path, enabled=True)
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is True
+
+
+def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_usb_otg_preferences(
+        config_path=config_path,
+        enabled=True,
+        image_width_px=800,
+        image_height_px=480,
+        image_format="png",
+        appearance="dark",
+        refresh_interval_seconds=120,
+        overview_devices_per_image=10,
+        export_battery_overview=True,
+        export_fleet_trend=False,
+        fleet_trend_metrics=("voltage", "temperature"),
+        fleet_trend_range="30",
+        fleet_trend_device_ids=("spare_nlp5", "spare_nlp20"),
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is True
+    assert config.usb_otg.image_width_px == 800
+    assert config.usb_otg.image_height_px == 480
+    assert config.usb_otg.image_format == "png"
+    assert config.usb_otg.appearance == "dark"
+    assert config.usb_otg.refresh_interval_seconds == 120
+    assert config.usb_otg.overview_devices_per_image == 10
+    assert config.usb_otg.export_battery_overview is True
+    assert config.usb_otg.export_fleet_trend is False
+    assert config.usb_otg.fleet_trend_metrics == ("voltage", "temperature")
+    assert config.usb_otg.fleet_trend_range == "30"
+    assert config.usb_otg.fleet_trend_device_ids == ("spare_nlp5", "spare_nlp20")
+
+
 def test_settings_display_post_persists_appearance_visible_limit_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
@@ -1022,6 +1330,423 @@ def test_settings_display_post_persists_appearance_visible_limit_and_chart_defau
     assert config.web.visible_device_limit == 4
     assert config.web.default_chart_range == "90"
     assert config.web.default_chart_metric == "temperature"
+
+
+def test_settings_usb_otg_post_persists_enabled_flag(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    export_calls: list[tuple[Path, Path | None]] = []
+    export_finished = threading.Event()
+
+    def _export_now(
+        *,
+        config_path: Path,
+        state_dir: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        export_calls.append((config_path, state_dir))
+        export_finished.set()
+        return subprocess.CompletedProcess(["export"], 0, "", "")
+
+    monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode(
+            {
+                "usb_otg_enabled": "on",
+                "export_fleet_trend": "on",
+                "fleet_trend_metrics": "soc",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        assert response.status == 200
+        params = parse_qs(urlparse(response.url).query)
+        assert params["message"] == ["Settings saved; USB OTG frame image export started"]
+
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is True
+    assert export_finished.wait(timeout=1.0)
+    assert export_calls == [(config_path, None)]
+
+
+def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "spare_nlp5"',
+                'type = "bm200"',
+                'name = "Spare NLP5"',
+                'mac = "A1:B2:C3:D4:E5:F6"',
+                "",
+                "[[devices]]",
+                'id = "spare_nlp20"',
+                'type = "bm200"',
+                'name = "Spare NLP20"',
+                'mac = "A1:B2:C3:D4:E5:F7"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode(
+            [
+                ("fleet_trend_device_ids", ""),
+                ("fleet_trend_device_ids", "spare_nlp5"),
+                ("fleet_trend_device_ids", "spare_nlp20"),
+            ]
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        assert response.status == 200
+
+    config = load_config(config_path)
+    assert config.usb_otg.fleet_trend_device_ids == ()
+
+
+def test_settings_usb_otg_post_starts_export_without_waiting(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    export_calls: list[tuple[Path, Path | None]] = []
+    export_started = threading.Event()
+    export_finished = threading.Event()
+    release_export = threading.Event()
+
+    def _export_now(
+        *,
+        config_path: Path,
+        state_dir: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        export_calls.append((config_path, state_dir))
+        export_started.set()
+        release_export.wait(timeout=5.0)
+        export_finished.set()
+        return subprocess.CompletedProcess(["export"], 0, "", "")
+
+    monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode(
+            {
+                "usb_otg_enabled": "on",
+                "export_fleet_trend": "on",
+                "fleet_trend_metrics": "soc",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=1.0) as response:
+            assert response.status == 200
+            params = parse_qs(urlparse(response.url).query)
+            assert params["message"] == ["Settings saved; USB OTG frame image export started"]
+    finally:
+        release_export.set()
+
+    assert export_started.wait(timeout=1.0)
+    assert export_finished.wait(timeout=2.0)
+    assert export_calls == [(config_path, None)]
+
+
+def test_settings_usb_otg_post_does_not_start_second_export_while_running(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    export_calls: list[tuple[Path, Path | None]] = []
+    export_started = threading.Event()
+    second_export_started = threading.Event()
+    export_finished = threading.Event()
+    release_export = threading.Event()
+
+    def _export_now(
+        *,
+        config_path: Path,
+        state_dir: Path | None = None,
+    ) -> subprocess.CompletedProcess[str]:
+        export_calls.append((config_path, state_dir))
+        if len(export_calls) > 1:
+            second_export_started.set()
+        export_started.set()
+        release_export.wait(timeout=5.0)
+        export_finished.set()
+        return subprocess.CompletedProcess(["export"], 0, "", "")
+
+    monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request_body = urllib.parse.urlencode(
+        {
+            "usb_otg_enabled": "on",
+            "export_fleet_trend": "on",
+            "fleet_trend_metrics": "soc",
+        }
+    ).encode("utf-8")
+
+    try:
+        first_request = urllib.request.Request(
+            f"http://{host}:{port}/settings/usb-otg",
+            data=request_body,
+            method="POST",
+        )
+        with urllib.request.urlopen(first_request, timeout=1.0) as response:
+            assert response.status == 200
+            params = parse_qs(urlparse(response.url).query)
+            assert params["message"] == ["Settings saved; USB OTG frame image export started"]
+
+        assert export_started.wait(timeout=1.0)
+
+        second_request = urllib.request.Request(
+            f"http://{host}:{port}/settings/usb-otg",
+            data=request_body,
+            method="POST",
+        )
+        with urllib.request.urlopen(second_request, timeout=1.0) as response:
+            assert response.status == 200
+            params = parse_qs(urlparse(response.url).query)
+            assert params["message"] == ["Settings saved"]
+
+        assert not second_export_started.wait(timeout=0.2)
+    finally:
+        release_export.set()
+
+    assert export_finished.wait(timeout=2.0)
+    assert export_calls == [(config_path, None)]
+
+
+def test_settings_usb_otg_post_rejects_non_numeric_values_without_snapshot(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode(
+            {
+                "usb_otg_enabled": "on",
+                "image_width_px": "wide",
+                "export_fleet_trend": "on",
+                "fleet_trend_metrics": "soc",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    try:
+        urllib.request.urlopen(request, timeout=5.0)
+    except urllib.error.HTTPError as error:
+        html = error.read().decode("utf-8")
+        assert error.code == 400
+    else:  # pragma: no cover - the request must fail validation
+        raise AssertionError("USB OTG settings POST unexpectedly succeeded")
+
+    assert "Validation failed: USB OTG settings values must be numeric" in html
+
+
+def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    export_finished = threading.Event()
+    marker_calls: list[Path | None] = []
+
+    update_force_values: list[object] = []
+
+    def _update_drive(**kwargs: object) -> USBOTGExportResult:
+        update_force_values.append(kwargs.get("force"))
+        progress = kwargs.get("progress")
+        if callable(progress):
+            progress(0, 3, "Preparing USB OTG frame image export")
+            progress(1, 3, "Rendered frame image")
+            progress(2, 3, "Writing images to USB OTG drive")
+            progress(3, 3, "USB OTG frame images exported")
+        export_finished.set()
+        return USBOTGExportResult(exported=True, reason="exported")
+
+    def _mark_exported(**kwargs: object) -> None:
+        state_dir = kwargs.get("state_dir")
+        marker_calls.append(state_dir if isinstance(state_dir, Path) else None)
+
+    monkeypatch.setattr("bm_gateway.web.update_usb_otg_drive", _update_drive)
+    monkeypatch.setattr("bm_gateway.web.mark_usb_otg_exported", _mark_exported)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/actions/export-usb-otg-images",
+        data=b"",
+        method="POST",
+    )
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        html = response.read().decode("utf-8")
+        assert response.status == 200
+        assert urlparse(response.url).path == "/usb-otg-export/progress"
+        assert "Frame Image Export" in html
+
+    assert export_finished.wait(timeout=1.0)
+    assert marker_calls == [tmp_path]
+    assert update_force_values == [True]
+
+    status_request = urllib.request.Request(
+        f"http://{host}:{port}/api/usb-otg-export/status",
+        headers={"Accept-Language": "it"},
+    )
+    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    assert payload["status"] == "completed"
+    assert payload["completed"] == 3
+    assert payload["total"] == 3
+    assert payload["percent"] == 100
+    assert payload["message"] == "Immagini cornice USB OTG esportate"
 
 
 def test_compact_mac_address_is_normalized() -> None:
@@ -1211,6 +1936,10 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Restart bm-gateway service" in html
     assert "Restart Bluetooth service" in html
     assert "Reboot Raspberry Pi" in html
+    assert "Reboot the Raspberry Pi now?" in html
+    assert "Shut Down Raspberry Pi" in html
+    assert 'action="/actions/shutdown-host"' in html
+    assert "Shut down the Raspberry Pi now?" in html
     assert "Home Assistant MQTT Discovery" in html
     assert "Storage Summary" in html
     assert "Configuration Files" in html
@@ -1227,6 +1956,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     )
     assert html.index('section-title">Home Assistant Settings') < html.index(
         'section-title">Home Assistant MQTT Discovery'
+    )
+    assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
+        'section-title">Web Service'
     )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
@@ -1310,6 +2042,433 @@ def test_render_settings_html_summary_shows_chart_defaults() -> None:
     assert "State of Charge" in html
 
 
+def test_render_settings_html_shows_disabled_usb_otg_export_by_default() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert "USB OTG Image Export" in html
+    assert "USB OTG image export" in html
+    assert "Disabled" in html
+    assert "USB OTG support" in html
+    assert "Installed" in html
+    assert "USB OTG device controller" in html
+    assert "Output size" in html
+    assert "480 x 234 px" in html
+    assert "Output format" in html
+    assert "JPEG" in html
+    assert "Devices per overview image" in html
+    assert "Backing disk image" in html
+
+
+def test_render_settings_html_warns_when_usb_otg_support_not_installed() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=False,
+    )
+
+    assert "USB OTG support was not installed on this system" in html
+    assert "--skip-usb-otg-tools" in html
+    assert "Not installed" in html
+    assert "Prepare USB OTG Mode" not in html
+    assert "Export Frame Images" not in html
+    assert "Export Frame Images Now" not in html
+    assert "Refresh USB OTG Drive" not in html
+
+
+def test_render_settings_html_non_edit_actions_show_usb_otg_drive_actions() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert "Actions" in html
+    assert "Refresh USB OTG Drive" in html
+    assert 'action="/actions/refresh-usb-otg-drive"' in html
+    assert "Export Frame Images" in html
+    assert "Export Frame Images Now" not in html
+    assert 'action="/actions/export-usb-otg-images"' in html
+
+
+def test_render_settings_html_non_edit_header_links_to_diagnostics() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert '<a class="secondary-button" href="/diagnostics">Diagnostics</a>' in html
+    assert "Exit Diagnostics" not in html
+
+
+def test_render_diagnostics_html_embeds_frame_preview() -> None:
+    html = render_diagnostics_html(theme_preference="dark")
+
+    assert "Diagnostics" in html
+    assert '<a class="secondary-button" href="/settings">Back to Settings</a>' in html
+    assert "Frame Preview" in html
+    assert 'target="frame-preview-display"' in html
+    assert '<iframe class="frame-preview-display"' in html
+    assert 'name="frame-preview-display"' in html
+    assert 'src="/frame/fleet-trend?metric=soc"' in html
+    assert 'title="Frame Preview"' not in html
+    assert 'aria-label="Frame Preview"' in html
+    assert "Fleet Trend SoC" in html
+    assert ">Fleet Trend</a>" not in html
+    assert 'href="/frame/battery-overview?page=1"' in html
+    assert "Battery Overview Page 1" in html
+
+
+def test_render_diagnostics_html_lists_only_enabled_fleet_metric_previews() -> None:
+    html = render_diagnostics_html(
+        theme_preference="dark",
+        fleet_trend_metrics=("voltage", "soc", "temperature"),
+    )
+
+    assert html.index("Fleet Trend SoC") < html.index("Fleet Trend Temperature")
+    assert html.index("Fleet Trend Temperature") < html.index("Fleet Trend Voltage")
+    assert html.count("Fleet Trend SoC") == 1
+    assert html.count("Fleet Trend Temperature") == 1
+    assert html.count("Fleet Trend Voltage") == 1
+    assert ">Fleet Trend</a>" not in html
+
+
+def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
+    html = render_frame_fleet_trend_html(
+        chart_points=[],
+        legend=[("Spare NLP5", "#f0b429")],
+        show_chart_markers=False,
+        appearance="dark",
+        default_chart_range="7",
+        default_chart_metric="soc",
+        width=480,
+        height=234,
+    )
+
+    assert "<span>Fleet Trend</span> · <span>SoC</span> · <span>7 days</span>" in html
+    assert "<span>Latest:</span> <span>No data</span>" in html
+    assert "Spare NLP5" in html
+    assert 'id="frame-fleet-trend-chart"' in html
+    assert 'class="bottom-nav"' not in html
+    assert 'class="page-shell"' not in html
+    assert "pointer-events: none;" in html
+    assert "background: var(--bg-app);" in html
+    assert 'class="chart-frame" id="frame-fleet-trend-chart" data-chart-compact="true"' in html
+    assert ".frame-capture-root .chart-nav-arrow" in html
+    assert ".frame-capture-root .chart-tooltip" in html
+    assert ".frame-capture-root .chart-meta" in html
+    assert "inset: 30px 0 0;" in html
+    assert "padding: 0;" in html
+    assert "background: transparent;" in html
+    assert "top: 10px;" in html
+    assert "left: 5px;" in html
+    assert "const padLeft = isCompact ? 30 : 68;" in html
+    assert "const padBottom = isCompact ? 20 : 44;" in html
+    assert "line-height: 1.25;" in html
+    assert "font-size: 8px;" in html
+    assert "border: 0;" in html
+    assert "display: none;" in html
+    assert "--frame-width: 480px;" in html
+    assert "--frame-height: 234px;" in html
+
+
+def test_render_frame_fleet_trend_html_localizes_latest_label_to_italian() -> None:
+    html = render_frame_fleet_trend_html(
+        chart_points=[
+            {
+                "ts": "2026-04-24T01:05:00+02:00",
+                "series": "Spare NLP20",
+                "series_color": "#ec5c86",
+                "soc": 91,
+                "voltage": 13.31,
+                "temperature": 24.0,
+            },
+        ],
+        legend=[("Spare NLP20", "#ec5c86")],
+        show_chart_markers=False,
+        appearance="dark",
+        default_chart_range="30",
+        default_chart_metric="voltage",
+        width=480,
+        height=234,
+        language="it",
+    )
+
+    assert "Andamento flotta" in html
+    assert "Voltaggio" in html
+    assert "30 giorni" in html
+    assert "Ultimo:" in html
+    assert "Latest:" not in html
+
+
+def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_values() -> None:
+    html = render_frame_fleet_trend_html(
+        chart_points=[
+            {
+                "ts": "2026-04-24T01:00:00+02:00",
+                "series": "Spare NLP5",
+                "series_color": "#f0b429",
+                "soc": 88,
+                "voltage": 13.29,
+                "temperature": 23.0,
+            },
+            {
+                "ts": "2026-04-24T01:05:00+02:00",
+                "series": "Spare NLP20",
+                "series_color": "#ec5c86",
+                "soc": 91,
+                "voltage": 13.31,
+                "temperature": 24.0,
+            },
+        ],
+        legend=[("Spare NLP5", "#f0b429"), ("Spare NLP20", "#ec5c86")],
+        show_chart_markers=False,
+        appearance="dark",
+        default_chart_range="30",
+        default_chart_metric="temperature",
+        width=480,
+        height=234,
+    )
+
+    assert "<span>Fleet Trend</span> · <span>Temperature</span> · <span>30 days</span>" in html
+    assert "<span>Latest:</span> <span>2026-04-24 01:05</span>" in html
+    assert "Spare NLP5 23.0°C" in html
+    assert "Spare NLP20 24.0°C" in html
+    assert 'data-metric="temperature" class="active"' in html
+    assert 'data-range="30" data-range-label="30 days" class="active"' in html
+
+
+def test_render_frame_fleet_trend_html_keeps_duplicate_device_names_distinct() -> None:
+    html = render_frame_fleet_trend_html(
+        chart_points=[
+            {
+                "ts": "2026-04-24T01:00:00+02:00",
+                "series": "Spare",
+                "series_id": "spare_nlp5",
+                "series_color": "#f0b429",
+                "soc": 88,
+                "voltage": 13.29,
+                "temperature": 23.0,
+            },
+            {
+                "ts": "2026-04-24T01:05:00+02:00",
+                "series": "Spare",
+                "series_id": "spare_nlp20",
+                "series_color": "#ec5c86",
+                "soc": 91,
+                "voltage": 13.31,
+                "temperature": 27.0,
+            },
+        ],
+        legend=[("Spare", "#f0b429"), ("Spare", "#ec5c86")],
+        show_chart_markers=False,
+        appearance="dark",
+        default_chart_range="30",
+        default_chart_metric="temperature",
+        width=480,
+        height=234,
+    )
+
+    assert "Spare 23.0°C" in html
+    assert "Spare 27.0°C" in html
+
+
+def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "spare_nlp5",
+                    "name": "Spare NLP5",
+                    "soc": 91,
+                    "voltage": 13.1,
+                    "temperature": 22.5,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "state": "normal",
+                    "connected": True,
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "spare_nlp5",
+                "name": "Spare NLP5",
+                "color_key": "amber",
+                "icon_key": "lead_acid_battery",
+            }
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
+    assert "<span>2026-04-24 03:12</span>" in html
+    assert "Spare NLP5" in html
+    assert "frame-battery-card" in html
+    assert "frame-battery-soc" in html
+    assert "91%" in html
+    assert 'class="bottom-nav"' not in html
+
+
+def test_render_frame_battery_overview_html_uses_configured_enabled_devices_only() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "enabled_battery",
+                    "name": "Enabled Runtime Name",
+                    "soc": 91,
+                    "voltage": 13.1,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "enabled": True,
+                },
+                {
+                    "id": "disabled_battery",
+                    "name": "Disabled Runtime Name",
+                    "soc": 44,
+                    "voltage": 12.1,
+                    "last_seen": "2026-04-24T03:13:24+02:00",
+                    "enabled": True,
+                },
+                {
+                    "id": "removed_battery",
+                    "name": "Removed Runtime Name",
+                    "soc": 55,
+                    "voltage": 12.4,
+                    "last_seen": "2026-04-24T03:14:24+02:00",
+                    "enabled": True,
+                },
+            ]
+        },
+        devices=[
+            {"id": "enabled_battery", "name": "Enabled Config Name", "enabled": True},
+            {"id": "disabled_battery", "name": "Disabled Config Name", "enabled": False},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "Enabled Config Name" in html
+    assert "91%" in html
+    assert "Disabled Config Name" not in html
+    assert "Disabled Runtime Name" not in html
+    assert "Removed Runtime Name" not in html
+
+
+def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
+                {
+                    "id": "two",
+                    "name": "Spare NLP20",
+                    "soc": 88,
+                    "voltage": 13.29,
+                    "last_seen": "2026-04-24T03:20:00+02:00",
+                },
+            ]
+        },
+        devices=[
+            {"id": "one", "name": "Spare NLP5", "enabled": True},
+            {"id": "two", "name": "Spare NLP20", "enabled": True},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "display: block;" in html
+    assert "frame-battery-stage" in html
+    assert "--frame-overview-card-size: 208px;" in html
+    assert "position: absolute;" in html
+    assert "width: 208px; height: 208px;" in html
+    assert "left: 17.0px; top: 22.0px;" in html
+    assert "conic-gradient(" in html
+    assert "font-size: 12px;" in html
+    assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
+    assert "<span>2026-04-24 03:20</span>" in html
+
+
+def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, usb_otg=replace(config.usb_otg, enabled=True))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_device_controller_detected=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert "USB OTG image export is enabled" in html
+    assert "no USB OTG device controller is currently detected" in html
+    assert "Zero USB Plug" in html
+
+
+def test_render_settings_html_edit_mode_shows_prepare_when_usb_otg_boot_mode_not_prepared() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_boot_mode_prepared=False,
+        usb_otg_support_installed=True,
+    )
+
+    assert "Prepare USB OTG Mode" in html
+    assert 'action="/actions/prepare-usb-otg-mode"' in html
+    assert "Restore USB Host Mode" not in html
+    assert 'action="/actions/restore-usb-host-mode"' not in html
+
+
+def test_render_settings_html_edit_mode_shows_restore_when_usb_otg_boot_mode_prepared() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_boot_mode_prepared=True,
+        usb_otg_support_installed=True,
+    )
+
+    assert "Prepare USB OTG Mode" not in html
+    assert 'action="/actions/prepare-usb-otg-mode"' not in html
+    assert "Restore USB Host Mode" in html
+    assert 'action="/actions/restore-usb-host-mode"' in html
+    assert "Refresh USB OTG Drive" not in html
+    assert 'action="/actions/refresh-usb-otg-drive"' not in html
+    assert "Export Frame Images" not in html
+    assert 'action="/actions/export-usb-otg-images"' not in html
+
+
 def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     html = render_settings_html(
@@ -1343,13 +2502,19 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert "Home Assistant Settings" in html
     assert "Web Service" in html
     assert "Display Settings" in html
+    assert "USB OTG Image Export" in html
     assert "Save gateway settings" in html
     assert "Save MQTT settings" in html
     assert "Save Home Assistant settings" in html
     assert "Save web service settings" in html
     assert "Save display settings" in html
+    assert "Save USB OTG settings" in html
     assert 'name="gateway_name"' in html
     assert 'name="timezone"' in html
+    assert '<select id="timezone-input" name="timezone" autocomplete="off" translate="no">' in html
+    assert '<input id="timezone-input" type="text"' not in html
+    assert '<option value="Europe/Rome" selected>Europe/Rome</option>' in html
+    assert '<option value="UTC">UTC</option>' in html
     assert 'name="mqtt_host"' in html
     assert 'name="mqtt_port"' in html
     assert 'name="mqtt_username"' in html
@@ -1361,6 +2526,18 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="home_assistant_status_topic"' in html
     assert 'name="home_assistant_gateway_device_id"' in html
     assert 'name="web_host"' in html
+    assert 'name="usb_otg_enabled"' in html
+    assert 'name="image_width_px"' in html
+    assert 'name="image_height_px"' in html
+    assert 'name="image_format"' in html
+    assert 'name="appearance"' in html
+    assert 'name="refresh_interval_seconds"' in html
+    assert 'name="overview_devices_per_image"' in html
+    assert 'name="export_battery_overview"' in html
+    assert 'name="export_fleet_trend"' in html
+    assert 'name="fleet_trend_metrics"' in html
+    assert 'name="fleet_trend_range"' in html
+    assert 'name="fleet_trend_device_ids"' in html
     assert 'name="web_enabled"' in html
     assert 'name="visible_device_limit"' in html
     assert 'name="bluetooth_adapter"' in html
@@ -1807,6 +2984,16 @@ def test_base_css_exposes_theme_preference_selectors() -> None:
     assert 'body[data-theme-preference="dark"]' in css
     assert 'body[data-theme-preference="system"]' in css
     assert "@media (prefers-color-scheme: dark)" in css
+
+
+def test_base_css_scales_frame_preview_without_clipping() -> None:
+    css = base_css()
+
+    assert ".frame-preview-display {" in css
+    assert "width: min(100%, 480px);" in css
+    assert "aspect-ratio: 480 / 234;" in css
+    assert "height: auto;" in css
+    assert "background: var(--bg-app);" in css
 
 
 def test_base_css_overrides_shared_icon_badge_treatment_in_dark_modes() -> None:
@@ -2331,6 +3518,7 @@ def test_chart_points_include_daily_temperature_rollups() -> None:
             "soc": 91,
             "temperature": 22.4,
             "series": "Series",
+            "series_id": "Series",
             "series_color": "#4f8df7",
         }
     ]
@@ -2941,6 +4129,53 @@ def test_update_device_from_form_renames_device_id_and_history(tmp_path: Path) -
     assert fetch_recent_history(database_path, device_id="starter_battery", limit=10)
 
 
+def test_update_device_from_form_skips_history_rewrite_for_non_history_fields(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+    database_path = tmp_path / "gateway.db"
+    rewrite_calls: list[dict[str, object]] = []
+
+    def _rename_history_device_id(**kwargs: object) -> None:
+        rewrite_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.rename_history_device_id",
+        _rename_history_device_id,
+    )
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        database_path=database_path,
+        device_id="bm200_house",
+        new_device_id="bm200_house",
+        device_type="bm200",
+        device_name="BM200 House",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="orange",
+        installed_in_vehicle=True,
+        vehicle_type="car",
+        battery_brand="NOCO",
+        battery_model="NLP20",
+        battery_nominal_voltage=12,
+        battery_capacity_ah=7.0,
+        battery_production_year=2025,
+    )
+
+    assert errors == []
+    assert rewrite_calls == []
+    assert not database_path.exists()
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert devices[0].color_key == "orange"
+    assert devices[0].vehicle_type == "car"
+
+
 def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> None:
     config_path = _write_edit_device_config(tmp_path)
 
@@ -2969,6 +4204,52 @@ def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> 
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
     assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+
+
+def test_devices_update_redirect_uses_normalized_renamed_device_id(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/devices/update",
+        data=urllib.parse.urlencode(
+            {
+                "old_device_id": "bm200_house",
+                "device_id": " starter_battery ",
+                "device_type": "bm200",
+                "device_name": "Starter Battery",
+                "device_mac": "AA:BB:CC:DD:EE:01",
+                "battery_family": "lead_acid",
+                "battery_profile": "regular_lead_acid",
+                "custom_soc_mode": "intelligent_algorithm",
+                "color_key": "green",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        params = parse_qs(urlparse(response.url).query)
+        assert response.status == 200
+        assert urlparse(response.url).path == "/devices/edit"
+        assert params["device_id"] == ["starter_battery"]
+        assert params["message"] == ["Device saved"]
 
 
 def test_update_device_from_form_rejects_history_collision(tmp_path: Path) -> None:

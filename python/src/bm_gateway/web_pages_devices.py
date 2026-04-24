@@ -24,6 +24,7 @@ def render_devices_html(
     devices: list[dict[str, object]],
     message: str = "",
     theme_preference: str = "system",
+    language: str = "en",
 ) -> str:
     version_label = display_version()
     primary_device_id = shared._primary_device_id(snapshot, devices)
@@ -90,6 +91,7 @@ def render_devices_html(
         primary_device_id=primary_device_id,
         version_label=version_label,
         theme_preference=theme_preference,
+        language=language,
     )
 
 
@@ -99,6 +101,7 @@ def render_add_device_html(
     theme_preference: str = "system",
     selected_color_key: str = "green",
     reserved_color_keys: set[str] | None = None,
+    language: str = "en",
 ) -> str:
     banner = banner_strip(html.escape(message), kind="warning") if message else ""
     body = (
@@ -127,6 +130,7 @@ def render_add_device_html(
         primary_device_id="",
         version_label=display_version(),
         theme_preference=theme_preference,
+        language=language,
         script=shared._battery_form_script(),
     )
 
@@ -138,6 +142,7 @@ def render_edit_device_html(
     theme_preference: str = "system",
     reserved_color_keys: set[str] | None = None,
     original_device_id: str | None = None,
+    language: str = "en",
 ) -> str:
     device_id = str(device.get("id", ""))
     hidden_device_id = original_device_id if original_device_id is not None else device_id
@@ -318,5 +323,6 @@ def render_edit_device_html(
         primary_device_id=device_id,
         version_label=display_version(),
         theme_preference=theme_preference,
+        language=language,
         script=shared._battery_form_script(),
     )

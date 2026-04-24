@@ -27,10 +27,72 @@ def render_home_html(
     appearance: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     version_label = display_version()
     resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
     primary_device_id = shared._primary_device_id(snapshot, devices)
+    overview_track_id = "home-overview-track"
+    overview_scroller = home_overview_scroller_html(
+        snapshot=snapshot,
+        devices=devices,
+        visible_device_limit=visible_device_limit,
+        track_id=overview_track_id,
+        include_controls=True,
+    )
+    chart_id = "home-overview-chart"
+    body = (
+        top_header(
+            title="BMGateway",
+            right=(
+                f'<div class="header-build-badge" translate="no">{html.escape(version_label)}</div>'
+            ),
+        )
+        + section_card(
+            title="Battery Overview",
+            subtitle="Touch the charge circle to open device details.",
+            body=overview_scroller,
+        )
+        + (
+            '<section class="home-add-device-strip">'
+            '<a class="primary-button icon-button home-add-device-button" href="/devices/new">'
+            '<span class="button-icon" aria-hidden="true">+</span>'
+            "<span>Add Device</span></a>"
+            "</section>"
+        )
+        + chart_card(
+            chart_id=chart_id,
+            title="Fleet Trend",
+            subtitle="",
+            points=chart_points,
+            range_options=shared._visible_chart_range_options(),
+            default_range=resolved_default_chart_range,
+            default_metric=default_chart_metric,
+            legend=legend or [("No devices", "#95a3b8")],
+            show_markers=show_chart_markers,
+        )
+    )
+    return app_document(
+        title="BMGateway",
+        body=body,
+        active_nav="home",
+        primary_device_id=primary_device_id,
+        version_label=version_label,
+        theme_preference=appearance,
+        language=language,
+        script=chart_script(chart_id, language=language)
+        + shared._home_overview_script(overview_track_id),
+    )
+
+
+def home_overview_scroller_html(
+    *,
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+    visible_device_limit: int,
+    track_id: str,
+    include_controls: bool,
+) -> str:
     snapshot_devices = shared._merge_snapshot_devices(snapshot, devices)
     device_cards: list[str] = []
     for index, device in enumerate(snapshot_devices):
@@ -98,7 +160,6 @@ def render_home_html(
         device_slots=visible_device_limit,
         add_card="",
     )
-    overview_track_id = "home-overview-track"
     is_paginated = len(overview_pages) > 1
     overview_pages_html = "".join(
         (
@@ -108,63 +169,22 @@ def render_home_html(
         for page in overview_pages
     )
     overview_controls = ""
-    if is_paginated:
+    if include_controls and is_paginated:
         overview_controls = (
             '<div class="home-overview-controls">'
             f'<button type="button" class="ghost-button home-overview-arrow" '
-            f'data-overview-target="{overview_track_id}" data-direction="previous" '
+            f'data-overview-target="{track_id}" data-direction="previous" '
             'aria-label="Show previous home cards">Prev</button>'
             f'<button type="button" class="ghost-button home-overview-arrow" '
-            f'data-overview-target="{overview_track_id}" data-direction="next" '
+            f'data-overview-target="{track_id}" data-direction="next" '
             'aria-label="Show next home cards">Next</button>'
             "</div>"
         )
-    overview_scroller = (
+    return (
         overview_controls
-        + f'<div id="{overview_track_id}" class="home-overview-scroller'
+        + f'<div id="{track_id}" class="home-overview-scroller'
         + ("" if is_paginated else " is-single-page")
         + f'">{overview_pages_html}</div>'
-    )
-    chart_id = "home-overview-chart"
-    body = (
-        top_header(
-            title="BMGateway",
-            right=(
-                f'<div class="header-build-badge" translate="no">{html.escape(version_label)}</div>'
-            ),
-        )
-        + section_card(
-            title="Battery Overview",
-            subtitle="Touch the charge circle to open device details.",
-            body=overview_scroller,
-        )
-        + (
-            '<section class="home-add-device-strip">'
-            '<a class="primary-button icon-button home-add-device-button" href="/devices/new">'
-            '<span class="button-icon" aria-hidden="true">+</span>'
-            "<span>Add Device</span></a>"
-            "</section>"
-        )
-        + chart_card(
-            chart_id=chart_id,
-            title="Fleet Trend",
-            subtitle="",
-            points=chart_points,
-            range_options=shared._visible_chart_range_options(),
-            default_range=resolved_default_chart_range,
-            default_metric=default_chart_metric,
-            legend=legend or [("No devices", "#95a3b8")],
-            show_markers=show_chart_markers,
-        )
-    )
-    return app_document(
-        title="BMGateway",
-        body=body,
-        active_nav="home",
-        primary_device_id=primary_device_id,
-        version_label=version_label,
-        theme_preference=appearance,
-        script=chart_script(chart_id) + shared._home_overview_script(overview_track_id),
     )
 
 

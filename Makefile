@@ -15,6 +15,7 @@ WEB_INSTALL_PATH ?= $(BINDIR)/$(WEB_CLI_NAME)
 APP_HOME ?= $(HOME)/.local/share/$(CLI_NAME)
 APP_VENV ?= $(APP_HOME)/venv
 APP_PYTHON ?= $(APP_VENV)/bin/python
+INSTALL_EXTRAS ?= usb-otg
 CONFIG_DIR ?= $(HOME)/.config/$(CONFIG_NAME)
 CONFIG_PATH ?= $(CONFIG_DIR)/config.toml
 DEVICES_PATH ?= $(CONFIG_DIR)/devices.toml
@@ -22,6 +23,10 @@ PYTHON_SRC ?= python/src
 PYTHON_TESTS ?= python/tests
 PYTHON_CONFIG ?= python/config
 MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs python home-assistant rpi-setup web -type f -name '*.md' | sort)
+INSTALL_SPEC := .
+ifneq ($(strip $(INSTALL_EXTRAS)),)
+INSTALL_SPEC := .[$(INSTALL_EXTRAS)]
+endif
 
 .DEFAULT_GOAL := help
 
@@ -66,7 +71,7 @@ install: install-deps ## Install a standalone user-facing runtime
 	else \
 		echo "Reusing existing runtime at $(APP_VENV)"; \
 	fi
-	@"$(UV)" pip install --python "$(APP_PYTHON)" .
+	@"$(UV)" pip install --python "$(APP_PYTHON)" "$(INSTALL_SPEC)"
 	@$(MAKE) install-link install-config
 
 install-dev: check-deps sync ## Link the dev environment CLI into ~/.local/bin

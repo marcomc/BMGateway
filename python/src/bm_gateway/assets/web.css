@@ -1388,6 +1388,15 @@ details summary::-webkit-details-marker { display: none; }
     color-mix(in srgb, var(--accent-yellow-soft) 36%, var(--bg-surface))
   );
 }
+.banner-strip.error {
+  border-color: rgba(239, 68, 68, 0.34);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, rgba(239, 68, 68, 0.16) 62%, var(--bg-elevated)),
+    color-mix(in srgb, rgba(239, 68, 68, 0.1) 36%, var(--bg-surface))
+  );
+  color: var(--state-error);
+}
 .home-add-device-strip {
   display: flex;
   align-items: stretch;
@@ -2040,6 +2049,32 @@ details summary::-webkit-details-marker { display: none; }
 }
 .nav-link.active { color: var(--accent-green); }
 .nav-link:hover { text-decoration: none; color: var(--text-primary); }
+
+.frame-preview-tool {
+  display: grid;
+  gap: 1rem;
+}
+
+.frame-preview-shell {
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  padding: 1rem;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--bg-app);
+}
+
+.frame-preview-display {
+  width: min(100%, 480px);
+  aspect-ratio: 480 / 234;
+  height: auto;
+  max-width: 100%;
+  border: 1px solid var(--border-muted);
+  border-radius: 4px;
+  background: #000;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .skip-link,
   .primary-button,

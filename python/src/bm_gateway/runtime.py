@@ -302,6 +302,7 @@ def build_fake_snapshot(config: AppConfig, devices: list[Device]) -> GatewaySnap
         home_assistant=config.home_assistant,
         web=config.web,
         retention=config.retention,
+        usb_otg=config.usb_otg,
         verbose=config.verbose,
     )
     return build_snapshot(fake_config, devices)

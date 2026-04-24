@@ -8,6 +8,7 @@ import html
 import json
 from typing import Iterable
 
+from .localization import localize_html, translation_for
 from .web_assets import chart_script_source, web_css_source
 
 
@@ -25,6 +26,7 @@ def app_document(
     theme_preference: str = "",
     head_extra: str = "",
     script: str = "",
+    language: str = "en",
 ) -> str:
     theme_attr = (
         f' data-theme-preference="{html.escape(theme_preference)}"' if theme_preference else ""
@@ -35,7 +37,7 @@ def app_document(
     <link rel="manifest" href="/site.webmanifest">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">"""
-    return f"""<!doctype html>
+    document = f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -59,6 +61,7 @@ def app_document(
   </body>
 </html>
 """
+    return localize_html(document, language)
 
 
 def base_css() -> str:
@@ -527,8 +530,42 @@ def chart_card(
     )
 
 
-def chart_script(*chart_ids: str) -> str:
+def chart_script(*chart_ids: str, language: str = "en") -> str:
     ids = json.dumps(list(chart_ids))
+    translation = translation_for(language)
+    i18n = json.dumps(
+        {
+            key: translation.gettext(key)
+            for key in (
+                "Voltage",
+                "Temperature",
+                "All retained history",
+                "Recent raw",
+                "Selected range",
+                "No retained history for this metric",
+                "Less than 1 day available",
+                "day available",
+                "days available",
+                "month available",
+                "months available",
+                "year available",
+                "years available",
+                "No",
+                "data available for",
+                "Window",
+                "Visible devices",
+                "No usable",
+                "samples in this range",
+                "Showing all available history",
+                "samples",
+                "Average",
+                "Range",
+            )
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
     script = chart_script_source()
     script = script.replace("{ids}", ids).replace("{{", "{").replace("}}", "}")
+    script = script.replace("{i18n}", i18n)
     return script

@@ -21,7 +21,14 @@ from .device_registry import (
     validate_devices,
     write_device_registry,
 )
-from .state_store import history_device_id_exists, rename_history_device_id
+from .models import DeviceReading, GatewaySnapshot
+from .runtime import database_file_path, state_file_path
+from .state_store import (
+    history_device_id_exists,
+    load_snapshot,
+    rename_history_device_id,
+)
+from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
 
 
@@ -33,6 +40,66 @@ def _config_and_registry_texts(config_path: Path) -> tuple[str, str]:
     except Exception:
         devices_text = ""
     return config_text, devices_text
+
+
+def _int_from_snapshot_mapping(
+    mapping: dict[str, object],
+    key: str,
+    default: int = 0,
+) -> int:
+    value = mapping.get(key, default)
+    if not isinstance(value, str | int | float):
+        return default
+    try:
+        return int(value)
+    except ValueError:
+        return default
+
+
+def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapshot:
+    readings: list[DeviceReading] = []
+    snapshot_devices = snapshot.get("devices", [])
+    if isinstance(snapshot_devices, list):
+        for item in snapshot_devices:
+            if not isinstance(item, dict):
+                continue
+            readings.append(
+                DeviceReading(
+                    id=str(item.get("id", "")),
+                    type=str(item.get("type", "bm200")),
+                    name=str(item.get("name") or item.get("id") or "Battery"),
+                    mac=str(item.get("mac", "")),
+                    enabled=bool(item.get("enabled", True)),
+                    connected=bool(item.get("connected", False)),
+                    voltage=float(item.get("voltage", 0.0) or 0.0),
+                    soc=int(float(item.get("soc", 0) or 0)),
+                    temperature=(
+                        float(item["temperature"]) if item.get("temperature") is not None else None
+                    ),
+                    rssi=int(item["rssi"]) if item.get("rssi") is not None else None,
+                    state=str(item.get("state", "unknown")),
+                    error_code=(
+                        str(item["error_code"]) if item.get("error_code") is not None else None
+                    ),
+                    error_detail=(
+                        str(item["error_detail"]) if item.get("error_detail") is not None else None
+                    ),
+                    last_seen=str(item.get("last_seen", snapshot.get("generated_at", ""))),
+                    adapter=str(item.get("adapter", "")),
+                    driver=str(item.get("driver", "")),
+                )
+            )
+    return GatewaySnapshot(
+        generated_at=str(snapshot.get("generated_at", "")),
+        gateway_name=str(snapshot.get("gateway_name", "BMGateway")),
+        active_adapter=str(snapshot.get("active_adapter", "")),
+        mqtt_enabled=bool(snapshot.get("mqtt_enabled", False)),
+        mqtt_connected=bool(snapshot.get("mqtt_connected", False)),
+        devices_total=_int_from_snapshot_mapping(snapshot, "devices_total", len(readings)),
+        devices_online=_int_from_snapshot_mapping(snapshot, "devices_online"),
+        poll_interval_seconds=_int_from_snapshot_mapping(snapshot, "poll_interval_seconds"),
+        devices=readings,
+    )
 
 
 def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml: str) -> list[str]:
@@ -183,17 +250,21 @@ def update_device_from_form(
     resolved_new_device_id = (
         new_device_id.strip() if new_device_id is not None else resolved_device_id
     )
+    resolved_device_type = device_type.strip()
+    resolved_device_name = device_name.strip()
+    resolved_device_mac = normalize_mac_address(device_mac)
     updated_devices: list[Device] = []
-    found = False
+    original_device: Device | None = None
     for device in devices:
         if device.id == resolved_device_id:
+            original_device = device
             updated_devices.append(
                 replace(
                     device,
                     id=resolved_new_device_id,
-                    type=device_type.strip(),
-                    name=device_name.strip(),
-                    mac=normalize_mac_address(device_mac),
+                    type=resolved_device_type,
+                    name=resolved_device_name,
+                    mac=resolved_device_mac,
                     battery_family=battery_family.strip(),
                     battery_profile=battery_profile.strip(),
                     custom_soc_mode=custom_soc_mode.strip(),
@@ -216,10 +287,9 @@ def update_device_from_form(
                     battery_production_year=battery_production_year,
                 )
             )
-            found = True
         else:
             updated_devices.append(device)
-    if not found:
+    if original_device is None:
         return [f"device {resolved_device_id} was not found"]
     errors = validate_devices(updated_devices)
     if errors:
@@ -232,14 +302,20 @@ def update_device_from_form(
         return [
             f"device id {resolved_new_device_id} already has stored history; choose a different id"
         ]
-    if database_path is not None:
+    history_identity_changed = (
+        resolved_new_device_id != resolved_device_id
+        or resolved_device_type != original_device.type
+        or resolved_device_name != original_device.name
+        or resolved_device_mac != normalize_mac_address(original_device.mac)
+    )
+    if database_path is not None and history_identity_changed:
         rename_history_device_id(
             database_path,
             old_device_id=resolved_device_id,
             new_device_id=resolved_new_device_id,
-            device_type=device_type.strip(),
-            name=device_name.strip(),
-            mac=normalize_mac_address(device_mac),
+            device_type=resolved_device_type,
+            name=resolved_device_name,
+            mac=resolved_device_mac,
         )
     write_device_registry(config.device_registry_path, updated_devices)
     return []
@@ -284,6 +360,7 @@ def update_web_preferences(
     appearance: str | None,
     default_chart_range: str | None,
     default_chart_metric: str | None,
+    language: str | None = None,
 ) -> list[str]:
     config = load_config(config_path)
     resolved_enabled = config.web.enabled if web_enabled is None else web_enabled
@@ -302,6 +379,7 @@ def update_web_preferences(
     resolved_default_chart_metric = (
         config.web.default_chart_metric if default_chart_metric is None else default_chart_metric
     )
+    resolved_language = config.web.language if language is None else language
     updated = replace(
         config,
         web=replace(
@@ -314,6 +392,81 @@ def update_web_preferences(
             appearance=resolved_appearance,
             default_chart_range=resolved_default_chart_range,
             default_chart_metric=resolved_default_chart_metric,
+            language=resolved_language,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
+def update_usb_otg_preferences(
+    *,
+    config_path: Path,
+    enabled: bool,
+    image_width_px: int | None = None,
+    image_height_px: int | None = None,
+    image_format: str | None = None,
+    appearance: str | None = None,
+    refresh_interval_seconds: int | None = None,
+    overview_devices_per_image: int | None = None,
+    export_battery_overview: bool | None = None,
+    export_fleet_trend: bool | None = None,
+    fleet_trend_metrics: tuple[str, ...] | None = None,
+    fleet_trend_range: str | None = None,
+    fleet_trend_device_ids: tuple[str, ...] | None = None,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        usb_otg=replace(
+            config.usb_otg,
+            enabled=enabled,
+            image_width_px=(
+                config.usb_otg.image_width_px if image_width_px is None else image_width_px
+            ),
+            image_height_px=(
+                config.usb_otg.image_height_px if image_height_px is None else image_height_px
+            ),
+            image_format=config.usb_otg.image_format if image_format is None else image_format,
+            appearance=config.usb_otg.appearance if appearance is None else appearance,
+            refresh_interval_seconds=(
+                config.usb_otg.refresh_interval_seconds
+                if refresh_interval_seconds is None
+                else refresh_interval_seconds
+            ),
+            overview_devices_per_image=(
+                config.usb_otg.overview_devices_per_image
+                if overview_devices_per_image is None
+                else overview_devices_per_image
+            ),
+            export_battery_overview=(
+                config.usb_otg.export_battery_overview
+                if export_battery_overview is None
+                else export_battery_overview
+            ),
+            export_fleet_trend=(
+                config.usb_otg.export_fleet_trend
+                if export_fleet_trend is None
+                else export_fleet_trend
+            ),
+            fleet_trend_metrics=(
+                config.usb_otg.fleet_trend_metrics
+                if fleet_trend_metrics is None
+                else fleet_trend_metrics
+            ),
+            fleet_trend_range=(
+                config.usb_otg.fleet_trend_range if fleet_trend_range is None else fleet_trend_range
+            ),
+            fleet_trend_device_ids=(
+                config.usb_otg.fleet_trend_device_ids
+                if fleet_trend_device_ids is None
+                else fleet_trend_device_ids
+            ),
         ),
     )
     from .config import validate_config
@@ -503,9 +656,96 @@ def restart_system_service(service_name: str) -> subprocess.CompletedProcess[str
     )
 
 
+def _usb_otg_boot_mode_command(action: str) -> list[str]:
+    return ["sudo", "-n", "/usr/local/bin/bm-gateway-usb-otg-boot-mode", action]
+
+
+def _usb_otg_drive_helper_command(config_path: Path, action: str) -> list[str]:
+    config = load_config(config_path)
+    return [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-frame-test",
+        action,
+        "--image-path",
+        config.usb_otg.image_path,
+        "--gadget-name",
+        config.usb_otg.gadget_name,
+    ]
+
+
+def prepare_usb_otg_boot_mode() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _usb_otg_boot_mode_command("prepare"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def restore_usb_otg_boot_mode() -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _usb_otg_boot_mode_command("restore"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def refresh_usb_otg_drive(config_path: Path) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        _usb_otg_drive_helper_command(config_path, "refresh"),
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+def export_usb_otg_images_now(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> subprocess.CompletedProcess[str]:
+    command = ["export-usb-otg-images"]
+    try:
+        config = load_config(config_path)
+        devices = load_device_registry(config.device_registry_path)
+        snapshot_path = state_file_path(config, state_dir=state_dir)
+        empty_snapshot: dict[str, object] = {"generated_at": "", "devices": []}
+        snapshot_mapping = (
+            load_snapshot(snapshot_path) if snapshot_path.exists() else empty_snapshot
+        )
+        result = update_usb_otg_drive(
+            config=config,
+            devices=devices,
+            snapshot=_gateway_snapshot_from_mapping(snapshot_mapping),
+            database_path=database_file_path(config, state_dir=state_dir),
+            force=True,
+        )
+        if result.exported:
+            mark_usb_otg_exported(config=config, state_dir=state_dir)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        return subprocess.CompletedProcess(command, 1, "", result.reason)
+    except Exception as exc:  # pragma: no cover - defensive web action boundary
+        detail = str(exc) or exc.__class__.__name__
+        return subprocess.CompletedProcess(command, 1, "", detail)
+
+
 def schedule_host_reboot() -> None:
     subprocess.Popen(  # noqa: S603
         ["/bin/sh", "-lc", "sleep 1 && sudo -n systemctl reboot"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+
+
+def schedule_host_shutdown() -> None:
+    subprocess.Popen(  # noqa: S603
+        ["/bin/sh", "-lc", "sleep 1 && sudo -n systemctl poweroff"],
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,

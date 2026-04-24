@@ -46,6 +46,13 @@ At the start of every new AI agent chat for this repository, read:
   `make dev-deploy TARGET=admin@host` from the repository root.
 - Keep remote dev deploy guidance generic in repo docs; do not commit personal
   hostnames.
+- Treat localization as all-language work. When asked to update localization,
+  update every supported locale catalog, not only the language mentioned in the
+  request.
+- Whenever adding or changing user-facing UI text, labels, options,
+  descriptions, errors, generated frame output, or other visible interface
+  strings, wire the text through the localization system and update the locale
+  catalogs in the same change.
 
 ## Live Validation Rules
 

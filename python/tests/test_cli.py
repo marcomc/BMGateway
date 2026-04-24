@@ -229,6 +229,44 @@ def test_run_once_writes_snapshot_and_emits_json(
     assert (state_dir / "runtime" / "latest_snapshot.json").exists()
 
 
+def test_run_dry_run_export_now_skips_usb_otg_drive_update(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    update_calls: list[object] = []
+    marker_calls: list[object] = []
+
+    def _update_drive(**kwargs: object) -> object:
+        update_calls.append(kwargs)
+        raise AssertionError("dry-run must not update the USB OTG drive")
+
+    def _mark_exported(**kwargs: object) -> None:
+        marker_calls.append(kwargs)
+
+    monkeypatch.setattr("bm_gateway.usb_otg_export.update_usb_otg_drive", _update_drive)
+    monkeypatch.setattr("bm_gateway.usb_otg_export.mark_usb_otg_exported", _mark_exported)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--dry-run",
+            "--export-usb-otg-now",
+            "--state-dir",
+            str(state_dir),
+        ]
+    )
+
+    assert result == 0
+    assert update_calls == []
+    assert marker_calls == []
+    assert (state_dir / "runtime" / "latest_snapshot.json").exists()
+
+
 def test_bm_gateway_main_help_does_not_advertise_web_commands(
     capsys: pytest.CaptureFixture[str],
 ) -> None:

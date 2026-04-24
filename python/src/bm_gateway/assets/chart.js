@@ -1,12 +1,14 @@
 <script>
 (() => {{
   const chartIds = {ids};
+  const I18N = {i18n};
+  const t = (key) => I18N[key] || key;
   const themeStyles = window.getComputedStyle(document.body);
   const themeValue = (name, fallback) => themeStyles.getPropertyValue(name).trim() || fallback;
   const METRICS = {{
-    voltage: {{ label: "Voltage", color: "#4f8df7", format: (value) => `${{value.toFixed(2)}} V` }},
+    voltage: {{ label: t("Voltage"), color: "#4f8df7", format: (value) => `${{value.toFixed(2)}} V` }},
     soc: {{ label: "SoC", color: "#17c45a", format: (value) => `${{value.toFixed(0)}}%` }},
-    temperature: {{ label: "Temperature", color: "#9a57f5", format: (value) => `${{value.toFixed(1)}} C` }},
+    temperature: {{ label: t("Temperature"), color: "#9a57f5", format: (value) => `${{value.toFixed(1)}} C` }},
   }};
   const AXIS_FORMATTERS = {{
     time: new Intl.DateTimeFormat(undefined, {{ hour: "2-digit", minute: "2-digit" }}),
@@ -140,35 +142,35 @@
   }}
   function describeWindow(rangeValue, rangeLabel) {{
     if (rangeValue === "all") {{
-      return "All retained history";
+      return t("All retained history");
     }}
     if (rangeValue === "raw") {{
-      return rangeLabel || "Recent raw";
+      return rangeLabel || t("Recent raw");
     }}
-    return rangeLabel || "Selected range";
+    return rangeLabel || t("Selected range");
   }}
   function summarizeCoverage(points, metric) {{
     const usable = points.filter((point) => typeof point[metric] === "number");
     const timestamps = usable.map((point) => parseTime(point.ts)).filter((point) => point !== null);
     if (timestamps.length === 0) {{
-      return "No retained history for this metric";
+      return t("No retained history for this metric");
     }}
     const earliest = Math.min(...timestamps);
     const latest = Math.max(...timestamps);
     const spanMs = Math.max(latest - earliest, 0);
     if (spanMs < 36 * 60 * 60 * 1000) {{
-      return "Less than 1 day available";
+      return t("Less than 1 day available");
     }}
     const spanDays = Math.max(1, Math.round(spanMs / (24 * 60 * 60 * 1000)));
     if (spanDays < 45) {{
-      return `${{spanDays}} days available`;
+      return `${{spanDays}} ${{spanDays === 1 ? t("day available") : t("days available")}}`;
     }}
     const spanMonths = Math.max(1, Math.round(spanDays / 30));
     if (spanMonths < 24) {{
-      return `${{spanMonths}} months available`;
+      return `${{spanMonths}} ${{spanMonths === 1 ? t("month available") : t("months available")}}`;
     }}
     const spanYears = Math.max(1, Math.round(spanDays / 365));
-    return `${{spanYears}} years available`;
+    return `${{spanYears}} ${{spanYears === 1 ? t("year available") : t("years available")}}`;
   }}
   function metricBounds(metric, values) {{
     if (metric === "soc") {{
@@ -192,7 +194,7 @@
     const usable = points.filter((point) => typeof point[metric] === "number");
     if (usable.length === 0) {{
       return {{
-        svg: '<div class="chart-empty">No ' + METRICS[metric].label + ' data available for ' + windowLabel + '.</div>',
+        svg: '<div class="chart-empty">' + t("No") + ' ' + METRICS[metric].label.toLowerCase() + ' ' + t("data available for") + ' ' + windowLabel + '.</div>',
         coords: [],
         width: 960,
         height: 360,
@@ -200,10 +202,11 @@
     }}
     const width = 960;
     const height = 360;
-    const padLeft = 68;
-    const padRight = 18;
-    const padTop = 18;
-    const padBottom = 44;
+    const isCompact = document.getElementById(chartId)?.dataset.chartCompact === "true";
+    const padLeft = isCompact ? 30 : 68;
+    const padRight = isCompact ? 14 : 18;
+    const padTop = isCompact ? 4 : 18;
+    const padBottom = isCompact ? 20 : 44;
     const sortedUsable = [...usable].sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
     const values = sortedUsable.map((point) => point[metric]);
     const bounds = metricBounds(metric, values);
@@ -246,13 +249,13 @@
     const yGuides = Array.from({{ length: 5 }}, (_, index) => {{
       const y = padTop + ((plotHeight / 4) * index);
       const labelValue = maxValue - ((span / 4) * index);
-      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="${{chartGrid}}" stroke-width="1"/>\n<text x="10" y="${{(y + 4).toFixed(1)}}" fill="${{chartAxis}}" font-size="12">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
+      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="${{chartGrid}}" stroke-width="1"/>\n<text x="${{isCompact ? 2 : 10}}" y="${{(y + 4).toFixed(1)}}" fill="${{chartAxis}}" font-size="${{isCompact ? 10 : 12}}">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
     }}).join("");
     const xIndexes = new Set([0, Math.floor(coords.length / 3), Math.floor((coords.length * 2) / 3), coords.length - 1]);
     const xGuides = coords.filter((_, index) => xIndexes.has(index)).map((point) => `\n<line x1="${{point.x.toFixed(1)}}" y1="${{padTop}}" x2="${{point.x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{chartGrid}}" stroke-dasharray="4 8" stroke-width="1"/>`).join("");
     const xLabels = coords.filter((_, index) => xIndexes.has(index)).map((point) => {{
       const timestamp = parseTime(point.ts) ?? start;
-      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - 12}}" text-anchor="middle" fill="${{chartAxis}}" font-size="12">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
+      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - (isCompact ? 5 : 12)}}" text-anchor="middle" fill="${{chartAxis}}" font-size="${{isCompact ? 10 : 12}}">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
     }}).join("");
     const gapThreshold = Math.max(xSpan / 8, 6 * 60 * 60 * 1000);
     const segmentSeries = (points) => {{
@@ -301,8 +304,11 @@
       }};
     }});
     const overlayId = `${{chartId}}-${{metric}}-overlay`;
+    const crosshairSvg = isCompact
+      ? ""
+      : `\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />`;
     return {{
-      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="22" fill="${{chartSurface}}"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
+      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="${{isCompact ? 12 : 22}}" fill="${{chartSurface}}"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}${{crosshairSvg}}\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
       coords,
       seriesBuckets: bucketList,
       metric,
@@ -537,9 +543,9 @@
       const visibleCount = visibleSeries.size;
       if (usable.length === 0) {{
         meta.innerHTML = [
-          `<span>Window: ${{windowLabel}}</span>`,
-          `<span>Visible devices: ${{visibleCount}}</span>`,
-          `<span>No usable ${{METRICS[currentMetric].label.toLowerCase()}} samples in this range</span>`,
+          `<span>${{t("Window")}}: ${{windowLabel}}</span>`,
+          `<span>${{t("Visible devices")}}: ${{visibleCount}}</span>`,
+          `<span>${{t("No usable")}} ${{METRICS[currentMetric].label.toLowerCase()}} ${{t("samples in this range")}}</span>`,
           `<span>${{coverageLabel}}</span>`
         ].join("");
         hideTooltip(frame);
@@ -549,14 +555,14 @@
       const average = values.reduce((sum, value) => sum + value, 0) / values.length;
       const usesAllAvailable = currentRange !== "all" && currentRange !== "raw" && usable.length === allUsable.length;
       const coverageSummary = usesAllAvailable
-        ? `Showing all available history (${{coverageLabel}})`
+        ? `${{t("Showing all available history")}} (${{coverageLabel}})`
         : coverageLabel;
       meta.innerHTML = [
-        `<span>Window: ${{windowLabel}}</span>`,
-        `<span>Visible devices: ${{visibleCount}}</span>`,
-        `<span>${{METRICS[currentMetric].label}} samples: ${{usable.length}}</span>`,
-        `<span>Average: ${{METRICS[currentMetric].format(average)}}</span>`,
-        `<span>Range: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
+        `<span>${{t("Window")}}: ${{windowLabel}}</span>`,
+        `<span>${{t("Visible devices")}}: ${{visibleCount}}</span>`,
+        `<span>${{METRICS[currentMetric].label}} ${{t("samples")}}: ${{usable.length}}</span>`,
+        `<span>${{t("Average")}}: ${{METRICS[currentMetric].format(average)}}</span>`,
+        `<span>${{t("Range")}}: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
         `<span>${{coverageSummary}}</span>`
       ].join("");
       if (chart.coords.length > 0) {{

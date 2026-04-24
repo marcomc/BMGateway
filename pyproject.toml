@@ -22,8 +22,12 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
   "mypy>=1.11.0",
+  "pillow>=10.4.0",
   "pytest>=8.3.0",
   "ruff>=0.11.0",
+]
+usb-otg = [
+  "pillow>=10.4.0",
 ]
 
 [project.scripts]
@@ -38,6 +42,7 @@ where = ["python/src"]
 
 [tool.setuptools.package-data]
 bm_gateway = ["assets/*.css", "assets/*.js", "assets/*.svg", "assets/*.png", "assets/*.webmanifest"]
+"bm_gateway.locales" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

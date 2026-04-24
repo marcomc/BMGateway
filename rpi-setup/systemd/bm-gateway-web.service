@@ -9,8 +9,7 @@ Environment=BMGATEWAY_CONFIG=/etc/bm-gateway/config.toml
 ExecStart=/usr/local/bin/bm-gateway-web --config ${BMGATEWAY_CONFIG}
 Restart=always
 RestartSec=10
-AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
 User=pi
 Group=pi
 WorkingDirectory=/var/lib/bm-gateway

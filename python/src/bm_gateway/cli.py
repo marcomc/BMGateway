@@ -217,6 +217,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Override the base directory used for runtime state files.",
     )
+    run_parser.add_argument(
+        "--export-usb-otg-now",
+        action="store_true",
+        help="Force a USB OTG frame-image export during this run.",
+    )
 
     return parser
 
@@ -445,6 +450,7 @@ def _handle_run(
     publish_discovery: bool,
     as_json: bool,
     state_dir: Path | None,
+    export_usb_otg_now: bool,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -466,6 +472,25 @@ def _handle_run(
             publish_discovery=publish_discovery,
             state_dir=state_dir,
         )
+        if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
+            from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive
+
+        if not dry_run and (
+            export_usb_otg_now
+            or (config.usb_otg.enabled and export_due(config=config, state_dir=state_dir))
+        ):
+            export_result = update_usb_otg_drive(
+                config=config,
+                devices=devices,
+                snapshot=last_snapshot,
+                database_path=database_file_path(config, state_dir=state_dir),
+                force=export_usb_otg_now,
+            )
+            if export_result.exported:
+                mark_usb_otg_exported(config=config, state_dir=state_dir)
+            elif export_usb_otg_now:
+                print(f"USB OTG image export failed: {export_result.reason}", file=sys.stderr)
+                return 1
         completed += 1
         if iteration_limit is not None and completed >= iteration_limit:
             break
@@ -771,6 +796,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             publish_discovery=bool(args.publish_discovery),
             as_json=bool(args.json),
             state_dir=args.state_dir,
+            export_usb_otg_now=bool(args.export_usb_otg_now),
         )
 
     print(format_main_help())

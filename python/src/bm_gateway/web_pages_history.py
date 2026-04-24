@@ -24,6 +24,7 @@ def render_device_html(
     theme_preference: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     version_label = display_version()
     resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
@@ -157,7 +158,8 @@ def render_device_html(
         active_nav="home",
         version_label=version_label,
         theme_preference=theme_preference,
-        script=chart_script(chart_id),
+        language=language,
+        script=chart_script(chart_id, language=language or "en"),
     )
 
 
@@ -172,6 +174,7 @@ def render_history_html(
     theme_preference: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     version_label = display_version()
     resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
@@ -236,7 +239,8 @@ def render_history_html(
         active_nav="history",
         version_label=version_label,
         theme_preference=theme_preference,
-        script=chart_script(chart_id),
+        language=language,
+        script=chart_script(chart_id, language=language or "en"),
     )
 
 

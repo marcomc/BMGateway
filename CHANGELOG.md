@@ -4,6 +4,91 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.0] - 2026-06-30
+
+### Added
+
+- Added modular web localization with packaged locale catalogs, a Settings
+  language selector, persisted `web.language` config, automatic browser/system
+  language detection by default, and initial support for English, Simplified
+  Chinese, Hindi, Spanish, Arabic, French, Bengali, Portuguese, Russian, Urdu,
+  German, and Italian.
+- Added a Raspberry Pi USB-OTG image-export hardware test helper and
+  Samsung `SPF-71E` compatibility image generator for validating a
+  read-only mass-storage gadget before implementing automated exports.
+- Added a disabled-by-default USB OTG image-export setting with device
+  controller detection, warning text when the gadget path is unavailable, and
+  installer support for USB-OTG helper packages.
+- Added reversible USB OTG boot-mode preparation and restore actions for the
+  Settings page, backed by a root-scoped helper that edits Raspberry Pi boot
+  config with timestamped backups.
+- Added automated USB OTG frame-image export for battery overview pages and a
+  Fleet Trend chart, including configurable output size, format, light/dark
+  appearance, refresh cadence, overview density, and a manual export action.
+- Added USB OTG-specific Fleet Trend frame settings for metric selection,
+  history range, and included devices, independent of the web UI display
+  defaults.
+- Switched USB OTG frame image generation to Chromium screenshots of the hidden
+  frame-render pages so Diagnostics preview and exported drive images share the
+  same renderer.
+- Start USB OTG frame-image regeneration in the background after saving USB OTG
+  image-export settings when export is enabled, so Settings redirects without
+  waiting for screenshots and drive reattachment to finish.
+- Added a USB OTG drive refresh action that reattaches the existing backing
+  disk image without regenerating frame images.
+- Added Settings warnings for aggressive gateway polling intervals below
+  300 seconds and for USB OTG exports that run faster than gateway polling,
+  plus clearer USB OTG `Backing disk image` wording.
+- Added a Settings action to shut down the Raspberry Pi safely from the web UI,
+  plus installer-managed scoped sudo permissions for restart, reboot, and
+  shutdown host-control actions.
+
+### Fixed
+
+- Fixed Raspberry Pi service refreshes so deployments preserve USB OTG Fleet
+  Trend metric, range, and device-selection settings instead of dropping them
+  from `config.toml`.
+- Fixed USB OTG Battery Overview frame captures so overview cards fit inside
+  the exported image and added a latest-sample timestamp to the frame title.
+- Tightened USB OTG Fleet Trend frame captures by removing the outer chart
+  wrapper gap and expanding the plot to the frame edges.
+- Fixed USB OTG Chromium screenshot sizing by compensating for Raspberry Pi
+  headless Chromium's outer-window inset before cropping to the configured
+  frame dimensions.
+- Fixed USB OTG Fleet Trend frame title clipping by giving the compact title
+  line enough vertical room and lowering the frame header while retaining
+  horizontal ellipsis.
+- Constrained the root USB OTG drive helper to safe backing-image and gadget
+  name policies, and removed unnecessary Linux capabilities from the web
+  service unit.
+- Fixed USB OTG settings validation so bad numeric form values return an
+  in-page validation error instead of disconnecting the web request.
+- Fixed manual USB OTG frame exports so the explicit export action can force a
+  one-off image generation even when automatic USB OTG exports are disabled.
+- Fixed web-triggered background USB OTG frame exports so saving settings
+  reuses the last stored snapshot instead of starting a concurrent polling run.
+- Fixed settings-triggered USB OTG frame exports so repeated saves do not start
+  concurrent drive-update workers.
+- Fixed Settings status text so repeated saves do not claim a new USB OTG frame
+  export started while an existing export is already running.
+- Fixed `bm-gateway run --dry-run --export-usb-otg-now` so dry-run mode skips
+  USB OTG drive writes instead of forcing an export.
+- Fixed USB OTG export scheduling so future-dated export markers are treated as
+  stale and exports can resume immediately.
+- Fixed USB OTG image-size validation so config values above the helper's
+  4096 MB limit are rejected before export.
+- Restored and documented USB OTG host-mode restore behavior so BMGateway
+  removes any `[all]` peripheral-mode `dwc2` overlay when it owns the boot-mode
+  setting.
+- Fixed USB OTG Fleet Trend frame latest-value rows for duplicate device names
+  by matching values with unique series identifiers.
+- Updated the config schema for `web.language` and the `[usb_otg]` settings so
+  packaged examples, runtime validation, and schema documentation stay aligned.
+- Tightened the USB OTG root helper so sudo-launched drive exports copy only
+  top-level readable files owned by the original sudo caller.
+- Tightened installer privilege setup so `--disable-web` removes the web action
+  sudoers policy instead of leaving passwordless web-service actions installed.
+
 ## [0.1.1] - 2026-04-23
 
 ### Added

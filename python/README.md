@@ -25,8 +25,10 @@ use [../docs/README.md](../docs/README.md).
 - `src/bm_gateway/web_pages_*.py` contain the page-family renderers
 - `src/bm_gateway/web_actions.py` contains web-driven mutations and actions
 - `src/bm_gateway/web_ui.py` contains shared HTML primitives
+- `src/bm_gateway/localization.py` loads packaged web localization catalogs
 - `src/bm_gateway/web_assets.py` loads packaged web assets
 - `src/bm_gateway/assets/` contains packaged CSS, JS, and web icons
+- `src/bm_gateway/locales/` contains packaged locale JSON files
 - `tests/` contains Python tests
 - `config/` contains example config files and the schema
 
@@ -57,6 +59,7 @@ Optional web executable for:
 - BM200/BM6-family live polling
 - MQTT publishing and Home Assistant discovery support
 - service-friendly Raspberry Pi deployment shape
+- modular web UI localization selected through `web.language`
 
 BM300 Pro live support is not implemented yet.
 

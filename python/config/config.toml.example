@@ -45,6 +45,26 @@ visible_device_limit = 4
 appearance = "system"
 default_chart_range = "7"
 default_chart_metric = "soc"
+language = "auto"
+
+[usb_otg]
+enabled = false
+image_path = "/var/lib/bm-gateway/usb-otg/bmgateway-frame.img"
+size_mb = 64
+gadget_name = "bmgw_frame"
+image_width_px = 480
+image_height_px = 234
+image_format = "jpeg"
+appearance = "light"
+# Use 0 to export after each gateway polling cycle.
+refresh_interval_seconds = 0
+overview_devices_per_image = 5
+export_battery_overview = true
+export_fleet_trend = true
+fleet_trend_metrics = ["soc"]
+fleet_trend_range = "7"
+# Empty means all configured devices. Selecting a subset writes explicit IDs.
+fleet_trend_device_ids = []
 
 [retention]
 raw_retention_days = 180

@@ -73,6 +73,7 @@ Start here:
   - Devices
   - Settings
 - Light/dark/system appearance modes
+- Modular web localization with a Settings language selector
 - Per-device colors, badges, and battery metadata
 - Battery, fleet, history, and device charts
 

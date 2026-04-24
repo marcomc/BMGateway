@@ -191,7 +191,8 @@ User_Alias BMGW = bm-gateway
 Cmnd_Alias BMGW_HOSTCTL = \
     /usr/bin/systemctl restart bm-gateway.service, \
     /usr/bin/systemctl restart bluetooth.service, \
-    /usr/bin/systemctl reboot
+    /usr/bin/systemctl reboot, \
+    /usr/bin/systemctl poweroff
 
 BMGW ALL=(root) NOPASSWD: BMGW_HOSTCTL
 ```
@@ -205,7 +206,7 @@ The better design is to remove direct `sudo systemctl ...` from the
 application and replace it with one of these:
 
 - a root-owned helper that accepts only `restart-runtime`,
-  `restart-bluetooth`, and `reboot`
+  `restart-bluetooth`, `reboot`, and `poweroff`
 - dedicated root-owned `systemd` oneshot units that perform those actions and
   can be started by a narrower policy
 
