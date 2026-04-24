@@ -247,6 +247,7 @@ def _start_tracked_usb_otg_image_export(
                 snapshot=_gateway_snapshot_from_mapping(snapshot_mapping),
                 database_path=database_file_path(config, state_dir=state_dir),
                 progress=_progress,
+                force=True,
             )
             if result.exported:
                 mark_usb_otg_exported(config=config, state_dir=state_dir)
@@ -1344,18 +1345,41 @@ def serve_management(
                 return
 
             if parsed.path == "/settings/usb-otg":
-                config, _, _ = self._load_current()
+                config, snapshot, current_database_path = self._load_current()
+                try:
+                    image_width_px = int(form.get("image_width_px", ["480"])[0])
+                    image_height_px = int(form.get("image_height_px", ["234"])[0])
+                    refresh_interval_seconds = int(form.get("refresh_interval_seconds", ["0"])[0])
+                    overview_devices_per_image = int(
+                        form.get("overview_devices_per_image", ["5"])[0]
+                    )
+                except ValueError:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_management_html(
+                            snapshot=snapshot,
+                            config=config,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            devices=[device.to_dict() for device in configured_devices],
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: USB OTG settings values must be numeric",
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
                 errors = update_usb_otg_preferences(
                     config_path=config_path,
                     enabled=_bool_from_form(form, "usb_otg_enabled"),
-                    image_width_px=int(form.get("image_width_px", ["480"])[0]),
-                    image_height_px=int(form.get("image_height_px", ["234"])[0]),
+                    image_width_px=image_width_px,
+                    image_height_px=image_height_px,
                     image_format=form.get("image_format", [config.usb_otg.image_format])[0],
                     appearance=form.get("appearance", [config.usb_otg.appearance])[0],
-                    refresh_interval_seconds=int(form.get("refresh_interval_seconds", ["0"])[0]),
-                    overview_devices_per_image=int(
-                        form.get("overview_devices_per_image", ["5"])[0]
-                    ),
+                    refresh_interval_seconds=refresh_interval_seconds,
+                    overview_devices_per_image=overview_devices_per_image,
                     export_battery_overview=_bool_from_form(form, "export_battery_overview"),
                     export_fleet_trend=_bool_from_form(form, "export_fleet_trend"),
                     fleet_trend_metrics=(
@@ -1381,11 +1405,9 @@ def serve_management(
                     configured_devices = load_device_registry(config.device_registry_path)
                     self._send_html(
                         render_management_html(
-                            snapshot=load_snapshot(state_file_path(config, state_dir=state_dir)),
+                            snapshot=snapshot,
                             config=config,
-                            storage_summary=fetch_storage_summary(
-                                database_file_path(config, state_dir=state_dir)
-                            ),
+                            storage_summary=fetch_storage_summary(current_database_path),
                             devices=[device.to_dict() for device in configured_devices],
                             config_text=read_text(config_path),
                             devices_text=read_text(config.device_registry_path),

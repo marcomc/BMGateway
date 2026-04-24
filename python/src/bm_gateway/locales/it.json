@@ -417,6 +417,7 @@
   "Used only when a username is provided. Leave blank for anonymous brokers.": "Usata solo quando viene fornito un nome utente. Lascia vuoto per broker anonimi.",
   "Valid samples": "Campioni validi",
   "Validation failed": "Validazione non riuscita",
+  "Validation failed: USB OTG settings values must be numeric": "Validazione non riuscita: i valori delle impostazioni USB OTG devono essere numerici",
   "Van": "Furgone",
   "Varta, Bosch, Yuasa…": "Varta, Bosch, Yuasa…",
   "Vehicle": "Veicolo",

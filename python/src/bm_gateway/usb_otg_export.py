@@ -8,9 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
-from typing import Callable
-
-from PIL import Image
+from typing import Any, Callable
 
 from .config import AppConfig
 from .device_registry import Device
@@ -45,6 +43,17 @@ def _extension(image_format: str) -> str:
     return "jpg" if image_format == "jpeg" else image_format
 
 
+def _pillow_image_module() -> Any:
+    try:
+        from PIL import Image
+    except ImportError as exc:  # pragma: no cover - exercised only in minimal installs
+        raise RuntimeError(
+            "Pillow is required for USB OTG frame image export. "
+            "Install bm-gateway with the usb-otg extra."
+        ) from exc
+    return Image
+
+
 def expected_usb_otg_export_steps(config: AppConfig, devices: list[Device]) -> int:
     image_count = 0
     if config.usb_otg.export_battery_overview:
@@ -59,6 +68,7 @@ def expected_usb_otg_export_steps(config: AppConfig, devices: list[Device]) -> i
 
 
 def _save_screenshot_as_format(source_png: Path, path: Path, image_format: str) -> None:
+    Image = _pillow_image_module()
     image = Image.open(source_png)
     if image_format == "jpeg":
         image.convert("RGB").save(path, format="JPEG", quality=92, optimize=True)
@@ -73,6 +83,7 @@ def _export_language(config: AppConfig) -> str:
 
 
 def _crop_screenshot_to_frame(source_png: Path, path: Path, width: int, height: int) -> None:
+    Image = _pillow_image_module()
     with Image.open(source_png) as image:
         image.crop((0, 0, width, height)).save(path, format="PNG")
 
@@ -310,8 +321,9 @@ def update_usb_otg_drive(
     runner: DriveCommandRunner = _default_runner,
     page_renderer: FramePageRenderer = _render_frame_page_with_chromium,
     progress: ProgressReporter | None = None,
+    force: bool = False,
 ) -> USBOTGExportResult:
-    if not config.usb_otg.enabled:
+    if not config.usb_otg.enabled and not force:
         return USBOTGExportResult(exported=False, reason="disabled")
     if not config.usb_otg.export_battery_overview and not config.usb_otg.export_fleet_trend:
         return USBOTGExportResult(exported=False, reason="no images enabled")

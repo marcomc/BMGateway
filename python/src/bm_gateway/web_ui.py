@@ -539,6 +539,9 @@ def chart_script(*chart_ids: str, language: str = "en") -> str:
             for key in (
                 "Voltage",
                 "Temperature",
+                "All retained history",
+                "Recent raw",
+                "Selected range",
                 "No retained history for this metric",
                 "Less than 1 day available",
                 "day available",

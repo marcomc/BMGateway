@@ -483,6 +483,7 @@ def _handle_run(
                 devices=devices,
                 snapshot=last_snapshot,
                 database_path=database_file_path(config, state_dir=state_dir),
+                force=export_usb_otg_now,
             )
             if export_result.exported:
                 mark_usb_otg_exported(config=config, state_dir=state_dir)

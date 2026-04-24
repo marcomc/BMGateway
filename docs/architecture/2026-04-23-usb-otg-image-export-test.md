@@ -207,6 +207,11 @@ The bootstrap and service installers install USB OTG support by default:
 - `/usr/local/bin/bm-gateway-usb-otg-frame-test`
 - scoped sudoers entries for boot-mode prepare/restore and drive export
 
+When the drive helper is launched through `sudo`, it only copies top-level
+readable files owned by the original sudo caller into the backing image. This
+keeps the web service's scoped helper permission from becoming a way to copy
+root-owned host files into the exported USB drive.
+
 Installations that do not need USB OTG support can skip those packages and
 helpers with:
 

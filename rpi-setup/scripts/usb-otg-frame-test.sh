@@ -173,6 +173,7 @@ unmount_image_mounts() {
 
 populate_image() {
   local mount_dir
+  local -a source_find_args
 
   if [[ -z "${source_dir}" ]]; then
     printf 'setup requires --source-dir\n' >&2
@@ -182,7 +183,11 @@ populate_image() {
     printf 'source directory not found: %s\n' "${source_dir}" >&2
     exit 1
   fi
-  if ! find "${source_dir}" -maxdepth 1 -type f -readable | grep -q .; then
+  source_find_args=("${source_dir}" -maxdepth 1 -type f -readable)
+  if [[ -n "${SUDO_UID:-}" ]]; then
+    source_find_args+=(-user "${SUDO_UID}")
+  fi
+  if ! find "${source_find_args[@]}" -print -quit | grep -q .; then
     printf 'source directory has no files: %s\n' "${source_dir}" >&2
     exit 1
   fi
@@ -208,7 +213,7 @@ populate_image() {
   fi
   rm -f "${mount_dir}/.bmgw-write-test"
   find "${mount_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
-  find "${source_dir}" -maxdepth 1 -type f -readable -exec cp -t "${mount_dir}" -- {} +
+  find "${source_find_args[@]}" -exec cp -t "${mount_dir}" -- {} +
   sync
   umount "${mount_dir}"
   rmdir "${mount_dir}"

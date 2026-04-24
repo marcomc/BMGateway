@@ -350,6 +350,7 @@
   "Used only when a username is provided. Leave blank for anonymous brokers.": "Used only when a username is provided. Leave blank for anonymous brokers.",
   "Valid samples": "Valid samples",
   "Validation failed": "Validacao falhou",
+  "Validation failed: USB OTG settings values must be numeric": "Falha na validação: os valores das configurações USB OTG devem ser numéricos",
   "Varta, Bosch, Yuasa…": "Varta, Bosch, Yuasa…",
   "Vehicle install": "Vehicle install",
   "Vehicle type": "Vehicle type",

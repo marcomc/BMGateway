@@ -142,12 +142,12 @@
   }}
   function describeWindow(rangeValue, rangeLabel) {{
     if (rangeValue === "all") {{
-      return "All retained history";
+      return t("All retained history");
     }}
     if (rangeValue === "raw") {{
-      return rangeLabel || "Recent raw";
+      return rangeLabel || t("Recent raw");
     }}
-    return rangeLabel || "Selected range";
+    return rangeLabel || t("Selected range");
   }}
   function summarizeCoverage(points, metric) {{
     const usable = points.filter((point) => typeof point[metric] === "number");

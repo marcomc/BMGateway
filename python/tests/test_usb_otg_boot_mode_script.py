@@ -76,8 +76,16 @@ def test_usb_otg_frame_helper_copies_only_top_level_readable_files() -> None:
     assert 'rm -f "${image_path}"' in script_text
     assert 'touch "${mount_dir}/.bmgw-write-test"' in script_text
     assert 'find "${mount_dir}" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +' in script_text
-    assert 'find "${source_dir}" -maxdepth 1 -type f -readable -exec cp' in script_text
+    assert 'source_find_args=("${source_dir}" -maxdepth 1 -type f -readable)' in script_text
+    assert 'find "${source_find_args[@]}" -print -quit | grep -q .' in script_text
+    assert 'find "${source_find_args[@]}" -exec cp' in script_text
     assert 'cp -R "${source_dir}/."' not in script_text
+
+
+def test_usb_otg_frame_helper_limits_sudo_source_files_to_calling_user() -> None:
+    script_text = Path("rpi-setup/scripts/usb-otg-frame-test.sh").read_text(encoding="utf-8")
+
+    assert 'source_find_args+=(-user "${SUDO_UID}")' in script_text
 
 
 def test_usb_otg_boot_mode_prepare_adds_managed_peripheral_overlay(tmp_path: Path) -> None:

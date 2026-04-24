@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from bm_gateway.config import load_config
@@ -75,3 +76,18 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.usb_otg.fleet_trend_metrics == ("soc",)
     assert config.usb_otg.fleet_trend_range == "7"
     assert config.usb_otg.fleet_trend_device_ids == ()
+
+
+def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
+    schema = json.loads(Path("python/config/config.schema.json").read_text(encoding="utf-8"))
+
+    web_properties = schema["properties"]["web"]["properties"]
+    usb_otg_properties = schema["properties"]["usb_otg"]["properties"]
+
+    assert web_properties["port"]["maximum"] == 65535
+    assert "auto" in web_properties["language"]["enum"]
+    assert "zh-Hans" in web_properties["language"]["enum"]
+    assert usb_otg_properties["image_width_px"]["minimum"] == 160
+    assert usb_otg_properties["image_height_px"]["minimum"] == 120
+    assert usb_otg_properties["image_format"]["enum"] == ["jpeg", "png", "bmp"]
+    assert usb_otg_properties["fleet_trend_metrics"]["minItems"] == 1

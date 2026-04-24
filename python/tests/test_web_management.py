@@ -4,6 +4,7 @@ import json
 import socket
 import subprocess
 import threading
+import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import replace
@@ -1387,6 +1388,57 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
     assert export_calls == [(config_path, None)]
 
 
+def test_settings_usb_otg_post_rejects_non_numeric_values_without_snapshot(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/usb-otg",
+        data=urllib.parse.urlencode(
+            {
+                "usb_otg_enabled": "on",
+                "image_width_px": "wide",
+                "export_fleet_trend": "on",
+                "fleet_trend_metrics": "soc",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    try:
+        urllib.request.urlopen(request, timeout=5.0)
+    except urllib.error.HTTPError as error:
+        html = error.read().decode("utf-8")
+        assert error.code == 400
+    else:  # pragma: no cover - the request must fail validation
+        raise AssertionError("USB OTG settings POST unexpectedly succeeded")
+
+    assert "Validation failed: USB OTG settings values must be numeric" in html
+
+
 def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -1402,7 +1454,10 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
     export_finished = threading.Event()
     marker_calls: list[Path | None] = []
 
+    update_force_values: list[object] = []
+
     def _update_drive(**kwargs: object) -> USBOTGExportResult:
+        update_force_values.append(kwargs.get("force"))
         progress = kwargs.get("progress")
         if callable(progress):
             progress(0, 3, "Preparing USB OTG frame image export")
@@ -1448,6 +1503,7 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
 
     assert export_finished.wait(timeout=1.0)
     assert marker_calls == [tmp_path]
+    assert update_force_values == [True]
 
     status_request = urllib.request.Request(
         f"http://{host}:{port}/api/usb-otg-export/status",

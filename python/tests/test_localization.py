@@ -169,6 +169,7 @@ def test_dynamic_error_messages_localize_stable_prefixes() -> None:
 def test_common_web_action_messages_are_translated_in_all_supported_locales() -> None:
     message_keys = (
         "Validation failed",
+        "Validation failed: USB OTG settings values must be numeric",
         "Run completed",
         "Run failed",
         "Home Assistant discovery republished",
@@ -213,6 +214,9 @@ def test_chart_script_uses_selected_language_for_generated_summary_text() -> Non
     assert "Window:" not in script
     assert "Visible devices:" not in script
     assert '"Showing all available history":"Mostra tutta la cronologia disponibile"' in script
+    assert '"All retained history":"Tutta la cronologia conservata"' in script
+    assert '"Recent raw":"Grezzi recenti"' in script
+    assert '"Selected range":"Intervallo selezionato"' in script
 
 
 def test_mqtt_anonymous_placeholders_are_translated_to_italian() -> None:
