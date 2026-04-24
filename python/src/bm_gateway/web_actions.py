@@ -183,17 +183,21 @@ def update_device_from_form(
     resolved_new_device_id = (
         new_device_id.strip() if new_device_id is not None else resolved_device_id
     )
+    resolved_device_type = device_type.strip()
+    resolved_device_name = device_name.strip()
+    resolved_device_mac = normalize_mac_address(device_mac)
     updated_devices: list[Device] = []
-    found = False
+    original_device: Device | None = None
     for device in devices:
         if device.id == resolved_device_id:
+            original_device = device
             updated_devices.append(
                 replace(
                     device,
                     id=resolved_new_device_id,
-                    type=device_type.strip(),
-                    name=device_name.strip(),
-                    mac=normalize_mac_address(device_mac),
+                    type=resolved_device_type,
+                    name=resolved_device_name,
+                    mac=resolved_device_mac,
                     battery_family=battery_family.strip(),
                     battery_profile=battery_profile.strip(),
                     custom_soc_mode=custom_soc_mode.strip(),
@@ -216,10 +220,9 @@ def update_device_from_form(
                     battery_production_year=battery_production_year,
                 )
             )
-            found = True
         else:
             updated_devices.append(device)
-    if not found:
+    if original_device is None:
         return [f"device {resolved_device_id} was not found"]
     errors = validate_devices(updated_devices)
     if errors:
@@ -232,14 +235,20 @@ def update_device_from_form(
         return [
             f"device id {resolved_new_device_id} already has stored history; choose a different id"
         ]
-    if database_path is not None:
+    history_identity_changed = (
+        resolved_new_device_id != resolved_device_id
+        or resolved_device_type != original_device.type
+        or resolved_device_name != original_device.name
+        or resolved_device_mac != normalize_mac_address(original_device.mac)
+    )
+    if database_path is not None and history_identity_changed:
         rename_history_device_id(
             database_path,
             old_device_id=resolved_device_id,
             new_device_id=resolved_new_device_id,
-            device_type=device_type.strip(),
-            name=device_name.strip(),
-            mac=normalize_mac_address(device_mac),
+            device_type=resolved_device_type,
+            name=resolved_device_name,
+            mac=resolved_device_mac,
         )
     write_device_registry(config.device_registry_path, updated_devices)
     return []

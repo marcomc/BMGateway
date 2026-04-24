@@ -666,6 +666,7 @@ def serve_management(
                 config = load_config(config_path)
                 old_device_id = form.get("old_device_id", form.get("device_id", [""]))[0]
                 submitted_device_id = form.get("device_id", [""])[0]
+                normalized_submitted_device_id = submitted_device_id.strip()
                 errors = update_device_from_form(
                     config_path=config_path,
                     database_path=database_file_path(config, state_dir=state_dir),
@@ -761,7 +762,7 @@ def serve_management(
                     "/devices/edit?"
                     + urlencode(
                         {
-                            "device_id": submitted_device_id,
+                            "device_id": normalized_submitted_device_id,
                             "message": "Device saved",
                         }
                     ),

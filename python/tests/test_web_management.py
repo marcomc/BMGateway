@@ -1908,8 +1908,9 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     assert "overflow-y: visible;" in html
     assert "overflow-x: hidden;" in html
     assert "--frame-overview-card-size: 208px;" in html
-    assert "grid-template-columns: repeat(var(--frame-battery-columns)" in html
+    assert "position: absolute;" in html
     assert "width: 208px; height: 208px;" in html
+    assert "left: 17.0px; top: 22.0px;" in html
     assert "conic-gradient(" in html
     assert "font-size: 12px;" in html
     assert "Battery Overview · Latest: 2026-04-24 03:20" in html
@@ -3625,6 +3626,53 @@ def test_update_device_from_form_renames_device_id_and_history(tmp_path: Path) -
     assert fetch_recent_history(database_path, device_id="starter_battery", limit=10)
 
 
+def test_update_device_from_form_skips_history_rewrite_for_non_history_fields(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+    database_path = tmp_path / "gateway.db"
+    rewrite_calls: list[dict[str, object]] = []
+
+    def _rename_history_device_id(**kwargs: object) -> None:
+        rewrite_calls.append(kwargs)
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.rename_history_device_id",
+        _rename_history_device_id,
+    )
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        database_path=database_path,
+        device_id="bm200_house",
+        new_device_id="bm200_house",
+        device_type="bm200",
+        device_name="BM200 House",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="orange",
+        installed_in_vehicle=True,
+        vehicle_type="car",
+        battery_brand="NOCO",
+        battery_model="NLP20",
+        battery_nominal_voltage=12,
+        battery_capacity_ah=7.0,
+        battery_production_year=2025,
+    )
+
+    assert errors == []
+    assert rewrite_calls == []
+    assert not database_path.exists()
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert devices[0].color_key == "orange"
+    assert devices[0].vehicle_type == "car"
+
+
 def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> None:
     config_path = _write_edit_device_config(tmp_path)
 
@@ -3653,6 +3701,52 @@ def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> 
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
     assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+
+
+def test_devices_update_redirect_uses_normalized_renamed_device_id(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/devices/update",
+        data=urllib.parse.urlencode(
+            {
+                "old_device_id": "bm200_house",
+                "device_id": " starter_battery ",
+                "device_type": "bm200",
+                "device_name": "Starter Battery",
+                "device_mac": "AA:BB:CC:DD:EE:01",
+                "battery_family": "lead_acid",
+                "battery_profile": "regular_lead_acid",
+                "custom_soc_mode": "intelligent_algorithm",
+                "color_key": "green",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        params = parse_qs(urlparse(response.url).query)
+        assert response.status == 200
+        assert urlparse(response.url).path == "/devices/edit"
+        assert params["device_id"] == ["starter_battery"]
+        assert params["message"] == ["Device saved"]
 
 
 def test_update_device_from_form_rejects_history_collision(tmp_path: Path) -> None:
