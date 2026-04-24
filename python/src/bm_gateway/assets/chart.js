@@ -201,10 +201,10 @@
     const width = 960;
     const height = 360;
     const isCompact = document.getElementById(chartId)?.dataset.chartCompact === "true";
-    const padLeft = isCompact ? 34 : 68;
-    const padRight = isCompact ? 22 : 18;
-    const padTop = isCompact ? 6 : 18;
-    const padBottom = isCompact ? 24 : 44;
+    const padLeft = isCompact ? 30 : 68;
+    const padRight = isCompact ? 14 : 18;
+    const padTop = isCompact ? 4 : 18;
+    const padBottom = isCompact ? 20 : 44;
     const sortedUsable = [...usable].sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
     const values = sortedUsable.map((point) => point[metric]);
     const bounds = metricBounds(metric, values);

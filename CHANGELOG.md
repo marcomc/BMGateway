@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   from `config.toml`.
 - Fixed USB OTG Battery Overview frame captures so overview cards fit inside
   the exported image and added a latest-sample timestamp to the frame title.
+- Tightened USB OTG Fleet Trend frame captures by removing the outer chart
+  wrapper gap and expanding the plot to the frame edges.
 
 ## [0.1.1] - 2026-04-23
 

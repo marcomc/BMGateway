@@ -232,7 +232,6 @@ def render_frame_battery_overview_html(
     height: int,
 ) -> str:
     latest_timestamp = _battery_overview_latest_timestamp(snapshot)
-    page_index = max(0, page - 1)
     page_devices = _battery_overview_page_devices(
         snapshot=snapshot,
         devices=devices,
@@ -255,8 +254,7 @@ def render_frame_battery_overview_html(
         '<h1 class="frame-title">'
         f"Battery Overview · Latest: {html.escape(latest_timestamp)}"
         "</h1>"
-        '<div class="frame-overview-page-window" '
-        f'style="--frame-page-index: {page_index}; --frame-overview-card-size: {card_size}px;">'
+        f'<div class="frame-battery-stage" style="--frame-overview-card-size: {card_size}px;">'
         f"{grid_markup}"
         "</div>"
         "</section>"
@@ -432,7 +430,8 @@ def _frame_document(
         margin: 0;
       }}
       .frame-capture-root .chart-card {{
-        flex: 1 1 auto;
+        position: absolute;
+        inset: 26px 0 0;
         min-height: 0;
         height: auto;
         padding: 0;
@@ -459,16 +458,19 @@ def _frame_document(
         margin: 6px 0;
       }}
       .frame-capture-root .chart-frame-shell {{
-        flex: 1 1 auto;
+        position: absolute;
+        inset: 0;
         min-height: 0;
         height: 100%;
       }}
       .frame-capture-root .chart-frame {{
-        height: 100%;
-        padding: 2px 4px 4px;
+        position: absolute;
+        inset: 0;
+        height: auto;
+        padding: 0;
         border: 0;
-        border-radius: 8px;
-        background: var(--bg-chart);
+        border-radius: 0;
+        background: transparent;
         cursor: default;
         overflow: hidden;
       }}
@@ -480,16 +482,15 @@ def _frame_document(
         height: 100%;
       }}
       .frame-overview-section {{
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr);
-        gap: 3px;
-        padding: 4px;
+        position: relative;
+        display: block;
+        padding: 0;
         background: var(--bg-app);
       }}
       .frame-fleet-trend-section {{
-        display: flex;
-        flex-direction: column;
-        padding: 2px 3px 3px;
+        position: relative;
+        display: block;
+        padding: 0;
         background: var(--bg-app);
       }}
       .frame-title {{
@@ -498,13 +499,21 @@ def _frame_document(
         line-height: 1.1;
       }}
       .frame-overview-section .frame-title {{
+        position: absolute;
+        top: 3px;
+        left: 4px;
+        z-index: 2;
         margin: 0;
         font-size: 12px;
       }}
       .frame-fleet-header {{
-        flex: 0 0 auto;
+        position: absolute;
+        top: 6px;
+        right: 2px;
+        left: 5px;
+        z-index: 2;
         margin-bottom: 0;
-        padding: 0 1px 1px;
+        padding: 0;
       }}
       .frame-fleet-header .frame-title {{
         margin-bottom: 1px;
@@ -534,9 +543,12 @@ def _frame_document(
       }}
       .frame-overview-page-window {{
         position: relative;
-        overflow-x: hidden;
-        overflow-y: visible;
+        overflow: visible;
         min-height: 0;
+      }}
+      .frame-battery-stage {{
+        position: absolute;
+        inset: 0;
       }}
       .frame-overview-page-window .home-overview-scroller,
       .frame-overview-page-window .home-overview-page {{

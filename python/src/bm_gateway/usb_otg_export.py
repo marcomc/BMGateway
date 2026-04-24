@@ -52,6 +52,11 @@ def _save_screenshot_as_format(source_png: Path, path: Path, image_format: str) 
         image.convert("RGB").save(path, format="BMP")
 
 
+def _crop_screenshot_to_frame(source_png: Path, path: Path, width: int, height: int) -> None:
+    with Image.open(source_png) as image:
+        image.crop((0, 0, width, height)).save(path, format="PNG")
+
+
 def _find_chromium() -> str:
     for name in ("chromium", "chromium-browser", "google-chrome", "google-chrome-stable"):
         candidate = which(name)
@@ -78,7 +83,9 @@ def _render_frame_page_with_chromium(
         temp_dir = Path(temp_dir_name)
         html_path = temp_dir / "frame.html"
         png_path = temp_dir / "frame.png"
+        cropped_png_path = temp_dir / "frame-cropped.png"
         html_path.write_text(html_text, encoding="utf-8")
+        capture_height = max(height, 400)
         command = [
             _find_chromium(),
             "--headless=new",
@@ -87,7 +94,7 @@ def _render_frame_page_with_chromium(
             "--no-sandbox",
             "--hide-scrollbars",
             "--virtual-time-budget=1200",
-            f"--window-size={width},{height}",
+            f"--window-size={width},{capture_height}",
             f"--screenshot={png_path}",
             html_path.as_uri(),
         ]
@@ -97,7 +104,8 @@ def _render_frame_page_with_chromium(
                 completed.stderr.strip() or completed.stdout.strip() or "Chromium screenshot failed"
             )
             raise RuntimeError(reason)
-        _save_screenshot_as_format(png_path, output_path, image_format)
+        _crop_screenshot_to_frame(png_path, cropped_png_path, width, height)
+        _save_screenshot_as_format(cropped_png_path, output_path, image_format)
 
 
 def render_battery_overview_images(

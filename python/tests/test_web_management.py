@@ -207,8 +207,8 @@ def test_chart_script_keeps_compact_frame_chart_inside_edges() -> None:
     script = chart_script("frame-fleet-trend-chart")
 
     assert 'dataset.chartCompact === "true"' in script
-    assert "const padRight = isCompact ? 22 : 18;" in script
-    assert "const padBottom = isCompact ? 24 : 44;" in script
+    assert "const padRight = isCompact ? 14 : 18;" in script
+    assert "const padBottom = isCompact ? 20 : 44;" in script
     assert 'rx="${isCompact ? 12 : 22}"' in script
 
 
@@ -1795,8 +1795,13 @@ def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
     assert ".frame-capture-root .chart-nav-arrow" in html
     assert ".frame-capture-root .chart-tooltip" in html
     assert ".frame-capture-root .chart-meta" in html
-    assert "padding: 2px 4px 4px;" in html
-    assert "background: var(--bg-chart);" in html
+    assert "inset: 26px 0 0;" in html
+    assert "padding: 0;" in html
+    assert "background: transparent;" in html
+    assert "top: 6px;" in html
+    assert "left: 5px;" in html
+    assert "const padLeft = isCompact ? 30 : 68;" in html
+    assert "const padBottom = isCompact ? 20 : 44;" in html
     assert "font-size: 8px;" in html
     assert "border: 0;" in html
     assert "display: none;" in html
@@ -1904,9 +1909,8 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
         height=234,
     )
 
-    assert "grid-template-rows: auto minmax(0, 1fr);" in html
-    assert "overflow-y: visible;" in html
-    assert "overflow-x: hidden;" in html
+    assert "display: block;" in html
+    assert "frame-battery-stage" in html
     assert "--frame-overview-card-size: 208px;" in html
     assert "position: absolute;" in html
     assert "width: 208px; height: 208px;" in html

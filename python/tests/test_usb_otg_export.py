@@ -11,6 +11,7 @@ from bm_gateway.device_registry import Device
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.usb_otg import usb_otg_support_installed
 from bm_gateway.usb_otg_export import (
+    _crop_screenshot_to_frame,
     build_drive_export_command,
     effective_refresh_interval_seconds,
     export_due,
@@ -48,6 +49,23 @@ def test_usb_otg_support_detects_installed_helper_and_mkfs_path(
     monkeypatch.setattr("bm_gateway.usb_otg.shutil.which", lambda _name: "/usr/sbin/mkfs.vfat")
 
     assert usb_otg_support_installed(drive_helper_path=helper)
+
+
+def test_crop_screenshot_to_frame_preserves_top_left_frame(tmp_path: Path) -> None:
+    source = tmp_path / "source.png"
+    target = tmp_path / "target.png"
+    image = Image.new("RGB", (4, 5), "#000000")
+    image.putpixel((0, 0), (255, 0, 0))
+    image.putpixel((2, 1), (0, 255, 0))
+    image.putpixel((3, 4), (0, 0, 255))
+    image.save(source, format="PNG")
+
+    _crop_screenshot_to_frame(source, target, 3, 2)
+
+    with Image.open(target) as cropped:
+        assert cropped.size == (3, 2)
+        assert cropped.getpixel((0, 0)) == (255, 0, 0)
+        assert cropped.getpixel((2, 1)) == (0, 255, 0)
 
 
 def _snapshot() -> GatewaySnapshot:

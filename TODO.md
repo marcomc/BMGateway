@@ -132,3 +132,23 @@
   - keep data collection read-only and safe for the web service privilege model
   - add tests for parsing Raspberry Pi model, memory, CPU, storage, and network
     diagnostics from representative Linux command output
+
+- [ ] Add optional live BLE monitoring sessions for battery monitors.
+  Keep periodic Raspberry Pi polling as the default appliance behavior, but add
+  an explicit user-controlled live mode that holds a BLE connection open and
+  streams voltage, temperature, and other readings at roughly the cadence used
+  by the original mobile app.
+  Reference:
+  - [docs/architecture/2026-04-24-optional-live-ble-monitoring-proposal.md](docs/architecture/2026-04-24-optional-live-ble-monitoring-proposal.md)
+  Actions:
+  - identify the BLE read or notification path used by the original app for
+    near-real-time updates
+  - add a bounded live-session service with start, stop, timeout, and
+    cancellation behavior
+  - expose live readings to the web UI without refreshing the whole page
+  - warn users that live mode may block the original phone app or other BLE
+    clients while BMGateway holds the connection
+  - keep normal unattended monitoring on the slower periodic polling loop
+    unless live mode is explicitly enabled
+  - decide whether live samples remain transient, update latest state, or are
+    downsampled before persistence and MQTT publishing
