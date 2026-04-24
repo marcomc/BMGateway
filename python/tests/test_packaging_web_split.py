@@ -60,6 +60,18 @@ def test_install_service_script_uses_current_mqtt_username_placeholder() -> None
     assert 'mqtt.get("username", "homeassistant")' not in payload
 
 
+def test_install_service_script_preserves_usb_otg_fleet_trend_preferences() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert "def string_sequence_to_toml(values: object) -> str:" in payload
+    assert 'usb_otg.get("fleet_trend_metrics", ["soc"])' in payload
+    assert 'usb_otg.get("fleet_trend_range", "7")' in payload
+    assert 'usb_otg.get("fleet_trend_device_ids", [])' in payload
+
+
 def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"

@@ -21,6 +21,23 @@ from bm_gateway.usb_otg_export import (
 from PIL import Image
 
 
+def _fake_frame_renderer(
+    html_text: str,
+    output_path: Path,
+    width: int,
+    height: int,
+    image_format: str,
+) -> None:
+    assert "frame-capture-root" in html_text
+    image = Image.new("RGB", (width, height), "#111214")
+    if image_format == "jpeg":
+        image.save(output_path, format="JPEG")
+    elif image_format == "png":
+        image.save(output_path, format="PNG")
+    else:
+        image.save(output_path, format="BMP")
+
+
 def test_usb_otg_support_detects_installed_helper_and_mkfs_path(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -118,12 +135,58 @@ def test_render_usb_otg_export_images_creates_configured_frame_size(tmp_path: Pa
         snapshot=_snapshot(),
         database_path=tmp_path / "gateway.db",
         output_dir=tmp_path,
+        page_renderer=_fake_frame_renderer,
     )
 
-    assert [file.name for file in files] == ["battery-overview-01.jpg", "fleet-trend.jpg"]
+    assert [file.name for file in files] == ["battery-overview-01.jpg", "fleet-trend-soc.jpg"]
     for file in files:
         with Image.open(file) as image:
             assert image.size == (480, 234)
+
+
+def test_render_usb_otg_export_images_creates_selected_fleet_metric_images(
+    tmp_path: Path,
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(
+            config.usb_otg,
+            export_battery_overview=False,
+            fleet_trend_metrics=("voltage", "temperature"),
+            fleet_trend_device_ids=("bm200_van",),
+        ),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="House Battery",
+            mac="AA:BB:CC:DD:EE:01",
+            color_key="green",
+        ),
+        Device(
+            id="bm200_van",
+            type="bm200",
+            name="Van Battery",
+            mac="AA:BB:CC:DD:EE:02",
+            color_key="blue",
+        ),
+    ]
+
+    files = render_usb_otg_export_images(
+        config=config,
+        devices=devices,
+        snapshot=_snapshot(),
+        database_path=tmp_path / "gateway.db",
+        output_dir=tmp_path,
+        page_renderer=_fake_frame_renderer,
+    )
+
+    assert [file.name for file in files] == [
+        "fleet-trend-voltage.jpg",
+        "fleet-trend-temperature.jpg",
+    ]
 
 
 def test_build_drive_export_command_targets_installed_usb_otg_helper(tmp_path: Path) -> None:
@@ -167,6 +230,7 @@ def test_update_usb_otg_drive_makes_staging_directory_readable_by_helper(
         snapshot=_snapshot(),
         database_path=tmp_path / "gateway.db",
         runner=_runner,
+        page_renderer=_fake_frame_renderer,
     )
 
     assert result.exported

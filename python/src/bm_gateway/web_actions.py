@@ -337,6 +337,9 @@ def update_usb_otg_preferences(
     overview_devices_per_image: int | None = None,
     export_battery_overview: bool | None = None,
     export_fleet_trend: bool | None = None,
+    fleet_trend_metrics: tuple[str, ...] | None = None,
+    fleet_trend_range: str | None = None,
+    fleet_trend_device_ids: tuple[str, ...] | None = None,
 ) -> list[str]:
     config = load_config(config_path)
     updated = replace(
@@ -371,6 +374,19 @@ def update_usb_otg_preferences(
                 config.usb_otg.export_fleet_trend
                 if export_fleet_trend is None
                 else export_fleet_trend
+            ),
+            fleet_trend_metrics=(
+                config.usb_otg.fleet_trend_metrics
+                if fleet_trend_metrics is None
+                else fleet_trend_metrics
+            ),
+            fleet_trend_range=(
+                config.usb_otg.fleet_trend_range if fleet_trend_range is None else fleet_trend_range
+            ),
+            fleet_trend_device_ids=(
+                config.usb_otg.fleet_trend_device_ids
+                if fleet_trend_device_ids is None
+                else fleet_trend_device_ids
             ),
         ),
     )

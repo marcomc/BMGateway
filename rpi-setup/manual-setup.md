@@ -398,8 +398,9 @@ The restore action removes the managed block. If prepare replaced an existing
 `dtoverlay=dwc2...` line under `[all]`, restore puts the previous line back.
 Both actions create timestamped backups beside the boot config before writing.
 
-When USB OTG image export is enabled, the runtime generates configured frame
-images after each gateway polling cycle by default. Set
+When USB OTG image export is enabled, the runtime screenshots the same hidden
+frame-render pages used by Diagnostics and publishes those images after each
+gateway polling cycle by default. Set
 `usb_otg.refresh_interval_seconds` to a positive number to use a custom export
 cadence. The Settings page warns if that export interval is shorter than the
 gateway polling interval because the picture frame may see repeated stale data
@@ -412,6 +413,14 @@ The generated image settings include:
 - light or dark appearance
 - overview devices per image, from 1 through 10
 - whether to export battery overview pages, Fleet Trend, or both
+- which Fleet Trend metric images to export: Voltage, SoC, Temperature, or any
+  combination of them
+- the Fleet Trend frame history range and configured devices included in those
+  frame images
+
+Saving USB OTG image-export settings starts background regeneration for the
+configured frame images and redirects Settings without waiting for screenshots
+and drive reattachment to finish when USB OTG image export is enabled.
 
 In non-editing Settings mode, use `Export Frame Images` to regenerate the
 configured images and expose a fresh drive immediately. Use

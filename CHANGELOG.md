@@ -20,6 +20,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added automated USB OTG frame-image export for battery overview pages and a
   Fleet Trend chart, including configurable output size, format, light/dark
   appearance, refresh cadence, overview density, and a manual export action.
+- Added USB OTG-specific Fleet Trend frame settings for metric selection,
+  history range, and included devices, independent of the web UI display
+  defaults.
+- Switched USB OTG frame image generation to Chromium screenshots of the hidden
+  frame-render pages so Diagnostics preview and exported drive images share the
+  same renderer.
+- Start USB OTG frame-image regeneration in the background after saving USB OTG
+  image-export settings when export is enabled, so Settings redirects without
+  waiting for screenshots and drive reattachment to finish.
 - Added a USB OTG drive refresh action that reattaches the existing backing
   disk image without regenerating frame images.
 - Added Settings warnings for aggressive gateway polling intervals below
@@ -28,6 +37,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a Settings action to shut down the Raspberry Pi safely from the web UI,
   plus installer-managed scoped sudo permissions for restart, reboot, and
   shutdown host-control actions.
+
+### Unreleased Fixed
+
+- Fixed Raspberry Pi service refreshes so deployments preserve USB OTG Fleet
+  Trend metric, range, and device-selection settings instead of dropping them
+  from `config.toml`.
+- Fixed USB OTG Battery Overview frame captures so overview cards fit inside
+  the exported image and added a latest-sample timestamp to the frame title.
 
 ## [0.1.1] - 2026-04-23
 

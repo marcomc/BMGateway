@@ -1562,6 +1562,69 @@ def render_home_html(
     )
 
 
+def render_diagnostics_html(
+    *,
+    theme_preference: str = "system",
+    fleet_trend_metrics: tuple[str, ...] = ("soc",),
+) -> str:
+    from .web_pages_frame import render_diagnostics_html as _render_diagnostics_html
+
+    return _render_diagnostics_html(
+        theme_preference=theme_preference,
+        fleet_trend_metrics=fleet_trend_metrics,
+    )
+
+
+def render_frame_fleet_trend_html(
+    *,
+    chart_points: list[dict[str, object]],
+    legend: list[tuple[str, str]],
+    show_chart_markers: bool,
+    appearance: str,
+    default_chart_range: str,
+    default_chart_metric: str,
+    width: int,
+    height: int,
+) -> str:
+    from .web_pages_frame import render_frame_fleet_trend_html as _render_frame_fleet_trend_html
+
+    return _render_frame_fleet_trend_html(
+        chart_points=chart_points,
+        legend=legend,
+        show_chart_markers=show_chart_markers,
+        appearance=appearance,
+        default_chart_range=default_chart_range,
+        default_chart_metric=default_chart_metric,
+        width=width,
+        height=height,
+    )
+
+
+def render_frame_battery_overview_html(
+    *,
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+    page: int,
+    devices_per_page: int,
+    appearance: str,
+    width: int,
+    height: int,
+) -> str:
+    from .web_pages_frame import (
+        render_frame_battery_overview_html as _render_frame_battery_overview_html,
+    )
+
+    return _render_frame_battery_overview_html(
+        snapshot=snapshot,
+        devices=devices,
+        page=page,
+        devices_per_page=devices_per_page,
+        appearance=appearance,
+        width=width,
+        height=height,
+    )
+
+
 def render_devices_html(
     *,
     snapshot: dict[str, object],

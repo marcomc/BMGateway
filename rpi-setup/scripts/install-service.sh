@@ -135,7 +135,7 @@ ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   apt-get update
-  apt-get install -y dosfstools libjpeg-dev python3-dev zlib1g-dev
+  apt-get install -y chromium dosfstools libjpeg-dev python3-dev zlib1g-dev
   install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-boot-mode.sh" \
     "${usb_otg_boot_mode_path}"
   install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-frame-test.sh" \
@@ -172,6 +172,12 @@ def string_to_toml(value: str) -> str:
         .replace("\t", "\\t")
     )
     return f'"{escaped}"'
+
+
+def string_sequence_to_toml(values: object) -> str:
+    if not isinstance(values, list | tuple):
+        return "[]"
+    return "[" + ", ".join(string_to_toml(str(value)) for value in values) + "]"
 
 
 config_path = Path(sys.argv[1])
@@ -258,6 +264,9 @@ payload = "\n".join(
         f'overview_devices_per_image = {int(usb_otg.get("overview_devices_per_image", 5))}',
         f'export_battery_overview = {bool_to_toml(bool(usb_otg.get("export_battery_overview", True)))}',
         f'export_fleet_trend = {bool_to_toml(bool(usb_otg.get("export_fleet_trend", True)))}',
+        f'fleet_trend_metrics = {string_sequence_to_toml(usb_otg.get("fleet_trend_metrics", ["soc"]))}',
+        f'fleet_trend_range = {string_to_toml(usb_otg.get("fleet_trend_range", "7"))}',
+        f'fleet_trend_device_ids = {string_sequence_to_toml(usb_otg.get("fleet_trend_device_ids", []))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',

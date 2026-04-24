@@ -114,3 +114,21 @@
     normalized to the configured USB OTG export format
   - define filename conflict behavior, ordering behavior, and quota limits for
     custom images on the frame drive
+
+- [ ] Add hardware and live resource diagnostics to the Diagnostics page.
+  Extend Diagnostics with host-level observability so appliance troubleshooting
+  can separate application problems from Raspberry Pi, network, storage, CPU,
+  RAM, and live throughput issues.
+  Actions:
+  - detect whether the host is a Raspberry Pi and show the exact Raspberry Pi
+    model when available
+  - show processor model, CPU core count, and current CPU usage
+  - show installed RAM, current RAM usage, and swap usage
+  - list mounted filesystems or relevant storage mounts with capacity and usage
+  - list network interfaces with link state, IP addresses, and active default
+    route
+  - show Wi-Fi network details when available, including SSID and signal data
+  - show current network upload and download throughput by interface
+  - keep data collection read-only and safe for the web service privilege model
+  - add tests for parsing Raspberry Pi model, memory, CPU, storage, and network
+    diagnostics from representative Linux command output

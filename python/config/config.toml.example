@@ -60,6 +60,10 @@ refresh_interval_seconds = 0
 overview_devices_per_image = 5
 export_battery_overview = true
 export_fleet_trend = true
+fleet_trend_metrics = ["soc"]
+fleet_trend_range = "7"
+# Empty means all configured devices. Settings writes explicit IDs when saved.
+fleet_trend_device_ids = []
 
 [retention]
 raw_retention_days = 180

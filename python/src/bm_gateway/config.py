@@ -73,6 +73,9 @@ class USBOTGConfig:
     overview_devices_per_image: int = 5
     export_battery_overview: bool = True
     export_fleet_trend: bool = True
+    fleet_trend_metrics: tuple[str, ...] = ("soc",)
+    fleet_trend_range: str = "7"
+    fleet_trend_device_ids: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -166,6 +169,9 @@ class AppConfig:
                 "overview_devices_per_image": self.usb_otg.overview_devices_per_image,
                 "export_battery_overview": self.usb_otg.export_battery_overview,
                 "export_fleet_trend": self.usb_otg.export_fleet_trend,
+                "fleet_trend_metrics": self.usb_otg.fleet_trend_metrics,
+                "fleet_trend_range": self.usb_otg.fleet_trend_range,
+                "fleet_trend_device_ids": self.usb_otg.fleet_trend_device_ids,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -212,6 +218,18 @@ def _string_to_toml(value: str) -> str:
         .replace("\t", "\\t")
     )
     return f'"{escaped}"'
+
+
+def _string_sequence_to_toml(values: tuple[str, ...]) -> str:
+    return "[" + ", ".join(_string_to_toml(value) for value in values) + "]"
+
+
+def _string_tuple_from_toml(value: object, *, default: tuple[str, ...]) -> tuple[str, ...]:
+    if value is None:
+        return default
+    if isinstance(value, list):
+        return tuple(str(item) for item in value)
+    return default
 
 
 def write_config(path: Path, config: AppConfig) -> None:
@@ -269,6 +287,12 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"overview_devices_per_image = {config.usb_otg.overview_devices_per_image}",
             f"export_battery_overview = {_bool_to_toml(config.usb_otg.export_battery_overview)}",
             f"export_fleet_trend = {_bool_to_toml(config.usb_otg.export_fleet_trend)}",
+            f"fleet_trend_metrics = {_string_sequence_to_toml(config.usb_otg.fleet_trend_metrics)}",
+            f"fleet_trend_range = {_string_to_toml(config.usb_otg.fleet_trend_range)}",
+            (
+                "fleet_trend_device_ids = "
+                f"{_string_sequence_to_toml(config.usb_otg.fleet_trend_device_ids)}"
+            ),
             "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
@@ -343,6 +367,15 @@ def load_config(path: Path) -> AppConfig:
         overview_devices_per_image=int(usb_otg_table.get("overview_devices_per_image", 5)),
         export_battery_overview=bool(usb_otg_table.get("export_battery_overview", True)),
         export_fleet_trend=bool(usb_otg_table.get("export_fleet_trend", True)),
+        fleet_trend_metrics=_string_tuple_from_toml(
+            usb_otg_table.get("fleet_trend_metrics"),
+            default=("soc",),
+        ),
+        fleet_trend_range=str(usb_otg_table.get("fleet_trend_range", "7")),
+        fleet_trend_device_ids=_string_tuple_from_toml(
+            usb_otg_table.get("fleet_trend_device_ids"),
+            default=(),
+        ),
     )
     retention = RetentionConfig(
         raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
@@ -419,6 +452,19 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("usb_otg.refresh_interval_seconds must be zero or greater")
     if not 1 <= config.usb_otg.overview_devices_per_image <= 10:
         errors.append("usb_otg.overview_devices_per_image must be between 1 and 10")
+    allowed_frame_metrics = {"voltage", "soc", "temperature"}
+    if not config.usb_otg.fleet_trend_metrics:
+        errors.append("usb_otg.fleet_trend_metrics must include at least one metric")
+    invalid_frame_metrics = [
+        metric
+        for metric in config.usb_otg.fleet_trend_metrics
+        if metric not in allowed_frame_metrics
+    ]
+    if invalid_frame_metrics:
+        errors.append("usb_otg.fleet_trend_metrics must contain only: voltage, soc, temperature")
+    allowed_usb_otg_fleet_ranges = {"1", "3", "5", "7", "30", "90", "365", "730", "all"}
+    if config.usb_otg.fleet_trend_range not in allowed_usb_otg_fleet_ranges:
+        errors.append("usb_otg.fleet_trend_range must be one of: 1, 3, 5, 7, 30, 90, 365, 730, all")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:

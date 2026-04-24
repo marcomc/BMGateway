@@ -106,6 +106,9 @@ The production feature now builds on the same gadget path:
   `Export Frame Images` action for hardware validation.
 - The same Actions panel includes `Refresh USB OTG Drive`, which detaches and
   reattaches the existing backing image without rendering new files.
+- The Settings header includes `Diagnostics`. Its `Frame Preview` section
+  embeds hidden screenshot-ready render routes such as `/frame/fleet-trend` and
+  `/frame/battery-overview?page=1` inside a simulated picture-frame viewport.
 
 ## Application Setting
 
@@ -125,6 +128,9 @@ refresh_interval_seconds = 0
 overview_devices_per_image = 5
 export_battery_overview = true
 export_fleet_trend = true
+fleet_trend_metrics = ["soc"]
+fleet_trend_range = "7"
+fleet_trend_device_ids = []
 ```
 
 The Settings page exposes this as `USB OTG Image Export`. It checks whether
@@ -192,10 +198,12 @@ The current exporter writes:
 
 - `battery-overview-01.jpg`, `battery-overview-02.jpg`, and so on, with up to
   `usb_otg.overview_devices_per_image` configured batteries per image
-- `fleet-trend.jpg`, a compact state-of-charge chart for all configured
-  batteries using the same device color keys as the web UI
+- `fleet-trend-soc.jpg`, `fleet-trend-voltage.jpg`, or
+  `fleet-trend-temperature.jpg`, depending on the selected Fleet Trend frame
+  metrics, using the selected frame devices and web UI color keys
 
 The image size, format, light/dark appearance, enabled image types, refresh
-interval, and overview page density are editable from Settings. Backing disk
+interval, overview page density, Fleet Trend metrics, Fleet Trend history
+range, and Fleet Trend device selection are editable from Settings. Backing disk
 image path, disk size, and gadget name remain read-only for now because safe
 changes require detach, migration, and reattach lifecycle handling.

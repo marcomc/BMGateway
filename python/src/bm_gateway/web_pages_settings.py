@@ -39,6 +39,22 @@ def _settings_markup_row(label: str, value_html: str) -> str:
     )
 
 
+def _usb_otg_fleet_device_checkbox(
+    *,
+    device: dict[str, object],
+    checked: bool,
+) -> str:
+    device_id = str(device.get("id", ""))
+    label = str(device.get("name") or device.get("id") or "Device")
+    return (
+        f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+        '<input type="checkbox" name="fleet_trend_device_ids" '
+        f'value="{html.escape(device_id)}"{shared._checked_attr(checked)}>'
+        f"<span>{html.escape(label)}</span>"
+        "</label>"
+    )
+
+
 def _poll_interval_warning(config: AppConfig) -> str:
     if config.gateway.poll_interval_seconds >= 300:
         return ""
@@ -390,6 +406,34 @@ def render_settings_html(
             )
             or "None",
         )
+        + settings_row(
+            "Fleet Trend metrics",
+            ", ".join(
+                label
+                for value, label in (
+                    ("voltage", "Voltage"),
+                    ("soc", "SoC"),
+                    ("temperature", "Temperature"),
+                )
+                if value in config.usb_otg.fleet_trend_metrics
+            )
+            or "None",
+        )
+        + settings_row(
+            "Fleet Trend range",
+            dict(shared._visible_chart_range_options()).get(
+                config.usb_otg.fleet_trend_range,
+                config.usb_otg.fleet_trend_range,
+            ),
+        )
+        + settings_row(
+            "Fleet Trend devices",
+            (
+                "All configured devices"
+                if not config.usb_otg.fleet_trend_device_ids
+                else ", ".join(config.usb_otg.fleet_trend_device_ids)
+            ),
+        )
         + settings_row("Backing disk image", config.usb_otg.image_path)
         + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
         + settings_row("Gadget name", config.usb_otg.gadget_name)
@@ -489,6 +533,50 @@ def render_settings_html(
         usb_otg_devices_per_image_options = "".join(
             _option_html(str(value), str(value), str(config.usb_otg.overview_devices_per_image))
             for value in range(1, 11)
+        )
+        usb_otg_fleet_range_options = "".join(
+            _option_html(
+                value,
+                label,
+                shared._sanitize_default_chart_range(config.usb_otg.fleet_trend_range),
+            )
+            for value, label in shared._visible_chart_range_options()
+        )
+        usb_otg_fleet_metric_controls = "".join(
+            (
+                f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                f'<input type="checkbox" name="fleet_trend_metrics" value="{value}"'
+                f"{shared._checked_attr(value in config.usb_otg.fleet_trend_metrics)}>"
+                f"<span>{label}</span></label>"
+            )
+            for value, label in (
+                ("voltage", "Voltage"),
+                ("soc", "SoC"),
+                ("temperature", "Temperature"),
+            )
+        )
+        selected_frame_device_ids = set(config.usb_otg.fleet_trend_device_ids)
+        use_all_frame_devices = not selected_frame_device_ids
+        usb_otg_fleet_device_controls = (
+            '<input type="hidden" name="fleet_trend_device_ids" value="">'
+            + (
+                "".join(
+                    _usb_otg_fleet_device_checkbox(
+                        device=device,
+                        checked=(
+                            use_all_frame_devices
+                            or str(device.get("id", "")) in selected_frame_device_ids
+                        ),
+                    )
+                    for device in devices
+                    if str(device.get("id", "")).strip()
+                )
+                or (
+                    '<div class="inline-field-help">'
+                    "Add at least one device before selecting frame devices."
+                    "</div>"
+                )
+            )
         )
         bluetooth_adapter_options = (
             _option_html("auto", "Auto", config.bluetooth.adapter)
@@ -922,6 +1010,25 @@ def render_settings_html(
                 ),
                 help_text="Generate a compact fleet trend chart using stored battery history.",
             )
+            + settings_control_row(
+                "Fleet Trend metrics",
+                f'<div class="chip-grid">{usb_otg_fleet_metric_controls}</div>',
+                help_text="Choose which chart images the frame export should generate.",
+            )
+            + settings_control_row(
+                "Fleet Trend range",
+                (
+                    '<select id="usb-otg-fleet-range-input" '
+                    'name="fleet_trend_range" autocomplete="off">'
+                    f"{usb_otg_fleet_range_options}</select>"
+                ),
+                help_text="Apply this history window to every selected Fleet Trend chart.",
+            )
+            + settings_control_row(
+                "Fleet Trend devices",
+                f'<div class="chip-grid">{usb_otg_fleet_device_controls}</div>',
+                help_text="Select at least one device to include in frame Fleet Trend charts.",
+            )
             + settings_row("Backing disk image", config.usb_otg.image_path)
             + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
             + settings_row("Gadget name", config.usb_otg.gadget_name)
@@ -1006,7 +1113,10 @@ def render_settings_html(
                 + (
                     '<a class="secondary-button" href="/settings">Done</a>'
                     if edit_mode
-                    else '<a class="primary-button" href="/settings?edit=1">Edit settings</a>'
+                    else (
+                        '<a class="secondary-button" href="/diagnostics">Diagnostics</a>'
+                        '<a class="primary-button" href="/settings?edit=1">Edit settings</a>'
+                    )
                 )
                 + "</div>"
             ),

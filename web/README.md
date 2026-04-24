@@ -59,11 +59,24 @@ installer. If `--skip-usb-otg-tools` was used, Settings shows that support is
 not installed and hides the prepare/export actions until the installer is run
 again without that skip option. When support is installed, Settings can also
 configure generated frame image width, height, format, light/dark appearance,
-refresh cadence, overview density, and which image types are exported.
+refresh cadence, overview density, which image types are exported, and the
+Fleet Trend frame metrics, history range, and included devices.
+The exporter screenshots the same hidden frame-render pages used by
+Diagnostics, so the preview and USB drive files share one rendering path.
+Saving USB OTG image-export settings starts background regeneration for the
+configured images when USB OTG export is enabled, then redirects Settings
+without waiting for screenshots and drive reattachment to finish.
 The non-editing Settings Actions panel exposes `Export Frame Images`, which
 regenerates the images and reattaches the drive, and `Refresh USB OTG Drive`, which
 only detaches and reattaches the existing backing disk image so a picture frame
 can re-enumerate it.
+
+Settings also exposes `Diagnostics` for internal validation pages. The
+Diagnostics page contains a `Frame Preview` section that embeds hidden
+frame-render routes such as `/frame/fleet-trend` and
+`/frame/battery-overview?page=1` inside a simulated picture-frame viewport.
+These routes remain clean screenshot targets with no normal application
+navigation around them.
 
 ## Canonical References
 

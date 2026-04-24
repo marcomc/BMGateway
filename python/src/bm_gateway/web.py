@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -66,7 +67,10 @@ from .web_pages import (
     render_add_device_html,
     render_device_html,
     render_devices_html,
+    render_diagnostics_html,
     render_edit_device_html,
+    render_frame_battery_overview_html,
+    render_frame_fleet_trend_html,
     render_history_html,
     render_home_html,
     render_management_html,
@@ -82,10 +86,13 @@ __all__ = [
     "build_run_once_command",
     "export_usb_otg_images_now",
     "render_add_device_html",
+    "render_diagnostics_html",
     "render_home_html",
     "render_device_html",
     "render_devices_html",
     "render_edit_device_html",
+    "render_frame_battery_overview_html",
+    "render_frame_fleet_trend_html",
     "render_history_html",
     "render_management_html",
     "render_reboot_pending_html",
@@ -111,6 +118,21 @@ __all__ = [
     "_chart_points",
     "_discover_bluetooth_adapters",
 ]
+
+
+def _start_usb_otg_image_export(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> threading.Thread:
+    thread = threading.Thread(
+        target=export_usb_otg_images_now,
+        kwargs={"config_path": config_path, "state_dir": state_dir},
+        daemon=True,
+        name="usb-otg-image-export",
+    )
+    thread.start()
+    return thread
 
 
 def serve_snapshot(*, host: str, port: int, snapshot_path: Path) -> None:
@@ -457,6 +479,62 @@ def serve_management(
                     theme_preference=config.web.appearance,
                 )
                 self._send_html(html)
+                return
+
+            if parsed.path in {"/diagnostics", "/debug"}:
+                self._send_html(
+                    render_diagnostics_html(
+                        theme_preference=config.web.appearance,
+                        fleet_trend_metrics=config.usb_otg.fleet_trend_metrics,
+                    )
+                )
+                return
+
+            if parsed.path == "/frame/fleet-trend":
+                params = parse_qs(parsed.query)
+                selected_metrics = config.usb_otg.fleet_trend_metrics or ("soc",)
+                requested_metric = params.get("metric", [selected_metrics[0]])[0]
+                frame_metric = (
+                    requested_metric
+                    if requested_metric in selected_metrics
+                    else selected_metrics[0]
+                )
+                frame_devices = _usb_otg_fleet_trend_devices(config, serialized_devices)
+                battery_chart_points, battery_legend = _fleet_chart_points(
+                    database_path=database_path,
+                    devices=frame_devices,
+                )
+                self._send_html(
+                    render_frame_fleet_trend_html(
+                        chart_points=battery_chart_points,
+                        legend=battery_legend,
+                        show_chart_markers=config.web.show_chart_markers,
+                        appearance=config.usb_otg.appearance,
+                        default_chart_range=config.usb_otg.fleet_trend_range,
+                        default_chart_metric=frame_metric,
+                        width=config.usb_otg.image_width_px,
+                        height=config.usb_otg.image_height_px,
+                    )
+                )
+                return
+
+            if parsed.path == "/frame/battery-overview":
+                params = parse_qs(parsed.query)
+                try:
+                    page = max(1, int(params.get("page", ["1"])[0]))
+                except ValueError:
+                    page = 1
+                self._send_html(
+                    render_frame_battery_overview_html(
+                        snapshot=snapshot,
+                        devices=serialized_devices,
+                        page=page,
+                        devices_per_page=config.usb_otg.overview_devices_per_image,
+                        appearance=config.usb_otg.appearance,
+                        width=config.usb_otg.image_width_px,
+                        height=config.usb_otg.image_height_px,
+                    )
+                )
                 return
 
             if parsed.path in {"/management", "/gateway"}:
@@ -1052,6 +1130,24 @@ def serve_management(
                     ),
                     export_battery_overview=_bool_from_form(form, "export_battery_overview"),
                     export_fleet_trend=_bool_from_form(form, "export_fleet_trend"),
+                    fleet_trend_metrics=(
+                        tuple(form.get("fleet_trend_metrics", []))
+                        if "fleet_trend_metrics" in form
+                        else config.usb_otg.fleet_trend_metrics
+                    ),
+                    fleet_trend_range=form.get(
+                        "fleet_trend_range",
+                        [config.usb_otg.fleet_trend_range],
+                    )[0],
+                    fleet_trend_device_ids=(
+                        tuple(
+                            device_id
+                            for device_id in form.get("fleet_trend_device_ids", [])
+                            if device_id.strip()
+                        )
+                        if "fleet_trend_device_ids" in form
+                        else config.usb_otg.fleet_trend_device_ids
+                    ),
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)
@@ -1072,9 +1168,20 @@ def serve_management(
                         status=400,
                     )
                     return
+                updated_config = load_config(config_path)
+                message = "Settings saved"
+                if updated_config.usb_otg.enabled and (
+                    updated_config.usb_otg.export_battery_overview
+                    or updated_config.usb_otg.export_fleet_trend
+                ):
+                    _start_usb_otg_image_export(
+                        config_path=config_path,
+                        state_dir=state_dir,
+                    )
+                    message += "; USB OTG frame image export started"
                 self.send_response(303)
                 self.send_header(
-                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": message})
                 )
                 self.end_headers()
                 return
@@ -1257,3 +1364,13 @@ def serve_management(
         server.serve_forever()
     finally:
         server.server_close()
+
+
+def _usb_otg_fleet_trend_devices(
+    config: AppConfig,
+    devices: list[dict[str, object]],
+) -> list[dict[str, object]]:
+    selected_ids = set(config.usb_otg.fleet_trend_device_ids)
+    if not selected_ids:
+        return devices
+    return [device for device in devices if str(device.get("id", "")) in selected_ids]

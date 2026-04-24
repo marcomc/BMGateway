@@ -72,3 +72,6 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.usb_otg.overview_devices_per_image == 5
     assert config.usb_otg.export_battery_overview is True
     assert config.usb_otg.export_fleet_trend is True
+    assert config.usb_otg.fleet_trend_metrics == ("soc",)
+    assert config.usb_otg.fleet_trend_range == "7"
+    assert config.usb_otg.fleet_trend_device_ids == ()

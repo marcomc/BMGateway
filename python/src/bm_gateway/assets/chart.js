@@ -200,10 +200,11 @@
     }}
     const width = 960;
     const height = 360;
-    const padLeft = 68;
-    const padRight = 18;
-    const padTop = 18;
-    const padBottom = 44;
+    const isCompact = document.getElementById(chartId)?.dataset.chartCompact === "true";
+    const padLeft = isCompact ? 34 : 68;
+    const padRight = isCompact ? 22 : 18;
+    const padTop = isCompact ? 6 : 18;
+    const padBottom = isCompact ? 24 : 44;
     const sortedUsable = [...usable].sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
     const values = sortedUsable.map((point) => point[metric]);
     const bounds = metricBounds(metric, values);
@@ -246,13 +247,13 @@
     const yGuides = Array.from({{ length: 5 }}, (_, index) => {{
       const y = padTop + ((plotHeight / 4) * index);
       const labelValue = maxValue - ((span / 4) * index);
-      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="${{chartGrid}}" stroke-width="1"/>\n<text x="10" y="${{(y + 4).toFixed(1)}}" fill="${{chartAxis}}" font-size="12">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
+      return `\n<line x1="${{padLeft}}" y1="${{y.toFixed(1)}}" x2="${{width - padRight}}" y2="${{y.toFixed(1)}}" stroke="${{chartGrid}}" stroke-width="1"/>\n<text x="${{isCompact ? 2 : 10}}" y="${{(y + 4).toFixed(1)}}" fill="${{chartAxis}}" font-size="${{isCompact ? 10 : 12}}">${{labelValue.toFixed(metric === 'soc' ? 0 : 1)}}</text>`;
     }}).join("");
     const xIndexes = new Set([0, Math.floor(coords.length / 3), Math.floor((coords.length * 2) / 3), coords.length - 1]);
     const xGuides = coords.filter((_, index) => xIndexes.has(index)).map((point) => `\n<line x1="${{point.x.toFixed(1)}}" y1="${{padTop}}" x2="${{point.x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{chartGrid}}" stroke-dasharray="4 8" stroke-width="1"/>`).join("");
     const xLabels = coords.filter((_, index) => xIndexes.has(index)).map((point) => {{
       const timestamp = parseTime(point.ts) ?? start;
-      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - 12}}" text-anchor="middle" fill="${{chartAxis}}" font-size="12">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
+      return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - (isCompact ? 5 : 12)}}" text-anchor="middle" fill="${{chartAxis}}" font-size="${{isCompact ? 10 : 12}}">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
     }}).join("");
     const gapThreshold = Math.max(xSpan / 8, 6 * 60 * 60 * 1000);
     const segmentSeries = (points) => {{
@@ -301,8 +302,11 @@
       }};
     }});
     const overlayId = `${{chartId}}-${{metric}}-overlay`;
+    const crosshairSvg = isCompact
+      ? ""
+      : `\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />`;
     return {{
-      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="22" fill="${{chartSurface}}"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}\n<line class="chart-crosshair" x1="${{coords[coords.length - 1].x.toFixed(1)}}" y1="${{padTop}}" x2="${{coords[coords.length - 1].x.toFixed(1)}}" y2="${{height - padBottom}}" stroke="${{coords[coords.length - 1].seriesColor}}" stroke-opacity="0.35" stroke-width="2" stroke-dasharray="4 8" />\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
+      svg: `<svg viewBox="0 0 ${{width}} ${{height}}" role="img" aria-label="${{METRICS[metric].label}} chart">\n<defs>${{seriesLayers.map((series) => series.defs).join("")}}\n</defs>\n<rect x="0" y="0" width="${{width}}" height="${{height}}" rx="${{isCompact ? 12 : 22}}" fill="${{chartSurface}}"/>\n${{yGuides}}\n${{xGuides}}\n${{seriesLayers.map((series) => series.body).join("")}}\n${{xLabels}}${{crosshairSvg}}\n<rect id="${{overlayId}}" class="chart-overlay" x="${{padLeft}}" y="${{padTop}}" width="${{plotWidth}}" height="${{plotHeight}}" fill="transparent" />\n</svg>`,
       coords,
       seriesBuckets: bucketList,
       metric,
