@@ -1434,11 +1434,12 @@ def serve_management(
                     updated_config.usb_otg.export_battery_overview
                     or updated_config.usb_otg.export_fleet_trend
                 ):
-                    _start_usb_otg_image_export(
+                    export_thread = _start_usb_otg_image_export(
                         config_path=config_path,
                         state_dir=state_dir,
                     )
-                    message += "; USB OTG frame image export started"
+                    if export_thread is not None:
+                        message += "; USB OTG frame image export started"
                 self.send_response(303)
                 self.send_header(
                     "Location", "/settings?" + urlencode({"edit": "1", "message": message})

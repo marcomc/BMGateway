@@ -1595,6 +1595,8 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
         )
         with urllib.request.urlopen(first_request, timeout=1.0) as response:
             assert response.status == 200
+            params = parse_qs(urlparse(response.url).query)
+            assert params["message"] == ["Settings saved; USB OTG frame image export started"]
 
         assert export_started.wait(timeout=1.0)
 
@@ -1605,6 +1607,8 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
         )
         with urllib.request.urlopen(second_request, timeout=1.0) as response:
             assert response.status == 200
+            params = parse_qs(urlparse(response.url).query)
+            assert params["message"] == ["Settings saved"]
 
         assert not second_export_started.wait(timeout=0.2)
     finally:

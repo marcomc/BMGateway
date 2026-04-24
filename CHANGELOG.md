@@ -69,6 +69,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   reuses the last stored snapshot instead of starting a concurrent polling run.
 - Fixed settings-triggered USB OTG frame exports so repeated saves do not start
   concurrent drive-update workers.
+- Fixed Settings status text so repeated saves do not claim a new USB OTG frame
+  export started while an existing export is already running.
+- Fixed `bm-gateway run --dry-run --export-usb-otg-now` so dry-run mode skips
+  USB OTG drive writes instead of forcing an export.
 - Fixed USB OTG Fleet Trend frame latest-value rows for duplicate device names
   by matching values with unique series identifiers.
 - Updated the config schema for `web.language` and the `[usb_otg]` settings so

@@ -472,11 +472,12 @@ def _handle_run(
             publish_discovery=publish_discovery,
             state_dir=state_dir,
         )
-        if config.usb_otg.enabled or export_usb_otg_now:
+        if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
             from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive
 
-        if export_usb_otg_now or (
-            config.usb_otg.enabled and export_due(config=config, state_dir=state_dir)
+        if not dry_run and (
+            export_usb_otg_now
+            or (config.usb_otg.enabled and export_due(config=config, state_dir=state_dir))
         ):
             export_result = update_usb_otg_drive(
                 config=config,
