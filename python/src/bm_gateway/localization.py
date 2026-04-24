@@ -99,7 +99,8 @@ _DYNAMIC_TRANSLATION_PREFIXES: Final = (
 )
 _IGNORED_TEXT_PATTERNS: Final = (
     re.compile(r"^/[-A-Za-z0-9._:/?=&%#<>]+$"),
-    re.compile(r"^[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)+$"),
+    re.compile(r"^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)+$"),
+    re.compile(r"^(?:Etc/)?GMT[+-]\d+$"),
     re.compile(r"^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$"),
     re.compile(r"^[A-F0-9:]{8,}$"),
     re.compile(r"^v?\d+(?:[.:]\d+)*(?: .*)?$"),

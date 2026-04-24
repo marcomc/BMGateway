@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import html
+from functools import lru_cache
 from typing import cast
+from zoneinfo import available_timezones
 
 from . import display_version
 from . import web_pages as shared
@@ -29,6 +31,17 @@ from .web_ui import (
     summary_card,
     top_header,
 )
+
+
+@lru_cache(maxsize=1)
+def _available_timezone_options() -> tuple[str, ...]:
+    try:
+        zones = sorted(available_timezones())
+    except OSError:
+        zones = []
+    if "UTC" not in zones:
+        zones.insert(0, "UTC")
+    return tuple(zones)
 
 
 def _settings_markup_row(label: str, value_html: str) -> str:
@@ -534,6 +547,18 @@ def render_settings_html(
         language_options = "".join(
             _option_html(value, label, config.web.language) for value, label in locale_options()
         )
+        timezone_choices = _available_timezone_options()
+        timezone_options = (
+            ""
+            if config.gateway.timezone in timezone_choices
+            else _option_html(
+                config.gateway.timezone,
+                f"{config.gateway.timezone} (configured)",
+                config.gateway.timezone,
+            )
+        ) + "".join(
+            _option_html(value, value, config.gateway.timezone) for value in timezone_choices
+        )
         usb_otg_format_options = "".join(
             _option_html(value, label, config.usb_otg.image_format)
             for value, label in (("jpeg", "JPEG"), ("png", "PNG"), ("bmp", "BMP"))
@@ -621,8 +646,9 @@ def render_settings_html(
             + settings_control_row(
                 "Timezone",
                 (
-                    f'<input id="timezone-input" type="text" name="timezone" '
-                    f'value="{html.escape(config.gateway.timezone)}" autocomplete="off">'
+                    '<select id="timezone-input" name="timezone" autocomplete="off" translate="no">'
+                    f"{timezone_options}"
+                    "</select>"
                 ),
                 help_text=(
                     "Use an IANA timezone such as Europe/Rome so timestamps render correctly."

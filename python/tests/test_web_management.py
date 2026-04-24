@@ -2018,6 +2018,10 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert "Save USB OTG settings" in html
     assert 'name="gateway_name"' in html
     assert 'name="timezone"' in html
+    assert '<select id="timezone-input" name="timezone" autocomplete="off" translate="no">' in html
+    assert '<input id="timezone-input" type="text"' not in html
+    assert '<option value="Europe/Rome" selected>Europe/Rome</option>' in html
+    assert '<option value="UTC">UTC</option>' in html
     assert 'name="mqtt_host"' in html
     assert 'name="mqtt_port"' in html
     assert 'name="mqtt_username"' in html

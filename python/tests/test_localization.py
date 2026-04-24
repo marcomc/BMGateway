@@ -189,6 +189,28 @@ def test_chart_script_uses_selected_language_for_generated_summary_text() -> Non
     assert '"Showing all available history":"Mostra tutta la cronologia disponibile"' in script
 
 
+def test_mqtt_anonymous_placeholders_are_translated_to_italian() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, mqtt=replace(config.mqtt, username="", password=""))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        theme_preference="light",
+        language="it",
+        detected_bluetooth_adapters=[],
+        usb_otg_device_controller_detected=False,
+        usb_otg_boot_mode_prepared=False,
+        usb_otg_support_installed=False,
+    )
+
+    assert "Anonimo / non impostato" in html
+    assert "Vuoto / anonimo" in html
+    assert "Anonymous / not set" not in html
+    assert "Empty / anonymous" not in html
+
+
 def test_device_status_explainer_uses_selected_language() -> None:
     html = render_device_html(
         device_id="spare_nlp5",
