@@ -1519,6 +1519,7 @@ def render_management_html(
     contract: dict[str, object],
     message: str = "",
     theme_preference: str = "system",
+    language: str | None = None,
 ) -> str:
     from .web_pages_settings import render_management_html as _render_management_html
 
@@ -1532,6 +1533,7 @@ def render_management_html(
         contract=contract,
         message=message,
         theme_preference=theme_preference,
+        language=language,
     )
 
 
@@ -1546,6 +1548,7 @@ def render_home_html(
     appearance: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     from .web_pages_home import render_home_html as _render_home_html
 
@@ -1559,6 +1562,7 @@ def render_home_html(
         appearance=appearance,
         default_chart_range=default_chart_range,
         default_chart_metric=default_chart_metric,
+        language=language,
     )
 
 
@@ -1566,12 +1570,14 @@ def render_diagnostics_html(
     *,
     theme_preference: str = "system",
     fleet_trend_metrics: tuple[str, ...] = ("soc",),
+    language: str = "en",
 ) -> str:
     from .web_pages_frame import render_diagnostics_html as _render_diagnostics_html
 
     return _render_diagnostics_html(
         theme_preference=theme_preference,
         fleet_trend_metrics=fleet_trend_metrics,
+        language=language,
     )
 
 
@@ -1585,6 +1591,7 @@ def render_frame_fleet_trend_html(
     default_chart_metric: str,
     width: int,
     height: int,
+    language: str = "en",
 ) -> str:
     from .web_pages_frame import render_frame_fleet_trend_html as _render_frame_fleet_trend_html
 
@@ -1597,6 +1604,7 @@ def render_frame_fleet_trend_html(
         default_chart_metric=default_chart_metric,
         width=width,
         height=height,
+        language=language,
     )
 
 
@@ -1609,6 +1617,7 @@ def render_frame_battery_overview_html(
     appearance: str,
     width: int,
     height: int,
+    language: str = "en",
 ) -> str:
     from .web_pages_frame import (
         render_frame_battery_overview_html as _render_frame_battery_overview_html,
@@ -1622,6 +1631,7 @@ def render_frame_battery_overview_html(
         appearance=appearance,
         width=width,
         height=height,
+        language=language,
     )
 
 
@@ -1631,6 +1641,7 @@ def render_devices_html(
     devices: list[dict[str, object]],
     message: str = "",
     theme_preference: str = "system",
+    language: str = "en",
 ) -> str:
     from .web_pages_devices import render_devices_html as _render_devices_html
 
@@ -1639,6 +1650,7 @@ def render_devices_html(
         devices=devices,
         message=message,
         theme_preference=theme_preference,
+        language=language,
     )
 
 
@@ -1648,6 +1660,7 @@ def render_add_device_html(
     theme_preference: str = "system",
     selected_color_key: str = "green",
     reserved_color_keys: set[str] | None = None,
+    language: str = "en",
 ) -> str:
     from .web_pages_devices import render_add_device_html as _render_add_device_html
 
@@ -1656,6 +1669,7 @@ def render_add_device_html(
         theme_preference=theme_preference,
         selected_color_key=selected_color_key,
         reserved_color_keys=reserved_color_keys,
+        language=language,
     )
 
 
@@ -1666,6 +1680,7 @@ def render_edit_device_html(
     theme_preference: str = "system",
     reserved_color_keys: set[str] | None = None,
     original_device_id: str | None = None,
+    language: str = "en",
 ) -> str:
     from .web_pages_devices import render_edit_device_html as _render_edit_device_html
 
@@ -1675,6 +1690,7 @@ def render_edit_device_html(
         theme_preference=theme_preference,
         reserved_color_keys=reserved_color_keys,
         original_device_id=original_device_id,
+        language=language,
     )
 
 
@@ -1694,6 +1710,7 @@ def render_settings_html(
     usb_otg_boot_mode_prepared: bool | None = None,
     usb_otg_support_installed: bool | None = None,
     theme_preference: str = "system",
+    language: str | None = None,
 ) -> str:
     from .web_pages_settings import render_settings_html as _render_settings_html
 
@@ -1712,19 +1729,20 @@ def render_settings_html(
         usb_otg_boot_mode_prepared=usb_otg_boot_mode_prepared,
         usb_otg_support_installed=usb_otg_support_installed,
         theme_preference=theme_preference,
+        language=language,
     )
 
 
-def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
+def render_reboot_pending_html(*, theme_preference: str = "system", language: str = "en") -> str:
     from .web_pages_settings import render_reboot_pending_html as _render_reboot_pending_html
 
-    return _render_reboot_pending_html(theme_preference=theme_preference)
+    return _render_reboot_pending_html(theme_preference=theme_preference, language=language)
 
 
-def render_shutdown_pending_html(*, theme_preference: str = "system") -> str:
+def render_shutdown_pending_html(*, theme_preference: str = "system", language: str = "en") -> str:
     from .web_pages_settings import render_shutdown_pending_html as _render_shutdown_pending_html
 
-    return _render_shutdown_pending_html(theme_preference=theme_preference)
+    return _render_shutdown_pending_html(theme_preference=theme_preference, language=language)
 
 
 def render_device_html(
@@ -1740,6 +1758,7 @@ def render_device_html(
     theme_preference: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     from .web_pages_history import render_device_html as _render_device_html
 
@@ -1755,6 +1774,7 @@ def render_device_html(
         theme_preference=theme_preference,
         default_chart_range=default_chart_range,
         default_chart_metric=default_chart_metric,
+        language=language,
     )
 
 
@@ -1769,6 +1789,7 @@ def render_history_html(
     theme_preference: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     from .web_pages_history import render_history_html as _render_history_html
 
@@ -1782,6 +1803,7 @@ def render_history_html(
         theme_preference=theme_preference,
         default_chart_range=default_chart_range,
         default_chart_metric=default_chart_metric,
+        language=language,
     )
 
 

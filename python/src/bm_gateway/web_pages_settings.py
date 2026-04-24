@@ -8,6 +8,7 @@ from typing import cast
 from . import display_version
 from . import web_pages as shared
 from .config import AppConfig
+from .localization import locale_options
 from .usb_otg import (
     usb_otg_boot_mode_prepared as detect_usb_otg_boot_mode_prepared,
 )
@@ -103,6 +104,7 @@ def render_management_html(
     contract: dict[str, object],
     message: str = "",
     theme_preference: str = "system",
+    language: str | None = None,
 ) -> str:
     return render_settings_html(
         config=config,
@@ -115,6 +117,7 @@ def render_management_html(
         devices_text=devices_text,
         contract=contract,
         theme_preference=theme_preference,
+        language=language,
     )
 
 
@@ -134,7 +137,9 @@ def render_settings_html(
     usb_otg_boot_mode_prepared: bool | None = None,
     usb_otg_support_installed: bool | None = None,
     theme_preference: str = "system",
+    language: str | None = None,
 ) -> str:
+    resolved_language = language or config.web.language
     version_label = display_version()
     primary_device_id = shared._primary_device_id(snapshot, devices)
     banner = banner_strip(html.escape(message), kind="warning") if message else ""
@@ -341,6 +346,10 @@ def render_settings_html(
                 "system": "System",
             }.get(config.web.appearance, config.web.appearance),
         )
+        + settings_row(
+            "Language",
+            dict(locale_options()).get(config.web.language, config.web.language),
+        )
     )
     usb_otg_warning = (
         banner_strip(
@@ -521,6 +530,9 @@ def render_settings_html(
                 ("dark", "Dark"),
                 ("system", "System"),
             )
+        )
+        language_options = "".join(
+            _option_html(value, label, config.web.language) for value, label in locale_options()
         )
         usb_otg_format_options = "".join(
             _option_html(value, label, config.usb_otg.image_format)
@@ -908,6 +920,15 @@ def render_settings_html(
                     "light or dark styling."
                 ),
             )
+            + settings_control_row(
+                "Language",
+                (
+                    '<select id="language-input" name="language" autocomplete="off">'
+                    f"{language_options}"
+                    "</select>"
+                ),
+                help_text="Choose the language used by the local web interface.",
+            )
             + '<div style="margin-top:1rem">'
             + f"{button('Save display settings', kind='primary')}"
             + "</div>"
@@ -1223,6 +1244,7 @@ def render_settings_html(
         primary_device_id=primary_device_id,
         version_label=version_label,
         theme_preference=theme_preference,
+        language=resolved_language,
     )
 
 
@@ -1236,7 +1258,7 @@ def _option_html(value: str, label: str, selected_value: str) -> str:
     )
 
 
-def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
+def render_reboot_pending_html(*, theme_preference: str = "system", language: str = "en") -> str:
     polling_script = """
 <script>
 (() => {
@@ -1322,11 +1344,12 @@ def render_reboot_pending_html(*, theme_preference: str = "system") -> str:
         active_nav="settings",
         version_label=display_version(),
         theme_preference=theme_preference,
+        language=language,
         script=polling_script,
     )
 
 
-def render_shutdown_pending_html(*, theme_preference: str = "system") -> str:
+def render_shutdown_pending_html(*, theme_preference: str = "system", language: str = "en") -> str:
     body = top_header(
         title="Shutdown In Progress",
     ) + section_card(
@@ -1362,4 +1385,5 @@ def render_shutdown_pending_html(*, theme_preference: str = "system") -> str:
         active_nav="settings",
         version_label=display_version(),
         theme_preference=theme_preference,
+        language=language,
     )

@@ -25,10 +25,6 @@
 - Add integration tests that exercise the example config files end-to-end.
 - Revisit Docker only for 64-bit deployment targets if containerization becomes
   operationally useful again.
-- Add localization support for the 10 most common interface languages.
-  The web app currently assumes a single language. Add a proper localization
-  layer so labels, status explanations, settings text, and operational
-  messages can be translated without forking templates.
 
 ## Propositions
 
@@ -46,6 +42,21 @@
   - decide whether privileged host actions should use a narrow helper or
     dedicated oneshot units instead of direct `sudo systemctl ...`
   - add follow-up web hardening for authentication and mutating-route safety
+
+- [ ] Add an explicit admin trust boundary for host-control web actions.
+  The management UI currently includes mutating host-control actions such as
+  reboot, shutdown, Bluetooth restart, and USB OTG prepare/export/refresh.
+  These actions must not remain reachable from a broadly exposed unauthenticated
+  LAN web surface.
+  Actions:
+  - decide whether the web UI should default to local-only binding until an
+    admin boundary exists
+  - add authentication or another explicit operator trust boundary for
+    management routes
+  - add CSRF and Origin or Referer validation for mutating POST actions
+  - separate read-only status pages from privileged host-control actions
+  - document the supported deployment model for LAN exposure after the boundary
+    is implemented
 
 - [ ] Add camera-based barcode scanning for device MAC or serial capture.
   Manual MAC entry is error-prone on phones and laptops. The original mobile

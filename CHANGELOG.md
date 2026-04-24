@@ -8,6 +8,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Unreleased Added
 
+- Added modular web localization with packaged locale catalogs, a Settings
+  language selector, persisted `web.language` config, automatic browser/system
+  language detection by default, and initial support for English, Simplified
+  Chinese, Hindi, Spanish, Arabic, French, Bengali, Portuguese, Russian, Urdu,
+  German, and Italian.
 - Added a Raspberry Pi USB-OTG image-export hardware test helper and
   Samsung `SPF-71E` compatibility image generator for validating a
   read-only mass-storage gadget before implementing automated exports.
@@ -53,6 +58,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed USB OTG Fleet Trend frame title clipping by giving the compact title
   line enough vertical room and lowering the frame header while retaining
   horizontal ellipsis.
+- Constrained the root USB OTG drive helper to safe backing-image and gadget
+  name policies, and removed unnecessary Linux capabilities from the web
+  service unit.
 
 ## [0.1.1] - 2026-04-23
 

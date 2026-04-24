@@ -13,8 +13,10 @@ Options:
   --source-dir <path>       Directory containing test images for setup.
   --image-path <path>       FAT backing image path.
                             Default: /var/lib/bm-gateway/usb-otg/spf71e-test.img
+                            Must be under /var/lib/bm-gateway/usb-otg.
   --size-mb <number>        Backing image size. Default: 64
   --gadget-name <name>      ConfigFS gadget name. Default: bmgw_spf71e
+                            Must be a simple bmgw_* identifier.
   --help                    Show this help text.
 EOF
 }
@@ -29,6 +31,7 @@ image_path="/var/lib/bm-gateway/usb-otg/spf71e-test.img"
 size_mb="64"
 gadget_name="bmgw_spf71e"
 configfs_root="/sys/kernel/config/usb_gadget"
+safe_image_dir="/var/lib/bm-gateway/usb-otg"
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -59,6 +62,45 @@ while [[ "$#" -gt 0 ]]; do
       ;;
   esac
 done
+
+validate_image_path() {
+  local dir_name file_name
+
+  dir_name="$(dirname -- "${image_path}")"
+  if [[ "${dir_name}" != "${safe_image_dir}" ]]; then
+    printf 'image path must be directly under %s: %s\n' "${safe_image_dir}" "${image_path}" >&2
+    exit 1
+  fi
+
+  file_name="$(basename -- "${image_path}")"
+  if [[ ! "${file_name}" =~ ^[A-Za-z0-9._-]+\.img$ ]]; then
+    printf 'image filename must be a safe .img name: %s\n' "${file_name}" >&2
+    exit 1
+  fi
+  image_path="${safe_image_dir}/${file_name}"
+}
+
+validate_gadget_name() {
+  if [[ ! "${gadget_name}" =~ ^bmgw_[A-Za-z0-9_-]+$ ]]; then
+    printf 'gadget name must be a simple bmgw_* identifier: %s\n' "${gadget_name}" >&2
+    exit 1
+  fi
+}
+
+validate_size_mb() {
+  if [[ ! "${size_mb}" =~ ^[0-9]+$ ]] || [[ "${size_mb}" -lt 1 ]] || [[ "${size_mb}" -gt 4096 ]]; then
+    printf 'size-mb must be an integer between 1 and 4096: %s\n' "${size_mb}" >&2
+    exit 1
+  fi
+}
+
+validate_inputs() {
+  validate_image_path
+  validate_gadget_name
+  validate_size_mb
+}
+
+validate_inputs
 
 require_root() {
   if [[ "${EUID}" -ne 0 ]]; then

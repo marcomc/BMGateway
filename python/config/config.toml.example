@@ -45,6 +45,7 @@ visible_device_limit = 4
 appearance = "system"
 default_chart_range = "7"
 default_chart_metric = "soc"
+language = "auto"
 
 [usb_otg]
 enabled = false

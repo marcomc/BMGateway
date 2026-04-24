@@ -8,6 +8,7 @@ import html
 import json
 from typing import Iterable
 
+from .localization import localize_html
 from .web_assets import chart_script_source, web_css_source
 
 
@@ -25,6 +26,7 @@ def app_document(
     theme_preference: str = "",
     head_extra: str = "",
     script: str = "",
+    language: str = "en",
 ) -> str:
     theme_attr = (
         f' data-theme-preference="{html.escape(theme_preference)}"' if theme_preference else ""
@@ -35,7 +37,7 @@ def app_document(
     <link rel="manifest" href="/site.webmanifest">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">"""
-    return f"""<!doctype html>
+    document = f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -59,6 +61,7 @@ def app_document(
   </body>
 </html>
 """
+    return localize_html(document, language)
 
 
 def base_css() -> str:

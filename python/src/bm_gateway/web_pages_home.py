@@ -27,6 +27,7 @@ def render_home_html(
     appearance: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
+    language: str = "en",
 ) -> str:
     version_label = display_version()
     resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
@@ -78,6 +79,7 @@ def render_home_html(
         primary_device_id=primary_device_id,
         version_label=version_label,
         theme_preference=appearance,
+        language=language,
         script=chart_script(chart_id) + shared._home_overview_script(overview_track_id),
     )
 

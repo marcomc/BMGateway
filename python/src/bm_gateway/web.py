@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import COLOR_CATALOG, default_color_key, load_device_registry
+from .localization import resolve_locale_preference
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
     fetch_daily_history,
@@ -205,9 +206,16 @@ def serve_management(
             database_path = database_file_path(config, state_dir=state_dir)
             return config, snapshot, database_path
 
+        def _request_language(self, config: AppConfig) -> str:
+            return resolve_locale_preference(
+                config.web.language,
+                self.headers.get("Accept-Language"),
+            )
+
         def do_GET(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
             config, snapshot, database_path = self._load_current()
+            request_language = self._request_language(config)
             devices = load_device_registry(config.device_registry_path)
             serialized_devices = [device.to_dict() for device in devices]
             contract = build_contract(config, devices)
@@ -337,6 +345,7 @@ def serve_management(
                     theme_preference=config.web.appearance,
                     default_chart_range=config.web.default_chart_range,
                     default_chart_metric=config.web.default_chart_metric,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -388,6 +397,7 @@ def serve_management(
                     theme_preference=config.web.appearance,
                     default_chart_range=config.web.default_chart_range,
                     default_chart_metric=config.web.default_chart_metric,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -399,17 +409,26 @@ def serve_management(
                     devices=serialized_devices,
                     message=message,
                     theme_preference=config.web.appearance,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
 
             if parsed.path == "/rebooting":
-                self._send_html(render_reboot_pending_html(theme_preference=config.web.appearance))
+                self._send_html(
+                    render_reboot_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
                 return
 
             if parsed.path == "/shutting-down":
                 self._send_html(
-                    render_shutdown_pending_html(theme_preference=config.web.appearance)
+                    render_shutdown_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
                 )
                 return
 
@@ -426,6 +445,7 @@ def serve_management(
                         theme_preference=config.web.appearance,
                         selected_color_key=default_color_key(used_colors=reserved_color_keys),
                         reserved_color_keys=reserved_color_keys,
+                        language=request_language,
                     )
                 )
                 return
@@ -443,6 +463,7 @@ def serve_management(
                             snapshot=snapshot,
                             devices=serialized_devices,
                             theme_preference=config.web.appearance,
+                            language=request_language,
                         ),
                         status=404,
                     )
@@ -460,6 +481,7 @@ def serve_management(
                         message=message,
                         theme_preference=config.web.appearance,
                         reserved_color_keys=reserved_color_keys,
+                        language=request_language,
                     )
                 )
                 return
@@ -477,6 +499,7 @@ def serve_management(
                     devices_text=read_text(config.device_registry_path),
                     contract=contract,
                     theme_preference=config.web.appearance,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -486,6 +509,7 @@ def serve_management(
                     render_diagnostics_html(
                         theme_preference=config.web.appearance,
                         fleet_trend_metrics=config.usb_otg.fleet_trend_metrics,
+                        language=request_language,
                     )
                 )
                 return
@@ -514,6 +538,7 @@ def serve_management(
                         default_chart_metric=frame_metric,
                         width=config.usb_otg.image_width_px,
                         height=config.usb_otg.image_height_px,
+                        language=request_language,
                     )
                 )
                 return
@@ -533,6 +558,7 @@ def serve_management(
                         appearance=config.usb_otg.appearance,
                         width=config.usb_otg.image_width_px,
                         height=config.usb_otg.image_height_px,
+                        language=request_language,
                     )
                 )
                 return
@@ -550,6 +576,7 @@ def serve_management(
                     devices_text=read_text(config.device_registry_path),
                     contract=contract,
                     theme_preference=config.web.appearance,
+                    language=request_language,
                 )
                 self._send_html(html)
                 return
@@ -568,6 +595,7 @@ def serve_management(
                 appearance=config.web.appearance,
                 default_chart_range=config.web.default_chart_range,
                 default_chart_metric=config.web.default_chart_metric,
+                language=request_language,
             )
             self._send_html(html)
 
@@ -604,6 +632,7 @@ def serve_management(
                         contract={},
                         message="Validation failed: " + "; ".join(errors),
                         theme_preference=config.web.appearance,
+                        language=self._request_language(config),
                     )
                     self._send_html(html, status=400)
                     return
@@ -648,6 +677,7 @@ def serve_management(
                                 device.color_key
                                 for device in load_device_registry(config.device_registry_path)
                             },
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -751,6 +781,7 @@ def serve_management(
                                 if item.id != old_device_id
                             },
                             original_device_id=old_device_id,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -783,6 +814,7 @@ def serve_management(
                         snapshot=snapshot,
                         devices=[device.to_dict() for device in configured_devices],
                         theme_preference=config.web.appearance,
+                        language=self._request_language(config),
                     )
                     self._send_html(html, status=400)
                     return
@@ -812,6 +844,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: settings values must be numeric",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -840,6 +873,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -869,6 +903,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: MQTT port must be numeric",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -900,6 +935,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -937,6 +973,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -967,6 +1004,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: bluetooth values must be numeric",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -992,6 +1030,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -1014,6 +1053,7 @@ def serve_management(
                 appearance: str | None = None
                 default_chart_range: str | None = None
                 default_chart_metric: str | None = None
+                language: str | None = None
                 if settings_section == "web":
                     try:
                         web_port = int(form.get("web_port", ["80"])[0])
@@ -1030,6 +1070,7 @@ def serve_management(
                                 contract=build_contract(config, configured_devices),
                                 message="Validation failed: web port must be numeric",
                                 theme_preference=config.web.appearance,
+                                language=self._request_language(config),
                             ),
                             status=400,
                         )
@@ -1053,6 +1094,7 @@ def serve_management(
                                 contract=build_contract(config, configured_devices),
                                 message="Validation failed: visible device limit must be numeric",
                                 theme_preference=config.web.appearance,
+                                language=self._request_language(config),
                             ),
                             status=400,
                         )
@@ -1064,6 +1106,7 @@ def serve_management(
                     default_chart_metric = form.get(
                         "default_chart_metric", [config.web.default_chart_metric]
                     )[0]
+                    language = form.get("language", [config.web.language])[0]
                 else:
                     configured_devices = load_device_registry(config.device_registry_path)
                     self._send_html(
@@ -1077,6 +1120,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: unknown settings section",
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -1091,6 +1135,7 @@ def serve_management(
                     appearance=appearance,
                     default_chart_range=default_chart_range,
                     default_chart_metric=default_chart_metric,
+                    language=language,
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)
@@ -1105,6 +1150,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )
@@ -1165,6 +1211,7 @@ def serve_management(
                             contract=build_contract(config, configured_devices),
                             message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
+                            language=self._request_language(config),
                         ),
                         status=400,
                     )

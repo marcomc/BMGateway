@@ -4,15 +4,15 @@ import subprocess
 from pathlib import Path
 
 
-def test_usb_otg_frame_helper_refresh_requires_existing_backing_image(tmp_path: Path) -> None:
-    image_path = tmp_path / "missing.img"
+def test_usb_otg_frame_helper_refresh_requires_existing_backing_image() -> None:
+    image_path = "/var/lib/bm-gateway/usb-otg/missing.img"
     result = subprocess.run(
         [
             "bash",
             "rpi-setup/scripts/usb-otg-frame-test.sh",
             "refresh",
             "--image-path",
-            str(image_path),
+            image_path,
             "--gadget-name",
             "bmgw_test",
         ],
@@ -23,6 +23,44 @@ def test_usb_otg_frame_helper_refresh_requires_existing_backing_image(tmp_path: 
 
     assert result.returncode != 0
     assert f"backing image not found: {image_path}" in result.stderr
+
+
+def test_usb_otg_frame_helper_rejects_image_paths_outside_safe_directory(
+    tmp_path: Path,
+) -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "rpi-setup/scripts/usb-otg-frame-test.sh",
+            "status",
+            "--image-path",
+            str(tmp_path / "unsafe.img"),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "image path must be directly under /var/lib/bm-gateway/usb-otg" in result.stderr
+
+
+def test_usb_otg_frame_helper_rejects_unsafe_gadget_names() -> None:
+    result = subprocess.run(
+        [
+            "bash",
+            "rpi-setup/scripts/usb-otg-frame-test.sh",
+            "status",
+            "--gadget-name",
+            "../unsafe",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert "gadget name must be a simple bmgw_* identifier" in result.stderr
 
 
 def test_usb_otg_frame_helper_setup_detaches_before_rebuilding_backing_image() -> None:

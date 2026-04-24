@@ -6,6 +6,7 @@ import html
 from datetime import datetime, timedelta
 
 from . import web_pages as shared
+from .localization import localize_html
 from .web_ui import (
     app_document,
     base_css,
@@ -20,6 +21,7 @@ def render_diagnostics_html(
     *,
     theme_preference: str = "system",
     fleet_trend_metrics: tuple[str, ...] = ("soc",),
+    language: str = "en",
 ) -> str:
     ordered_metrics = _ordered_fleet_metrics(fleet_trend_metrics)
     default_metric = ordered_metrics[0] if ordered_metrics else "soc"
@@ -63,6 +65,7 @@ def render_diagnostics_html(
         body=body,
         active_nav="settings",
         theme_preference=theme_preference,
+        language=language,
     )
 
 
@@ -82,6 +85,7 @@ def render_frame_fleet_trend_html(
     default_chart_metric: str,
     width: int,
     height: int,
+    language: str = "en",
 ) -> str:
     chart_id = "frame-fleet-trend-chart"
     range_value = shared._sanitize_default_chart_range(default_chart_range)
@@ -137,6 +141,7 @@ def render_frame_fleet_trend_html(
         appearance=appearance,
         width=width,
         height=height,
+        language=language,
     )
 
 
@@ -230,6 +235,7 @@ def render_frame_battery_overview_html(
     appearance: str,
     width: int,
     height: int,
+    language: str = "en",
 ) -> str:
     latest_timestamp = _battery_overview_latest_timestamp(snapshot)
     page_devices = _battery_overview_page_devices(
@@ -266,6 +272,7 @@ def render_frame_battery_overview_html(
         appearance=appearance,
         width=width,
         height=height,
+        language=language,
     )
 
 
@@ -390,12 +397,13 @@ def _frame_document(
     appearance: str,
     width: int,
     height: int,
+    language: str = "en",
 ) -> str:
     safe_title = html.escape(title)
     theme_attr = html.escape(appearance)
     width = max(1, width)
     height = max(1, height)
-    return f"""<!doctype html>
+    document = f"""<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8">
@@ -685,3 +693,4 @@ def _frame_document(
   </body>
 </html>
 """
+    return localize_html(document, language)

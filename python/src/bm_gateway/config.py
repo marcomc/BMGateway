@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .localization import allowed_language_codes, is_supported_language_preference
+
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "bm-gateway" / "config.toml"
 
 
@@ -57,6 +59,7 @@ class WebConfig:
     appearance: str = "system"
     default_chart_range: str = "7"
     default_chart_metric: str = "soc"
+    language: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,7 @@ class AppConfig:
                 "appearance": self.web.appearance,
                 "default_chart_range": self.web.default_chart_range,
                 "default_chart_metric": self.web.default_chart_metric,
+                "language": self.web.language,
             },
             "usb_otg": {
                 "enabled": self.usb_otg.enabled,
@@ -273,6 +277,7 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"appearance = {_string_to_toml(config.web.appearance)}",
             f"default_chart_range = {_string_to_toml(config.web.default_chart_range)}",
             f"default_chart_metric = {_string_to_toml(config.web.default_chart_metric)}",
+            f"language = {_string_to_toml(config.web.language)}",
             "",
             "[usb_otg]",
             f"enabled = {_bool_to_toml(config.usb_otg.enabled)}",
@@ -351,6 +356,7 @@ def load_config(path: Path) -> AppConfig:
         appearance=str(web_table.get("appearance", "system")),
         default_chart_range=str(web_table.get("default_chart_range", "7")),
         default_chart_metric=str(web_table.get("default_chart_metric", "soc")),
+        language=str(web_table.get("language", "auto")),
     )
     usb_otg = USBOTGConfig(
         enabled=bool(usb_otg_table.get("enabled", False)),
@@ -434,6 +440,8 @@ def validate_config(config: AppConfig) -> list[str]:
         )
     if config.web.default_chart_metric not in {"voltage", "soc", "temperature"}:
         errors.append("web.default_chart_metric must be one of: voltage, soc, temperature")
+    if not is_supported_language_preference(config.web.language):
+        errors.append("web.language must be one of: " + ", ".join(allowed_language_codes()))
     if not config.usb_otg.image_path.strip():
         errors.append("usb_otg.image_path must not be empty")
     if config.usb_otg.size_mb <= 0:

@@ -337,6 +337,7 @@ The installed config keeps:
 - `web.show_chart_markers = false`
 - `web.visible_device_limit = 4`
 - `web.appearance = "system"`
+- `web.language = "auto"`
 - `usb_otg.enabled = false`
 - `usb_otg.image_width_px = 480`
 - `usb_otg.image_height_px = 234`

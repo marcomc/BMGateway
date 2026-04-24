@@ -293,6 +293,7 @@ def update_web_preferences(
     appearance: str | None,
     default_chart_range: str | None,
     default_chart_metric: str | None,
+    language: str | None = None,
 ) -> list[str]:
     config = load_config(config_path)
     resolved_enabled = config.web.enabled if web_enabled is None else web_enabled
@@ -311,6 +312,7 @@ def update_web_preferences(
     resolved_default_chart_metric = (
         config.web.default_chart_metric if default_chart_metric is None else default_chart_metric
     )
+    resolved_language = config.web.language if language is None else language
     updated = replace(
         config,
         web=replace(
@@ -323,6 +325,7 @@ def update_web_preferences(
             appearance=resolved_appearance,
             default_chart_range=resolved_default_chart_range,
             default_chart_metric=resolved_default_chart_metric,
+            language=resolved_language,
         ),
     )
     from .config import validate_config

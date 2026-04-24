@@ -42,6 +42,7 @@ where = ["python/src"]
 
 [tool.setuptools.package-data]
 bm_gateway = ["assets/*.css", "assets/*.js", "assets/*.svg", "assets/*.png", "assets/*.webmanifest"]
+"bm_gateway.locales" = ["*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["python/tests"]

@@ -88,17 +88,16 @@ def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> N
     assert 'visudo -cf "${sudoers_path}"' in payload
 
 
-def test_web_service_bounding_set_allows_privileged_usb_otg_helper_capabilities() -> None:
+def test_web_service_unit_keeps_sudo_helper_capabilities_available() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
     )
     payload = script_path.read_text(encoding="utf-8")
 
-    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_SETUID CAP_SETGID CAP_AUDIT_WRITE" in (
-        payload
-    )
-    assert "CAP_CHOWN" in payload
-    assert "CAP_DAC_OVERRIDE" in payload
-    assert "CAP_FOWNER" in payload
-    assert "CAP_SYS_ADMIN" in payload
-    assert "CAP_SYS_MODULE" in payload
+    web_unit_payload = payload.split('cat >"${web_unit_path}" <<EOF', maxsplit=1)[1]
+    web_unit_payload = web_unit_payload.split("EOF", maxsplit=1)[0]
+
+    assert "AmbientCapabilities=CAP_NET_BIND_SERVICE" in web_unit_payload
+    assert "CapabilityBoundingSet=" not in payload
+    assert "${usb_otg_drive_helper_path} setup *" in payload
+    assert "${usb_otg_drive_helper_path} refresh *" in payload
