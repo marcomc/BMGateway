@@ -398,9 +398,12 @@ in:
 
 The web UI shows only the action that matches the current boot-mode state:
 prepare when USB OTG peripheral mode is not prepared, or restore when it is.
-The restore action removes the managed block. If prepare replaced an existing
-`dtoverlay=dwc2...` line under `[all]`, restore puts the previous line back.
-Both actions create timestamped backups beside the boot config before writing.
+BMGateway intentionally treats USB OTG peripheral boot mode as an
+application-owned setting. The restore action removes the managed block and any
+`[all]` `dtoverlay=dwc2...dr_mode=peripheral` line, even if that line predated
+BMGateway, so the host returns to USB host mode. Prepare still preserves
+non-peripheral `dwc2` lines, and both actions create timestamped backups beside
+the boot config before writing.
 
 When USB OTG image export is enabled, the runtime screenshots the same hidden
 frame-render pages used by Diagnostics and publishes those images after each

@@ -191,9 +191,11 @@ when it is. These actions are separate from the export checkbox because they
 edit Raspberry Pi boot configuration and require a reboot before taking effect.
 The prepare action installs a BMGateway-managed
 `dtoverlay=dwc2,dr_mode=peripheral` block under `[all]` in
-`/boot/firmware/config.txt`. If it replaces an existing `dtoverlay=dwc2...`
-line in `[all]`, it preserves that line inside the managed block so the restore
-action can put it back later.
+`/boot/firmware/config.txt`. BMGateway intentionally owns this boot-mode
+setting: prepare preserves existing non-peripheral `dwc2` lines, while restore
+removes the managed block and any `[all]` `dtoverlay=dwc2...dr_mode=peripheral`
+line so disabling the setting returns the host to USB host mode even when a
+peripheral overlay predated BMGateway.
 
 Both actions create timestamped backups beside the boot config before writing.
 
