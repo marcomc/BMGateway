@@ -22,6 +22,7 @@ Read these in order when you need architectural or implementation context:
 2. [Foundation Spec](specs/2026-04-17-foundation-spec.md)
 3. [Python Component Guide](../python/README.md)
 4. [BM6 / BM200 Integration Notes](2026-04-19-bm6-bm200-integration-notes.md)
+5. [BM300 Pro / BM7 Integration Notes](2026-04-25-bm300-bm7-integration-notes.md)
 
 ## Core Documents
 
@@ -40,6 +41,8 @@ Read these in order when you need architectural or implementation context:
 
 - Verified BM6/BM200 protocol observations:
   [2026-04-19-bm6-bm200-integration-notes.md](2026-04-19-bm6-bm200-integration-notes.md)
+- Verified BM300 Pro/BM7 live-polling protocol observations:
+  [2026-04-25-bm300-bm7-integration-notes.md](2026-04-25-bm300-bm7-integration-notes.md)
 - Raspberry Pi 3B operating-system and web-surface research:
   [research/2026-04-17-pi3b-web-and-os-research.md](research/2026-04-17-pi3b-web-and-os-research.md)
 

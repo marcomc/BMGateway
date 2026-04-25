@@ -5,6 +5,7 @@ from pathlib import Path
 from bm_gateway.device_registry import (
     Device,
     load_device_registry,
+    normalize_mac_address,
     validate_devices,
     write_device_registry,
 )
@@ -38,6 +39,10 @@ def test_write_and_load_device_registry_round_trips_battery_metadata(tmp_path: P
     loaded = load_device_registry(path)
 
     assert loaded == devices
+
+
+def test_normalize_mac_address_handles_cyrillic_confusables() -> None:
+    assert normalize_mac_address("ЗСАВ72B2C667") == "3C:AB:72:B2:C6:67"
 
 
 def test_validate_devices_rejects_invalid_custom_curve() -> None:

@@ -64,9 +64,23 @@ def test_parse_bm6_plaintext_measurement_decodes_voltage_and_soc() -> None:
     assert measurement == BM200Measurement(
         voltage=13.4,
         soc=100,
-        status_code=2,
+        status_code=0,
         state="normal",
         temperature=23.0,
+    )
+
+
+def test_parse_bm6_plaintext_measurement_decodes_charging_state() -> None:
+    plaintext = bytes.fromhex("d1550700120264059c0000000002ffff")
+
+    measurement = parse_bm6_plaintext_measurement(plaintext)
+
+    assert measurement == BM200Measurement(
+        voltage=14.36,
+        soc=100,
+        status_code=2,
+        state="charging",
+        temperature=18.0,
     )
 
 

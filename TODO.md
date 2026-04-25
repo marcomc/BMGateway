@@ -7,8 +7,11 @@
   archive probes do not yet answer the existing BM200 history-count/download
   commands. Finish the device-memory fetch path before treating reconnect
   backfill as shipped on real hardware.
-- Decide whether BM300 Pro support ships in the same runtime milestone or
-  stays behind a disabled driver flag.
+- Complete BM300 Pro/BM7 feature parity beyond live current-state polling.
+  Live voltage, SoC, temperature, RSSI, and device state now use a dedicated
+  BM300 Pro driver. Onboard history, firmware version reads, cranking/charging
+  event records, and rapid acceleration/deceleration persistence still need
+  protocol capture or live verification before they should ship.
 - Add richer degradation analytics beyond the current yearly summaries and
   rolling comparison windows.
 - Add MQTT birth/LWT republish handling beyond the current availability and

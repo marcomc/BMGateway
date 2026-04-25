@@ -26,6 +26,11 @@ BM200_STATUS = {
     4: "charging",
     8: "floating",
 }
+BM6_STATUS = {
+    0: "normal",
+    1: "low",
+    2: "charging",
+}
 
 
 @dataclass(frozen=True)
@@ -150,14 +155,15 @@ def parse_bm6_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
     raw = plaintext.hex()
     voltage = int(raw[15:18], 16) / 100.0
     soc = int(raw[12:14], 16)
+    status_code = plaintext[5]
     temperature_raw = plaintext[4]
     temperature = -float(temperature_raw) if plaintext[3] == 0x01 else float(temperature_raw)
     return BM200Measurement(
         voltage=voltage,
         soc=soc,
         temperature=temperature,
-        status_code=2,
-        state="normal",
+        status_code=status_code,
+        state=BM6_STATUS.get(status_code, "unknown"),
     )
 
 

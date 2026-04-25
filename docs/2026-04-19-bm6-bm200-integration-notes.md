@@ -182,7 +182,7 @@ Verified result:
 This is a host-stack integration detail, not a BM6 protocol issue, and it is
 easy to miss if debugging only at the UI layer.
 
-### 9. BM200/BM6 status is a discrete device-reported category
+### 9. BM200 and BM6 status are discrete device-reported categories
 
 During the device-page redesign, it became important to answer a UI question:
 
@@ -190,16 +190,24 @@ During the device-page redesign, it became important to answer a UI question:
 
 Verified result:
 
-- for BM200/BM6 current-state reads, the monitor reports a discrete status code
-  directly
-- in the current mapping used by `BMGateway`, that means:
+- for current-state reads, the monitor reports a discrete status code directly
+- legacy BM200 packets use the current `BMGateway` mapping:
   - `0` -> `critical`
   - `1` -> `low`
   - `2` -> `normal`
   - `4` -> `charging`
   - `8` -> `floating`
+- BM6 request/response packets use the newer live-state mapping:
+  - `0` -> `normal`
+  - `1` -> `low`
+  - `2` -> `charging`
 - `BMGateway` should explain this in the UI as a device-reported state band,
   not as a hidden voltage heuristic invented by the gateway
+
+The BM6 mapping was verified again after adding BM300 Pro support: two NOCO
+BM200-labeled devices under battery maintainers returned decrypted payloads
+with byte `5 == 0x02` and voltages around `14.36 V`, which should be displayed
+as `charging`, not `normal`.
 
 This matters for trust: users should be able to tell whether a label came from
 the monitor protocol or from an app-side interpretation.

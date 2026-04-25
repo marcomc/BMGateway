@@ -12,6 +12,20 @@ VALID_DEVICE_TYPES = {"bm200", "bm300pro"}
 MAC_ADDRESS_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
 COMPACT_MAC_RE = re.compile(r"^[0-9A-F]{12}$")
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+MAC_CONFUSABLES = str.maketrans(
+    {
+        "А": "A",
+        "В": "B",
+        "С": "C",
+        "Е": "E",
+        "а": "A",
+        "в": "B",
+        "с": "C",
+        "е": "E",
+        "З": "3",
+        "з": "3",
+    }
+)
 BATTERY_FAMILIES = {
     "lead_acid": "Lead-Acid Battery",
     "lithium": "Lithium Battery",
@@ -254,10 +268,11 @@ def _parse_custom_voltage_curve(
 
 
 def normalize_mac_address(value: str) -> str:
-    raw = re.sub(r"[^0-9A-Fa-f]", "", value).upper()
+    normalized = value.translate(MAC_CONFUSABLES)
+    raw = re.sub(r"[^0-9A-Fa-f]", "", normalized).upper()
     if COMPACT_MAC_RE.fullmatch(raw):
         return ":".join(raw[index : index + 2] for index in range(0, 12, 2))
-    return value.strip().upper()
+    return normalized.strip().upper()
 
 
 def generate_device_id(

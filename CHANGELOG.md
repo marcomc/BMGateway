@@ -42,6 +42,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a Settings action to shut down the Raspberry Pi safely from the web UI,
   plus installer-managed scoped sudo permissions for restart, reboot, and
   shutdown host-control actions.
+- Added a dedicated BM300 Pro/BM7 live polling driver, selected from the
+  configured device type, with voltage, state-of-charge, temperature, RSSI, and
+  device-state support kept separate from the existing BM200/BM6 driver.
 
 ### Fixed
 
@@ -71,6 +74,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrent drive-update workers.
 - Fixed Settings status text so repeated saves do not claim a new USB OTG frame
   export started while an existing export is already running.
+- Fixed BM6-family current-state parsing so device status code `2` displays as
+  `charging` instead of being forced to `normal`.
+- Fixed USB OTG frame device selection so Battery Overview frame images honor
+  the selected frame devices instead of only Fleet Trend charts.
 - Fixed `bm-gateway run --dry-run --export-usb-otg-now` so dry-run mode skips
   USB OTG drive writes instead of forcing an export.
 - Fixed USB OTG export scheduling so future-dated export markers are treated as

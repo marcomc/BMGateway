@@ -448,7 +448,7 @@ def render_settings_html(
             ),
         )
         + settings_row(
-            "Fleet Trend devices",
+            "Frame devices",
             (
                 "All configured devices"
                 if not config.usb_otg.fleet_trend_device_ids
@@ -1054,9 +1054,9 @@ def render_settings_html(
                 help_text="Apply this history window to every selected Fleet Trend chart.",
             )
             + settings_control_row(
-                "Fleet Trend devices",
+                "Frame devices",
                 f'<div class="chip-grid">{usb_otg_fleet_device_controls}</div>',
-                help_text="Select at least one device to include in frame Fleet Trend charts.",
+                help_text="Select at least one device to include in generated frame images.",
             )
             + settings_row("Backing disk image", config.usb_otg.image_path)
             + settings_row("Image size", f"{config.usb_otg.size_mb} MB")

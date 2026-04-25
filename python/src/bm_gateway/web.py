@@ -722,7 +722,7 @@ def serve_management(
                     if requested_metric in selected_metrics
                     else selected_metrics[0]
                 )
-                frame_devices = _usb_otg_fleet_trend_devices(config, serialized_devices)
+                frame_devices = _usb_otg_frame_devices(config, serialized_devices)
                 battery_chart_points, battery_legend = _fleet_chart_points(
                     database_path=database_path,
                     devices=frame_devices,
@@ -750,8 +750,8 @@ def serve_management(
                     page = 1
                 self._send_html(
                     render_frame_battery_overview_html(
-                        snapshot=snapshot,
-                        devices=serialized_devices,
+                        snapshot=_snapshot_for_frame_devices(snapshot, config),
+                        devices=_usb_otg_frame_devices(config, serialized_devices),
                         page=page,
                         devices_per_page=config.usb_otg.overview_devices_per_image,
                         appearance=config.usb_otg.appearance,
@@ -1600,7 +1600,7 @@ def serve_management(
         server.server_close()
 
 
-def _usb_otg_fleet_trend_devices(
+def _usb_otg_frame_devices(
     config: AppConfig,
     devices: list[dict[str, object]],
 ) -> list[dict[str, object]]:
@@ -1608,3 +1608,27 @@ def _usb_otg_fleet_trend_devices(
     if not selected_ids:
         return devices
     return [device for device in devices if str(device.get("id", "")) in selected_ids]
+
+
+def _snapshot_for_frame_devices(
+    snapshot: dict[str, object],
+    config: AppConfig,
+) -> dict[str, object]:
+    selected_ids = set(config.usb_otg.fleet_trend_device_ids)
+    if not selected_ids:
+        return snapshot
+    snapshot_devices = snapshot.get("devices", [])
+    if not isinstance(snapshot_devices, list):
+        return snapshot
+    filtered_devices = [
+        device
+        for device in snapshot_devices
+        if isinstance(device, dict) and str(device.get("id", "")) in selected_ids
+    ]
+    filtered_snapshot = dict(snapshot)
+    filtered_snapshot["devices"] = filtered_devices
+    filtered_snapshot["devices_total"] = len(filtered_devices)
+    filtered_snapshot["devices_online"] = sum(
+        1 for device in filtered_devices if bool(device.get("connected"))
+    )
+    return filtered_snapshot
