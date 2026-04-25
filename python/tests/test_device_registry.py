@@ -4,6 +4,7 @@ from pathlib import Path
 
 from bm_gateway.device_registry import (
     Device,
+    default_color_key,
     device_driver_type,
     load_device_registry,
     normalize_mac_address,
@@ -110,6 +111,11 @@ def test_validate_devices_accepts_custom_hex_overview_colors() -> None:
         )
         == []
     )
+
+
+def test_default_color_key_treats_preset_hex_values_as_used() -> None:
+    assert default_color_key(used_colors={"#17c45a"}) == "blue"
+    assert default_color_key(used_colors={"#17C45A", "#4f8df7"}) == "purple"
 
 
 def test_validate_devices_rejects_invalid_custom_curve() -> None:

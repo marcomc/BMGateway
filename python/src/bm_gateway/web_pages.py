@@ -12,6 +12,7 @@ from .config import AppConfig
 from .device_registry import (
     BATTERY_FAMILIES,
     COLOR_CATALOG,
+    COLOR_HEX,
     CUSTOM_SOC_MODES,
     DEVICE_TYPE_LABELS,
     LEAD_ACID_PROFILES,
@@ -61,16 +62,7 @@ PROTOCOL_STATUS_SCALE: tuple[tuple[str, str, str, str], ...] = (
     ),
 )
 
-DEVICE_COLOR_HEX: dict[str, str] = {
-    "green": "#17c45a",
-    "blue": "#4f8df7",
-    "purple": "#9a57f5",
-    "orange": "#f4a340",
-    "teal": "#16b8b0",
-    "rose": "#ec5c86",
-    "indigo": "#6677ff",
-    "amber": "#f0b429",
-}
+DEVICE_COLOR_HEX = COLOR_HEX
 
 VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("1", "1 day"),

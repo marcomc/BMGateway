@@ -378,7 +378,7 @@ def _battery_overview_pages(
     if not merged_devices:
         return [[]]
 
-    page_size = min(max(1, devices_per_page), _FRAME_OVERVIEW_MAX_DEVICES_PER_PAGE)
+    page_size = max(1, devices_per_page)
     if len(merged_devices) <= page_size:
         return [merged_devices]
 

@@ -305,7 +305,7 @@ def test_render_usb_otg_export_images_limits_overview_to_selected_frame_devices(
     assert "Boat Battery" not in combined_html
 
 
-def test_render_usb_otg_export_images_balances_overview_frame_pages(
+def test_render_usb_otg_export_images_honors_configured_overview_devices_per_image(
     tmp_path: Path,
 ) -> None:
     config = load_config(Path("python/config/config.toml.example"))
@@ -349,13 +349,13 @@ def test_render_usb_otg_export_images_balances_overview_frame_pages(
         page_renderer=_capturing_frame_renderer,
     )
 
-    assert expected_usb_otg_export_steps(config, devices) == 3
-    assert [file.name for file in files] == ["battery-overview-01.jpg", "battery-overview-02.jpg"]
+    assert expected_usb_otg_export_steps(config, devices) == 2
+    assert [file.name for file in files] == ["battery-overview-01.jpg"]
     assert "Battery 1" in rendered_pages[0]
     assert "Battery 2" in rendered_pages[0]
     assert "Battery 3" in rendered_pages[0]
-    assert "Battery 4" in rendered_pages[1]
-    assert "Battery 5" in rendered_pages[1]
+    assert "Battery 4" in rendered_pages[0]
+    assert "Battery 5" in rendered_pages[0]
 
 
 def test_render_usb_otg_export_images_uses_configured_web_language(tmp_path: Path) -> None:

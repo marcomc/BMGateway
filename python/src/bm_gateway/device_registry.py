@@ -114,6 +114,17 @@ COLOR_CATALOG = {
     "indigo": "Indigo",
     "amber": "Amber",
 }
+COLOR_HEX = {
+    "green": "#17c45a",
+    "blue": "#4f8df7",
+    "purple": "#9a57f5",
+    "orange": "#f4a340",
+    "teal": "#16b8b0",
+    "rose": "#ec5c86",
+    "indigo": "#6677ff",
+    "amber": "#f0b429",
+}
+COLOR_KEY_BY_HEX = {value.lower(): key for key, value in COLOR_HEX.items()}
 DEFAULT_CUSTOM_CURVE = (
     (100, 12.90),
     (90, 12.80),
@@ -274,20 +285,30 @@ def default_icon_key(*, battery_family: str, battery_profile: str) -> str:
 
 
 def default_color_key(*, used_colors: set[str]) -> str:
+    normalized_used_colors = {normalize_palette_color_key(color_key) for color_key in used_colors}
     for color_key in COLOR_CATALOG:
-        if color_key not in used_colors:
+        if color_key not in normalized_used_colors:
             return color_key
     for offset in range(64):
-        hue = ((len(used_colors) + offset) * 0.61803398875) % 1.0
+        hue = ((len(normalized_used_colors) + offset) * 0.61803398875) % 1.0
         red, green, blue = colorsys.hsv_to_rgb(hue, 0.68, 0.88)
         color_key = f"#{round(red * 255):02x}{round(green * 255):02x}{round(blue * 255):02x}"
-        if color_key not in used_colors:
+        if normalize_palette_color_key(color_key) not in normalized_used_colors:
             return color_key
     return "#17c45a"
 
 
 def is_hex_color_key(color_key: str) -> bool:
     return HEX_COLOR_RE.fullmatch(color_key.strip()) is not None
+
+
+def normalize_palette_color_key(color_key: str) -> str:
+    stripped = color_key.strip()
+    if stripped in COLOR_CATALOG:
+        return stripped
+    if is_hex_color_key(stripped):
+        return COLOR_KEY_BY_HEX.get(stripped.lower(), stripped.lower())
+    return stripped
 
 
 def is_valid_color_key(color_key: str) -> bool:
