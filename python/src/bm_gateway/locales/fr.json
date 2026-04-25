@@ -95,6 +95,7 @@
   "Detected adapters: hci0.": "Detected adapters: hci0.",
   "Deutsch (German)": "Deutsch (German)",
   "Device ID": "Device ID",
+  "Device added. First poll already running.": "Appareil ajouté. Le premier relevé est déjà en cours.",
   "Device added. First poll started.": "Appareil ajoute. Premiere interrogation lancee.",
   "Device discovery payloads": "Charges utiles de découverte des appareils",
   "Device registry path": "Chemin du registre des appareils",

@@ -246,7 +246,6 @@ payload = "\n".join(
         f'host = {string_to_toml(web.get("host", web_host))}',
         f'port = {int(web.get("port", web_port))}',
         f'show_chart_markers = {bool_to_toml(bool(web.get("show_chart_markers", False)))}',
-        f'visible_device_limit = {int(web.get("visible_device_limit", 4))}',
         f'appearance = {string_to_toml(web.get("appearance", "system"))}',
         f'default_chart_range = {string_to_toml(web.get("default_chart_range", "7"))}',
         f'default_chart_metric = {string_to_toml(web.get("default_chart_metric", "soc"))}',

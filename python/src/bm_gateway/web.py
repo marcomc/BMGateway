@@ -136,6 +136,8 @@ _USB_OTG_EXPORT_STATUS: dict[str, object] = {
     "detail": "",
     "redirect_message": "",
 }
+_RUN_ONCE_LOCK = threading.Lock()
+_RUN_ONCE_PROCESS: object | None = None
 
 
 def _set_usb_otg_export_status(**updates: object) -> None:
@@ -150,6 +152,21 @@ def _usb_otg_export_status_snapshot() -> dict[str, object]:
     total = _int_from_mapping(snapshot, "total")
     snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
     return snapshot
+
+
+def _start_tracked_run_once_via_cli(
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+) -> bool:
+    global _RUN_ONCE_PROCESS
+    with _RUN_ONCE_LOCK:
+        if _RUN_ONCE_PROCESS is not None:
+            poll = getattr(_RUN_ONCE_PROCESS, "poll", None)
+            if not callable(poll) or poll() is None:
+                return False
+        _RUN_ONCE_PROCESS = start_run_once_via_cli(config_path, state_dir=state_dir)
+        return True
 
 
 def _int_from_mapping(mapping: dict[str, object], key: str, default: int = 0) -> int:
@@ -889,11 +906,16 @@ def serve_management(
                     )
                     return
 
-                start_run_once_via_cli(config_path, state_dir=state_dir)
+                poll_started = _start_tracked_run_once_via_cli(config_path, state_dir=state_dir)
+                message = (
+                    "Device added. First poll started."
+                    if poll_started
+                    else "Device added. First poll already running."
+                )
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/devices?" + urlencode({"message": "Device added. First poll started."}),
+                    "/devices?" + urlencode({"message": message}),
                 )
                 self.end_headers()
                 return

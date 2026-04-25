@@ -13,8 +13,8 @@ The actual audited host in this project is:
 - USB Wi-Fi dongle for wireless connectivity
 - USB Bluetooth dongle for BLE connectivity
 
-It also covers the current BM200 live polling path. BM300 Pro is still not
-implemented.
+It also covers the current BM200/BM6-family and BM300 Pro/BM7-family live
+polling paths.
 
 If you want to prebuild and customise the SD card from macOS before first
 boot, use [macos-imager-cli.md](macos-imager-cli.md).
@@ -338,7 +338,6 @@ The installed config keeps:
 - `web.host = "0.0.0.0"`
 - `web.port = 80`
 - `web.show_chart_markers = false`
-- `web.visible_device_limit = 4`
 - `web.appearance = "system"`
 - `web.language = "auto"`
 - `usb_otg.enabled = false`

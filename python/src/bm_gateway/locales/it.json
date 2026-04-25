@@ -118,6 +118,7 @@
   "Deutsch (German)": "Deutsch (tedesco)",
   "Device": "Dispositivo",
   "Device ID": "ID dispositivo",
+  "Device added. First poll already running.": "Dispositivo aggiunto. Primo polling gia in esecuzione.",
   "Device added. First poll started.": "Dispositivo aggiunto. Primo polling avviato.",
   "Device discovery payloads": "Payload di discovery dei dispositivi",
   "Device registry path": "Percorso registro dispositivi",

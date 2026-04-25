@@ -82,6 +82,15 @@ def test_install_service_script_preserves_web_language_preference() -> None:
     assert 'f\'language = {string_to_toml(web.get("language", "auto"))}\'' in payload
 
 
+def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert "visible_device_limit" not in payload
+
+
 def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"

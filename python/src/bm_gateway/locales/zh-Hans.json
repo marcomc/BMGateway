@@ -93,6 +93,7 @@
   "Detected adapters: hci0.": "检测到的适配器：hci0。",
   "Deutsch (German)": "德语（德语）",
   "Device ID": "设备ID",
+  "Device added. First poll already running.": "设备已添加。首次轮询已在运行。",
   "Device added. First poll started.": "设备已添加。首次轮询已开始。",
   "Device discovery payloads": "设备发现有效负载",
   "Device registry path": "设备注册表路径",

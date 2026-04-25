@@ -873,6 +873,7 @@ def test_devices_add_post_redirects_before_first_poll(
     def _run_once(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
         raise AssertionError("device creation must not wait for a synchronous poll")
 
+    monkeypatch.setattr("bm_gateway.web._RUN_ONCE_PROCESS", None)
     monkeypatch.setattr("bm_gateway.web.start_run_once_via_cli", _start_run_once)
     monkeypatch.setattr("bm_gateway.web.run_once_via_cli", _run_once)
 
@@ -919,6 +920,36 @@ def test_devices_add_post_redirects_before_first_poll(
     assert config.gateway.reader_mode == "live"
     assert [device.id for device in devices] == ["ancell_bm200"]
     assert started_polls == [(config_path, tmp_path / "state")]
+
+
+def test_tracked_first_poll_does_not_start_duplicate_processes(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from bm_gateway import web
+
+    class RunningProcess:
+        def poll(self) -> None:
+            return None
+
+    started_polls: list[tuple[Path, Path | None]] = []
+
+    def _start_run_once(config_path: Path, *, state_dir: Path | None = None) -> RunningProcess:
+        started_polls.append((config_path, state_dir))
+        return RunningProcess()
+
+    monkeypatch.setattr(web, "_RUN_ONCE_PROCESS", None)
+    monkeypatch.setattr(web, "start_run_once_via_cli", _start_run_once)
+
+    assert web._start_tracked_run_once_via_cli(
+        tmp_path / "config.toml",
+        state_dir=tmp_path / "state",
+    )
+    assert not web._start_tracked_run_once_via_cli(
+        tmp_path / "config.toml",
+        state_dir=tmp_path / "state",
+    )
+    assert started_polls == [(tmp_path / "config.toml", tmp_path / "state")]
 
 
 def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
