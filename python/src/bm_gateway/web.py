@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
-from .device_registry import COLOR_CATALOG, default_color_key, load_device_registry
+from .device_registry import default_color_key, load_device_registry
 from .localization import resolve_locale_preference, translation_for
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
@@ -84,6 +84,7 @@ from .web_pages import (
     render_snapshot_html,
     render_usb_otg_export_pending_html,
 )
+from .web_pages_frame import frame_battery_overview_page_count
 from .web_support import read_text
 
 __all__ = [
@@ -636,7 +637,7 @@ def serve_management(
                 reserved_color_keys = {
                     str(device.get("color_key", "")).strip()
                     for device in serialized_devices
-                    if str(device.get("color_key", "")).strip() in COLOR_CATALOG
+                    if str(device.get("color_key", "")).strip()
                 }
                 self._send_html(
                     render_add_device_html(
@@ -672,7 +673,7 @@ def serve_management(
                     str(item.get("color_key", "")).strip()
                     for item in serialized_devices
                     if str(item.get("id", "")) != device_id
-                    and str(item.get("color_key", "")).strip() in COLOR_CATALOG
+                    and str(item.get("color_key", "")).strip()
                 }
                 self._send_html(
                     render_edit_device_html(
@@ -704,10 +705,17 @@ def serve_management(
                 return
 
             if parsed.path in {"/diagnostics", "/debug"}:
+                frame_snapshot = _snapshot_for_frame_devices(snapshot, config)
+                frame_devices = _usb_otg_frame_devices(config, serialized_devices)
                 self._send_html(
                     render_diagnostics_html(
                         theme_preference=config.web.appearance,
                         fleet_trend_metrics=config.usb_otg.fleet_trend_metrics,
+                        battery_overview_page_count=frame_battery_overview_page_count(
+                            snapshot=frame_snapshot,
+                            devices=frame_devices,
+                            devices_per_page=config.usb_otg.overview_devices_per_image,
+                        ),
                         language=request_language,
                     )
                 )

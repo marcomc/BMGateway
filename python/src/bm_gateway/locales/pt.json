@@ -236,6 +236,7 @@
   "Output format": "Output format",
   "Output size": "Output size",
   "Overview color": "Overview color",
+  "Page": "Página",
   "Pick whether charts should open on Voltage, State of Charge, or Temperature.": "Escolha se os gráficos devem abrir em Tensão, Estado de carga ou Temperatura.",
   "Pick whether the web UI follows the system theme or stays locked to light or dark styling.": "Pick whether the web UI follows the system theme or stays locked to light or dark styling.",
   "Poll interval": "Poll interval",

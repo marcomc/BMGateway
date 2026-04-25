@@ -66,8 +66,9 @@ The state codes documented by the BM7 Home Assistant fork are:
 
 The runtime dispatch is model-based:
 
-- `bm200` uses the existing `bm200.py` driver
-- `bm300pro` uses the new `bm300.py` driver
+- `bm200`, `bm6`, `bm900`, and `bm900pro` use the existing `bm200.py`
+  driver family
+- `bm300`, `bm300pro`, and `bm7` use the new `bm300.py` driver family
 - any unknown device type remains unsupported
 
 The BM200/BM6 driver was not changed to understand BM300 payloads. This keeps

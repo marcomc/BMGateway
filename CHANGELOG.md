@@ -45,6 +45,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a dedicated BM300 Pro/BM7 live polling driver, selected from the
   configured device type, with voltage, state-of-charge, temperature, RSSI, and
   device-state support kept separate from the existing BM200/BM6 driver.
+- Added commercial device type choices for BM6, BM7, BM300, BM300 Pro, BM900,
+  and BM900 Pro while keeping them mapped to the existing isolated driver
+  families.
+- Added freeform overview colors with a native color picker, while preserving
+  the existing color presets for quick selection.
 
 ### Fixed
 
@@ -78,6 +83,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `charging` instead of being forced to `normal`.
 - Fixed USB OTG frame device selection so Battery Overview frame images honor
   the selected frame devices instead of only Fleet Trend charts.
+- Fixed USB OTG Battery Overview frame layout so three selected devices render
+  in one row and larger selections paginate into balanced frame pages.
+- Fixed Diagnostics frame preview links so every generated Battery Overview
+  frame page is available when selected devices span multiple pages.
+- Fixed USB OTG Battery Overview frame status rendering so battery state,
+  offline, and error conditions match the Home Battery Overview.
 - Fixed `bm-gateway run --dry-run --export-usb-otg-now` so dry-run mode skips
   USB OTG drive writes instead of forcing an export.
 - Fixed USB OTG export scheduling so future-dated export markers are treated as

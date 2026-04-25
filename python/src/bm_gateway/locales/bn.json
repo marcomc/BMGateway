@@ -236,6 +236,7 @@
   "Output format": "Output format",
   "Output size": "Output size",
   "Overview color": "Overview color",
+  "Page": "পৃষ্ঠা",
   "Pick whether charts should open on Voltage, State of Charge, or Temperature.": "চার্ট ভোল্টেজ, চার্জের অবস্থা, নাকি তাপমাত্রায় খুলবে তা বেছে নিন।",
   "Pick whether the web UI follows the system theme or stays locked to light or dark styling.": "Pick whether the web UI follows the system theme or stays locked to light or dark styling.",
   "Poll interval": "Poll interval",

@@ -236,6 +236,7 @@
   "Output format": "输出格式",
   "Output size": "输出尺寸",
   "Overview color": "概览颜色",
+  "Page": "页",
   "Pick whether charts should open on Voltage, State of Charge, or Temperature.": "选择图表默认打开电压、荷电状态或温度。",
   "Pick whether the web UI follows the system theme or stays locked to light or dark styling.": "选择 Web UI 是遵循系统主题还是保持锁定为浅色或深色样式。",
   "Poll interval": "轮询间隔",

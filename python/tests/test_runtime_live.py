@@ -294,6 +294,94 @@ def test_build_snapshot_uses_live_bm300_reader_when_enabled() -> None:
     assert snapshot.devices[0].rssi == -61
 
 
+def test_build_snapshot_uses_bm200_driver_for_commercial_aliases() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm6_motorcycle",
+            type="bm6",
+            name="BM6 Motorcycle",
+            mac="AA:BB:CC:DD:EE:03",
+            enabled=True,
+        )
+    ]
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        assert device.type == "bm6"
+        return BM200Measurement(
+            voltage=12.9,
+            soc=90,
+            status_code=0,
+            state="normal",
+            temperature=19.0,
+        )
+
+    snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
+
+    assert snapshot.devices_online == 1
+    assert snapshot.devices[0].type == "bm6"
+    assert snapshot.devices[0].driver == "bm200"
+    assert snapshot.devices[0].voltage == 12.9
+
+
+def test_build_snapshot_uses_bm300_driver_for_commercial_aliases() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm7_bench",
+            type="bm7",
+            name="BM7 Bench",
+            mac="E0:4E:7A:AF:9B:E8",
+            enabled=True,
+        )
+    ]
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM300Measurement:
+        assert device.type == "bm7"
+        return BM300Measurement(
+            voltage=14.4,
+            soc=100,
+            status_code=2,
+            state="charging",
+            temperature=18.0,
+        )
+
+    snapshot = build_snapshot(config, devices, bm300_reader=fake_reader)
+
+    assert snapshot.devices_online == 1
+    assert snapshot.devices[0].type == "bm7"
+    assert snapshot.devices[0].driver == "bm300pro"
+    assert snapshot.devices[0].state == "charging"
+
+
 def test_build_snapshot_classifies_bm300_reader_errors() -> None:
     config = AppConfig(
         source_path=Path("/tmp/gateway.toml"),

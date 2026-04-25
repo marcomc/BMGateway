@@ -147,7 +147,7 @@ def home_overview_scroller_html(
             f"<article class='home-overview-card home-overview-orb-shell'>"
             f"<a class='home-overview-card-link home-overview-orb tone-card {color_key}' "
             f"href='{device_href}' aria-label='Open details for {device_name_text}' "
-            f"style='{shared._tone_card_style(color_key)}'>"
+            f"style='{shared._tone_card_style_for_device(device, fallback_index=index)}'>"
             f"{gauge_markup}"
             "</a>"
             "</article>"

@@ -2157,10 +2157,32 @@ details summary::-webkit-details-marker { display: none; }
   font-size: 0.9rem;
   line-height: 1.5;
 }
-.select-with-preview {
+.select-with-preview,
+.color-picker-control {
   display: flex;
   align-items: center;
   gap: 0.7rem;
+}
+.color-picker-control input[type="color"] {
+  width: 3.25rem;
+  min-width: 3.25rem;
+  height: 2.6rem;
+  padding: 0.2rem;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  cursor: pointer;
+}
+.color-picker-control input[type="color"]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+.color-picker-control input[type="color"]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
+}
+.color-picker-control input[type="color"]::-moz-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-sm) - 2px);
 }
 .color-preview-dot {
   flex: 0 0 auto;

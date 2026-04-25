@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import subprocess
 import threading
@@ -2200,7 +2201,19 @@ def test_render_diagnostics_html_embeds_frame_preview() -> None:
     assert "Fleet Trend SoC" in html
     assert ">Fleet Trend</a>" not in html
     assert 'href="/frame/battery-overview?page=1"' in html
-    assert "Battery Overview Page 1" in html
+    assert "<span>Battery Overview</span> <span>Page</span> 1</a>" in html
+
+
+def test_render_diagnostics_html_lists_all_battery_overview_pages() -> None:
+    html = render_diagnostics_html(
+        theme_preference="dark",
+        battery_overview_page_count=2,
+    )
+
+    assert 'href="/frame/battery-overview?page=1"' in html
+    assert 'href="/frame/battery-overview?page=2"' in html
+    assert "<span>Battery Overview</span> <span>Page</span> 1</a>" in html
+    assert "<span>Battery Overview</span> <span>Page</span> 2</a>" in html
 
 
 def test_render_diagnostics_html_lists_only_enabled_fleet_metric_previews() -> None:
@@ -2393,8 +2406,56 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
     assert "Spare NLP5" in html
     assert "frame-battery-card" in html
     assert "frame-battery-soc" in html
+    assert "Battery OK" in html
+    assert "battery-card-status battery-card-status-inline ok" in html
     assert "91%" in html
     assert 'class="bottom-nav"' not in html
+
+
+def test_render_frame_battery_overview_html_uses_shared_status_interpretation() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "charging_battery",
+                    "name": "Charging Battery",
+                    "soc": 100,
+                    "voltage": 14.5,
+                    "temperature": 22.0,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "state": "charging",
+                    "connected": True,
+                    "error_code": None,
+                },
+                {
+                    "id": "offline_battery",
+                    "name": "Offline Battery",
+                    "soc": 0,
+                    "voltage": 0.0,
+                    "temperature": None,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "state": "offline",
+                    "connected": False,
+                    "error_code": "device_not_found",
+                },
+            ]
+        },
+        devices=[
+            {"id": "charging_battery", "name": "Charging Battery", "enabled": True},
+            {"id": "offline_battery", "name": "Offline Battery", "enabled": True},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "Charging" in html
+    assert "Unable to connect" in html
+    assert "battery-card-status battery-card-status-inline charging" in html
+    assert "battery-card-status battery-card-status-inline error" in html
+    assert "Battery OK" not in html
 
 
 def test_render_frame_battery_overview_html_uses_configured_enabled_devices_only() -> None:
@@ -2480,6 +2541,38 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     assert "font-size: 12px;" in html
     assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
     assert "<span>2026-04-24 03:20</span>" in html
+
+
+def test_render_frame_battery_overview_html_keeps_three_cards_in_one_row() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
+                {"id": "two", "name": "Spare NLP20", "soc": 88, "voltage": 13.29},
+                {"id": "three", "name": "Liberty", "soc": 91, "voltage": 13.5},
+            ]
+        },
+        devices=[
+            {"id": "one", "name": "Spare NLP5", "enabled": True},
+            {"id": "two", "name": "Spare NLP20", "enabled": True},
+            {"id": "three", "name": "Liberty", "enabled": True},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    card_positions = re.findall(
+        r"left: ([0-9.]+)px; top: ([0-9.]+)px; width: ([0-9]+)px; height: ([0-9]+)px;",
+        html,
+    )
+
+    assert len(card_positions) == 3
+    assert {top for _left, top, _width, _height in card_positions} == {"49.0"}
+    assert all(width == height for _left, _top, width, height in card_positions)
+    assert {width for _left, _top, width, _height in card_positions} == {"154"}
 
 
 def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:
@@ -4049,6 +4142,13 @@ def test_render_add_device_html_is_dedicated_creation_surface() -> None:
 def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
     html = _add_device_form_html()
 
+    assert '<option value="bm200" selected>BM200</option>' in html
+    assert '<option value="bm6">BM6</option>' in html
+    assert '<option value="bm900">BM900</option>' in html
+    assert '<option value="bm900pro">BM900 Pro</option>' in html
+    assert '<option value="bm300">BM300</option>' in html
+    assert '<option value="bm300pro">BM300 Pro</option>' in html
+    assert '<option value="bm7">BM7</option>' in html
     assert 'name="installed_in_vehicle"' in html
     assert 'name="vehicle_type"' in html
     assert ">Car<" in html
@@ -4065,6 +4165,8 @@ def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
     assert 'name="device_id"' not in html
     assert 'name="icon_key"' not in html
     assert "color-preview-dot" in html
+    assert 'type="color" name="color_key"' in html
+    assert 'list="device-color-input-presets"' in html
 
 
 def test_battery_form_script_normalizes_compact_or_colon_mac_inputs() -> None:
@@ -4304,6 +4406,37 @@ def test_update_device_from_form_skips_history_rewrite_for_non_history_fields(
     devices = load_device_registry(config.device_registry_path)
     assert devices[0].color_key == "orange"
     assert devices[0].vehicle_type == "car"
+
+
+def test_update_device_from_form_accepts_custom_hex_overview_color(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        new_device_id="bm200_house",
+        device_type="bm200",
+        device_name="BM200 House",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="#2f80ed",
+        installed_in_vehicle=False,
+        vehicle_type="",
+        battery_brand="",
+        battery_model="",
+        battery_nominal_voltage=None,
+        battery_capacity_ah=None,
+        battery_production_year=None,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert devices[0].color_key == "#2f80ed"
 
 
 def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> None:

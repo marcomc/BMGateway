@@ -11,7 +11,7 @@ from time import sleep
 from typing import Callable
 
 from .config import AppConfig, GatewayConfig
-from .device_registry import Device
+from .device_registry import Device, device_driver_type
 from .drivers.bm200 import (
     BleakDeviceNotFoundError,
     BM200Error,
@@ -66,7 +66,7 @@ def _build_fake_reading(device: Device, *, generated_at: str, adapter: str) -> D
         error_detail=None,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -87,7 +87,7 @@ def _build_disabled_reading(device: Device, *, generated_at: str, adapter: str) 
         error_detail=None,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -108,7 +108,7 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
         error_detail=device.type,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -150,7 +150,7 @@ def _build_error_reading(
         error_detail=error_detail,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -231,7 +231,8 @@ def build_snapshot(
     bm200_live_reader = bm200_reader or _read_live_bm200
     bm300_live_reader = bm300_reader or _read_live_bm300
     if config.gateway.reader_mode == "live" and any(
-        device.enabled and device.type in LIVE_DEVICE_TYPES for device in devices
+        device.enabled and device_driver_type(device.type) in LIVE_DEVICE_TYPES
+        for device in devices
     ):
         _ensure_adapter_ready(adapter)
 
@@ -247,9 +248,10 @@ def build_snapshot(
             continue
 
         live_reader: Callable[[Device, str, float, float], BM200Measurement | BM300Measurement]
-        if device.type == "bm200":
+        driver_type = device_driver_type(device.type)
+        if driver_type == "bm200":
             live_reader = bm200_live_reader
-        elif device.type == "bm300pro":
+        elif driver_type == "bm300pro":
             live_reader = bm300_live_reader
         else:
             readings.append(
@@ -306,7 +308,7 @@ def build_snapshot(
                 error_detail=None,
                 last_seen=generated_at,
                 adapter=adapter,
-                driver=device.type,
+                driver=driver_type,
             )
         )
 

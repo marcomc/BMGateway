@@ -58,6 +58,10 @@ Verified result:
   4. write the encrypted poll request to `FFF3`
   5. wait for the notification
 
+`BMGateway` lets users choose commercial labels separately from the protocol
+driver. The `bm200`, `bm6`, `bm900`, and `bm900pro` device types currently use
+the BM200/BM6 driver family. Unknown labels remain unsupported until verified.
+
 ### 2. `scan_timeout_seconds` materially affects real success rate
 
 `BMGateway` originally configured:

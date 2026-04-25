@@ -166,13 +166,6 @@ def render_battery_overview_images(
     height = config.usb_otg.image_height_px
     per_image = config.usb_otg.overview_devices_per_image
     frame_devices = _frame_export_devices(config, devices)
-    real_devices = [device for device in frame_devices if device.enabled]
-    if not real_devices:
-        real_devices = frame_devices
-    pages = [
-        real_devices[index : index + per_image] for index in range(0, len(real_devices), per_image)
-    ]
-    pages = pages or [[]]
     files: list[Path] = []
     serialized_devices = [device.to_dict() for device in frame_devices]
     page_count = frame_battery_overview_page_count(

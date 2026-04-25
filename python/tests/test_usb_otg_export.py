@@ -305,6 +305,59 @@ def test_render_usb_otg_export_images_limits_overview_to_selected_frame_devices(
     assert "Boat Battery" not in combined_html
 
 
+def test_render_usb_otg_export_images_balances_overview_frame_pages(
+    tmp_path: Path,
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(
+            config.usb_otg,
+            export_battery_overview=True,
+            export_fleet_trend=False,
+            overview_devices_per_image=5,
+        ),
+    )
+    devices = [
+        Device(
+            id=f"bm200_{index}",
+            type="bm200",
+            name=f"Battery {index}",
+            mac=f"AA:BB:CC:DD:EE:{index:02X}",
+            color_key="green",
+        )
+        for index in range(1, 6)
+    ]
+    rendered_pages: list[str] = []
+
+    def _capturing_frame_renderer(
+        html_text: str,
+        output_path: Path,
+        width: int,
+        height: int,
+        image_format: str,
+    ) -> None:
+        rendered_pages.append(html_text)
+        _fake_frame_renderer(html_text, output_path, width, height, image_format)
+
+    files = render_usb_otg_export_images(
+        config=config,
+        devices=devices,
+        snapshot=replace(_snapshot(), devices=[]),
+        database_path=tmp_path / "gateway.db",
+        output_dir=tmp_path,
+        page_renderer=_capturing_frame_renderer,
+    )
+
+    assert expected_usb_otg_export_steps(config, devices) == 3
+    assert [file.name for file in files] == ["battery-overview-01.jpg", "battery-overview-02.jpg"]
+    assert "Battery 1" in rendered_pages[0]
+    assert "Battery 2" in rendered_pages[0]
+    assert "Battery 3" in rendered_pages[0]
+    assert "Battery 4" in rendered_pages[1]
+    assert "Battery 5" in rendered_pages[1]
+
+
 def test_render_usb_otg_export_images_uses_configured_web_language(tmp_path: Path) -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(

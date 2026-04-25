@@ -48,7 +48,7 @@ def render_devices_html(
         rows.append(
             f"<a class='device-list-row tone-card {tone}' "
             f"href='/devices/edit?device_id={quote(device_id)}' "
-            f"style='{shared._tone_card_style(tone)}'>"
+            f"style='{shared._tone_card_style_for_device(device, fallback_index=index)}'>"
             "<div class='device-list-row-main'>"
             f"{device_icon_markup}"
             "<div class='device-list-row-copy'>"
@@ -193,12 +193,7 @@ def render_edit_device_html(
     device_name = html.escape(str(device.get("name", "")))
     device_mac = html.escape(str(device.get("mac", "")))
     device_type = str(device.get("type", "bm200"))
-    device_type_options = (
-        f'<option value="bm200"{shared._selected_attr(device_type == "bm200")}>'
-        "bm200</option>"
-        f'<option value="bm300pro"{shared._selected_attr(device_type == "bm300pro")}>'
-        "bm300pro</option>"
-    )
+    device_type_options = shared._device_type_options(selected_device_type=device_type)
     family_options = shared._battery_family_options(selected_family=family)
     profile_options = shared._battery_profile_options(selected_profile=profile)
     custom_mode_options = shared._custom_mode_options(selected_mode=custom_soc_mode)

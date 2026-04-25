@@ -23,6 +23,7 @@ def render_diagnostics_html(
     *,
     theme_preference: str = "system",
     fleet_trend_metrics: tuple[str, ...] = ("soc",),
+    battery_overview_page_count: int = 1,
     language: str = "en",
 ) -> str:
     ordered_metrics = _ordered_fleet_metrics(fleet_trend_metrics)
@@ -35,6 +36,17 @@ def render_diagnostics_html(
             f"Fleet Trend {_metric_label(metric)}</a>"
         )
         for metric in ordered_metrics
+    )
+    overview_links = "".join(
+        (
+            '<a class="secondary-button" '
+            f'href="/frame/battery-overview?page={page_index}" '
+            'target="frame-preview-display">'
+            "<span>Battery Overview</span> "
+            "<span>Page</span> "
+            f"{page_index}</a>"
+        )
+        for page_index in range(1, max(1, battery_overview_page_count) + 1)
     )
     body = top_header(
         title="Diagnostics",
@@ -50,9 +62,7 @@ def render_diagnostics_html(
             '<div class="frame-preview-tool">'
             '<div class="inline-actions">'
             f"{metric_links}"
-            '<a class="secondary-button" href="/frame/battery-overview?page=1" '
-            'target="frame-preview-display">'
-            "Battery Overview Page 1</a>"
+            f"{overview_links}"
             "</div>"
             '<div class="frame-preview-shell">'
             '<iframe class="frame-preview-display" name="frame-preview-display" '
@@ -375,9 +385,9 @@ def _battery_overview_pages(
     page_count = (len(merged_devices) + page_size - 1) // page_size
     base_size = len(merged_devices) // page_count
     larger_page_count = len(merged_devices) % page_count
-    page_sizes = [base_size] * (page_count - larger_page_count) + [
-        base_size + 1
-    ] * larger_page_count
+    page_sizes = [base_size + 1] * larger_page_count + [base_size] * (
+        page_count - larger_page_count
+    )
 
     pages: list[list[dict[str, object]]] = []
     start = 0
@@ -445,6 +455,7 @@ def _frame_battery_cards_html(
         temperature_text = html.escape(
             shared._format_number(device.get("temperature"), digits=1, suffix="°C")
         )
+        status_markup = shared._battery_card_status_markup(device, inline=True)
         soc_value = shared._coerce_float(device.get("soc"), default=0.0)
         degrees = max(0.0, min(100.0, soc_value)) * 3.6
         cards.append(
@@ -461,7 +472,7 @@ def _frame_battery_cards_html(
             "</div>"
             '<div class="frame-battery-center">'
             f'<div class="frame-battery-soc">{soc_text}</div>'
-            '<div class="frame-battery-status">Battery OK</div>'
+            f"{status_markup}"
             f'<div class="frame-battery-detail">{temperature_text}</div>'
             f'<div class="frame-battery-detail">{voltage_text}</div>'
             "</div>"
@@ -738,8 +749,7 @@ def _frame_document(
         font-weight: 800;
         line-height: 0.95;
       }}
-      .frame-battery-status {{
-        color: var(--state-ok);
+      .frame-battery-center .battery-card-status-inline {{
         font-size: 7px;
         font-weight: 800;
         line-height: 1.1;

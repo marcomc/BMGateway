@@ -13,6 +13,7 @@ from .device_registry import (
     BATTERY_FAMILIES,
     COLOR_CATALOG,
     CUSTOM_SOC_MODES,
+    DEVICE_TYPE_LABELS,
     LEAD_ACID_PROFILES,
     LITHIUM_PROFILES,
     VEHICLE_TYPES,
@@ -22,7 +23,9 @@ from .device_registry import (
     default_battery_family,
     default_battery_profile,
     default_icon_key,
+    device_type_label,
     icon_label,
+    is_hex_color_key,
     vehicle_type_label,
 )
 from .state_store import (
@@ -93,16 +96,26 @@ def _device_color_key(device: dict[str, object], *, fallback_index: int = 0) -> 
 
 
 def _device_accent_color(device: dict[str, object], *, fallback_index: int = 0) -> str:
+    color_key = str(device.get("color_key", "")).strip()
+    if is_hex_color_key(color_key):
+        return color_key
     return DEVICE_COLOR_HEX[_device_color_key(device, fallback_index=fallback_index)]
 
 
-def _tone_card_style(color_key: str) -> str:
-    accent = DEVICE_COLOR_HEX[color_key]
+def _tone_card_style(color_key: str, *, accent: str | None = None) -> str:
+    resolved_accent = accent or DEVICE_COLOR_HEX[color_key]
     return (
-        f"--card-accent: {accent};"
-        f"--card-accent-soft: color-mix(in srgb, {accent} 16%, var(--bg-surface));"
-        f"--card-accent-soft-strong: color-mix(in srgb, {accent} 26%, var(--bg-surface));"
-        f"--card-accent-glow: color-mix(in srgb, {accent} 24%, transparent);"
+        f"--card-accent: {resolved_accent};"
+        f"--card-accent-soft: color-mix(in srgb, {resolved_accent} 16%, var(--bg-surface));"
+        f"--card-accent-soft-strong: color-mix(in srgb, {resolved_accent} 26%, var(--bg-surface));"
+        f"--card-accent-glow: color-mix(in srgb, {resolved_accent} 24%, transparent);"
+    )
+
+
+def _tone_card_style_for_device(device: dict[str, object], *, fallback_index: int = 0) -> str:
+    return _tone_card_style(
+        _device_color_key(device, fallback_index=fallback_index),
+        accent=_device_accent_color(device, fallback_index=fallback_index),
     )
 
 
@@ -192,7 +205,7 @@ def _history_device_selector_html(
         device_cards.append(
             f'<a class="history-device-card tone-card {color_key}'
             f'{" selected" if is_selected else ""}" href="/history?device_id={quote(device_id)}"'
-            f"{aria_current}>"
+            f"{aria_current} style='{_tone_card_style_for_device(device, fallback_index=index)}'>"
             "<div class='history-device-head'>"
             f"{badge_markup}"
             "<div class='device-card-copy history-device-copy'>"
@@ -970,8 +983,7 @@ def _add_device_form_html(
         'autocomplete="off" placeholder="House Battery…" required></div>'
         '<div><label class="settings-label" for="device-type-input">Type</label>'
         '<select id="device-type-input" name="device_type" autocomplete="off">'
-        '<option value="bm200">bm200</option>'
-        '<option value="bm300pro">bm300pro</option></select></div>'
+        f"{_device_type_options()}</select></div>"
         '<div><label class="settings-label" '
         'for="installed-in-vehicle-input">Vehicle install</label>'
         f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
@@ -1047,6 +1059,17 @@ def _add_device_form_html(
     )
 
 
+def _device_type_options(*, selected_device_type: str = "bm200") -> str:
+    return "".join(
+        (
+            f'<option value="{html.escape(device_type)}"'
+            f"{_selected_attr(device_type == selected_device_type)}>"
+            f"{html.escape(device_type_label(device_type))}</option>"
+        )
+        for device_type in DEVICE_TYPE_LABELS
+    )
+
+
 def _battery_family_options(*, selected_family: str = "lead_acid") -> str:
     return "".join(
         f"<option value='{html.escape(value)}'"
@@ -1106,23 +1129,34 @@ def _color_key_options(
     )
 
 
+def _color_input_value(color_key: str) -> str:
+    if is_hex_color_key(color_key):
+        return color_key
+    return DEVICE_COLOR_HEX.get(color_key, DEVICE_COLOR_HEX["green"])
+
+
 def _color_key_control_html(
     *,
     selected_color_key: str,
     reserved_color_keys: set[str] | None,
     control_id: str,
 ) -> str:
-    resolved_color_key = selected_color_key if selected_color_key in COLOR_CATALOG else "green"
-    safe_color_key = html.escape(resolved_color_key)
+    _ = reserved_color_keys
+    safe_color = html.escape(_color_input_value(selected_color_key))
+    datalist_id = f"{control_id}-presets"
+    preset_options = "".join(
+        f'<option value="{html.escape(DEVICE_COLOR_HEX[value])}" label="{html.escape(label)}">'
+        for value, label in COLOR_CATALOG.items()
+    )
     return (
-        '<div class="select-with-preview">'
-        f'<span class="color-preview-dot {safe_color_key}" aria-hidden="true"></span>'
-        f"<select id='{html.escape(control_id)}' name='color_key' data-color-preview-source='true'>"
-        + _color_key_options(
-            selected_color_key=selected_color_key,
-            reserved_color_keys=reserved_color_keys,
-        )
-        + "</select></div>"
+        '<div class="color-picker-control">'
+        f'<span class="color-preview-dot" style="--color-swatch: {safe_color};" '
+        'aria-hidden="true"></span>'
+        f'<input id="{html.escape(control_id)}" type="color" name="color_key" '
+        f'value="{safe_color}" list="{html.escape(datalist_id)}" '
+        'data-color-preview-source="true" aria-label="Overview color">'
+        f'<datalist id="{html.escape(datalist_id)}">{preset_options}</datalist>'
+        "</div>"
     )
 
 
@@ -1203,7 +1237,7 @@ def _battery_form_script() -> str:
       if (!colorSelect || !colorPreview) {
         return;
       }
-      colorPreview.className = "color-preview-dot " + colorSelect.value;
+      colorPreview.style.setProperty("--color-swatch", colorSelect.value);
     }
 
     function syncAll() {
@@ -1766,6 +1800,7 @@ def render_diagnostics_html(
     *,
     theme_preference: str = "system",
     fleet_trend_metrics: tuple[str, ...] = ("soc",),
+    battery_overview_page_count: int = 1,
     language: str = "en",
 ) -> str:
     from .web_pages_frame import render_diagnostics_html as _render_diagnostics_html
@@ -1773,6 +1808,7 @@ def render_diagnostics_html(
     return _render_diagnostics_html(
         theme_preference=theme_preference,
         fleet_trend_metrics=fleet_trend_metrics,
+        battery_overview_page_count=battery_overview_page_count,
         language=language,
     )
 
