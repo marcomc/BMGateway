@@ -11,7 +11,7 @@ from time import sleep
 from typing import Callable
 
 from .config import AppConfig, GatewayConfig
-from .device_registry import Device
+from .device_registry import Device, device_driver_type
 from .drivers.bm200 import (
     BleakDeviceNotFoundError,
     BM200Error,
@@ -20,9 +20,19 @@ from .drivers.bm200 import (
     BM200TimeoutError,
     read_bm200_measurement,
 )
+from .drivers.bm300 import (
+    BleakBM300DeviceNotFoundError,
+    BM300Error,
+    BM300Measurement,
+    BM300ProtocolError,
+    BM300TimeoutError,
+    read_bm300_measurement,
+)
 from .models import DeviceReading, GatewaySnapshot
 
 BM200Reader = Callable[[Device, str, float, float], BM200Measurement]
+BM300Reader = Callable[[Device, str, float, float], BM300Measurement]
+LIVE_DEVICE_TYPES = {"bm200", "bm300pro"}
 
 
 def _active_adapter(config: AppConfig) -> str:
@@ -56,7 +66,7 @@ def _build_fake_reading(device: Device, *, generated_at: str, adapter: str) -> D
         error_detail=None,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -77,7 +87,7 @@ def _build_disabled_reading(device: Device, *, generated_at: str, adapter: str) 
         error_detail=None,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -98,19 +108,19 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
         error_detail=device.type,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
-def _classify_bm200_error(error: Exception) -> tuple[str, str]:
+def _classify_live_error(error: Exception) -> tuple[str, str]:
     detail = str(error) or error.__class__.__name__
-    if isinstance(error, BleakDeviceNotFoundError):
+    if isinstance(error, BleakDeviceNotFoundError | BleakBM300DeviceNotFoundError):
         return "device_not_found", "No BLE advertisement seen during the scan window."
-    if isinstance(error, BM200TimeoutError):
+    if isinstance(error, BM200TimeoutError | BM300TimeoutError):
         return "timeout", detail
-    if isinstance(error, BM200ProtocolError):
+    if isinstance(error, BM200ProtocolError | BM300ProtocolError):
         return "protocol_error", detail
-    if isinstance(error, BM200Error):
+    if isinstance(error, BM200Error | BM300Error):
         return "driver_error", detail
     return "unexpected_error", detail
 
@@ -122,7 +132,7 @@ def _build_error_reading(
     adapter: str,
     error: Exception,
 ) -> DeviceReading:
-    error_code, error_detail = _classify_bm200_error(error)
+    error_code, error_detail = _classify_live_error(error)
     state = "offline" if error_code == "device_not_found" else "error"
     return DeviceReading(
         id=device.id,
@@ -140,7 +150,7 @@ def _build_error_reading(
         error_detail=error_detail,
         last_seen=generated_at,
         adapter=adapter,
-        driver=device.type,
+        driver=device_driver_type(device.type),
     )
 
 
@@ -152,6 +162,22 @@ def _read_live_bm200(
 ) -> BM200Measurement:
     return asyncio.run(
         read_bm200_measurement(
+            address=device.mac,
+            adapter=adapter,
+            timeout_seconds=timeout_seconds,
+            scan_timeout_seconds=scan_timeout_seconds,
+        )
+    )
+
+
+def _read_live_bm300(
+    device: Device,
+    adapter: str,
+    timeout_seconds: float,
+    scan_timeout_seconds: float,
+) -> BM300Measurement:
+    return asyncio.run(
+        read_bm300_measurement(
             address=device.mac,
             adapter=adapter,
             timeout_seconds=timeout_seconds,
@@ -197,13 +223,16 @@ def build_snapshot(
     devices: list[Device],
     *,
     bm200_reader: BM200Reader | None = None,
+    bm300_reader: BM300Reader | None = None,
 ) -> GatewaySnapshot:
     generated_at = _generated_at()
     adapter = _active_adapter(config)
     readings: list[DeviceReading] = []
-    live_reader = bm200_reader or _read_live_bm200
+    bm200_live_reader = bm200_reader or _read_live_bm200
+    bm300_live_reader = bm300_reader or _read_live_bm300
     if config.gateway.reader_mode == "live" and any(
-        device.enabled and device.type == "bm200" for device in devices
+        device.enabled and device_driver_type(device.type) in LIVE_DEVICE_TYPES
+        for device in devices
     ):
         _ensure_adapter_ready(adapter)
 
@@ -218,7 +247,13 @@ def build_snapshot(
             readings.append(_build_fake_reading(device, generated_at=generated_at, adapter=adapter))
             continue
 
-        if device.type != "bm200":
+        live_reader: Callable[[Device, str, float, float], BM200Measurement | BM300Measurement]
+        driver_type = device_driver_type(device.type)
+        if driver_type == "bm200":
+            live_reader = bm200_live_reader
+        elif driver_type == "bm300pro":
+            live_reader = bm300_live_reader
+        else:
             readings.append(
                 _build_unsupported_reading(device, generated_at=generated_at, adapter=adapter)
             )
@@ -232,7 +267,12 @@ def build_snapshot(
                     float(config.bluetooth.connect_timeout_seconds),
                     float(config.bluetooth.scan_timeout_seconds),
                 )
-            except (BleakDeviceNotFoundError, BM200TimeoutError):
+            except (
+                BleakDeviceNotFoundError,
+                BleakBM300DeviceNotFoundError,
+                BM200TimeoutError,
+                BM300TimeoutError,
+            ):
                 recover_adapter(adapter)
                 measurement = live_reader(
                     device,
@@ -268,7 +308,7 @@ def build_snapshot(
                 error_detail=None,
                 last_seen=generated_at,
                 adapter=adapter,
-                driver="bm200",
+                driver=driver_type,
             )
         )
 

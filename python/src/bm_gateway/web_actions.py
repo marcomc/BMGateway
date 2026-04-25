@@ -356,7 +356,6 @@ def update_web_preferences(
     web_host: str | None,
     web_port: int | None,
     show_chart_markers: bool | None,
-    visible_device_limit: int | None,
     appearance: str | None,
     default_chart_range: str | None,
     default_chart_metric: str | None,
@@ -368,9 +367,6 @@ def update_web_preferences(
     resolved_port = config.web.port if web_port is None else web_port
     resolved_show_chart_markers = (
         config.web.show_chart_markers if show_chart_markers is None else show_chart_markers
-    )
-    resolved_visible_device_limit = (
-        config.web.visible_device_limit if visible_device_limit is None else visible_device_limit
     )
     resolved_appearance = config.web.appearance if appearance is None else appearance
     resolved_default_chart_range = (
@@ -388,7 +384,6 @@ def update_web_preferences(
             host=resolved_host,
             port=resolved_port,
             show_chart_markers=resolved_show_chart_markers,
-            visible_device_limit=resolved_visible_device_limit,
             appearance=resolved_appearance,
             default_chart_range=resolved_default_chart_range,
             default_chart_metric=resolved_default_chart_metric,
@@ -640,6 +635,25 @@ def run_once_via_cli(
         check=False,
         capture_output=True,
         text=True,
+    )
+
+
+def start_run_once_via_cli(
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+    publish_discovery: bool = False,
+) -> subprocess.Popen[str]:
+    return subprocess.Popen(
+        build_run_once_command(
+            config_path,
+            state_dir=state_dir,
+            publish_discovery=publish_discovery,
+        ),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        start_new_session=True,
     )
 
 

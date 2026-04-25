@@ -5,6 +5,7 @@ from __future__ import annotations
 import subprocess
 import tempfile
 from dataclasses import dataclass
+from dataclasses import replace as dataclass_replace
 from datetime import datetime, timezone
 from pathlib import Path
 from shutil import which
@@ -16,6 +17,7 @@ from .localization import resolve_locale_preference
 from .models import GatewaySnapshot
 from .web_pages import _fleet_chart_points
 from .web_pages_frame import (
+    frame_battery_overview_page_count,
     render_frame_battery_overview_html,
     render_frame_fleet_trend_html,
 )
@@ -58,10 +60,16 @@ def expected_usb_otg_export_steps(config: AppConfig, devices: list[Device]) -> i
     image_count = 0
     if config.usb_otg.export_battery_overview:
         per_image = config.usb_otg.overview_devices_per_image
-        real_devices = [device for device in devices if device.enabled]
+        real_devices = [
+            device for device in _frame_export_devices(config, devices) if device.enabled
+        ]
         if not real_devices:
-            real_devices = devices
-        image_count += max(1, (len(real_devices) + per_image - 1) // per_image)
+            real_devices = _frame_export_devices(config, devices)
+        image_count += frame_battery_overview_page_count(
+            snapshot={},
+            devices=[device.to_dict() for device in real_devices],
+            devices_per_page=per_image,
+        )
     if config.usb_otg.export_fleet_trend:
         image_count += len(config.usb_otg.fleet_trend_metrics)
     return image_count + 1
@@ -157,17 +165,16 @@ def render_battery_overview_images(
     width = config.usb_otg.image_width_px
     height = config.usb_otg.image_height_px
     per_image = config.usb_otg.overview_devices_per_image
-    real_devices = [device for device in devices if device.enabled]
-    if not real_devices:
-        real_devices = devices
-    pages = [
-        real_devices[index : index + per_image] for index in range(0, len(real_devices), per_image)
-    ]
-    pages = pages or [[]]
+    frame_devices = _frame_export_devices(config, devices)
     files: list[Path] = []
-    serialized_devices = [device.to_dict() for device in devices]
+    serialized_devices = [device.to_dict() for device in frame_devices]
+    page_count = frame_battery_overview_page_count(
+        snapshot=snapshot.to_dict(),
+        devices=serialized_devices,
+        devices_per_page=per_image,
+    )
 
-    for page_index, _page_devices in enumerate(pages, start=1):
+    for page_index in range(1, page_count + 1):
         path = output_dir / (
             f"battery-overview-{page_index:02d}.{_extension(config.usb_otg.image_format)}"
         )
@@ -232,11 +239,29 @@ def render_fleet_trend_image(
     return path
 
 
-def _fleet_trend_export_devices(config: AppConfig, devices: list[Device]) -> list[Device]:
+def _frame_export_devices(config: AppConfig, devices: list[Device]) -> list[Device]:
     selected_ids = set(config.usb_otg.fleet_trend_device_ids)
     if not selected_ids:
         return devices
     return [device for device in devices if device.id in selected_ids]
+
+
+def _filtered_snapshot_for_devices(
+    snapshot: GatewaySnapshot,
+    devices: list[Device],
+    *,
+    force_filter: bool = False,
+) -> GatewaySnapshot:
+    selected_ids = {device.id for device in devices}
+    if not selected_ids and not force_filter:
+        return snapshot
+    filtered_readings = [reading for reading in snapshot.devices if reading.id in selected_ids]
+    return dataclass_replace(
+        snapshot,
+        devices=filtered_readings,
+        devices_total=len(filtered_readings),
+        devices_online=sum(1 for reading in filtered_readings if reading.connected),
+    )
 
 
 def render_usb_otg_export_images(
@@ -254,11 +279,16 @@ def render_usb_otg_export_images(
     files: list[Path] = []
     resolved_total_steps = total_steps or expected_usb_otg_export_steps(config, devices)
     if config.usb_otg.export_battery_overview:
+        frame_devices = _frame_export_devices(config, devices)
         files.extend(
             render_battery_overview_images(
                 config=config,
-                devices=devices,
-                snapshot=snapshot,
+                devices=frame_devices,
+                snapshot=_filtered_snapshot_for_devices(
+                    snapshot,
+                    frame_devices,
+                    force_filter=bool(config.usb_otg.fleet_trend_device_ids),
+                ),
                 output_dir=output_dir,
                 page_renderer=page_renderer,
                 progress=progress,
@@ -267,11 +297,12 @@ def render_usb_otg_export_images(
             )
         )
     if config.usb_otg.export_fleet_trend:
+        frame_devices = _frame_export_devices(config, devices)
         for metric in config.usb_otg.fleet_trend_metrics:
             files.append(
                 render_fleet_trend_image(
                     config=config,
-                    devices=_fleet_trend_export_devices(config, devices),
+                    devices=frame_devices,
                     snapshot=snapshot,
                     database_path=database_path,
                     output_dir=output_dir,

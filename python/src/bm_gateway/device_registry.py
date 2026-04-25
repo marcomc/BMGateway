@@ -2,16 +2,50 @@
 
 from __future__ import annotations
 
+import colorsys
 import re
 import tomllib
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 
-VALID_DEVICE_TYPES = {"bm200", "bm300pro"}
+DEVICE_TYPE_LABELS = {
+    "bm200": "BM200",
+    "bm6": "BM6",
+    "bm900": "BM900",
+    "bm900pro": "BM900 Pro",
+    "bm300": "BM300",
+    "bm300pro": "BM300 Pro",
+    "bm7": "BM7",
+}
+DEVICE_DRIVER_TYPES = {
+    "bm200": "bm200",
+    "bm6": "bm200",
+    "bm900": "bm200",
+    "bm900pro": "bm200",
+    "bm300": "bm300pro",
+    "bm300pro": "bm300pro",
+    "bm7": "bm300pro",
+}
+VALID_DEVICE_TYPES = set(DEVICE_TYPE_LABELS)
+HEX_COLOR_RE = re.compile(r"^#[0-9A-Fa-f]{6}$")
 MAC_ADDRESS_RE = re.compile(r"^[0-9A-F]{2}(?::[0-9A-F]{2}){5}$")
 COMPACT_MAC_RE = re.compile(r"^[0-9A-F]{12}$")
 DEVICE_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+MAC_CONFUSABLES = str.maketrans(
+    {
+        "А": "A",
+        "В": "B",
+        "С": "C",
+        "Е": "E",
+        "а": "A",
+        "в": "B",
+        "с": "C",
+        "е": "E",
+        "З": "3",
+        "з": "3",
+    }
+)
 BATTERY_FAMILIES = {
     "lead_acid": "Lead-Acid Battery",
     "lithium": "Lithium Battery",
@@ -80,6 +114,17 @@ COLOR_CATALOG = {
     "indigo": "Indigo",
     "amber": "Amber",
 }
+COLOR_HEX = {
+    "green": "#17c45a",
+    "blue": "#4f8df7",
+    "purple": "#9a57f5",
+    "orange": "#f4a340",
+    "teal": "#16b8b0",
+    "rose": "#ec5c86",
+    "indigo": "#6677ff",
+    "amber": "#f0b429",
+}
+COLOR_KEY_BY_HEX = {value.lower(): key for key, value in COLOR_HEX.items()}
 DEFAULT_CUSTOM_CURVE = (
     (100, 12.90),
     (90, 12.80),
@@ -190,6 +235,8 @@ def icon_label(icon_key: str) -> str:
 
 
 def color_label(color_key: str) -> str:
+    if is_hex_color_key(color_key):
+        return color_key.upper()
     return COLOR_CATALOG.get(color_key, color_key.replace("_", " ").title())
 
 
@@ -199,8 +246,16 @@ def vehicle_type_label(vehicle_type: str) -> str:
     return VEHICLE_TYPES.get(vehicle_type, vehicle_type.replace("_", " ").title())
 
 
+def device_type_label(device_type: str) -> str:
+    return DEVICE_TYPE_LABELS.get(device_type, device_type.replace("_", " ").upper())
+
+
+def device_driver_type(device_type: str) -> str:
+    return DEVICE_DRIVER_TYPES.get(device_type, device_type)
+
+
 def default_battery_family(device_type: str) -> str:
-    if device_type == "bm300pro":
+    if device_driver_type(device_type) == "bm300pro":
         return "lithium"
     return "lead_acid"
 
@@ -208,7 +263,7 @@ def default_battery_family(device_type: str) -> str:
 def default_battery_profile(device_type: str, family: str) -> str:
     if family == "lithium":
         return "lithium"
-    if device_type == "bm300pro" and family == "lead_acid":
+    if device_driver_type(device_type) == "bm300pro" and family == "lead_acid":
         return "regular_lead_acid"
     return "regular_lead_acid"
 
@@ -230,10 +285,34 @@ def default_icon_key(*, battery_family: str, battery_profile: str) -> str:
 
 
 def default_color_key(*, used_colors: set[str]) -> str:
+    normalized_used_colors = {normalize_palette_color_key(color_key) for color_key in used_colors}
     for color_key in COLOR_CATALOG:
-        if color_key not in used_colors:
+        if color_key not in normalized_used_colors:
             return color_key
-    return next(iter(COLOR_CATALOG))
+    for offset in range(64):
+        hue = ((len(normalized_used_colors) + offset) * 0.61803398875) % 1.0
+        red, green, blue = colorsys.hsv_to_rgb(hue, 0.68, 0.88)
+        color_key = f"#{round(red * 255):02x}{round(green * 255):02x}{round(blue * 255):02x}"
+        if normalize_palette_color_key(color_key) not in normalized_used_colors:
+            return color_key
+    return "#17c45a"
+
+
+def is_hex_color_key(color_key: str) -> bool:
+    return HEX_COLOR_RE.fullmatch(color_key.strip()) is not None
+
+
+def normalize_palette_color_key(color_key: str) -> str:
+    stripped = color_key.strip()
+    if stripped in COLOR_CATALOG:
+        return stripped
+    if is_hex_color_key(stripped):
+        return COLOR_KEY_BY_HEX.get(stripped.lower(), stripped.lower())
+    return stripped
+
+
+def is_valid_color_key(color_key: str) -> bool:
+    return color_key in COLOR_CATALOG or is_hex_color_key(color_key)
 
 
 def _parse_custom_voltage_curve(
@@ -254,10 +333,11 @@ def _parse_custom_voltage_curve(
 
 
 def normalize_mac_address(value: str) -> str:
-    raw = re.sub(r"[^0-9A-Fa-f]", "", value).upper()
+    normalized = value.translate(MAC_CONFUSABLES)
+    raw = re.sub(r"[^0-9A-Fa-f]", "", normalized).upper()
     if COMPACT_MAC_RE.fullmatch(raw):
         return ":".join(raw[index : index + 2] for index in range(0, 12, 2))
-    return value.strip().upper()
+    return normalized.strip().upper()
 
 
 def generate_device_id(
@@ -403,7 +483,6 @@ def validate_devices(devices: list[Device]) -> list[str]:
     errors: list[str] = []
     seen_ids: set[str] = set()
     seen_identifiers: set[str] = set()
-    seen_colors: set[str] = set()
 
     for device in devices:
         if not device.id:
@@ -453,15 +532,10 @@ def validate_devices(devices: list[Device]) -> list[str]:
                 f"{', '.join(sorted(ICON_CATALOG))}"
             )
 
-        if device.color_key not in COLOR_CATALOG:
+        if not is_valid_color_key(device.color_key):
             errors.append(
-                f"device {device.id or '<unknown>'} color key must be one of "
-                f"{', '.join(sorted(COLOR_CATALOG))}"
+                f"device {device.id or '<unknown>'} color key must be a preset name or #RRGGBB"
             )
-        elif device.color_key in seen_colors:
-            errors.append(f"duplicate device color key: {device.color_key}")
-        else:
-            seen_colors.add(device.color_key)
 
         if device.installed_in_vehicle:
             if device.vehicle_type not in VEHICLE_TYPES:

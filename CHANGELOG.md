@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.0] - 2026-06-30
+## [0.2.0] - 2026-04-25
 
 ### Added
 
@@ -42,6 +42,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a Settings action to shut down the Raspberry Pi safely from the web UI,
   plus installer-managed scoped sudo permissions for restart, reboot, and
   shutdown host-control actions.
+- Added a dedicated BM300 Pro/BM7 live polling driver, selected from the
+  configured device type, with voltage, state-of-charge, temperature, RSSI, and
+  device-state support kept separate from the existing BM200/BM6 driver.
+- Added commercial device type choices for BM6, BM7, BM300, BM300 Pro, BM900,
+  and BM900 Pro while keeping them mapped to the existing isolated driver
+  families.
+- Added freeform overview colors with a native color picker, while preserving
+  the existing color presets for quick selection.
 
 ### Fixed
 
@@ -71,6 +79,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrent drive-update workers.
 - Fixed Settings status text so repeated saves do not claim a new USB OTG frame
   export started while an existing export is already running.
+- Fixed BM6-family current-state parsing so device status code `2` displays as
+  `charging` instead of being forced to `normal`.
+- Fixed USB OTG frame device selection so Battery Overview frame images honor
+  the selected frame devices instead of only Fleet Trend charts.
+- Fixed USB OTG Battery Overview frame layout so three selected devices render
+  in one row and larger selections paginate into balanced frame pages.
+- Fixed Diagnostics frame preview links so every generated Battery Overview
+  frame page is available when selected devices span multiple pages.
+- Fixed USB OTG Battery Overview frame status rendering so battery state,
+  offline, and error conditions match the Home Battery Overview.
 - Fixed `bm-gateway run --dry-run --export-usb-otg-now` so dry-run mode skips
   USB OTG drive writes instead of forcing an export.
 - Fixed USB OTG export scheduling so future-dated export markers are treated as
@@ -88,6 +106,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   top-level readable files owned by the original sudo caller.
 - Tightened installer privilege setup so `--disable-web` removes the web action
   sudoers policy instead of leaving passwordless web-service actions installed.
+- Fixed device creation from the web UI so saving a new device redirects
+  immediately while the first live polling cycle starts in the background.
+- Reworked the Home Battery Overview so it uses responsive browser-measured
+  pagination with at most two rows, instead of a user-configured visible-card
+  limit.
+- Refined History and Devices card lists with a clearer Batteries selector,
+  responsive selector pagination, larger device badges, and shorter mobile edit
+  actions.
 
 ## [0.1.1] - 2026-04-23
 

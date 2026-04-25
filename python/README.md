@@ -57,11 +57,13 @@ Optional web executable for:
 - shared config/runtime/web core in one package
 - fake and live reader modes
 - BM200/BM6-family live polling
+- BM300 Pro/BM7-family live polling
 - MQTT publishing and Home Assistant discovery support
 - service-friendly Raspberry Pi deployment shape
 - modular web UI localization selected through `web.language`
 
-BM300 Pro live support is not implemented yet.
+BM300 Pro live support is implemented through a separate driver selected by the
+configured device type.
 
 ## History and Persistence
 
@@ -98,6 +100,8 @@ Use these as the canonical references instead of repeating the same guidance:
   [../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)
 - Verified BM6/BM200 notes:
   [../docs/2026-04-19-bm6-bm200-integration-notes.md](../docs/2026-04-19-bm6-bm200-integration-notes.md)
+- BM300 Pro/BM7 notes:
+  [../docs/2026-04-25-bm300-bm7-integration-notes.md](../docs/2026-04-25-bm300-bm7-integration-notes.md)
 - Raspberry Pi installation:
   [../rpi-setup/manual-setup.md](../rpi-setup/manual-setup.md)
 - Home Assistant setup:

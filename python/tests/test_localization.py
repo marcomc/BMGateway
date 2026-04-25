@@ -185,6 +185,7 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
     message_keys = (
         "Validation failed",
         "Validation failed: USB OTG settings values must be numeric",
+        "Device added. First poll started.",
         "Run completed",
         "Run failed",
         "Home Assistant discovery republished",
@@ -365,7 +366,6 @@ def test_update_web_preferences_persists_language(tmp_path: Path) -> None:
         web_host=None,
         web_port=None,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,

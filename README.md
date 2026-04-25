@@ -14,8 +14,8 @@
 
 ## Overview
 
-`BMGateway` is a Raspberry Pi battery-monitor gateway for BM200/BM6-family
-devices.
+`BMGateway` is a Raspberry Pi battery-monitor gateway for BM200/BM6-family and
+BM300 Pro/BM7-family devices.
 
 It ships as one Python codebase with two executables:
 
@@ -62,7 +62,7 @@ Start here:
 ## What Is Included
 
 - Packaged runtime CLI and web executable
-- Live BM200/BM6-family polling path
+- Live BM200/BM6-family and BM300 Pro/BM7-family polling paths
 - SQLite history with raw, daily, monthly, and yearly views
 - Optional Home Assistant MQTT discovery integration
 - Raspberry Pi bootstrap and `systemd` service installation
@@ -128,9 +128,9 @@ The default quality gate is `make check`.
 
 ## Release Status
 
-The current documented first release is:
+The current documented release is:
 
-- `0.1.1`
+- `0.2.0`
 
 Use [CHANGELOG.md](CHANGELOG.md) for release content and [TODO.md](TODO.md) for
 work that is not shipped yet.
@@ -158,6 +158,12 @@ software and protocol research that should be credited explicitly.
   [Home Assistant BM6 thread](https://community.home-assistant.io/t/bm6-battery-monitor-esphome/806239).
   This helped validate practical behavior seen on live hardware. Thanks to the
   community contributors for sharing findings.
+- BM300 Pro / BM7 reverse-engineering references:
+  [slydiman/bm7-battery-monitor](https://github.com/slydiman/bm7-battery-monitor)
+  and [derekpurdy/BM7](https://github.com/derekpurdy/BM7).
+  These provided the BM7 AES key, current-state poll command, payload offsets,
+  and model naming used for the isolated BM300 Pro driver. Thanks to those
+  project maintainers and contributors for publishing their findings.
 - BM2/BM6 community discussion:
   [OpenMQTTGateway BM2 thread](https://community.openmqttgateway.com/t/omg-1-8-0-no-longer-gets-bm2-messages/3578).
   This provided useful context during compatibility debugging. Thanks to the

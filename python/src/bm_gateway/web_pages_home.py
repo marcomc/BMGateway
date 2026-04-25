@@ -23,7 +23,6 @@ def render_home_html(
     chart_points: list[dict[str, object]],
     legend: list[tuple[str, str]],
     show_chart_markers: bool = False,
-    visible_device_limit: int = 4,
     appearance: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
@@ -36,7 +35,6 @@ def render_home_html(
     overview_scroller = home_overview_scroller_html(
         snapshot=snapshot,
         devices=devices,
-        visible_device_limit=visible_device_limit,
         track_id=overview_track_id,
         include_controls=True,
     )
@@ -89,7 +87,6 @@ def home_overview_scroller_html(
     *,
     snapshot: dict[str, object],
     devices: list[dict[str, object]],
-    visible_device_limit: int,
     track_id: str,
     include_controls: bool,
 ) -> str:
@@ -150,48 +147,29 @@ def home_overview_scroller_html(
             f"<article class='home-overview-card home-overview-orb-shell'>"
             f"<a class='home-overview-card-link home-overview-orb tone-card {color_key}' "
             f"href='{device_href}' aria-label='Open details for {device_name_text}' "
-            f"style='{shared._tone_card_style(color_key)}'>"
+            f"style='{shared._tone_card_style_for_device(device, fallback_index=index)}'>"
             f"{gauge_markup}"
             "</a>"
             "</article>"
         )
-    overview_pages = shared._chunk_overview_cards(
-        device_cards,
-        device_slots=visible_device_limit,
-        add_card="",
-    )
-    is_paginated = len(overview_pages) > 1
-    overview_pages_html = "".join(
-        (
-            f'<div class="{_overview_page_class(page, is_paginated=is_paginated)}" '
-            f'style="{_overview_page_style(page)}">' + "".join(page) + "</div>"
-        )
-        for page in overview_pages
-    )
     overview_controls = ""
-    if include_controls and is_paginated:
+    if include_controls:
         overview_controls = (
-            '<div class="home-overview-controls">'
+            '<div class="home-overview-controls" hidden>'
             f'<button type="button" class="ghost-button home-overview-arrow" '
             f'data-overview-target="{track_id}" data-direction="previous" '
-            'aria-label="Show previous home cards">Prev</button>'
+            'aria-label="Show previous home cards">‹</button>'
             f'<button type="button" class="ghost-button home-overview-arrow" '
             f'data-overview-target="{track_id}" data-direction="next" '
-            'aria-label="Show next home cards">Next</button>'
+            'aria-label="Show next home cards">›</button>'
             "</div>"
         )
     return (
-        overview_controls
-        + f'<div id="{track_id}" class="home-overview-scroller'
-        + ("" if is_paginated else " is-single-page")
-        + f'">{overview_pages_html}</div>'
+        '<div class="home-overview-stage">'
+        + overview_controls
+        + f'<div id="{track_id}" class="home-overview-scroller is-single-page">'
+        + '<div class="home-overview-page is-single-page page-multi-cards" '
+        + 'style="--overview-columns: 1; --overview-rows: 1;">'
+        + "".join(device_cards)
+        + "</div></div></div>"
     )
-
-
-def _overview_page_style(page: list[str]) -> str:
-    columns, rows = shared._overview_layout_dimensions(len(page))
-    return f"--overview-columns: {columns}; --overview-rows: {rows};"
-
-
-def _overview_page_class(page: list[str], *, is_paginated: bool) -> str:
-    return shared._overview_page_class(len(page), is_single_page=not is_paginated)

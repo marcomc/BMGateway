@@ -12,7 +12,9 @@ from .config import AppConfig
 from .device_registry import (
     BATTERY_FAMILIES,
     COLOR_CATALOG,
+    COLOR_HEX,
     CUSTOM_SOC_MODES,
+    DEVICE_TYPE_LABELS,
     LEAD_ACID_PROFILES,
     LITHIUM_PROFILES,
     VEHICLE_TYPES,
@@ -22,7 +24,9 @@ from .device_registry import (
     default_battery_family,
     default_battery_profile,
     default_icon_key,
+    device_type_label,
     icon_label,
+    is_hex_color_key,
     vehicle_type_label,
 )
 from .state_store import (
@@ -58,16 +62,7 @@ PROTOCOL_STATUS_SCALE: tuple[tuple[str, str, str, str], ...] = (
     ),
 )
 
-DEVICE_COLOR_HEX: dict[str, str] = {
-    "green": "#17c45a",
-    "blue": "#4f8df7",
-    "purple": "#9a57f5",
-    "orange": "#f4a340",
-    "teal": "#16b8b0",
-    "rose": "#ec5c86",
-    "indigo": "#6677ff",
-    "amber": "#f0b429",
-}
+DEVICE_COLOR_HEX = COLOR_HEX
 
 VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("1", "1 day"),
@@ -93,16 +88,26 @@ def _device_color_key(device: dict[str, object], *, fallback_index: int = 0) -> 
 
 
 def _device_accent_color(device: dict[str, object], *, fallback_index: int = 0) -> str:
+    color_key = str(device.get("color_key", "")).strip()
+    if is_hex_color_key(color_key):
+        return color_key
     return DEVICE_COLOR_HEX[_device_color_key(device, fallback_index=fallback_index)]
 
 
-def _tone_card_style(color_key: str) -> str:
-    accent = DEVICE_COLOR_HEX[color_key]
+def _tone_card_style(color_key: str, *, accent: str | None = None) -> str:
+    resolved_accent = accent or DEVICE_COLOR_HEX[color_key]
     return (
-        f"--card-accent: {accent};"
-        f"--card-accent-soft: color-mix(in srgb, {accent} 16%, var(--bg-surface));"
-        f"--card-accent-soft-strong: color-mix(in srgb, {accent} 26%, var(--bg-surface));"
-        f"--card-accent-glow: color-mix(in srgb, {accent} 24%, transparent);"
+        f"--card-accent: {resolved_accent};"
+        f"--card-accent-soft: color-mix(in srgb, {resolved_accent} 16%, var(--bg-surface));"
+        f"--card-accent-soft-strong: color-mix(in srgb, {resolved_accent} 26%, var(--bg-surface));"
+        f"--card-accent-glow: color-mix(in srgb, {resolved_accent} 24%, transparent);"
+    )
+
+
+def _tone_card_style_for_device(device: dict[str, object], *, fallback_index: int = 0) -> str:
+    return _tone_card_style(
+        _device_color_key(device, fallback_index=fallback_index),
+        accent=_device_accent_color(device, fallback_index=fallback_index),
     )
 
 
@@ -173,6 +178,7 @@ def _history_device_selector_html(
         )
 
     device_cards: list[str] = []
+    track_id = "history-device-track"
     for index, device in enumerate(configured_devices):
         device_id = str(device.get("id", ""))
         is_selected = device_id == selected_device_id
@@ -191,7 +197,7 @@ def _history_device_selector_html(
         device_cards.append(
             f'<a class="history-device-card tone-card {color_key}'
             f'{" selected" if is_selected else ""}" href="/history?device_id={quote(device_id)}"'
-            f"{aria_current}>"
+            f"{aria_current} style='{_tone_card_style_for_device(device, fallback_index=index)}'>"
             "<div class='history-device-head'>"
             f"{badge_markup}"
             "<div class='device-card-copy history-device-copy'>"
@@ -203,8 +209,25 @@ def _history_device_selector_html(
             "</a>"
         )
     return section_card(
-        title="History Device",
-        body=f'<div class="device-grid history-device-grid">{"".join(device_cards)}</div>',
+        title="Batteries",
+        body=(
+            '<div class="history-device-stage">'
+            '<div class="history-device-controls" hidden>'
+            f'<button type="button" class="ghost-button home-overview-arrow history-device-arrow" '
+            f'data-history-device-target="{track_id}" data-direction="previous" '
+            'aria-label="Show previous history devices">‹</button>'
+            f'<button type="button" class="ghost-button home-overview-arrow history-device-arrow" '
+            f'data-history-device-target="{track_id}" data-direction="next" '
+            'aria-label="Show next history devices">›</button>'
+            "</div>"
+            f'<div id="{track_id}" class="history-device-scroller is-single-page">'
+            '<div class="history-device-page is-single-page page-multi-cards" '
+            'style="--history-device-columns: 1; --history-device-rows: 1">'
+            f"{''.join(device_cards)}"
+            "</div>"
+            "</div>"
+            "</div>"
+        ),
     )
 
 
@@ -325,13 +348,59 @@ def _home_overview_script(track_id: str) -> str:
   }}
   const previousButton = document.querySelector('{previous_selector}');
   const nextButton = document.querySelector('{next_selector}');
-  const pages = Array.from(track.querySelectorAll(".home-overview-page"));
-  if (pages.length <= 1) {{
-    if (previousButton) previousButton.hidden = true;
-    if (nextButton) nextButton.hidden = true;
-    return;
-  }}
+  const controls = previousButton ? previousButton.closest(".home-overview-controls") : null;
+  const cards = Array.from(track.querySelectorAll(".home-overview-card"));
+  let pages = [];
   let currentPage = 0;
+  function cardClass(count, isSinglePage) {{
+    const classes = ["home-overview-page"];
+    if (isSinglePage) classes.push("is-single-page");
+    if (count <= 1) classes.push("page-one-card");
+    else if (count === 2) classes.push("page-two-cards");
+    else classes.push("page-multi-cards");
+    return classes.join(" ");
+  }}
+  function pageSizing() {{
+    const styles = window.getComputedStyle(track);
+    const minCard = parseFloat(styles.getPropertyValue("--overview-card-min")) || 162;
+    const maxCard = parseFloat(styles.getPropertyValue("--overview-card-max")) || minCard;
+    const gap = parseFloat(styles.getPropertyValue("--overview-gap")) || 16;
+    const pagePadding = parseFloat(styles.getPropertyValue("--overview-page-padding")) || 0;
+    const width = Math.max(track.clientWidth - (pagePadding * 2), minCard);
+    const rawColumns = Math.floor((width + gap) / (maxCard + gap));
+    const columns = Math.max(1, Math.min(cards.length || 1, rawColumns));
+    const availableCard = (width - (gap * Math.max(0, columns - 1))) / columns;
+    const cardSize = Math.max(minCard, Math.min(maxCard, availableCard));
+    const capacity = Math.max(1, columns * 2);
+    return {{ columns, capacity, cardSize }};
+  }}
+  function buildPages() {{
+    const {{ columns, capacity, cardSize }} = pageSizing();
+    const groupedCards = [];
+    for (let index = 0; index < cards.length; index += capacity) {{
+      groupedCards.push(cards.slice(index, index + capacity));
+    }}
+    if (groupedCards.length === 0) {{
+      groupedCards.push([]);
+    }}
+    const isSinglePage = groupedCards.length <= 1;
+    track.classList.toggle("is-single-page", isSinglePage);
+    track.replaceChildren();
+    pages = groupedCards.map((group) => {{
+      const rows = isSinglePage && group.length <= columns ? 1 : 2;
+      const page = document.createElement("div");
+      page.className = cardClass(group.length, isSinglePage);
+      page.style.setProperty("--overview-columns", String(columns));
+      page.style.setProperty("--overview-rows", String(rows));
+      page.style.setProperty("--overview-card-size", `${{Math.round(cardSize)}}px`);
+      group.forEach((card) => page.appendChild(card));
+      track.appendChild(page);
+      return page;
+    }});
+    currentPage = Math.max(0, Math.min(currentPage, pages.length - 1));
+    if (controls) controls.hidden = pages.length <= 1;
+    syncButtons();
+  }}
   function syncButtons() {{
     if (previousButton) previousButton.disabled = currentPage <= 0;
     if (nextButton) nextButton.disabled = currentPage >= pages.length - 1;
@@ -361,7 +430,137 @@ def _home_overview_script(track_id: str) -> str:
     currentPage = bestIndex;
     syncButtons();
   }}, {{ passive: true }});
-  syncButtons();
+  let resizeFrame = 0;
+  const scheduleBuild = () => {{
+    if (controls) controls.hidden = true;
+    if (resizeFrame) {{
+      window.cancelAnimationFrame(resizeFrame);
+    }}
+    resizeFrame = window.requestAnimationFrame(() => {{
+      resizeFrame = 0;
+      buildPages();
+    }});
+  }};
+  buildPages();
+  if ("ResizeObserver" in window) {{
+    new ResizeObserver(scheduleBuild).observe(track);
+  }} else {{
+    window.addEventListener("resize", scheduleBuild);
+  }}
+  if (window.visualViewport) {{
+    window.visualViewport.addEventListener("resize", scheduleBuild, {{ passive: true }});
+  }}
+}})();
+</script>
+"""
+
+
+def _history_device_selector_script(track_id: str = "history-device-track") -> str:
+    previous_selector = f'[data-history-device-target="{track_id}"][data-direction="previous"]'
+    next_selector = f'[data-history-device-target="{track_id}"][data-direction="next"]'
+    return f"""
+<script>
+(() => {{
+  const track = document.getElementById("{track_id}");
+  if (!track) {{
+    return;
+  }}
+  const previousButton = document.querySelector('{previous_selector}');
+  const nextButton = document.querySelector('{next_selector}');
+  const controls = previousButton ? previousButton.closest(".history-device-controls") : null;
+  const cards = Array.from(track.querySelectorAll(".history-device-card"));
+  let pages = [];
+  let currentPage = 0;
+  function pageClass(count, isSinglePage) {{
+    const classes = ["history-device-page"];
+    if (isSinglePage) classes.push("is-single-page");
+    if (count <= 1) classes.push("page-one-card");
+    else if (count === 2) classes.push("page-two-cards");
+    else classes.push("page-multi-cards");
+    return classes.join(" ");
+  }}
+  function pageSizing() {{
+    const styles = window.getComputedStyle(track);
+    const minCard = parseFloat(styles.getPropertyValue("--history-device-card-min")) || 220;
+    const gap = parseFloat(styles.getPropertyValue("--history-device-gap")) || 16;
+    const width = Math.max(track.clientWidth, minCard);
+    const rawColumns = Math.floor((width + gap) / (minCard + gap));
+    const columns = Math.max(1, Math.min(4, cards.length || 1, rawColumns));
+    const capacity = Math.max(1, Math.min(4, columns * 2));
+    return {{ columns, capacity }};
+  }}
+  function buildPages() {{
+    const {{ columns, capacity }} = pageSizing();
+    const groupedCards = [];
+    for (let index = 0; index < cards.length; index += capacity) {{
+      groupedCards.push(cards.slice(index, index + capacity));
+    }}
+    if (groupedCards.length === 0) {{
+      groupedCards.push([]);
+    }}
+    const isSinglePage = groupedCards.length <= 1;
+    track.classList.toggle("is-single-page", isSinglePage);
+    track.replaceChildren();
+    pages = groupedCards.map((group) => {{
+      const rows = isSinglePage && group.length <= columns ? 1 : 2;
+      const page = document.createElement("div");
+      page.className = pageClass(group.length, isSinglePage);
+      page.style.setProperty("--history-device-columns", String(columns));
+      page.style.setProperty("--history-device-rows", String(rows));
+      group.forEach((card) => page.appendChild(card));
+      track.appendChild(page);
+      return page;
+    }});
+    currentPage = Math.max(0, Math.min(currentPage, pages.length - 1));
+    if (controls) controls.hidden = pages.length <= 1;
+    syncButtons();
+  }}
+  function syncButtons() {{
+    if (previousButton) previousButton.disabled = currentPage <= 0;
+    if (nextButton) nextButton.disabled = currentPage >= pages.length - 1;
+  }}
+  function scrollToPage(index) {{
+    currentPage = Math.max(0, Math.min(index, pages.length - 1));
+    pages[currentPage].scrollIntoView({{ behavior: "smooth", inline: "start", block: "nearest" }});
+    syncButtons();
+  }}
+  if (previousButton) {{
+    previousButton.addEventListener("click", () => scrollToPage(currentPage - 1));
+  }}
+  if (nextButton) {{
+    nextButton.addEventListener("click", () => scrollToPage(currentPage + 1));
+  }}
+  track.addEventListener("scroll", () => {{
+    const trackLeft = track.getBoundingClientRect().left;
+    let bestIndex = 0;
+    let bestDistance = Infinity;
+    pages.forEach((page, index) => {{
+      const distance = Math.abs(page.getBoundingClientRect().left - trackLeft);
+      if (distance < bestDistance) {{
+        bestDistance = distance;
+        bestIndex = index;
+      }}
+    }});
+    currentPage = bestIndex;
+    syncButtons();
+  }}, {{ passive: true }});
+  let resizeFrame = 0;
+  const scheduleBuild = () => {{
+    if (controls) controls.hidden = true;
+    if (resizeFrame) {{
+      window.cancelAnimationFrame(resizeFrame);
+    }}
+    resizeFrame = window.requestAnimationFrame(() => {{
+      resizeFrame = 0;
+      buildPages();
+    }});
+  }};
+  buildPages();
+  if ("ResizeObserver" in window) {{
+    new ResizeObserver(scheduleBuild).observe(track);
+  }} else {{
+    window.addEventListener("resize", scheduleBuild);
+  }}
 }})();
 </script>
 """
@@ -776,8 +975,7 @@ def _add_device_form_html(
         'autocomplete="off" placeholder="House Battery…" required></div>'
         '<div><label class="settings-label" for="device-type-input">Type</label>'
         '<select id="device-type-input" name="device_type" autocomplete="off">'
-        '<option value="bm200">bm200</option>'
-        '<option value="bm300pro">bm300pro</option></select></div>'
+        f"{_device_type_options()}</select></div>"
         '<div><label class="settings-label" '
         'for="installed-in-vehicle-input">Vehicle install</label>'
         f'<label class="settings-value" style="{TOGGLE_LABEL_STYLE}">'
@@ -853,6 +1051,17 @@ def _add_device_form_html(
     )
 
 
+def _device_type_options(*, selected_device_type: str = "bm200") -> str:
+    return "".join(
+        (
+            f'<option value="{html.escape(device_type)}"'
+            f"{_selected_attr(device_type == selected_device_type)}>"
+            f"{html.escape(device_type_label(device_type))}</option>"
+        )
+        for device_type in DEVICE_TYPE_LABELS
+    )
+
+
 def _battery_family_options(*, selected_family: str = "lead_acid") -> str:
     return "".join(
         f"<option value='{html.escape(value)}'"
@@ -912,23 +1121,34 @@ def _color_key_options(
     )
 
 
+def _color_input_value(color_key: str) -> str:
+    if is_hex_color_key(color_key):
+        return color_key
+    return DEVICE_COLOR_HEX.get(color_key, DEVICE_COLOR_HEX["green"])
+
+
 def _color_key_control_html(
     *,
     selected_color_key: str,
     reserved_color_keys: set[str] | None,
     control_id: str,
 ) -> str:
-    resolved_color_key = selected_color_key if selected_color_key in COLOR_CATALOG else "green"
-    safe_color_key = html.escape(resolved_color_key)
+    _ = reserved_color_keys
+    safe_color = html.escape(_color_input_value(selected_color_key))
+    datalist_id = f"{control_id}-presets"
+    preset_options = "".join(
+        f'<option value="{html.escape(DEVICE_COLOR_HEX[value])}" label="{html.escape(label)}">'
+        for value, label in COLOR_CATALOG.items()
+    )
     return (
-        '<div class="select-with-preview">'
-        f'<span class="color-preview-dot {safe_color_key}" aria-hidden="true"></span>'
-        f"<select id='{html.escape(control_id)}' name='color_key' data-color-preview-source='true'>"
-        + _color_key_options(
-            selected_color_key=selected_color_key,
-            reserved_color_keys=reserved_color_keys,
-        )
-        + "</select></div>"
+        '<div class="color-picker-control">'
+        f'<span class="color-preview-dot" style="--color-swatch: {safe_color};" '
+        'aria-hidden="true"></span>'
+        f'<input id="{html.escape(control_id)}" type="color" name="color_key" '
+        f'value="{safe_color}" list="{html.escape(datalist_id)}" '
+        'data-color-preview-source="true" aria-label="Overview color">'
+        f'<datalist id="{html.escape(datalist_id)}">{preset_options}</datalist>'
+        "</div>"
     )
 
 
@@ -1009,7 +1229,7 @@ def _battery_form_script() -> str:
       if (!colorSelect || !colorPreview) {
         return;
       }
-      colorPreview.className = "color-preview-dot " + colorSelect.value;
+      colorPreview.style.setProperty("--color-swatch", colorSelect.value);
     }
 
     function syncAll() {
@@ -1548,7 +1768,6 @@ def render_home_html(
     chart_points: list[dict[str, object]],
     legend: list[tuple[str, str]],
     show_chart_markers: bool = False,
-    visible_device_limit: int = 4,
     appearance: str = "system",
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
@@ -1562,7 +1781,6 @@ def render_home_html(
         chart_points=chart_points,
         legend=legend,
         show_chart_markers=show_chart_markers,
-        visible_device_limit=visible_device_limit,
         appearance=appearance,
         default_chart_range=default_chart_range,
         default_chart_metric=default_chart_metric,
@@ -1574,6 +1792,7 @@ def render_diagnostics_html(
     *,
     theme_preference: str = "system",
     fleet_trend_metrics: tuple[str, ...] = ("soc",),
+    battery_overview_page_count: int = 1,
     language: str = "en",
 ) -> str:
     from .web_pages_frame import render_diagnostics_html as _render_diagnostics_html
@@ -1581,6 +1800,7 @@ def render_diagnostics_html(
     return _render_diagnostics_html(
         theme_preference=theme_preference,
         fleet_trend_metrics=fleet_trend_metrics,
+        battery_overview_page_count=battery_overview_page_count,
         language=language,
     )
 

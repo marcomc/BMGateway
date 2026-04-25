@@ -16,11 +16,14 @@ from .web_ui import (
     top_header,
 )
 
+_FRAME_OVERVIEW_MAX_DEVICES_PER_PAGE = 3
+
 
 def render_diagnostics_html(
     *,
     theme_preference: str = "system",
     fleet_trend_metrics: tuple[str, ...] = ("soc",),
+    battery_overview_page_count: int = 1,
     language: str = "en",
 ) -> str:
     ordered_metrics = _ordered_fleet_metrics(fleet_trend_metrics)
@@ -33,6 +36,17 @@ def render_diagnostics_html(
             f"Fleet Trend {_metric_label(metric)}</a>"
         )
         for metric in ordered_metrics
+    )
+    overview_links = "".join(
+        (
+            '<a class="secondary-button" '
+            f'href="/frame/battery-overview?page={page_index}" '
+            'target="frame-preview-display">'
+            "<span>Battery Overview</span> "
+            "<span>Page</span> "
+            f"{page_index}</a>"
+        )
+        for page_index in range(1, max(1, battery_overview_page_count) + 1)
     )
     body = top_header(
         title="Diagnostics",
@@ -48,9 +62,7 @@ def render_diagnostics_html(
             '<div class="frame-preview-tool">'
             '<div class="inline-actions">'
             f"{metric_links}"
-            '<a class="secondary-button" href="/frame/battery-overview?page=1" '
-            'target="frame-preview-display">'
-            "Battery Overview Page 1</a>"
+            f"{overview_links}"
             "</div>"
             '<div class="frame-preview-shell">'
             '<iframe class="frame-preview-display" name="frame-preview-display" '
@@ -309,6 +321,21 @@ def render_frame_battery_overview_html(
     )
 
 
+def frame_battery_overview_page_count(
+    *,
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+    devices_per_page: int,
+) -> int:
+    return len(
+        _battery_overview_pages(
+            snapshot=snapshot,
+            devices=devices,
+            devices_per_page=devices_per_page,
+        )
+    )
+
+
 def _battery_overview_page_devices(
     *,
     snapshot: dict[str, object],
@@ -316,6 +343,21 @@ def _battery_overview_page_devices(
     page: int,
     devices_per_page: int,
 ) -> list[dict[str, object]]:
+    pages = _battery_overview_pages(
+        snapshot=snapshot,
+        devices=devices,
+        devices_per_page=devices_per_page,
+    )
+    page_index = max(0, min(page - 1, len(pages) - 1))
+    return pages[page_index]
+
+
+def _battery_overview_pages(
+    *,
+    snapshot: dict[str, object],
+    devices: list[dict[str, object]],
+    devices_per_page: int,
+) -> list[list[dict[str, object]]]:
     snapshot_devices = snapshot.get("devices", [])
     snapshot_device_rows = snapshot_devices if isinstance(snapshot_devices, list) else []
     snapshot_by_id = {
@@ -333,8 +375,32 @@ def _battery_overview_page_devices(
     enabled_devices = [device for device in merged_devices if bool(device.get("enabled", True))]
     if enabled_devices:
         merged_devices = enabled_devices
-    page_index = max(0, page - 1)
-    return merged_devices[page_index * devices_per_page : (page_index + 1) * devices_per_page]
+    if not merged_devices:
+        return [[]]
+
+    page_size = max(1, devices_per_page)
+    if len(merged_devices) <= page_size:
+        return [merged_devices]
+
+    page_count = (len(merged_devices) + page_size - 1) // page_size
+    base_size = len(merged_devices) // page_count
+    larger_page_count = len(merged_devices) % page_count
+    page_sizes = [base_size + 1] * larger_page_count + [base_size] * (
+        page_count - larger_page_count
+    )
+
+    pages: list[list[dict[str, object]]] = []
+    start = 0
+    for size in page_sizes:
+        pages.append(merged_devices[start : start + size])
+        start += size
+    return pages
+
+
+def _frame_overview_layout_dimensions(card_count: int) -> tuple[int, int]:
+    if card_count <= _FRAME_OVERVIEW_MAX_DEVICES_PER_PAGE:
+        return max(1, card_count), 1
+    return shared._overview_layout_dimensions(card_count)
 
 
 def _overview_card_size_px(
@@ -343,7 +409,7 @@ def _overview_card_size_px(
     width: int,
     height: int,
 ) -> int:
-    columns, rows = shared._overview_layout_dimensions(card_count)
+    columns, rows = _frame_overview_layout_dimensions(card_count)
     gap = 4
     frame_padding = 8
     title_and_gap = 18
@@ -360,7 +426,7 @@ def _frame_battery_cards_html(
     height: int,
 ) -> str:
     cards: list[str] = []
-    columns, rows = shared._overview_layout_dimensions(len(devices or [{}]))
+    columns, rows = _frame_overview_layout_dimensions(len(devices or [{}]))
     gap = 4
     top = 22
     frame_padding = 4
@@ -389,6 +455,7 @@ def _frame_battery_cards_html(
         temperature_text = html.escape(
             shared._format_number(device.get("temperature"), digits=1, suffix="°C")
         )
+        status_markup = shared._battery_card_status_markup(device, inline=True)
         soc_value = shared._coerce_float(device.get("soc"), default=0.0)
         degrees = max(0.0, min(100.0, soc_value)) * 3.6
         cards.append(
@@ -405,7 +472,7 @@ def _frame_battery_cards_html(
             "</div>"
             '<div class="frame-battery-center">'
             f'<div class="frame-battery-soc">{soc_text}</div>'
-            '<div class="frame-battery-status">Battery OK</div>'
+            f"{status_markup}"
             f'<div class="frame-battery-detail">{temperature_text}</div>'
             f'<div class="frame-battery-detail">{voltage_text}</div>'
             "</div>"
@@ -682,8 +749,7 @@ def _frame_document(
         font-weight: 800;
         line-height: 0.95;
       }}
-      .frame-battery-status {{
-        color: var(--state-ok);
+      .frame-battery-center .battery-card-status-inline {{
         font-size: 7px;
         font-weight: 800;
         line-height: 1.1;

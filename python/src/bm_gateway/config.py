@@ -55,7 +55,6 @@ class WebConfig:
     host: str = "0.0.0.0"
     port: int = 80
     show_chart_markers: bool = False
-    visible_device_limit: int = 4
     appearance: str = "system"
     default_chart_range: str = "7"
     default_chart_metric: str = "soc"
@@ -154,7 +153,6 @@ class AppConfig:
                 "host": self.web.host,
                 "port": self.web.port,
                 "show_chart_markers": self.web.show_chart_markers,
-                "visible_device_limit": self.web.visible_device_limit,
                 "appearance": self.web.appearance,
                 "default_chart_range": self.web.default_chart_range,
                 "default_chart_metric": self.web.default_chart_metric,
@@ -273,7 +271,6 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"host = {_string_to_toml(config.web.host)}",
             f"port = {config.web.port}",
             f"show_chart_markers = {_bool_to_toml(config.web.show_chart_markers)}",
-            f"visible_device_limit = {config.web.visible_device_limit}",
             f"appearance = {_string_to_toml(config.web.appearance)}",
             f"default_chart_range = {_string_to_toml(config.web.default_chart_range)}",
             f"default_chart_metric = {_string_to_toml(config.web.default_chart_metric)}",
@@ -352,7 +349,6 @@ def load_config(path: Path) -> AppConfig:
         host=str(web_table.get("host", "0.0.0.0")),
         port=int(web_table.get("port", 80)),
         show_chart_markers=bool(web_table.get("show_chart_markers", False)),
-        visible_device_limit=int(web_table.get("visible_device_limit", 4)),
         appearance=str(web_table.get("appearance", "system")),
         default_chart_range=str(web_table.get("default_chart_range", "7")),
         default_chart_metric=str(web_table.get("default_chart_metric", "soc")),
@@ -429,8 +425,6 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("web.port must be greater than zero")
     if config.web.port > 65535:
         errors.append("web.port must be less than or equal to 65535")
-    if config.web.visible_device_limit not in {2, 4, 6, 8}:
-        errors.append("web.visible_device_limit must be one of: 2, 4, 6, 8")
     if config.web.appearance not in {"light", "dark", "system"}:
         errors.append("web.appearance must be one of: light, dark, system")
     allowed_chart_ranges = {"raw", "1", "3", "5", "7", "30", "90", "365", "730", "all"}

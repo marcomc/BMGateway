@@ -368,7 +368,7 @@
       distance: fallbackDistance,
     }}];
   }}
-  function showTooltip(frame, chart, targetX) {{
+  function showTooltip(frame, chart, targetX, pointer = null) {{
     const tooltip = frame.querySelector(".chart-tooltip");
     const crosshair = frame.querySelector(".chart-crosshair");
     if (!tooltip || !crosshair || chart.coords.length === 0) {{
@@ -410,16 +410,26 @@
     const pointY = (
       (Math.min(...entries.map((entry) => entry.point.y)) / chart.height) * svgRect.height
     ) + (svgRect.top - frameRect.top);
+    const isTouchPointer = pointer && (
+      pointer.pointerType === "touch"
+      || (window.matchMedia && window.matchMedia("(pointer: coarse)").matches)
+    );
+    const anchorY = isTouchPointer && Number.isFinite(pointer.clientY)
+      ? pointer.clientY - frameRect.top
+      : pointY;
+    const touchOffset = isTouchPointer ? 42 : 16;
     const margin = 8;
     const desiredLeft = pointX - (tooltipRect.width / 2);
     const clampedLeft = Math.max(
       margin,
       Math.min(desiredLeft, frame.clientWidth - tooltipRect.width - margin),
     );
-    const preferredTop = pointY - tooltipRect.height - 16;
+    const preferredTop = anchorY - tooltipRect.height - touchOffset;
     const fallbackBelow = pointY + 16;
     const clampedTop = preferredTop < margin
-      ? Math.min(fallbackBelow, frame.clientHeight - tooltipRect.height - margin)
+      ? (isTouchPointer
+        ? margin
+        : Math.min(fallbackBelow, frame.clientHeight - tooltipRect.height - margin))
       : Math.max(margin, Math.min(preferredTop, frame.clientHeight - tooltipRect.height - margin));
     tooltip.style.left = `${{clampedLeft}}px`;
     tooltip.style.top = `${{clampedTop}}px`;
@@ -486,6 +496,8 @@
     let dragStartEnd = null;
     let pendingRender = false;
     let pendingFocusClientX = null;
+    let pendingFocusClientY = null;
+    let pendingFocusPointerType = "";
     function overlayBounds() {{
       const overlay = frame.querySelector(".chart-overlay");
       return overlay ? overlay.getBoundingClientRect() : null;
@@ -524,7 +536,7 @@
         button.setAttribute("aria-pressed", String(isVisible));
       }}
     }}
-    function render(focusClientX = null) {{
+    function render(focusClientX = null, focusClientY = null, focusPointerType = "") {{
       const filteredPoints = allPoints.filter((point) => visibleSeries.has(point.series || "Series"));
       const windowState = pickRange(filteredPoints, currentRange, currentWindowEnd);
       currentWindow = windowState;
@@ -569,23 +581,30 @@
         if (focusClientX !== null) {{
           const targetX = targetXFromClientX(focusClientX);
           if (targetX !== null) {{
-            showTooltip(frame, chart, targetX);
+            showTooltip(frame, chart, targetX, {{
+              clientY: focusClientY,
+              pointerType: focusPointerType,
+            }});
             return;
           }}
         }}
         showTooltip(frame, chart, chart.coords[chart.coords.length - 1].x);
       }}
     }}
-    function requestRender(focusClientX = null) {{
+    function requestRender(focusClientX = null, focusClientY = null, focusPointerType = "") {{
       pendingFocusClientX = focusClientX;
+      pendingFocusClientY = focusClientY;
+      pendingFocusPointerType = focusPointerType;
       if (pendingRender) {{
         return;
       }}
       pendingRender = true;
       requestAnimationFrame(() => {{
         pendingRender = false;
-        render(pendingFocusClientX);
+        render(pendingFocusClientX, pendingFocusClientY, pendingFocusPointerType);
         pendingFocusClientX = null;
+        pendingFocusClientY = null;
+        pendingFocusPointerType = "";
       }});
     }}
     function pageRange(direction) {{
@@ -668,7 +687,7 @@
       frame.setPointerCapture?.(event.pointerId);
       const targetX = targetXFromClientX(event.clientX);
       if (targetX !== null && currentChart) {{
-        showTooltip(frame, currentChart, targetX);
+        showTooltip(frame, currentChart, targetX, event);
       }}
       event.preventDefault();
     }});
@@ -681,7 +700,7 @@
         const deltaX = event.clientX - dragStartX;
         const deltaMs = (deltaX / bounds.width) * currentWindow.duration;
         currentWindowEnd = dragStartEnd - deltaMs;
-        requestRender(event.clientX);
+        requestRender(event.clientX, event.clientY, event.pointerType || "");
         event.preventDefault();
         return;
       }}
@@ -700,7 +719,7 @@
       }}
       const targetX = targetXFromClientX(event.clientX);
       if (targetX !== null && currentChart) {{
-        showTooltip(frame, currentChart, targetX);
+        showTooltip(frame, currentChart, targetX, event);
       }}
     }});
     const endDrag = (event) => {{
@@ -718,7 +737,7 @@
       }}
       const targetX = targetXFromClientX(event.clientX);
       if (targetX !== null && currentChart) {{
-        showTooltip(frame, currentChart, targetX);
+        showTooltip(frame, currentChart, targetX, event);
       }} else {{
         hideTooltip(frame);
       }}

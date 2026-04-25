@@ -240,7 +240,8 @@ def render_history_html(
         version_label=version_label,
         theme_preference=theme_preference,
         language=language,
-        script=chart_script(chart_id, language=language or "en"),
+        script=chart_script(chart_id, language=language or "en")
+        + shared._history_device_selector_script(),
     )
 
 

@@ -361,7 +361,7 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
             .read()
             .decode("utf-8")
         )
-        assert "Configured Devices" in devices_page
+        assert "Configured Devices" not in devices_page
         assert "Register new BM devices directly from the device registry." not in devices_page
         assert 'href="/devices/new"' in devices_page
 
@@ -399,7 +399,8 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         assert "Valid samples" in history_page
         assert "Average voltage" in history_page
         assert "Temperature" in history_page
-        assert "History Device" in history_page
+        assert "Batteries" in history_page
+        assert "History Device" not in history_page
         assert "Current History View" in history_page
         assert 'href="/history?device_id=bm200_house"' in history_page
         assert "All" in history_page
@@ -410,7 +411,8 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
             .decode("utf-8")
         )
         assert "<h1>History</h1>" in default_history_page
-        assert "History Device" in default_history_page
+        assert "Batteries" in default_history_page
+        assert "History Device" not in default_history_page
 
         connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
         try:

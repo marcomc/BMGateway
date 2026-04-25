@@ -46,8 +46,9 @@ def render_devices_html(
             stack_class="compact",
         )
         rows.append(
-            f"<div class='device-list-row tone-card {tone}' "
-            f"style='{shared._tone_card_style(tone)}'>"
+            f"<a class='device-list-row tone-card {tone}' "
+            f"href='/devices/edit?device_id={quote(device_id)}' "
+            f"style='{shared._tone_card_style_for_device(device, fallback_index=index)}'>"
             "<div class='device-list-row-main'>"
             f"{device_icon_markup}"
             "<div class='device-list-row-copy'>"
@@ -57,11 +58,7 @@ def render_devices_html(
             f"<div class='meta device-list-row-id'>Serial / MAC: {device_mac_text}</div>"
             "</div>"
             "</div>"
-            "<div class='device-list-row-actions'>"
-            f"<a class='ghost-button' href='/devices/edit?device_id={quote(device_id)}'>"
-            "Edit device</a>"
-            "</div>"
-            "</div>"
+            "</a>"
         )
     banner = banner_strip(html.escape(message), kind="warning") if message else ""
     body = (
@@ -76,8 +73,9 @@ def render_devices_html(
         )
         + banner
         + section_card(
-            title="Configured Devices",
+            classes="device-list-section",
             body=(
+                '<div class="device-list-help">Touch a device card to edit it.</div>'
                 f'<div class="device-list-rows">{"".join(rows)}</div>'
                 if rows
                 else "<div class='muted-note'>No devices configured yet.</div>"
@@ -195,12 +193,7 @@ def render_edit_device_html(
     device_name = html.escape(str(device.get("name", "")))
     device_mac = html.escape(str(device.get("mac", "")))
     device_type = str(device.get("type", "bm200"))
-    device_type_options = (
-        f'<option value="bm200"{shared._selected_attr(device_type == "bm200")}>'
-        "bm200</option>"
-        f'<option value="bm300pro"{shared._selected_attr(device_type == "bm300pro")}>'
-        "bm300pro</option>"
-    )
+    device_type_options = shared._device_type_options(selected_device_type=device_type)
     family_options = shared._battery_family_options(selected_family=family)
     profile_options = shared._battery_profile_options(selected_profile=profile)
     custom_mode_options = shared._custom_mode_options(selected_mode=custom_soc_mode)

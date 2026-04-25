@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import json
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
-from bm_gateway import cli
+from bm_gateway import __version__, cli
 from bm_gateway.models import GatewaySnapshot
 
 
@@ -94,6 +95,25 @@ def test_main_without_args_prints_focused_help(capsys: pytest.CaptureFixture[str
     assert "ha" in captured.out
     assert "run" in captured.out
     assert "web" not in captured.out
+
+
+def test_package_version_matches_project_metadata() -> None:
+    pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
+
+    with pyproject_path.open("rb") as handle:
+        pyproject = tomllib.load(handle)
+
+    assert __version__ == pyproject["project"]["version"]
+
+
+def test_cli_version_commands_emit_package_version(capsys: pytest.CaptureFixture[str]) -> None:
+    from bm_gateway.web_cli import main as web_main
+
+    assert cli.main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == __version__
+
+    assert web_main(["--version"]) == 0
+    assert capsys.readouterr().out.strip() == __version__
 
 
 def test_config_show_emits_json(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:

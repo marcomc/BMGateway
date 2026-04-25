@@ -14,6 +14,7 @@ from bm_gateway.config import (
 )
 from bm_gateway.device_registry import Device
 from bm_gateway.drivers.bm200 import BleakDeviceNotFoundError, BM200Measurement, BM200TimeoutError
+from bm_gateway.drivers.bm300 import BM300Measurement, BM300TimeoutError
 from bm_gateway.runtime import build_snapshot, database_file_path, recover_adapter
 from bm_gateway.state_store import fetch_counts, persist_snapshot
 
@@ -242,7 +243,7 @@ def test_build_snapshot_preserves_live_reader_rssi() -> None:
     assert snapshot.devices[0].rssi == -67
 
 
-def test_build_snapshot_marks_non_bm200_devices_unsupported_in_live_mode() -> None:
+def test_build_snapshot_uses_live_bm300_reader_when_enabled() -> None:
     config = AppConfig(
         source_path=Path("/tmp/gateway.toml"),
         device_registry_path=Path("/tmp/devices.toml"),
@@ -258,6 +259,185 @@ def test_build_snapshot_marks_non_bm200_devices_unsupported_in_live_mode() -> No
             id="bm300_van",
             type="bm300pro",
             name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM300Measurement:
+        assert device.id == "bm300_van"
+        assert adapter == "hci0"
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
+        return BM300Measurement(
+            voltage=25.42,
+            soc=83,
+            status_code=0,
+            state="normal",
+            temperature=24.0,
+            rssi=-61,
+        )
+
+    snapshot = build_snapshot(config, devices, bm300_reader=fake_reader)
+
+    assert snapshot.devices_online == 1
+    assert snapshot.devices[0].driver == "bm300pro"
+    assert snapshot.devices[0].voltage == 25.42
+    assert snapshot.devices[0].soc == 83
+    assert snapshot.devices[0].state == "normal"
+    assert snapshot.devices[0].temperature == 24.0
+    assert snapshot.devices[0].rssi == -61
+
+
+def test_build_snapshot_uses_bm200_driver_for_commercial_aliases() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm6_motorcycle",
+            type="bm6",
+            name="BM6 Motorcycle",
+            mac="AA:BB:CC:DD:EE:03",
+            enabled=True,
+        )
+    ]
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        assert device.type == "bm6"
+        return BM200Measurement(
+            voltage=12.9,
+            soc=90,
+            status_code=0,
+            state="normal",
+            temperature=19.0,
+        )
+
+    snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
+
+    assert snapshot.devices_online == 1
+    assert snapshot.devices[0].type == "bm6"
+    assert snapshot.devices[0].driver == "bm200"
+    assert snapshot.devices[0].voltage == 12.9
+
+
+def test_build_snapshot_uses_bm300_driver_for_commercial_aliases() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm7_bench",
+            type="bm7",
+            name="BM7 Bench",
+            mac="E0:4E:7A:AF:9B:E8",
+            enabled=True,
+        )
+    ]
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM300Measurement:
+        assert device.type == "bm7"
+        return BM300Measurement(
+            voltage=14.4,
+            soc=100,
+            status_code=2,
+            state="charging",
+            temperature=18.0,
+        )
+
+    snapshot = build_snapshot(config, devices, bm300_reader=fake_reader)
+
+    assert snapshot.devices_online == 1
+    assert snapshot.devices[0].type == "bm7"
+    assert snapshot.devices[0].driver == "bm300pro"
+    assert snapshot.devices[0].state == "charging"
+
+
+def test_build_snapshot_classifies_bm300_reader_errors() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm300_van",
+            type="bm300pro",
+            name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+
+    def failing_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM300Measurement:
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
+        raise BM300TimeoutError(f"{device.id}:{adapter}")
+
+    snapshot = build_snapshot(config, devices, bm300_reader=failing_reader)
+
+    assert snapshot.devices_online == 0
+    assert snapshot.devices[0].driver == "bm300pro"
+    assert snapshot.devices[0].state == "error"
+    assert snapshot.devices[0].error_code == "timeout"
+    assert snapshot.devices[0].error_detail == "bm300_van:hci0"
+
+
+def test_build_snapshot_marks_unknown_devices_unsupported_in_live_mode() -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="unknown_van",
+            type="unknown",
+            name="Unknown Van",
             mac="AA:BB:CC:DD:EE:02",
             enabled=True,
         )

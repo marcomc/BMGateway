@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlencode, urlparse
 
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
-from .device_registry import COLOR_CATALOG, default_color_key, load_device_registry
+from .device_registry import default_color_key, load_device_registry
 from .localization import resolve_locale_preference, translation_for
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
@@ -37,6 +37,7 @@ from .web_actions import (
     run_once_via_cli,
     schedule_host_reboot,
     schedule_host_shutdown,
+    start_run_once_via_cli,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -83,6 +84,7 @@ from .web_pages import (
     render_snapshot_html,
     render_usb_otg_export_pending_html,
 )
+from .web_pages_frame import frame_battery_overview_page_count
 from .web_support import read_text
 
 __all__ = [
@@ -109,6 +111,7 @@ __all__ = [
     "prepare_usb_otg_boot_mode",
     "refresh_usb_otg_drive",
     "restore_usb_otg_boot_mode",
+    "start_run_once_via_cli",
     "update_bluetooth_preferences",
     "update_config_from_text",
     "update_device_from_form",
@@ -133,6 +136,8 @@ _USB_OTG_EXPORT_STATUS: dict[str, object] = {
     "detail": "",
     "redirect_message": "",
 }
+_RUN_ONCE_LOCK = threading.Lock()
+_RUN_ONCE_PROCESS: object | None = None
 
 
 def _set_usb_otg_export_status(**updates: object) -> None:
@@ -147,6 +152,40 @@ def _usb_otg_export_status_snapshot() -> dict[str, object]:
     total = _int_from_mapping(snapshot, "total")
     snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
     return snapshot
+
+
+def _start_tracked_run_once_via_cli(
+    config_path: Path,
+    *,
+    state_dir: Path | None = None,
+) -> bool:
+    global _RUN_ONCE_PROCESS
+    with _RUN_ONCE_LOCK:
+        if _RUN_ONCE_PROCESS is not None:
+            poll = getattr(_RUN_ONCE_PROCESS, "poll", None)
+            if not callable(poll) or poll() is None:
+                return False
+        process = start_run_once_via_cli(config_path, state_dir=state_dir)
+        _RUN_ONCE_PROCESS = process
+        _start_run_once_reaper(process)
+        return True
+
+
+def _start_run_once_reaper(process: object) -> None:
+    wait = getattr(process, "wait", None)
+    if not callable(wait):
+        return
+
+    def _reaper() -> None:
+        global _RUN_ONCE_PROCESS
+        try:
+            wait()
+        finally:
+            with _RUN_ONCE_LOCK:
+                if _RUN_ONCE_PROCESS is process:
+                    _RUN_ONCE_PROCESS = None
+
+    threading.Thread(target=_reaper, daemon=True).start()
 
 
 def _int_from_mapping(mapping: dict[str, object], key: str, default: int = 0) -> int:
@@ -634,7 +673,7 @@ def serve_management(
                 reserved_color_keys = {
                     str(device.get("color_key", "")).strip()
                     for device in serialized_devices
-                    if str(device.get("color_key", "")).strip() in COLOR_CATALOG
+                    if str(device.get("color_key", "")).strip()
                 }
                 self._send_html(
                     render_add_device_html(
@@ -670,7 +709,7 @@ def serve_management(
                     str(item.get("color_key", "")).strip()
                     for item in serialized_devices
                     if str(item.get("id", "")) != device_id
-                    and str(item.get("color_key", "")).strip() in COLOR_CATALOG
+                    and str(item.get("color_key", "")).strip()
                 }
                 self._send_html(
                     render_edit_device_html(
@@ -702,10 +741,17 @@ def serve_management(
                 return
 
             if parsed.path in {"/diagnostics", "/debug"}:
+                frame_snapshot = _snapshot_for_frame_devices(snapshot, config)
+                frame_devices = _usb_otg_frame_devices(config, serialized_devices)
                 self._send_html(
                     render_diagnostics_html(
                         theme_preference=config.web.appearance,
                         fleet_trend_metrics=config.usb_otg.fleet_trend_metrics,
+                        battery_overview_page_count=frame_battery_overview_page_count(
+                            snapshot=frame_snapshot,
+                            devices=frame_devices,
+                            devices_per_page=config.usb_otg.overview_devices_per_image,
+                        ),
                         language=request_language,
                     )
                 )
@@ -720,7 +766,7 @@ def serve_management(
                     if requested_metric in selected_metrics
                     else selected_metrics[0]
                 )
-                frame_devices = _usb_otg_fleet_trend_devices(config, serialized_devices)
+                frame_devices = _usb_otg_frame_devices(config, serialized_devices)
                 battery_chart_points, battery_legend = _fleet_chart_points(
                     database_path=database_path,
                     devices=frame_devices,
@@ -748,8 +794,8 @@ def serve_management(
                     page = 1
                 self._send_html(
                     render_frame_battery_overview_html(
-                        snapshot=snapshot,
-                        devices=serialized_devices,
+                        snapshot=_snapshot_for_frame_devices(snapshot, config),
+                        devices=_usb_otg_frame_devices(config, serialized_devices),
                         page=page,
                         devices_per_page=config.usb_otg.overview_devices_per_image,
                         appearance=config.usb_otg.appearance,
@@ -788,7 +834,6 @@ def serve_management(
                 chart_points=battery_chart_points,
                 legend=battery_legend,
                 show_chart_markers=config.web.show_chart_markers,
-                visible_device_limit=config.web.visible_device_limit,
                 appearance=config.web.appearance,
                 default_chart_range=config.web.default_chart_range,
                 default_chart_metric=config.web.default_chart_metric,
@@ -880,11 +925,16 @@ def serve_management(
                     )
                     return
 
-                run_once_via_cli(config_path, state_dir=state_dir)
+                poll_started = _start_tracked_run_once_via_cli(config_path, state_dir=state_dir)
+                message = (
+                    "Device added. First poll started."
+                    if poll_started
+                    else "Device added. First poll already running."
+                )
                 self.send_response(303)
                 self.send_header(
                     "Location",
-                    "/devices?" + urlencode({"message": "Device added. Live polling enabled."}),
+                    "/devices?" + urlencode({"message": message}),
                 )
                 self.end_headers()
                 return
@@ -1246,7 +1296,6 @@ def serve_management(
                 web_host: str | None = None
                 web_port: int | None = None
                 show_chart_markers: bool | None = None
-                visible_device_limit: int | None = None
                 appearance: str | None = None
                 default_chart_range: str | None = None
                 default_chart_metric: str | None = None
@@ -1276,26 +1325,6 @@ def serve_management(
                     web_host = form.get("web_host", ["0.0.0.0"])[0]
                 elif settings_section == "display":
                     show_chart_markers = _bool_from_form(form, "show_chart_markers")
-                    try:
-                        visible_device_limit = int(form.get("visible_device_limit", ["4"])[0])
-                    except ValueError:
-                        configured_devices = load_device_registry(config.device_registry_path)
-                        self._send_html(
-                            render_management_html(
-                                snapshot=snapshot,
-                                config=config,
-                                storage_summary=fetch_storage_summary(current_database_path),
-                                devices=[device.to_dict() for device in configured_devices],
-                                config_text=read_text(config_path),
-                                devices_text=read_text(config.device_registry_path),
-                                contract=build_contract(config, configured_devices),
-                                message="Validation failed: visible device limit must be numeric",
-                                theme_preference=config.web.appearance,
-                                language=self._request_language(config),
-                            ),
-                            status=400,
-                        )
-                        return
                     appearance = form.get("appearance", [config.web.appearance])[0]
                     default_chart_range = form.get(
                         "default_chart_range", [config.web.default_chart_range]
@@ -1328,7 +1357,6 @@ def serve_management(
                     web_host=web_host,
                     web_port=web_port,
                     show_chart_markers=show_chart_markers,
-                    visible_device_limit=visible_device_limit,
                     appearance=appearance,
                     default_chart_range=default_chart_range,
                     default_chart_metric=default_chart_metric,
@@ -1621,7 +1649,7 @@ def serve_management(
         server.server_close()
 
 
-def _usb_otg_fleet_trend_devices(
+def _usb_otg_frame_devices(
     config: AppConfig,
     devices: list[dict[str, object]],
 ) -> list[dict[str, object]]:
@@ -1629,3 +1657,27 @@ def _usb_otg_fleet_trend_devices(
     if not selected_ids:
         return devices
     return [device for device in devices if str(device.get("id", "")) in selected_ids]
+
+
+def _snapshot_for_frame_devices(
+    snapshot: dict[str, object],
+    config: AppConfig,
+) -> dict[str, object]:
+    selected_ids = set(config.usb_otg.fleet_trend_device_ids)
+    if not selected_ids:
+        return snapshot
+    snapshot_devices = snapshot.get("devices", [])
+    if not isinstance(snapshot_devices, list):
+        return snapshot
+    filtered_devices = [
+        device
+        for device in snapshot_devices
+        if isinstance(device, dict) and str(device.get("id", "")) in selected_ids
+    ]
+    filtered_snapshot = dict(snapshot)
+    filtered_snapshot["devices"] = filtered_devices
+    filtered_snapshot["devices_total"] = len(filtered_devices)
+    filtered_snapshot["devices_online"] = sum(
+        1 for device in filtered_devices if bool(device.get("connected"))
+    )
+    return filtered_snapshot

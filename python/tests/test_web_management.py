@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import re
 import socket
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -59,7 +61,7 @@ from bm_gateway.web_actions import (
     schedule_host_shutdown,
 )
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
-from bm_gateway.web_ui import base_css, chart_script
+from bm_gateway.web_ui import app_document, base_css, chart_script
 
 
 def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: Path) -> None:
@@ -206,6 +208,18 @@ def test_chart_script_renders_multi_series_tooltip_rows() -> None:
     assert 'class="tooltip-series-swatch"' in script
     assert 'class="tooltip-series-value"' in script
     assert "const rows = entries.map((entry) => (" in script
+
+
+def test_chart_script_offsets_touch_tooltips_above_finger() -> None:
+    script = chart_script("history-chart")
+
+    assert "function showTooltip(frame, chart, targetX, pointer = null)" in script
+    assert 'pointer.pointerType === "touch"' in script
+    assert 'window.matchMedia("(pointer: coarse)").matches' in script
+    assert "const anchorY = isTouchPointer && Number.isFinite(pointer.clientY)" in script
+    assert "const touchOffset = isTouchPointer ? 42 : 16;" in script
+    assert 'requestRender(event.clientX, event.clientY, event.pointerType || "");' in script
+    assert "showTooltip(frame, currentChart, targetX, event);" in script
 
 
 def test_chart_script_keeps_compact_frame_chart_inside_edges() -> None:
@@ -838,6 +852,152 @@ def test_add_device_from_form_accepts_serial_style_identifier(tmp_path: Path) ->
     assert devices[0].mac == "FAKE SERIAL 123"
 
 
+def test_devices_add_post_redirects_before_first_poll(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    from bm_gateway.web import serve_management
+
+    started_polls: list[tuple[Path, Path | None]] = []
+
+    def _start_run_once(config_path: Path, *, state_dir: Path | None = None) -> object:
+        started_polls.append((config_path, state_dir))
+        return object()
+
+    def _run_once(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise AssertionError("device creation must not wait for a synchronous poll")
+
+    monkeypatch.setattr("bm_gateway.web._RUN_ONCE_PROCESS", None)
+    monkeypatch.setattr("bm_gateway.web.start_run_once_via_cli", _start_run_once)
+    monkeypatch.setattr("bm_gateway.web.run_once_via_cli", _run_once)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path / "state",
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/devices/add",
+        data=urllib.parse.urlencode(
+            {
+                "device_type": "bm200",
+                "device_name": "Ancell BM200",
+                "device_mac": "A1B2C3D4E5F6",
+                "battery_family": "lead_acid",
+                "battery_profile": "regular_lead_acid",
+                "custom_soc_mode": "intelligent_algorithm",
+                "color_key": "green",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        body = response.read().decode("utf-8")
+        assert response.status == 200
+        assert "/devices?message=Device+added.+First+poll+started." in response.url
+        assert "Device added. First poll started." in body
+
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert config.gateway.reader_mode == "live"
+    assert [device.id for device in devices] == ["ancell_bm200"]
+    assert started_polls == [(config_path, tmp_path / "state")]
+
+
+def test_tracked_first_poll_does_not_start_duplicate_processes(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from bm_gateway import web
+
+    class RunningProcess:
+        def poll(self) -> None:
+            return None
+
+    started_polls: list[tuple[Path, Path | None]] = []
+
+    def _start_run_once(config_path: Path, *, state_dir: Path | None = None) -> RunningProcess:
+        started_polls.append((config_path, state_dir))
+        return RunningProcess()
+
+    monkeypatch.setattr(web, "_RUN_ONCE_PROCESS", None)
+    monkeypatch.setattr(web, "start_run_once_via_cli", _start_run_once)
+
+    assert web._start_tracked_run_once_via_cli(
+        tmp_path / "config.toml",
+        state_dir=tmp_path / "state",
+    )
+    assert not web._start_tracked_run_once_via_cli(
+        tmp_path / "config.toml",
+        state_dir=tmp_path / "state",
+    )
+    assert started_polls == [(tmp_path / "config.toml", tmp_path / "state")]
+
+
+def test_tracked_first_poll_reaps_completed_process(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from bm_gateway import web
+
+    process_waiting = threading.Event()
+    release_process = threading.Event()
+
+    class CompletingProcess:
+        def poll(self) -> None:
+            return None
+
+        def wait(self) -> int:
+            process_waiting.set()
+            release_process.wait(timeout=1.0)
+            return 0
+
+    process = CompletingProcess()
+
+    def _start_run_once(
+        _config_path: Path,
+        *,
+        state_dir: Path | None = None,
+    ) -> CompletingProcess:
+        assert state_dir == tmp_path / "state"
+        return process
+
+    monkeypatch.setattr(web, "_RUN_ONCE_PROCESS", None)
+    monkeypatch.setattr(web, "start_run_once_via_cli", _start_run_once)
+
+    assert web._start_tracked_run_once_via_cli(
+        tmp_path / "config.toml",
+        state_dir=tmp_path / "state",
+    )
+    assert process_waiting.wait(timeout=1.0)
+
+    release_process.set()
+    deadline = time.monotonic() + 1.0
+    while web._RUN_ONCE_PROCESS is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert web._RUN_ONCE_PROCESS is None
+
+
 def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
@@ -958,7 +1118,6 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -975,7 +1134,6 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
         web_host=None,
         web_port=None,
         show_chart_markers=True,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,
@@ -985,7 +1143,6 @@ def test_update_web_preferences_preserves_existing_port_when_only_display_change
     config = load_config(config_path)
     assert config.web.port == 9091
     assert config.web.show_chart_markers is True
-    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -> None:
@@ -1028,7 +1185,6 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1045,7 +1201,6 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
         web_host="127.0.0.1",
         web_port=8088,
         show_chart_markers=None,
-        visible_device_limit=4,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,
@@ -1056,7 +1211,6 @@ def test_update_web_preferences_persists_host_and_enabled_flag(tmp_path: Path) -
     assert config.web.enabled is False
     assert config.web.host == "127.0.0.1"
     assert config.web.port == 8088
-    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
@@ -1101,7 +1255,6 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
                 'host = "0.0.0.0"',
                 "port = 80",
                 "show_chart_markers = true",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1118,7 +1271,6 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
         web_host=None,
         web_port=8088,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range=None,
         default_chart_metric=None,
@@ -1128,7 +1280,6 @@ def test_update_web_preferences_preserves_chart_markers_when_only_port_changes(
     config = load_config(config_path)
     assert config.web.port == 8088
     assert config.web.show_chart_markers is True
-    assert config.web.visible_device_limit == 4
 
 
 def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
@@ -1171,7 +1322,6 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
                 'host = "0.0.0.0"',
                 "port = 9091",
                 "show_chart_markers = false",
-                "visible_device_limit = 4",
                 "",
                 "[retention]",
                 "raw_retention_days = 180",
@@ -1188,7 +1338,6 @@ def test_update_web_preferences_persists_appearance(tmp_path: Path) -> None:
         web_host=None,
         web_port=None,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance="dark",
         default_chart_range=None,
         default_chart_metric=None,
@@ -1213,7 +1362,6 @@ def test_update_web_preferences_persists_chart_defaults(tmp_path: Path) -> None:
         web_host=None,
         web_port=None,
         show_chart_markers=None,
-        visible_device_limit=None,
         appearance=None,
         default_chart_range="90",
         default_chart_metric="temperature",
@@ -1280,7 +1428,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.fleet_trend_device_ids == ("spare_nlp5", "spare_nlp20")
 
 
-def test_settings_display_post_persists_appearance_visible_limit_and_chart_defaults(
+def test_settings_display_post_persists_appearance_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
@@ -1313,7 +1461,6 @@ def test_settings_display_post_persists_appearance_visible_limit_and_chart_defau
             {
                 "settings_section": "display",
                 "show_chart_markers": "on",
-                "visible_device_limit": "4",
                 "default_chart_range": "90",
                 "default_chart_metric": "temperature",
                 "appearance": "dark",
@@ -1327,7 +1474,6 @@ def test_settings_display_post_persists_appearance_visible_limit_and_chart_defau
 
     config = load_config(config_path)
     assert config.web.appearance == "dark"
-    assert config.web.visible_device_limit == 4
     assert config.web.default_chart_range == "90"
     assert config.web.default_chart_metric == "temperature"
 
@@ -1925,7 +2071,7 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Home Assistant status topic" in html
     assert "Web Service" in html
     assert "Display Settings" in html
-    assert "Visible overview cards" in html
+    assert "Visible overview cards" not in html
     assert "Edit settings" in html
     assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
@@ -2132,7 +2278,19 @@ def test_render_diagnostics_html_embeds_frame_preview() -> None:
     assert "Fleet Trend SoC" in html
     assert ">Fleet Trend</a>" not in html
     assert 'href="/frame/battery-overview?page=1"' in html
-    assert "Battery Overview Page 1" in html
+    assert "<span>Battery Overview</span> <span>Page</span> 1</a>" in html
+
+
+def test_render_diagnostics_html_lists_all_battery_overview_pages() -> None:
+    html = render_diagnostics_html(
+        theme_preference="dark",
+        battery_overview_page_count=2,
+    )
+
+    assert 'href="/frame/battery-overview?page=1"' in html
+    assert 'href="/frame/battery-overview?page=2"' in html
+    assert "<span>Battery Overview</span> <span>Page</span> 1</a>" in html
+    assert "<span>Battery Overview</span> <span>Page</span> 2</a>" in html
 
 
 def test_render_diagnostics_html_lists_only_enabled_fleet_metric_previews() -> None:
@@ -2325,8 +2483,56 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
     assert "Spare NLP5" in html
     assert "frame-battery-card" in html
     assert "frame-battery-soc" in html
+    assert "Battery OK" in html
+    assert "battery-card-status battery-card-status-inline ok" in html
     assert "91%" in html
     assert 'class="bottom-nav"' not in html
+
+
+def test_render_frame_battery_overview_html_uses_shared_status_interpretation() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "charging_battery",
+                    "name": "Charging Battery",
+                    "soc": 100,
+                    "voltage": 14.5,
+                    "temperature": 22.0,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "state": "charging",
+                    "connected": True,
+                    "error_code": None,
+                },
+                {
+                    "id": "offline_battery",
+                    "name": "Offline Battery",
+                    "soc": 0,
+                    "voltage": 0.0,
+                    "temperature": None,
+                    "last_seen": "2026-04-24T03:12:24+02:00",
+                    "state": "offline",
+                    "connected": False,
+                    "error_code": "device_not_found",
+                },
+            ]
+        },
+        devices=[
+            {"id": "charging_battery", "name": "Charging Battery", "enabled": True},
+            {"id": "offline_battery", "name": "Offline Battery", "enabled": True},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "Charging" in html
+    assert "Unable to connect" in html
+    assert "battery-card-status battery-card-status-inline charging" in html
+    assert "battery-card-status battery-card-status-inline error" in html
+    assert "Battery OK" not in html
 
 
 def test_render_frame_battery_overview_html_uses_configured_enabled_devices_only() -> None:
@@ -2412,6 +2618,38 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     assert "font-size: 12px;" in html
     assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
     assert "<span>2026-04-24 03:20</span>" in html
+
+
+def test_render_frame_battery_overview_html_keeps_three_cards_in_one_row() -> None:
+    html = render_frame_battery_overview_html(
+        snapshot={
+            "devices": [
+                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
+                {"id": "two", "name": "Spare NLP20", "soc": 88, "voltage": 13.29},
+                {"id": "three", "name": "Liberty", "soc": 91, "voltage": 13.5},
+            ]
+        },
+        devices=[
+            {"id": "one", "name": "Spare NLP5", "enabled": True},
+            {"id": "two", "name": "Spare NLP20", "enabled": True},
+            {"id": "three", "name": "Liberty", "enabled": True},
+        ],
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    card_positions = re.findall(
+        r"left: ([0-9.]+)px; top: ([0-9.]+)px; width: ([0-9]+)px; height: ([0-9]+)px;",
+        html,
+    )
+
+    assert len(card_positions) == 3
+    assert {top for _left, top, _width, _height in card_positions} == {"49.0"}
+    assert all(width == height for _left, _top, width, height in card_positions)
+    assert {width for _left, _top, width, _height in card_positions} == {"154"}
 
 
 def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:
@@ -2539,7 +2777,7 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="fleet_trend_range"' in html
     assert 'name="fleet_trend_device_ids"' in html
     assert 'name="web_enabled"' in html
-    assert 'name="visible_device_limit"' in html
+    assert 'name="visible_device_limit"' not in html
     assert 'name="bluetooth_adapter"' in html
     assert 'name="scan_timeout_seconds"' in html
     assert 'name="connect_timeout_seconds"' in html
@@ -2686,8 +2924,11 @@ def test_render_home_html_renders_device_icon() -> None:
     assert "Open device" not in html
     assert "All" in html
     assert "home-overview-scroller" in html
-    assert 'aria-label="Show previous home cards"' not in html
-    assert 'aria-label="Show next home cards"' not in html
+    assert 'aria-label="Show previous home cards"' in html
+    assert 'aria-label="Show next home cards"' in html
+    assert ">Prev<" not in html
+    assert ">Next<" not in html
+    assert 'class="home-overview-controls" hidden' in html
     assert "home-overview-page" in html
     assert "--overview-columns:" in html
     assert "Add Device" in html
@@ -2714,6 +2955,17 @@ def test_render_home_html_threads_appearance_to_document_root() -> None:
     assert 'rel="icon" href="/favicon.svg"' in html
     assert 'rel="apple-touch-icon" href="/apple-touch-icon.png"' in html
     assert 'rel="manifest" href="/site.webmanifest"' in html
+
+
+def test_app_document_installs_mobile_pull_to_refresh() -> None:
+    html = app_document(title="Test", body="<p>Body</p>", language="en")
+
+    assert 'class="pull-refresh-indicator"' in html
+    assert 'class="pull-refresh-spinner"' in html
+    assert '"ontouchstart" in window' in html
+    assert "window.location.reload()" in html
+    assert "event.preventDefault();" in html
+    assert 'window.matchMedia("(pointer: fine)").matches' in html
 
 
 def test_render_home_html_defaults_chart_to_seven_days_and_soc() -> None:
@@ -2925,6 +3177,8 @@ def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     assert "min-width: 48px;" in css
     assert "min-height: 48px;" in css
     assert "padding: 0.85rem 0.95rem 0.85rem 1.1rem;" in css
+    assert ".device-icon-frame.device-list-badge {" in css
+    assert ".device-icon-frame.device-list-badge .device-icon-svg {" in css
 
 
 def test_base_css_highlights_selected_history_device_with_device_accent() -> None:
@@ -2936,6 +3190,12 @@ def test_base_css_highlights_selected_history_device_with_device_accent() -> Non
     assert ".history-device-card.selected {" in css
     assert "border-color: color-mix(in srgb, var(--card-accent) 72%, var(--border-soft));" in css
     assert "0 16px 34px color-mix(in srgb, var(--card-accent) 18%, transparent)," in css
+    assert (
+        "transform: translateY(-1px);"
+        not in css[
+            css.index(".history-device-card.selected {") : css.index(".history-device-head {")
+        ]
+    )
     assert ".history-device-card.selected .history-device-current {" in css
     assert "color: var(--card-accent);" in css
     assert "font-weight: 800;" in css
@@ -2944,11 +3204,16 @@ def test_base_css_highlights_selected_history_device_with_device_accent() -> Non
 def test_base_css_uses_wrapping_flex_layout_for_history_device_selector() -> None:
     css = base_css()
 
-    assert ".history-device-grid {" in css
+    assert ".history-device-stage {" in css
+    assert "margin-top: 1.15rem;" in css
+    assert ".history-device-scroller {" in css
+    assert "--history-device-page-padding: calc(var(--history-device-gap) / 2);" in css
+    assert ".history-device-page {" in css
     assert "display: flex;" in css
-    assert "flex-wrap: wrap;" in css
-    assert "align-items: flex-start;" in css
+    assert "scroll-padding-inline: var(--history-device-page-padding);" in css
+    assert "grid-template-columns: repeat(var(--history-device-columns), minmax(0, 1fr));" in css
     assert "gap: 1rem;" in css
+    assert ".history-device-page .history-device-card {" in css
 
 
 def test_base_css_compacts_raw_history_table() -> None:
@@ -3045,7 +3310,27 @@ def test_base_css_uses_coherent_dark_surfaces_and_mobile_card_scaling() -> None:
     assert "font-size: 0.82rem;" in css
     assert "font-size: 2.2rem;" in css
     assert "padding: 0.75rem 0.8rem 0.75rem 0.95rem;" in css
-    assert ".home-overview-page.is-single-page.page-two-cards," in css
+    assert ".home-overview-controls[hidden] {" in css
+    assert ".home-overview-stage {" in css
+    assert "align-self: start;" in css
+    assert "align-items: start;" in css
+    assert "aspect-ratio: 1 / 1;" in css
+    assert "--overview-card-max: 198px;" in css
+    assert "--overview-card-size: min(var(--overview-card-max), 100%);" in css
+    assert "width: var(--overview-card-size);" in css
+    assert "height: var(--overview-card-size);" in css
+    assert "inline-size: var(--overview-card-size);" in css
+    assert "block-size: var(--overview-card-size);" in css
+    assert "max-height: var(--overview-card-size);" in css
+    assert "justify-items: center;" in css
+    assert "grid-template-columns: repeat(var(--overview-columns), minmax(0, 1fr));" in css
+    assert "grid-template-rows: repeat(var(--overview-rows), auto);" in css
+    assert "--overview-page-padding: calc(var(--overview-gap) / 2);" in css
+    assert "scroll-padding-inline: var(--overview-page-padding);" in css
+    assert '.home-overview-arrow[data-direction="previous"] {' in css
+    assert ".pull-refresh-indicator {" in css
+    assert ".pull-refresh-indicator.is-refreshing .pull-refresh-spinner {" in css
+    assert "@keyframes pull-refresh-spin" in css
 
 
 def test_render_devices_html_threads_appearance_to_document_root() -> None:
@@ -3077,7 +3362,9 @@ def test_render_devices_html_wraps_single_device_in_grid_layout_hook() -> None:
 
     assert 'class="device-list-rows"' in html
     assert "device-list-row tone-card green" in html
-    assert "Edit device" in html
+    assert "Touch a device card to edit it." in html
+    assert ">Edit</a>" not in html
+    assert "Edit device" not in html
 
 
 def test_render_devices_html_reserves_second_badge_slot_for_non_vehicle_devices() -> None:
@@ -3176,7 +3463,7 @@ def test_render_settings_html_threads_appearance_to_document_root() -> None:
     assert 'data-theme-preference="dark"' in html
 
 
-def test_render_home_html_pages_cards_by_visible_device_limit() -> None:
+def test_render_home_html_defers_overview_pagination_to_browser_layout() -> None:
     from bm_gateway.web import render_home_html
 
     snapshot_devices = [
@@ -3208,13 +3495,18 @@ def test_render_home_html_pages_cards_by_visible_device_limit() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=4,
     )
 
-    assert html.count('class="home-overview-page page-multi-cards"') == 2
-    assert 'class="home-overview-page page-one-card"' not in html
-    assert "--overview-columns: 2;" in html
-    assert "--overview-rows: 2;" in html
+    assert html.count('class="home-overview-page is-single-page page-multi-cards"') == 1
+    assert html.count("class='home-overview-card home-overview-orb-shell'") == 7
+    assert "function buildPages()" in html
+    assert 'styles.getPropertyValue("--overview-card-max")' in html
+    assert 'page.style.setProperty("--overview-card-size"' in html
+    assert "const capacity = Math.max(1, columns * 2);" in html
+    assert 'window.visualViewport.addEventListener("resize", scheduleBuild' in html
+    assert "track.clientWidth - (pagePadding * 2)" in html
+    assert "--overview-columns: 1;" in html
+    assert "--overview-rows: 1;" in html
     assert "Battery 7" in html
     assert 'data-direction="previous"' in html
     assert 'data-direction="next"' in html
@@ -3253,10 +3545,9 @@ def test_render_home_html_marks_single_page_card_count() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=4,
     )
 
-    assert "home-overview-page is-single-page page-one-card" in html
+    assert "home-overview-page is-single-page page-multi-cards" in html
 
 
 def test_render_home_html_uses_four_by_two_layout_for_eight_visible_cards() -> None:
@@ -3293,13 +3584,12 @@ def test_render_home_html_uses_four_by_two_layout_for_eight_visible_cards() -> N
         devices=registry_devices,
         chart_points=[],
         legend=[],
-        visible_device_limit=8,
     )
 
     assert 'class="home-overview-page is-single-page page-multi-cards"' in html
-    assert "--overview-columns: 4;" in html
-    assert "--overview-rows: 2;" in html
-    assert 'class="home-overview-controls"' not in html
+    assert "--overview-columns: 1;" in html
+    assert "--overview-rows: 1;" in html
+    assert 'class="home-overview-controls" hidden' in html
 
 
 def test_render_home_html_keeps_registry_only_devices_visible() -> None:
@@ -3340,7 +3630,6 @@ def test_render_home_html_keeps_registry_only_devices_visible() -> None:
         ],
         chart_points=[],
         legend=[],
-        visible_device_limit=4,
     )
 
     assert "Live Device" in html
@@ -3708,12 +3997,17 @@ def test_render_history_html_shows_device_selector_and_quick_switch_links() -> N
         monthly_history=[],
     )
 
-    assert "History Device" in html
+    assert "Batteries" in html
+    assert "History Device" not in html
     assert 'action="/history"' not in html
     assert 'name="device_id"' not in html
     assert 'href="/history?device_id=bm200_house"' in html
     assert 'href="/history?device_id=starter_battery"' in html
     assert 'aria-current="page"' in html
+    assert 'class="history-device-controls" hidden' in html
+    assert "history-device-scroller" in html
+    assert "history-device-page" in html
+    assert "function buildPages()" in html
     assert "Open History" not in html
     assert "Configured batteries" not in html
     assert "history-device-card" in html
@@ -3733,7 +4027,8 @@ def test_render_history_html_marks_single_selector_grid_layout() -> None:
         monthly_history=[],
     )
 
-    assert 'class="device-grid history-device-grid"' in html
+    assert 'class="history-device-scroller is-single-page"' in html
+    assert 'class="history-device-page is-single-page page-multi-cards"' in html
 
 
 def test_render_history_html_uses_compact_history_selector_cards() -> None:
@@ -3845,6 +4140,7 @@ def test_render_history_html_handles_no_configured_devices() -> None:
     assert "No Devices Configured" in html
     assert 'href="/devices/new"' in html
     assert "History Device" not in html
+    assert "Batteries" not in html
 
 
 def test_render_devices_html_explains_offline_device_not_found_state() -> None:
@@ -3877,7 +4173,10 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert 'href="/devices/new"' in html
     assert "Register new BM devices directly from the device registry." not in html
     assert "Serial / MAC: 3C:AB:72:82:86:EA" in html
-    assert "Edit device" in html
+    assert "Touch a device card to edit it." in html
+    assert "device-list-row tone-card green" in html
+    assert "Edit device" not in html
+    assert ">Edit</a>" not in html
 
 
 def test_render_devices_html_uses_device_battery_profile_labels() -> None:
@@ -3901,8 +4200,9 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
     assert "AGM Battery" in html
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert "Add Device" in html
-    assert "Configured Devices" in html
+    assert "Configured Devices" not in html
     assert "Serial / MAC" in html
+    assert "Touch a device card to edit it." in html
     assert "Edit device settings" not in html
 
 
@@ -3919,6 +4219,13 @@ def test_render_add_device_html_is_dedicated_creation_surface() -> None:
 def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
     html = _add_device_form_html()
 
+    assert '<option value="bm200" selected>BM200</option>' in html
+    assert '<option value="bm6">BM6</option>' in html
+    assert '<option value="bm900">BM900</option>' in html
+    assert '<option value="bm900pro">BM900 Pro</option>' in html
+    assert '<option value="bm300">BM300</option>' in html
+    assert '<option value="bm300pro">BM300 Pro</option>' in html
+    assert '<option value="bm7">BM7</option>' in html
     assert 'name="installed_in_vehicle"' in html
     assert 'name="vehicle_type"' in html
     assert ">Car<" in html
@@ -3935,6 +4242,8 @@ def test_add_device_form_includes_vehicle_and_battery_metadata_fields() -> None:
     assert 'name="device_id"' not in html
     assert 'name="icon_key"' not in html
     assert "color-preview-dot" in html
+    assert 'type="color" name="color_key"' in html
+    assert 'list="device-color-input-presets"' in html
 
 
 def test_battery_form_script_normalizes_compact_or_colon_mac_inputs() -> None:
@@ -4174,6 +4483,37 @@ def test_update_device_from_form_skips_history_rewrite_for_non_history_fields(
     devices = load_device_registry(config.device_registry_path)
     assert devices[0].color_key == "orange"
     assert devices[0].vehicle_type == "car"
+
+
+def test_update_device_from_form_accepts_custom_hex_overview_color(tmp_path: Path) -> None:
+    config_path = _write_edit_device_config(tmp_path)
+
+    errors = update_device_from_form(
+        config_path=config_path,
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        new_device_id="bm200_house",
+        device_type="bm200",
+        device_name="BM200 House",
+        device_mac="AA:BB:CC:DD:EE:01",
+        battery_family="lead_acid",
+        battery_profile="regular_lead_acid",
+        custom_soc_mode="intelligent_algorithm",
+        custom_voltage_curve=(),
+        color_key="#2f80ed",
+        installed_in_vehicle=False,
+        vehicle_type="",
+        battery_brand="",
+        battery_model="",
+        battery_nominal_voltage=None,
+        battery_capacity_ah=None,
+        battery_production_year=None,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    assert devices[0].color_key == "#2f80ed"
 
 
 def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> None:

@@ -4,7 +4,10 @@ from pathlib import Path
 
 from bm_gateway.device_registry import (
     Device,
+    default_color_key,
+    device_driver_type,
     load_device_registry,
+    normalize_mac_address,
     validate_devices,
     write_device_registry,
 )
@@ -38,6 +41,81 @@ def test_write_and_load_device_registry_round_trips_battery_metadata(tmp_path: P
     loaded = load_device_registry(path)
 
     assert loaded == devices
+
+
+def test_normalize_mac_address_handles_cyrillic_confusables() -> None:
+    assert normalize_mac_address("ЗСАВ72B2C667") == "3C:AB:72:B2:C6:67"
+
+
+def test_commercial_device_type_aliases_map_to_driver_families() -> None:
+    assert (
+        validate_devices(
+            [
+                Device(
+                    id="bm6_motorcycle",
+                    type="bm6",
+                    name="BM6 Motorcycle",
+                    mac="3C:AB:72:82:86:EA",
+                    color_key="green",
+                ),
+                Device(
+                    id="bm900_car",
+                    type="bm900pro",
+                    name="BM900 Pro Car",
+                    mac="3C:AB:72:82:86:EB",
+                    color_key="blue",
+                ),
+                Device(
+                    id="bm7_bench",
+                    type="bm7",
+                    name="BM7 Bench",
+                    mac="E0:4E:7A:AF:9B:E8",
+                    color_key="purple",
+                ),
+                Device(
+                    id="bm300_bench",
+                    type="bm300",
+                    name="BM300 Bench",
+                    mac="E0:4E:7A:AF:9B:E9",
+                    color_key="orange",
+                ),
+            ]
+        )
+        == []
+    )
+    assert device_driver_type("bm6") == "bm200"
+    assert device_driver_type("bm900pro") == "bm200"
+    assert device_driver_type("bm7") == "bm300pro"
+    assert device_driver_type("bm300") == "bm300pro"
+
+
+def test_validate_devices_accepts_custom_hex_overview_colors() -> None:
+    assert (
+        validate_devices(
+            [
+                Device(
+                    id="bm200_house",
+                    type="bm200",
+                    name="BM200 House",
+                    mac="3C:AB:72:82:86:EA",
+                    color_key="#2f80ed",
+                ),
+                Device(
+                    id="bm200_spare",
+                    type="bm200",
+                    name="BM200 Spare",
+                    mac="3C:AB:72:82:86:EB",
+                    color_key="#2f80ed",
+                ),
+            ]
+        )
+        == []
+    )
+
+
+def test_default_color_key_treats_preset_hex_values_as_used() -> None:
+    assert default_color_key(used_colors={"#17c45a"}) == "blue"
+    assert default_color_key(used_colors={"#17C45A", "#4f8df7"}) == "purple"
 
 
 def test_validate_devices_rejects_invalid_custom_curve() -> None:
