@@ -5,6 +5,7 @@ import re
 import socket
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -950,6 +951,51 @@ def test_tracked_first_poll_does_not_start_duplicate_processes(
         state_dir=tmp_path / "state",
     )
     assert started_polls == [(tmp_path / "config.toml", tmp_path / "state")]
+
+
+def test_tracked_first_poll_reaps_completed_process(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    from bm_gateway import web
+
+    process_waiting = threading.Event()
+    release_process = threading.Event()
+
+    class CompletingProcess:
+        def poll(self) -> None:
+            return None
+
+        def wait(self) -> int:
+            process_waiting.set()
+            release_process.wait(timeout=1.0)
+            return 0
+
+    process = CompletingProcess()
+
+    def _start_run_once(
+        _config_path: Path,
+        *,
+        state_dir: Path | None = None,
+    ) -> CompletingProcess:
+        assert state_dir == tmp_path / "state"
+        return process
+
+    monkeypatch.setattr(web, "_RUN_ONCE_PROCESS", None)
+    monkeypatch.setattr(web, "start_run_once_via_cli", _start_run_once)
+
+    assert web._start_tracked_run_once_via_cli(
+        tmp_path / "config.toml",
+        state_dir=tmp_path / "state",
+    )
+    assert process_waiting.wait(timeout=1.0)
+
+    release_process.set()
+    deadline = time.monotonic() + 1.0
+    while web._RUN_ONCE_PROCESS is not None and time.monotonic() < deadline:
+        time.sleep(0.01)
+
+    assert web._RUN_ONCE_PROCESS is None
 
 
 def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:

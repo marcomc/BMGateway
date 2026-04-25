@@ -165,8 +165,27 @@ def _start_tracked_run_once_via_cli(
             poll = getattr(_RUN_ONCE_PROCESS, "poll", None)
             if not callable(poll) or poll() is None:
                 return False
-        _RUN_ONCE_PROCESS = start_run_once_via_cli(config_path, state_dir=state_dir)
+        process = start_run_once_via_cli(config_path, state_dir=state_dir)
+        _RUN_ONCE_PROCESS = process
+        _start_run_once_reaper(process)
         return True
+
+
+def _start_run_once_reaper(process: object) -> None:
+    wait = getattr(process, "wait", None)
+    if not callable(wait):
+        return
+
+    def _reaper() -> None:
+        global _RUN_ONCE_PROCESS
+        try:
+            wait()
+        finally:
+            with _RUN_ONCE_LOCK:
+                if _RUN_ONCE_PROCESS is process:
+                    _RUN_ONCE_PROCESS = None
+
+    threading.Thread(target=_reaper, daemon=True).start()
 
 
 def _int_from_mapping(mapping: dict[str, object], key: str, default: int = 0) -> int:

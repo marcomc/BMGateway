@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 import pytest
 from bm_gateway.drivers.bm300 import (
     BM300_POLL_PLAINTEXT,
+    BleakBM300Transport,
     BM300Measurement,
     BM300ProtocolError,
     decrypt_bm300_payload,
@@ -106,3 +108,75 @@ def test_read_bm300_measurement_preserves_scan_rssi() -> None:
 
     assert measurement.voltage == 13.4
     assert measurement.rssi == -67
+
+
+def test_bleak_bm300_transport_uses_configured_bluez_adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanned_device = object()
+    encrypted = encrypt_bm300_payload(bytes.fromhex("d1550700170064053c0000000102ffff"))
+    scanner_bluez_args: list[dict[str, str]] = []
+    client_bluez_args: list[dict[str, str]] = []
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float, bluez: dict[str, str]) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+            client_bluez_args.append(dict(bluez))
+            self._callback: Callable[[object | None, bytearray], None] | None = None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            self._callback = callback
+
+        async def write_gatt_char(self, _char: str, _data: bytes, response: bool) -> None:
+            assert response is True
+            assert self._callback is not None
+            self._callback(None, bytearray(encrypted))
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(
+        address: str,
+        timeout: float,
+        bluez: dict[str, str],
+    ) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout > 0
+        scanner_bluez_args.append(dict(bluez))
+        return scanned_device
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm300.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm300.BleakClient", FakeClient)
+
+    payload, rssi = asyncio.run(
+        BleakBM300Transport().read_voltage_notification(
+            address="AA:BB:CC:DD:EE:FF",
+            adapter="hci1",
+            timeout_seconds=5.0,
+            scan_timeout_seconds=3.0,
+        )
+    )
+
+    assert parse_bm300_voltage_notification(payload).voltage == 13.4
+    assert rssi is None
+    assert scanner_bluez_args == [{"adapter": "hci1"}]
+    assert client_bluez_args == [{"adapter": "hci1"}]

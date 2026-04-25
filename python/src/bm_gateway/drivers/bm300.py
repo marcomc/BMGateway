@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from typing import Any, Protocol
 
 from bleak import BleakClient, BleakScanner
+from bleak.args.bluez import BlueZClientArgs, BlueZScannerArgs
 from Crypto.Cipher import AES
 
 BM300_NOTIFY_CHARACTERISTIC = "0000fff4-0000-1000-8000-00805f9b34fb"
@@ -72,6 +73,20 @@ def _device_rssi(device: object) -> int | None:
     return None
 
 
+def _bluez_client_args(adapter: str) -> BlueZClientArgs:
+    active_adapter = adapter.strip()
+    if not active_adapter or active_adapter == "auto":
+        return {}
+    return {"adapter": active_adapter}
+
+
+def _bluez_scanner_args(adapter: str) -> BlueZScannerArgs:
+    active_adapter = adapter.strip()
+    if not active_adapter or active_adapter == "auto":
+        return {}
+    return {"adapter": active_adapter}
+
+
 def _create_cipher() -> Any:
     return AES.new(BM300_AES_KEY, AES.MODE_CBC, bytes(BM300_BLOCK_SIZE))
 
@@ -134,11 +149,12 @@ class BleakBM300Transport:
         timeout_seconds: float,
         scan_timeout_seconds: float,
     ) -> tuple[bytes, int | None]:
-        _ = adapter
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         last_error: Exception | None = None
         scan_timeout = max(1.0, scan_timeout_seconds)
+        bluez_scanner_args = _bluez_scanner_args(adapter)
+        bluez_client_args = _bluez_client_args(adapter)
         while True:
             remaining = deadline - loop.time()
             if remaining <= 0:
@@ -159,12 +175,17 @@ class BleakBM300Transport:
             device = await BleakScanner.find_device_by_address(
                 address,
                 timeout=min(scan_timeout, remaining),
+                bluez=bluez_scanner_args,
             )
             if device is None:
                 continue
             rssi = _device_rssi(device)
 
-            client = BleakClient(device, timeout=min(scan_timeout, remaining))
+            client = BleakClient(
+                device,
+                timeout=min(scan_timeout, remaining),
+                bluez=bluez_client_args,
+            )
             try:
                 async with client:
                     await client.start_notify(BM300_NOTIFY_CHARACTERISTIC, notification_handler)
