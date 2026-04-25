@@ -247,10 +247,13 @@ def _frame_export_devices(config: AppConfig, devices: list[Device]) -> list[Devi
 
 
 def _filtered_snapshot_for_devices(
-    snapshot: GatewaySnapshot, devices: list[Device]
+    snapshot: GatewaySnapshot,
+    devices: list[Device],
+    *,
+    force_filter: bool = False,
 ) -> GatewaySnapshot:
     selected_ids = {device.id for device in devices}
-    if not selected_ids:
+    if not selected_ids and not force_filter:
         return snapshot
     filtered_readings = [reading for reading in snapshot.devices if reading.id in selected_ids]
     return dataclass_replace(
@@ -281,7 +284,11 @@ def render_usb_otg_export_images(
             render_battery_overview_images(
                 config=config,
                 devices=frame_devices,
-                snapshot=_filtered_snapshot_for_devices(snapshot, frame_devices),
+                snapshot=_filtered_snapshot_for_devices(
+                    snapshot,
+                    frame_devices,
+                    force_filter=bool(config.usb_otg.fleet_trend_device_ids),
+                ),
                 output_dir=output_dir,
                 page_renderer=page_renderer,
                 progress=progress,
