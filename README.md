@@ -128,9 +128,9 @@ The default quality gate is `make check`.
 
 ## Release Status
 
-The current documented first release is:
+The current documented release is:
 
-- `0.1.1`
+- `0.2.0`
 
 Use [CHANGELOG.md](CHANGELOG.md) for release content and [TODO.md](TODO.md) for
 work that is not shipped yet.
