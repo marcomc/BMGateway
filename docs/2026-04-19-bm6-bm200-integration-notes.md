@@ -32,6 +32,10 @@ Useful references:
   [Home Assistant BM6 thread](https://community.home-assistant.io/t/bm6-battery-monitor-esphome/806239)
 - BM2/BM6 broadcasting discussion:
   [OpenMQTTGateway BM2 thread](https://community.openmqttgateway.com/t/omg-1-8-0-no-longer-gets-bm2-messages/3578)
+- BM2 reverse engineering and history reader:
+  [KrystianD/bm2-battery-monitor](https://github.com/KrystianD/bm2-battery-monitor)
+- BM6/BM200 exported history and cranking-log analyzers:
+  [1stbenz.github.io source](https://github.com/1stbenz/1stbenz.github.io)
 
 ## BMGateway-Verified Findings
 
@@ -208,15 +212,104 @@ Verified result:
 - `BMGateway` should explain this in the UI as a device-reported state band,
   not as a hidden voltage heuristic invented by the gateway
 
-The BM6 mapping was verified again after adding BM300 Pro support: two NOCO
-BM200-labeled devices under battery maintainers returned decrypted payloads
-with byte `5 == 0x02` and voltages around `14.36 V`, which should be displayed
-as `charging`, not `normal`.
+The BM6 mapping was corrected after comparing public Home Assistant BM6 code,
+official-app behavior, and local probes on two BM200-labeled monitors. The
+current best interpretation is that byte `5 == 0x02` is the device/app
+`charging` state for BM6-family request/response packets. This does not prove a
+charger is physically connected: a fully charged lithium battery or other
+high-voltage condition can make the official app report charging even when the
+charger is disconnected. Treat `charging` here as the monitor-reported state,
+not as an independent electrical-current measurement. BM300 Pro/BM7 also maps
+code `2` to `charging`.
 
 This matters for trust: users should be able to tell whether a label came from
 the monitor protocol or from an app-side interpretation.
 
-### 10. Official-app battery taxonomy is richer than the old registry model
+### 10. BM6 exposes a raw version command but standard GATT identity is fake
+
+During the 2026-04-25 protocol pass, `Spare NLP20` advertised as `BM6` and
+returned the following raw response after writing encrypted plaintext command
+`d1550100000000000000000000000000` with the BM6 key:
+
+```text
+d1550101080005000000000000000000
+```
+
+As with BM300 Pro, treat this as a raw firmware or protocol-version payload
+until the bytes are independently explained. Public BM6/BM7 projects know the
+same command and prefix, but the reviewed sources do not provide enough
+evidence to assign a durable semantic name to each byte.
+
+The standard Device Information service was not useful for real identity. It
+returned placeholder strings such as `Model Number`, `Serial Number`,
+`Firmware Revision`, and `Software Revision`.
+
+### 11. Direct BM2 history-count did not work on the BM6 request channel
+
+`BMGateway` tried the known BM2 history count command `e701` on the connected
+BM6-family device with both relevant keys:
+
+- BM6 family key
+- older BM2 key
+
+Neither variant returned an `e7` history-count packet or any other notification
+during the test window. Earlier mixed-command probes also showed that, once the
+device is in the live polling path, subsequent notifications continue to be
+ordinary `d15507` live packets that only decrypt cleanly with the BM6 key.
+
+This is negative evidence against reusing the BM2 history command unchanged for
+BM6 request/response devices. It does not prove BM6 lacks onboard history,
+because the official app and exported logs show history and cranking data exist
+somewhere in the product workflow.
+
+Additional `e7xx` variants were also tested on `Spare NLP20`:
+
+- `e700`
+- `e701`
+- `e70100`
+- `e7010000`
+- `e701000000`
+- `e702`
+- `e703`
+- `e704`
+- `e705`
+- `e7ff`
+
+Those variants were tried with the BM6 family key and the older BM2 key. The
+exact `e701` form was also tried with write-without-response and once as a raw
+unencrypted write. None produced a notification.
+
+### 12. BM6/BM200 onboard history uses `d15505_b7_01`
+
+The verified BM6/BM200 history selector is:
+
+```text
+d1550500000000010000000000000000
+```
+
+The probe tool names it `hist_d15505_b7_01`.
+
+Verified record layout:
+
+```text
+vvv ss tt p
+```
+
+| Field | Meaning |
+| --- | --- |
+| `vvv` | Battery voltage in centivolts |
+| `ss` | State of charge percentage |
+| `tt` | Temperature in degrees Celsius |
+| `p` | Event or record-type nibble; unresolved |
+
+A full response contains 256 records. Records are newest-first and spaced about
+2 minutes apart, so one page covers about 8 hours 32 minutes.
+
+The lower-SoC validation on `spare_nlp20` and `spare_nlp5` proved that `ss`
+tracks live SoC below 100%. The canonical evidence and test artifacts are in
+[BM Protocol Research Handoff](2026-04-25-bm-protocol-research-handoff.md).
+
+### 13. Official-app battery taxonomy is richer than the old registry model
 
 The original `BMGateway` registry only had:
 
@@ -250,24 +343,17 @@ flow can stay aligned with what users already see in the official app.
 
 ## Open Questions
 
-These are still not fully verified.
+### Remaining BM6/BM200 history gaps
 
-### Device history memory on BM6-family hardware
+The current history page is decoded for time order, voltage, SoC, and
+temperature. Remaining gaps:
 
-`BMGateway` already contains partial BM2-style history helpers:
-
-- `encode_history_count_request`
-- `encode_history_download_request`
-- `decode_history_count_packet`
-- `parse_history_items`
-
-Open question:
-
-- does the BM6-family device use the same history request/response protocol as
-  older BM2/BM200 references, or a different one used only by the official
-  app?
-
-This needs a BLE capture while the official app downloads history.
+- meaning of the final `p` nibble
+- how to request older pages beyond the latest 256 records
+- whether cranking or charging-test records use `p`, another `d15505` selector,
+  or another command family
+- how to merge repeated 256-record pages into persistent archive history without
+  duplicates
 
 ### Why the monitor disappears from advertising
 
@@ -286,4 +372,6 @@ When debugging BM6-family devices in `BMGateway`:
 2. Distinguish `not found` from `timeout after connect`.
 3. Avoid assuming a `BM200` label means legacy BM2 passive behavior.
 4. Prefer scan-first, bounded retries, and explicit request/response polling.
-5. Capture official-app traffic before implementing history download.
+5. Use `hist_d15505_b7_01` for the verified 256-record BM6/BM200 history page.
+6. Capture official-app traffic only for unresolved paging, cranking, or
+   charging-test behavior.

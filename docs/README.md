@@ -23,6 +23,8 @@ Read these in order when you need architectural or implementation context:
 3. [Python Component Guide](../python/README.md)
 4. [BM6 / BM200 Integration Notes](2026-04-19-bm6-bm200-integration-notes.md)
 5. [BM300 Pro / BM7 Integration Notes](2026-04-25-bm300-bm7-integration-notes.md)
+6. [BM Protocol Research Handoff](2026-04-25-bm-protocol-research-handoff.md)
+7. [Protocol Probe Tools](protocol-probe-tools.md)
 
 ## Core Documents
 
@@ -36,6 +38,8 @@ Read these in order when you need architectural or implementation context:
 | Web product boundary | [../web/README.md](../web/README.md) |
 | Home Assistant contract | [../home-assistant/contract.md](../home-assistant/contract.md) |
 | Raspberry Pi installation and operations | [../rpi-setup/manual-setup.md](../rpi-setup/manual-setup.md) |
+| BLE protocol research handoff | [2026-04-25-bm-protocol-research-handoff.md](2026-04-25-bm-protocol-research-handoff.md) |
+| BLE protocol probe tools | [protocol-probe-tools.md](protocol-probe-tools.md) |
 
 ## Product-Specific Notes
 
@@ -43,6 +47,10 @@ Read these in order when you need architectural or implementation context:
   [2026-04-19-bm6-bm200-integration-notes.md](2026-04-19-bm6-bm200-integration-notes.md)
 - Verified BM300 Pro/BM7 live-polling protocol observations:
   [2026-04-25-bm300-bm7-integration-notes.md](2026-04-25-bm300-bm7-integration-notes.md)
+- Current BM200/BM6 and BM300 Pro/BM7 protocol handoff:
+  [2026-04-25-bm-protocol-research-handoff.md](2026-04-25-bm-protocol-research-handoff.md)
+- Bounded BLE protocol probe tool usage:
+  [protocol-probe-tools.md](protocol-probe-tools.md)
 - Raspberry Pi 3B operating-system and web-surface research:
   [research/2026-04-17-pi3b-web-and-os-research.md](research/2026-04-17-pi3b-web-and-os-research.md)
 

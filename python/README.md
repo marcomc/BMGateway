@@ -43,6 +43,7 @@ Main runtime CLI for:
 - Home Assistant contract and discovery export
 - runtime execution
 - history inspection and pruning
+- bounded BM6/BM7 protocol probes for live debugging
 
 ### `bm-gateway-web`
 
@@ -102,6 +103,8 @@ Use these as the canonical references instead of repeating the same guidance:
   [../docs/2026-04-19-bm6-bm200-integration-notes.md](../docs/2026-04-19-bm6-bm200-integration-notes.md)
 - BM300 Pro/BM7 notes:
   [../docs/2026-04-25-bm300-bm7-integration-notes.md](../docs/2026-04-25-bm300-bm7-integration-notes.md)
+- Protocol probe tools:
+  [../docs/protocol-probe-tools.md](../docs/protocol-probe-tools.md)
 - Raspberry Pi installation:
   [../rpi-setup/manual-setup.md](../rpi-setup/manual-setup.md)
 - Home Assistant setup:

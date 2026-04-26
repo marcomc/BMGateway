@@ -17,6 +17,10 @@ Useful references:
   [slydiman/bm7-battery-monitor](https://github.com/slydiman/bm7-battery-monitor)
 - BM7 Home Assistant fork:
   [derekpurdy/BM7](https://github.com/derekpurdy/BM7)
+- BM6/BM7-compatible parser and driver work:
+  [battery-hawk BM6 driver](https://github.com/UpDryTwist/battery-hawk)
+- Android BM300 helper using the BM7 key:
+  [xpcardata BM300 helper](https://github.com/stevelea/xpcardata)
 - BM6 reverse engineering that established the shared request/response shape:
   [tarball.ca BM6 article](https://www.tarball.ca/posts/reverse-engineering-the-bm6-ble-battery-monitor/)
 - BM6 and BM7 community discussion:
@@ -96,6 +100,110 @@ characters that commonly look like MAC-address hex characters before deciding
 whether an input is a compact MAC address. This is an input-normalization
 finding, not a BM300 protocol finding.
 
+### Protocol Research Pass: 2026-04-25
+
+The 2026-04-25 live probe kept the `bm-gateway` service stopped only while the
+radio was under test, then restarted it. Both `bm-gateway` and
+`bm-gateway-web` were active after the probe.
+
+Configured `bm300pro` devices advertised as `BM300 Pro` and exposed the same
+core GATT shape:
+
+- service `0000fff0-0000-1000-8000-00805f9b34fb`
+- write characteristic `0000fff3-0000-1000-8000-00805f9b34fb`
+- notify characteristic `0000fff4-0000-1000-8000-00805f9b34fb`
+- auxiliary readable characteristics `fff1` and `fff2`
+- `fee0` / `fee1`, Generic Access, Generic Attribute, and Device Information
+  services
+
+The standard Device Information strings are not useful as real identity data on
+the tested units. They returned placeholder text such as `Model Number`,
+`Serial Number`, `Firmware Revision`, and `Software Revision`.
+
+Two reachable BM300 Pro devices returned the same encrypted-version response
+after writing plaintext command `d1550100000000000000000000000000` with the
+BM7 key:
+
+```text
+d1550102021125000000000000000000
+```
+
+Treat that as a raw firmware or protocol-version payload for now. Public
+projects know the command and prefix, but none of the reviewed sources provide
+enough evidence to assign each byte a durable semantic name.
+
+The same two devices returned live packets with state code `0` during this
+probe:
+
+```text
+d155070010005c053300000000000000
+d1550700120061053d00000000000000
+```
+
+Decoded values were consistent with existing parser offsets:
+
+- `Libertv LD13CZT`: 13.31 V, 92%, 16°C, status code `0`
+- `DOC FB12899`: 13.41 V, 97%, 18°C, status code `0`
+
+`Punto FA376HT` advertised as `BM300 Pro` but the direct GATT probe timed out
+at very low RSSI during this pass. A read-only probe did later connect long
+enough to confirm the same `fff1 = 01` and `fff2 = 02` values.
+
+Read-only custom characteristics on BM300 Pro showed:
+
+| Characteristic | Observed value | Current interpretation |
+| --- | --- | --- |
+| `fff1` | `01` | Unknown |
+| `fff2` | `02` | Unknown |
+| `fff5` | timeout | Unknown |
+| `fee1` | timeout on tested units | Unknown |
+
+Do not expose `fff1` or `fff2` as features until a source or controlled test
+explains them.
+
+The BM2 history-count command `e701` was also tested against a reachable
+BM300 Pro unit with both the BM7 family key and the older BM2 key. Neither
+variant produced a history-count response or any other notification during the
+test window. This is negative evidence only; it says that the direct BM2
+history-count request is not a BM300 Pro history entrypoint.
+
+Additional `e7xx` variants tested on a reachable BM300 Pro were also silent:
+
+- `e700`
+- `e701`
+- `e70100`
+- `e702`
+- `e7ff`
+
+The same `d15500..d1550f` zero-payload command sweep used for BM6 was also run
+against BM300 Pro. The BM300 Pro unit produced ordinary echoes or live packets
+for several command IDs, but `d15505` was again the only unmapped command that
+returned a historical marker-shaped response:
+
+```text
+d1550500000000000000000000000000
+fffefe00000000000000000000000000
+```
+
+That is consistent with the BM6-family `d15505` result. A later BM7 probe on
+`doc_fb12899` also returned 30 historical-looking 4-byte chunks for byte-6 or
+byte-7 `d15505` selectors. Those chunks are raw evidence only: order, cadence,
+and field layout have not been validated for BM7.
+
+Treat BM7 history as unresolved. Do not import BM300 Pro/BM7 history until a
+BM7-specific validation test proves the record layout.
+
+### External Research Status
+
+The reviewed BM300 Pro / BM7 projects converge on live current-state polling
+and the `d15501` version command. None of the reviewed BM300 Pro / BM7 projects
+implements onboard history download.
+
+Community discussion also confirms that Ancel `BM300 Pro` devices are often
+seen separately from Ancel `BM200` devices even when integrations share a BM6
+lineage. That matches the project decision to keep `bm300pro` on a separate
+driver path using the BM7 key.
+
 ## Remaining Gaps
 
 The public references contain enough information for live current-state polling
@@ -104,10 +212,12 @@ but not enough verified information for all original-app features.
 Open BM300 Pro/BM7 work:
 
 - onboard history download
-- firmware version retrieval
+- semantic parsing of the raw `d15501` firmware or protocol-version response
 - cranking, charging, and trip-history event records
 - rapid acceleration and rapid deceleration persistence
+- validation of the observed `d15505` 4-byte chunks: order, cadence, field
+  layout, and relationship to live voltage, SoC, and temperature
 
-No new private reverse-engineering discovery was made in this implementation.
-The protocol code is based on public BM7 references and local adaptation into
-the existing `BMGateway` runtime shape.
+The 2026-04-25 probe added one project-local discovery: tested BM300 Pro units
+return raw `d15501` payload `d1550102021125000000000000000000`. The payload is
+documented here as raw evidence only.

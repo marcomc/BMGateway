@@ -61,7 +61,7 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
             voltage=12.73,
             soc=58,
             status_code=2,
-            state="normal",
+            state="charging",
             temperature=23.0,
         )
 
@@ -71,7 +71,7 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
     assert snapshot.devices_online == 1
     assert snapshot.devices[0].voltage == 12.73
     assert snapshot.devices[0].soc == 58
-    assert snapshot.devices[0].state == "normal"
+    assert snapshot.devices[0].state == "charging"
     assert snapshot.devices[0].temperature == 23.0
     assert snapshot.devices[1].connected is False
     assert snapshot.devices[1].state == "disabled"
@@ -186,7 +186,7 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
             voltage=12.73,
             soc=58,
             status_code=2,
-            state="normal",
+            state="charging",
             temperature=18.5,
         )
 
@@ -232,7 +232,7 @@ def test_build_snapshot_preserves_live_reader_rssi() -> None:
             voltage=12.73,
             soc=58,
             status_code=2,
-            state="normal",
+            state="charging",
             temperature=18.5,
             rssi=-67,
         )
@@ -487,7 +487,7 @@ def test_build_snapshot_powers_on_adapter_before_live_polling(
         assert adapter == "hci0"
         assert timeout_seconds == 45.0
         assert scan_timeout_seconds == 15.0
-        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
+        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="charging")
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
@@ -538,7 +538,7 @@ def test_build_snapshot_retries_after_device_not_found(
         assert scan_timeout_seconds == 15.0
         if attempts["count"] == 1:
             raise BleakDeviceNotFoundError(device.mac)
-        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
+        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="charging")
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)

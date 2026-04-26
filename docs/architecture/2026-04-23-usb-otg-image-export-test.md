@@ -164,7 +164,7 @@ image_height_px = 234
 image_format = "jpeg"
 appearance = "light"
 refresh_interval_seconds = 0
-overview_devices_per_image = 5
+overview_devices_per_image = 3
 export_battery_overview = true
 export_fleet_trend = true
 fleet_trend_metrics = ["soc"]
@@ -243,7 +243,7 @@ export interval is shorter than the configured gateway poll interval.
 The current exporter writes:
 
 - `battery-overview-01.jpg`, `battery-overview-02.jpg`, and so on, with up to
-  `usb_otg.overview_devices_per_image` configured batteries per image
+  three configured batteries per image
 - `fleet-trend-soc.jpg`, `fleet-trend-voltage.jpg`, or
   `fleet-trend-temperature.jpg`, depending on the selected Fleet Trend frame
   metrics, using the selected frame devices and web UI color keys

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, load_device_registry, validate_devices
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
+from .protocol_probe import run_protocol_probe, utc_timestamp
 from .runtime import (
     build_snapshot,
     database_file_path,
@@ -53,6 +55,7 @@ def format_main_help() -> str:
             "  devices  Inspect the configured device registry",
             "  ha       Render the Home Assistant MQTT contract",
             "  history  Inspect persisted and imported device history",
+            "  protocol Probe bounded read-only BM6/BM7 BLE protocol commands",
             "  run      Execute the gateway runtime and persist snapshots",
             "",
             "Run `bm-gateway <command> --help` for command-specific help.",
@@ -221,6 +224,27 @@ def build_parser() -> argparse.ArgumentParser:
         "--export-usb-otg-now",
         action="store_true",
         help="Force a USB OTG frame-image export during this run.",
+    )
+
+    protocol_parser = subparsers.add_parser(
+        "protocol", help="Run bounded BM6/BM7 BLE protocol probes."
+    )
+    protocol_subparsers = protocol_parser.add_subparsers(dest="protocol_command")
+    protocol_probe = protocol_subparsers.add_parser(
+        "probe-history",
+        help="Probe known safe live/version/history-candidate commands and print JSONL.",
+    )
+    protocol_probe.add_argument(
+        "--device-id",
+        action="append",
+        default=[],
+        help="Limit the probe to a configured device ID. May be repeated.",
+    )
+    protocol_probe.add_argument(
+        "--command-timeout-seconds",
+        type=float,
+        default=3.5,
+        help="Seconds to wait for notifications after each command.",
     )
 
     return parser
@@ -699,6 +723,46 @@ def _handle_history_prune(
     return 0
 
 
+def _handle_protocol_probe_history(
+    path: Path,
+    *,
+    verbose: bool,
+    device_ids: Sequence[str],
+    command_timeout_seconds: float,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, devices = runtime
+    known_ids = {device.id for device in devices}
+    unknown_ids = sorted(set(device_ids) - known_ids)
+    if unknown_ids:
+        for device_id in unknown_ids:
+            print(f"Unknown device: {device_id}", file=sys.stderr)
+        return 2
+
+    def emit(event: dict[str, object]) -> None:
+        event.setdefault("ts", utc_timestamp())
+        print(json.dumps(event, sort_keys=True), flush=True)
+
+    try:
+        asyncio.run(
+            run_protocol_probe(
+                devices=devices,
+                device_ids=device_ids,
+                adapter=config.bluetooth.adapter,
+                scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
+                connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
+                command_timeout_seconds=command_timeout_seconds,
+                emit=emit,
+            )
+        )
+    except KeyboardInterrupt:
+        print("Protocol probe interrupted.", file=sys.stderr)
+        return 130
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv) if argv is not None else sys.argv[1:]
     if not args_list or args_list == ["--help"] or args_list == ["-h"]:
@@ -784,6 +848,14 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=bool(args.verbose),
             as_json=bool(args.json),
             state_dir=args.state_dir,
+        )
+
+    if args.command == "protocol" and args.protocol_command == "probe-history":
+        return _handle_protocol_probe_history(
+            args.config,
+            verbose=bool(args.verbose),
+            device_ids=args.device_id,
+            command_timeout_seconds=args.command_timeout_seconds,
         )
 
     if args.command == "run":

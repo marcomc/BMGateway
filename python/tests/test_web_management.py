@@ -60,6 +60,7 @@ from bm_gateway.web_actions import (
     restore_usb_otg_boot_mode,
     schedule_host_shutdown,
 )
+from bm_gateway.web_pages_frame import frame_battery_overview_page_count
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import app_document, base_css, chart_script
 
@@ -2650,6 +2651,49 @@ def test_render_frame_battery_overview_html_keeps_three_cards_in_one_row() -> No
     assert {top for _left, top, _width, _height in card_positions} == {"49.0"}
     assert all(width == height for _left, _top, width, height in card_positions)
     assert {width for _left, _top, width, _height in card_positions} == {"154"}
+
+
+def test_frame_battery_overview_pages_always_use_three_device_pages() -> None:
+    devices = [
+        {"id": f"battery_{index}", "name": f"Battery {index}", "enabled": True}
+        for index in range(1, 6)
+    ]
+
+    assert (
+        frame_battery_overview_page_count(
+            snapshot={},
+            devices=devices,
+            devices_per_page=5,
+        )
+        == 2
+    )
+
+    page_one = render_frame_battery_overview_html(
+        snapshot={},
+        devices=devices,
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+    page_two = render_frame_battery_overview_html(
+        snapshot={},
+        devices=devices,
+        page=2,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "Battery 1" in page_one
+    assert "Battery 2" in page_one
+    assert "Battery 3" in page_one
+    assert "Battery 4" not in page_one
+    assert "Battery 5" not in page_one
+    assert "Battery 4" in page_two
+    assert "Battery 5" in page_two
 
 
 def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:

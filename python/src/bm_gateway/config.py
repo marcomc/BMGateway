@@ -72,7 +72,7 @@ class USBOTGConfig:
     image_format: str = "jpeg"
     appearance: str = "light"
     refresh_interval_seconds: int = 0
-    overview_devices_per_image: int = 5
+    overview_devices_per_image: int = 3
     export_battery_overview: bool = True
     export_fleet_trend: bool = True
     fleet_trend_metrics: tuple[str, ...] = ("soc",)
@@ -366,7 +366,7 @@ def load_config(path: Path) -> AppConfig:
         image_format=str(usb_otg_table.get("image_format", "jpeg")),
         appearance=str(usb_otg_table.get("appearance", "light")),
         refresh_interval_seconds=int(usb_otg_table.get("refresh_interval_seconds", 0)),
-        overview_devices_per_image=int(usb_otg_table.get("overview_devices_per_image", 5)),
+        overview_devices_per_image=int(usb_otg_table.get("overview_devices_per_image", 3)),
         export_battery_overview=bool(usb_otg_table.get("export_battery_overview", True)),
         export_fleet_trend=bool(usb_otg_table.get("export_fleet_trend", True)),
         fleet_trend_metrics=_string_tuple_from_toml(

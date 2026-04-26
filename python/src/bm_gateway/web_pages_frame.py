@@ -16,7 +16,7 @@ from .web_ui import (
     top_header,
 )
 
-_FRAME_OVERVIEW_MAX_DEVICES_PER_PAGE = 3
+FRAME_OVERVIEW_DEVICES_PER_PAGE = 3
 
 
 def render_diagnostics_html(
@@ -286,7 +286,7 @@ def render_frame_battery_overview_html(
         snapshot=snapshot,
         devices=devices,
         page=page,
-        devices_per_page=max(1, devices_per_page),
+        devices_per_page=devices_per_page,
     )
     card_size = _overview_card_size_px(
         card_count=max(1, len(page_devices)),
@@ -378,27 +378,19 @@ def _battery_overview_pages(
     if not merged_devices:
         return [[]]
 
-    page_size = max(1, devices_per_page)
-    if len(merged_devices) <= page_size:
-        return [merged_devices]
+    page_size = _effective_frame_overview_devices_per_page(devices_per_page)
+    return [
+        merged_devices[index : index + page_size]
+        for index in range(0, len(merged_devices), page_size)
+    ]
 
-    page_count = (len(merged_devices) + page_size - 1) // page_size
-    base_size = len(merged_devices) // page_count
-    larger_page_count = len(merged_devices) % page_count
-    page_sizes = [base_size + 1] * larger_page_count + [base_size] * (
-        page_count - larger_page_count
-    )
 
-    pages: list[list[dict[str, object]]] = []
-    start = 0
-    for size in page_sizes:
-        pages.append(merged_devices[start : start + size])
-        start += size
-    return pages
+def _effective_frame_overview_devices_per_page(_configured_devices_per_page: int) -> int:
+    return FRAME_OVERVIEW_DEVICES_PER_PAGE
 
 
 def _frame_overview_layout_dimensions(card_count: int) -> tuple[int, int]:
-    if card_count <= _FRAME_OVERVIEW_MAX_DEVICES_PER_PAGE:
+    if card_count <= FRAME_OVERVIEW_DEVICES_PER_PAGE:
         return max(1, card_count), 1
     return shared._overview_layout_dimensions(card_count)
 

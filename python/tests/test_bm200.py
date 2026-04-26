@@ -70,7 +70,7 @@ def test_parse_bm6_plaintext_measurement_decodes_voltage_and_soc() -> None:
     )
 
 
-def test_parse_bm6_plaintext_measurement_decodes_charging_state() -> None:
+def test_parse_bm6_plaintext_measurement_treats_code_two_as_charging() -> None:
     plaintext = bytes.fromhex("d1550700120264059c0000000002ffff")
 
     measurement = parse_bm6_plaintext_measurement(plaintext)

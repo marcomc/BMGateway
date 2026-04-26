@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Added
+
+- Added a bounded `bm-gateway protocol probe-history` diagnostic command for
+  safe BM6/BM7 live, version, and `d15505` history-candidate BLE probes with
+  JSONL output.
+
+### Fixed
+
+- Corrected BM6-family live state code `2` to display as `charging`, matching
+  public BM6 integration code, official-app behavior, and local BM200 probes.
+
 ## [0.2.0] - 2026-04-25
 
 ### Added
@@ -79,12 +92,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrent drive-update workers.
 - Fixed Settings status text so repeated saves do not claim a new USB OTG frame
   export started while an existing export is already running.
-- Fixed BM6-family current-state parsing so device status code `2` displays as
-  `charging` instead of being forced to `normal`.
 - Fixed USB OTG frame device selection so Battery Overview frame images honor
   the selected frame devices instead of only Fleet Trend charts.
 - Fixed USB OTG Battery Overview frame layout so three selected devices render
   in one row and larger selections paginate into balanced frame pages.
+- Fixed USB OTG Battery Overview frame pagination so frame preview and export
+  pages always contain at most three devices, even when older configs request a
+  larger per-image count.
 - Fixed Diagnostics frame preview links so every generated Battery Overview
   frame page is available when selected devices span multiple pages.
 - Fixed USB OTG Battery Overview frame status rendering so battery state,

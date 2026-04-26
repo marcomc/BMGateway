@@ -84,7 +84,7 @@ from .web_pages import (
     render_snapshot_html,
     render_usb_otg_export_pending_html,
 )
-from .web_pages_frame import frame_battery_overview_page_count
+from .web_pages_frame import FRAME_OVERVIEW_DEVICES_PER_PAGE, frame_battery_overview_page_count
 from .web_support import read_text
 
 __all__ = [
@@ -1394,7 +1394,10 @@ def serve_management(
                     image_height_px = int(form.get("image_height_px", ["234"])[0])
                     refresh_interval_seconds = int(form.get("refresh_interval_seconds", ["0"])[0])
                     overview_devices_per_image = int(
-                        form.get("overview_devices_per_image", ["5"])[0]
+                        form.get(
+                            "overview_devices_per_image",
+                            [str(FRAME_OVERVIEW_DEVICES_PER_PAGE)],
+                        )[0]
                     )
                 except ValueError:
                     configured_devices = load_device_registry(config.device_registry_path)
