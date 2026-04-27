@@ -108,6 +108,7 @@
   "Device added. First poll already running.": "ڈیوائس شامل ہو گئی۔ پہلا پول پہلے ہی چل رہا ہے۔",
   "Device added. First poll started.": "ڈیوائس شامل ہو گئی۔ پہلی پولنگ شروع ہو گئی۔",
   "Device discovery payloads": "Device discovery payloads",
+  "Download History": "ہسٹری ڈاؤن لوڈ کریں",
   "Device registry path": "Device registry path",
   "Devices": "ڈیوائسز",
   "Devices online: 0 / 1": "Devices online: 0 / 1",
@@ -425,5 +426,15 @@
   "العربية (Arabic)": "العربية (Arabic)",
   "हिन्दी (Hindi)": "हिन्दी (Hindi)",
   "বাংলা (Bengali)": "বাংলা (Bengali)",
-  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))"
+  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))",
+  "Downloading history records": "ہسٹری ریکارڈز ڈاؤن لوڈ ہو رہے ہیں",
+  "History Sync": "ہسٹری سنک",
+  "History import": "ہسٹری درآمد",
+  "History import status": "ہسٹری درآمد کی حالت",
+  "History records are being downloaded from the selected monitor.": "منتخب مانیٹر سے ہسٹری ریکارڈز ڈاؤن لوڈ ہو رہے ہیں۔",
+  "History sync already running": "ہسٹری سنک پہلے سے چل رہا ہے",
+  "Importing history records": "ہسٹری ریکارڈز درآمد ہو رہے ہیں",
+  "Preparing history download": "ہسٹری ڈاؤن لوڈ تیار ہو رہا ہے",
+  "Records": "ریکارڈز",
+  "This page updates automatically and returns to history when the import finishes.": "درآمد مکمل ہونے پر یہ صفحہ خود بخود اپ ڈیٹ ہو کر ہسٹری پر واپس جاتا ہے۔"
 }

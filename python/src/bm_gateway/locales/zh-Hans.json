@@ -108,6 +108,7 @@
   "Device added. First poll already running.": "设备已添加。首次轮询已在运行。",
   "Device added. First poll started.": "设备已添加。首次轮询已开始。",
   "Device discovery payloads": "设备发现有效负载",
+  "Download History": "下载历史",
   "Device registry path": "设备注册表路径",
   "Devices": "设备",
   "Devices online: 0 / 1": "在线设备：0 / 1",
@@ -425,5 +426,15 @@
   "العربية (Arabic)": "阿拉伯语",
   "हिन्दी (Hindi)": "हिन्दी（印地语）",
   "বাংলা (Bengali)": "বাংলা（孟加拉语）",
-  "简体中文 (Chinese (Simplified))": "简体中文（中文（简体））"
+  "简体中文 (Chinese (Simplified))": "简体中文（中文（简体））",
+  "Downloading history records": "正在下载历史记录",
+  "History Sync": "历史同步",
+  "History import": "历史导入",
+  "History import status": "历史导入状态",
+  "History records are being downloaded from the selected monitor.": "正在从所选监视器下载历史记录。",
+  "History sync already running": "历史同步已在运行",
+  "Importing history records": "正在导入历史记录",
+  "Preparing history download": "正在准备历史下载",
+  "Records": "记录",
+  "This page updates automatically and returns to history when the import finishes.": "导入完成后，此页面会自动更新并返回历史页面。"
 }

@@ -2027,6 +2027,7 @@ def render_history_html(
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
     language: str = "en",
+    message: str = "",
 ) -> str:
     from .web_pages_history import render_history_html as _render_history_html
 
@@ -2040,6 +2041,20 @@ def render_history_html(
         theme_preference=theme_preference,
         default_chart_range=default_chart_range,
         default_chart_metric=default_chart_metric,
+        language=language,
+        message=message,
+    )
+
+
+def render_history_sync_pending_html(
+    *, theme_preference: str = "system", language: str = "en"
+) -> str:
+    from .web_pages_history import (
+        render_history_sync_pending_html as _render_history_sync_pending_html,
+    )
+
+    return _render_history_sync_pending_html(
+        theme_preference=theme_preference,
         language=language,
     )
 

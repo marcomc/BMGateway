@@ -5,11 +5,13 @@
 - Expand BM6-family archive-history recovery beyond the verified bounded sync.
   BM200/BM6 archive import now reads cumulative `d15505` page counts, stores
   voltage, SoC, temperature, raw record, page selector, record index, and
-  timestamp quality, and runs through periodic/reconnect backfill plus a manual
-  Settings action. Next work is full 30-day page-count validation, stronger
-  overlap-based timestamp alignment for long absences, and archive-sync status
-  reporting. Keep the final `p` nibble raw until cranking or charging-test
-  events explain it.
+  timestamp quality, and runs through periodic/reconnect backfill plus a
+  per-device History page action. Manual BM200/BM6 sync now requests 85
+  cumulative pages, matching the 30-day retention estimate; next work is live
+  validation of the full-window result, stronger overlap-based timestamp
+  alignment for long absences, and richer archive-sync status reporting beyond
+  the manual progress page. Keep the final `p` nibble raw until cranking or
+  charging-test events explain it.
   Reference:
   [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.
@@ -187,20 +189,20 @@
     or releases the original app as expected
 
 - [ ] Expand archive-history backfill beyond the verified bounded BM200 path.
-  BM200/BM6 automatic periodic and reconnect-triggered import is implemented
-  for verified cumulative page counts through 3 pages, with a manual Settings
-  action for immediate bounded import. BM300 Pro/BM7 archive import is also
-  implemented behind a separate opt-in gate using byte-6 selector `01`.
-  Validate higher BM200/BM6 page counts before claiming full 30-day recovery,
-  and validate BM300 Pro/BM7 byte-6 selectors beyond `01` before claiming full
-  72-day recovery.
+  BM200/BM6 automatic periodic and reconnect-triggered import uses a
+  conservative configured page cap, while manual per-device sync on the History
+  page requests the full 85-page 30-day retention estimate. BM300 Pro/BM7
+  archive import is also implemented behind a separate opt-in gate using byte-6
+  selector `01`. Validate the full BM200/BM6 page-count result before claiming
+  complete 30-day recovery, and validate BM300 Pro/BM7 byte-6 selectors beyond
+  `01` before claiming full 72-day recovery.
   Reference:
   - [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
   Actions:
   - add stronger raw-sequence overlap timestamp alignment for long absences and
     imports that cross service restarts
-  - report last archive-sync time, inserted count, duplicate count, and failure
-    reason in status output
+  - report last archive-sync time, duplicate count, and failure reason in
+    persistent per-device status output
   - validate higher BM200/BM6 cumulative `d15505` page counts toward the
     advertised 30-day retention
   - validate higher BM300 Pro/BM7 byte-6 `d15505` selector counts toward the

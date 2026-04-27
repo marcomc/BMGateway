@@ -293,9 +293,6 @@ def render_settings_html(
         '<form method="post" action="/actions/republish-discovery">'
         f"{button('Republish Home Assistant Discovery', kind='secondary')}"
         "</form>"
-        '<form method="post" action="/actions/sync-history-now">'
-        f"{button('Sync History Now', kind='secondary')}"
-        "</form>"
         + (
             '<form method="post" action="/actions/refresh-usb-otg-drive">'
             f"{button('Refresh USB OTG Drive', kind='secondary')}"

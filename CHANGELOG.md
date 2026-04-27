@@ -16,8 +16,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   temperature, raw record storage, and a `--page-count` option for cumulative
   `d15505` history pages.
 - Added automatic BM200/BM6 archive-history backfill for visible devices,
-  driven by configurable periodic and reconnect thresholds, plus a Settings
-  action to run a bounded history import on demand.
+  driven by configurable periodic and reconnect thresholds, plus a per-device
+  History page action that requests the full 30-day BM200 retention window on
+  demand.
+- Added a History sync progress page for manual archive imports, with live
+  status, fetched-record totals, imported-record progress, and automatic return
+  to the selected History page.
 - Added gated BM300 Pro/BM7 archive-history import using the verified
   `d15505` byte-6 selector and the shared `vvv ss tt p` record layout, with a
   separate opt-in setting and page cap for future 72-day retention validation.

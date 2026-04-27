@@ -7,7 +7,7 @@ import math
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Mapping
+from typing import Callable, Mapping
 
 from .config import AppConfig
 from .device_registry import Device, device_driver_type
@@ -25,6 +25,7 @@ BM200_ARCHIVE_PROFILE = "bm6_d15505_b7_v1"
 BM300_ARCHIVE_PROFILE = "bm7_d15505_b6_v1"
 BM200_HISTORY_PAGE_SECONDS = 256 * 2 * 60
 BM300_HISTORY_PAGE_SECONDS = 883 * 2 * 60
+ArchiveSyncProgress = Callable[[int, int, str], None]
 
 
 def sync_bm200_device_archive(
@@ -33,12 +34,15 @@ def sync_bm200_device_archive(
     device: Device,
     database_path: Path,
     page_count: int = 3,
+    progress: ArchiveSyncProgress | None = None,
 ) -> dict[str, object]:
     if device.type != "bm200":
         raise ValueError(f"archive sync is only implemented for bm200 devices, got {device.type}")
 
     adapter = _active_adapter(config)
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
+    if progress is not None:
+        progress(0, max(1, page_count * 256), "Downloading history records")
     history = asyncio.run(
         read_bm200_history(
             address=device.mac,
@@ -49,6 +53,8 @@ def sync_bm200_device_archive(
         )
     )
     rows = [asdict(reading) for reading in history]
+    if progress is not None:
+        progress(0, len(rows), "Importing history records")
     inserted = import_archive_history(
         database_path,
         device_id=device.id,
@@ -59,7 +65,10 @@ def sync_bm200_device_archive(
         driver="bm200",
         profile=BM200_ARCHIVE_PROFILE,
         readings=rows,
+        progress=progress,
     )
+    if progress is not None:
+        progress(len(rows), len(rows), "History sync completed")
     return {
         "device_id": device.id,
         "fetched": len(rows),
@@ -76,6 +85,7 @@ def sync_bm300_device_archive(
     device: Device,
     database_path: Path,
     page_count: int = 3,
+    progress: ArchiveSyncProgress | None = None,
 ) -> dict[str, object]:
     if device_driver_type(device.type) != "bm300pro":
         raise ValueError(
@@ -84,6 +94,8 @@ def sync_bm300_device_archive(
 
     adapter = _active_adapter(config)
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
+    if progress is not None:
+        progress(0, max(1, page_count * 883), "Downloading history records")
     history = asyncio.run(
         read_bm300_history(
             address=device.mac,
@@ -94,6 +106,8 @@ def sync_bm300_device_archive(
         )
     )
     rows = [asdict(reading) for reading in history]
+    if progress is not None:
+        progress(0, len(rows), "Importing history records")
     inserted = import_archive_history(
         database_path,
         device_id=device.id,
@@ -104,7 +118,10 @@ def sync_bm300_device_archive(
         driver="bm300pro",
         profile=BM300_ARCHIVE_PROFILE,
         readings=rows,
+        progress=progress,
     )
+    if progress is not None:
+        progress(len(rows), len(rows), "History sync completed")
     return {
         "device_id": device.id,
         "fetched": len(rows),

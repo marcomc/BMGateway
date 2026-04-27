@@ -108,6 +108,7 @@
   "Device added. First poll already running.": "डिवाइस जोड़ा गया। पहला पोल पहले से चल रहा है।",
   "Device added. First poll started.": "डिवाइस जोड़ा गया। पहला पोल शुरू हुआ।",
   "Device discovery payloads": "Device discovery payloads",
+  "Download History": "इतिहास डाउनलोड करें",
   "Device registry path": "Device registry path",
   "Devices": "डिवाइस",
   "Devices online: 0 / 1": "Devices online: 0 / 1",
@@ -425,5 +426,15 @@
   "العربية (Arabic)": "العربية (Arabic)",
   "हिन्दी (Hindi)": "हिन्दी (Hindi)",
   "বাংলা (Bengali)": "বাংলা (Bengali)",
-  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))"
+  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))",
+  "Downloading history records": "इतिहास रिकॉर्ड डाउनलोड हो रहे हैं",
+  "History Sync": "इतिहास सिंक",
+  "History import": "इतिहास आयात",
+  "History import status": "इतिहास आयात स्थिति",
+  "History records are being downloaded from the selected monitor.": "चयनित मॉनिटर से इतिहास रिकॉर्ड डाउनलोड हो रहे हैं।",
+  "History sync already running": "इतिहास सिंक पहले से चल रहा है",
+  "Importing history records": "इतिहास रिकॉर्ड आयात हो रहे हैं",
+  "Preparing history download": "इतिहास डाउनलोड तैयार हो रहा है",
+  "Records": "रिकॉर्ड",
+  "This page updates automatically and returns to history when the import finishes.": "आयात पूरा होने पर यह पेज अपने आप अपडेट होकर इतिहास पर लौटता है।"
 }

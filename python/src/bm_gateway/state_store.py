@@ -6,9 +6,11 @@ import json
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import cast
+from typing import Callable, cast
 
 from .models import GatewaySnapshot
+
+ArchiveImportProgress = Callable[[int, int, str], None]
 
 
 def write_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
@@ -682,12 +684,16 @@ def import_archive_history(
     driver: str,
     profile: str,
     readings: list[dict[str, object]],
+    progress: ArchiveImportProgress | None = None,
 ) -> int:
     connection = _connect_database(path)
     imported_at = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
     inserted = 0
+    total = len(readings)
     try:
-        for reading in readings:
+        if progress is not None:
+            progress(0, total, "Importing history records")
+        for index, reading in enumerate(readings, start=1):
             cursor = connection.execute(
                 """
                 INSERT OR IGNORE INTO device_archive_readings (
@@ -733,6 +739,8 @@ def import_archive_history(
                 ),
             )
             inserted += int(cursor.rowcount or 0)
+            if progress is not None:
+                progress(index, total, "Importing history records")
         connection.commit()
     finally:
         connection.close()

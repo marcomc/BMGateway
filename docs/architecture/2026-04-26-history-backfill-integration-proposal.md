@@ -183,9 +183,28 @@ successful live poll.
 
 ### Manual Sync
 
-Expose a manual "Sync history now" action for the configured archive families.
-It should run the same bounded path as automatic sync and report inserted,
-ignored, and failed records.
+Expose manual archive sync as a per-device action on the History page, inside
+the selected device's History Chart section. Do not expose it as a global
+Settings action: an operator choosing "download history now" is usually acting
+on one battery, and a global import would hold BLE links across every configured
+monitor.
+
+Manual sync intentionally uses a different page policy from automatic sync:
+
+- BM200/BM6 manual sync requests 85 cumulative pages. This matches the
+  advertised 30-day retention estimate at 2-minute cadence with 256 records per
+  page.
+- BM200/BM6 automatic periodic/reconnect sync remains bounded by
+  `bm200_max_pages_per_sync` to reduce routine BLE time and battery impact.
+- BM300 Pro/BM7 manual sync keeps using the configured BM300 page cap until
+  selectors beyond `01` are validated against real devices.
+
+The action opens an intermediate progress page, polls
+`/api/history-sync/status`, then redirects back to the selected History page.
+The progress page reports the active phase, fetched-record totals, processed
+records during DB import, inserted records, and the failure reason when the
+import fails. Ignored-duplicate counts remain part of the archive-sync
+status-output task.
 
 ## Deduplication And Timestamping
 
@@ -282,7 +301,9 @@ Meaning:
   least 8 hours without a successful live row.
 - `safety_margin_seconds = 7200`: request a two-hour overlap so page-boundary
   timestamp estimates do not leave small gaps.
-- `bm200_max_pages_per_sync = 3`: currently verified safe BM200/BM6 page count.
+- `bm200_max_pages_per_sync = 3`: conservative BM200/BM6 page cap for automatic
+  periodic/reconnect sync. Manual per-device sync requests the 85-page 30-day
+  window instead of this routine cap.
 - `bm300_enabled = false`: keep BM7 automatic archive import opt-in until
   byte-6 page/range behavior is validated beyond selector `01`.
 - `bm300_max_pages_per_sync = 1`: bounded BM300 Pro/BM7 selector cap when
@@ -297,7 +318,8 @@ Meaning:
 2. Add archive schema fields for SoC, temperature, raw record, profile,
    selector, record index, and timestamp quality.
 3. Implement a BM200/BM6 archive reader for cumulative `d15505` page counts.
-   Done for verified page selectors 1 through 3.
+   Done for configured page counts up to the 85-selector 30-day estimate; live
+   validation of the full window remains open.
 4. Implement idempotent archive import with raw-sequence overlap alignment.
    Done for duplicate suppression by `(device_id, ts, profile)`; stronger raw
    sequence alignment remains open.
@@ -305,8 +327,8 @@ Meaning:
    reconnect and periodic bounded sync. Done for BM200/BM6.
 6. Keep archive sync failures non-fatal for normal live polling. Done for
    candidate sync; errors are reported in the sync result payload.
-7. Add a Settings action for an immediate bounded history import. Done for
-   enabled BM200 devices and opted-in BM300 Pro/BM7 devices.
+7. Add a per-device History page action for immediate archive import. Done for
+   enabled BM200 devices and BM300 Pro/BM7 devices.
 8. Add web or CLI status output showing last archive sync, inserted rows,
    ignored duplicates, and failure reason.
 9. Add tests for short absence, long absence beyond 3 pages, repeated imports,
@@ -324,8 +346,10 @@ Meaning:
   periodic interval.
 - Charts can show 2-minute archive voltage, SoC, and temperature without losing
   live connectivity rows.
-- The implementation clearly reports the configured cumulative page count and
-  the fact that full 30-day BM200/BM6 recovery is not yet validated.
+- Automatic sync clearly reports the configured cumulative page count.
+- Manual BM200/BM6 sync requests the 85-page 30-day window and reports how many
+  records were fetched and inserted, while live validation of full-window
+  behavior remains tracked.
 - BM300 Pro/BM7 archive sync remains disabled by default but can be enabled
   explicitly with its own page cap.
 

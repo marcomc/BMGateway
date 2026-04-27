@@ -548,6 +548,7 @@ def chart_card(
     default_metric: str,
     legend: list[tuple[str, str]],
     show_markers: bool = False,
+    actions_html: str = "",
 ) -> str:
     points_json = html.escape(json.dumps(points, separators=(",", ":")))
     legend_html = "".join(
@@ -583,6 +584,11 @@ def chart_card(
     subtitle_html = (
         f'<div class="section-subtitle">{html.escape(subtitle)}</div>' if subtitle else ""
     )
+    actions_block = (
+        f'<div class="inline-actions chart-card-actions">{actions_html}</div>'
+        if actions_html
+        else ""
+    )
     return (
         '<section class="chart-card">'
         '<div class="chart-card-header">'
@@ -591,6 +597,7 @@ def chart_card(
         f'<h2 class="section-title">{html.escape(title)}</h2>'
         f"{subtitle_html}"
         "</div>"
+        f"{actions_block}"
         '<div class="control-rail chart-metric-rail">'
         f'<div class="control-segment tab-strip">{metric_buttons}</div>'
         "</div>"

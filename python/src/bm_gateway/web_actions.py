@@ -7,8 +7,13 @@ import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
-from .archive_sync import sync_archive_backfill_candidates
+from .archive_sync import (
+    sync_archive_backfill_candidates,
+    sync_bm200_device_archive,
+    sync_bm300_device_archive,
+)
 from .config import load_config, write_config
 from .device_registry import (
     Device,
@@ -32,6 +37,9 @@ from .state_store import (
 )
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
+
+BM200_FULL_HISTORY_PAGE_COUNT = 85
+HistorySyncProgress = Callable[[int, int, str], None]
 
 
 def _config_and_registry_texts(config_path: Path) -> tuple[str, str]:
@@ -709,6 +717,47 @@ def sync_history_now(
         "errors": errors,
         "results": results,
     }
+
+
+def sync_device_history_now(
+    *,
+    config_path: Path,
+    device_id: str,
+    state_dir: Path | None = None,
+    progress: HistorySyncProgress | None = None,
+) -> dict[str, object]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    device = next((item for item in devices if item.id == device_id), None)
+    if device is None:
+        raise ValueError(f"Unknown device: {device_id}")
+    if not device.enabled:
+        raise ValueError(f"Device is disabled: {device_id}")
+
+    driver_type = device_driver_type(device.type)
+    database_path = database_file_path(config, state_dir=state_dir)
+    if driver_type == "bm200":
+        payload = sync_bm200_device_archive(
+            config=config,
+            device=device,
+            database_path=database_path,
+            page_count=BM200_FULL_HISTORY_PAGE_COUNT,
+            progress=progress,
+        )
+    elif driver_type == "bm300pro":
+        payload = sync_bm300_device_archive(
+            config=config,
+            device=device,
+            database_path=database_path,
+            page_count=max(1, config.archive_sync.bm300_max_pages_per_sync),
+            progress=progress,
+        )
+    else:
+        raise ValueError(f"History sync is not implemented for device type: {device.type}")
+
+    payload["requested"] = 1
+    payload["synced"] = True
+    return payload
 
 
 def _sum_result_int(results: list[dict[str, object]], key: str) -> int:

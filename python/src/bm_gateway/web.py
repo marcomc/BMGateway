@@ -38,7 +38,7 @@ from .web_actions import (
     schedule_host_reboot,
     schedule_host_shutdown,
     start_run_once_via_cli,
-    sync_history_now,
+    sync_device_history_now,
     update_archive_sync_preferences,
     update_bluetooth_preferences,
     update_config_from_text,
@@ -78,6 +78,7 @@ from .web_pages import (
     render_frame_battery_overview_html,
     render_frame_fleet_trend_html,
     render_history_html,
+    render_history_sync_pending_html,
     render_home_html,
     render_management_html,
     render_reboot_pending_html,
@@ -102,6 +103,7 @@ __all__ = [
     "render_frame_battery_overview_html",
     "render_frame_fleet_trend_html",
     "render_history_html",
+    "render_history_sync_pending_html",
     "render_management_html",
     "render_reboot_pending_html",
     "render_settings_html",
@@ -114,7 +116,7 @@ __all__ = [
     "refresh_usb_otg_drive",
     "restore_usb_otg_boot_mode",
     "start_run_once_via_cli",
-    "sync_history_now",
+    "sync_device_history_now",
     "update_archive_sync_preferences",
     "update_bluetooth_preferences",
     "update_config_from_text",
@@ -140,6 +142,18 @@ _USB_OTG_EXPORT_STATUS: dict[str, object] = {
     "detail": "",
     "redirect_message": "",
 }
+_HISTORY_SYNC_LOCK = threading.Lock()
+_HISTORY_SYNC_STATUS: dict[str, object] = {
+    "status": "idle",
+    "device_id": "",
+    "completed": 0,
+    "total": 0,
+    "fetched": 0,
+    "inserted": 0,
+    "message": "Preparing history download",
+    "detail": "",
+    "redirect_message": "",
+}
 _RUN_ONCE_LOCK = threading.Lock()
 _RUN_ONCE_PROCESS: object | None = None
 
@@ -156,6 +170,93 @@ def _usb_otg_export_status_snapshot() -> dict[str, object]:
     total = _int_from_mapping(snapshot, "total")
     snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
     return snapshot
+
+
+def _set_history_sync_status(**updates: object) -> None:
+    with _HISTORY_SYNC_LOCK:
+        _HISTORY_SYNC_STATUS.update(updates)
+
+
+def _history_sync_status_snapshot() -> dict[str, object]:
+    with _HISTORY_SYNC_LOCK:
+        snapshot = dict(_HISTORY_SYNC_STATUS)
+    completed = _int_from_mapping(snapshot, "completed")
+    total = _int_from_mapping(snapshot, "total")
+    snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
+    return snapshot
+
+
+def _start_tracked_history_sync(
+    *,
+    config_path: Path,
+    device_id: str,
+    state_dir: Path | None = None,
+) -> threading.Thread | None:
+    with _HISTORY_SYNC_LOCK:
+        if _HISTORY_SYNC_STATUS.get("status") == "running":
+            return None
+        _HISTORY_SYNC_STATUS.update(
+            {
+                "status": "running",
+                "device_id": device_id,
+                "completed": 0,
+                "total": 0,
+                "fetched": 0,
+                "inserted": 0,
+                "message": "Preparing history download",
+                "detail": "",
+                "redirect_message": "",
+            }
+        )
+
+    def _progress(completed: int, total: int, message: str) -> None:
+        _set_history_sync_status(
+            status="running",
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    def _worker() -> None:
+        try:
+            payload = sync_device_history_now(
+                config_path=config_path,
+                device_id=device_id,
+                state_dir=state_dir,
+                progress=_progress,
+            )
+            fetched = _int_from_mapping(payload, "fetched")
+            inserted = _int_from_mapping(payload, "inserted")
+            resolved_device_id = str(payload.get("device_id") or device_id)
+            message = (
+                f"History sync completed: {resolved_device_id}, "
+                f"inserted {inserted} of {fetched} records"
+            )
+            _set_history_sync_status(
+                status="completed",
+                device_id=resolved_device_id,
+                completed=fetched,
+                total=fetched,
+                fetched=fetched,
+                inserted=inserted,
+                message="History sync completed",
+                detail=f"Inserted {inserted} of {fetched} records.",
+                redirect_message=message,
+            )
+        except Exception as exc:  # pragma: no cover - defensive web boundary
+            detail = str(exc) or exc.__class__.__name__
+            sync_status = _history_sync_status_snapshot()
+            _set_history_sync_status(
+                status="failed",
+                completed=_int_from_mapping(sync_status, "total"),
+                message="History sync failed",
+                detail=detail,
+                redirect_message=f"History sync failed: {detail}",
+            )
+
+    thread = threading.Thread(target=_worker, daemon=True, name="history-sync")
+    thread.start()
+    return thread
 
 
 def _start_tracked_run_once_via_cli(
@@ -478,6 +579,20 @@ def serve_management(
                         status["redirect_message"] = translation.gettext(redirect_message)
                 self._send_json(status)
                 return
+            if parsed.path == "/api/history-sync/status":
+                status = _history_sync_status_snapshot()
+                translation = translation_for(request_language)
+                message = str(status.get("message", ""))
+                redirect_message = str(status.get("redirect_message", ""))
+                status["message"] = translation.gettext(message)
+                if redirect_message:
+                    if ": " in redirect_message:
+                        prefix, detail = redirect_message.split(": ", 1)
+                        status["redirect_message"] = f"{translation.gettext(prefix)}: {detail}"
+                    else:
+                        status["redirect_message"] = translation.gettext(redirect_message)
+                self._send_json(status)
+                return
             if parsed.path == "/api/devices":
                 self._send_json({"devices": serialized_devices})
                 return
@@ -526,6 +641,15 @@ def serve_management(
             if parsed.path == "/usb-otg-export/progress":
                 self._send_html(
                     render_usb_otg_export_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
+                return
+
+            if parsed.path == "/history-sync/progress":
+                self._send_html(
+                    render_history_sync_pending_html(
                         theme_preference=config.web.appearance,
                         language=request_language,
                     )
@@ -593,6 +717,7 @@ def serve_management(
             if parsed.path == "/history":
                 params = parse_qs(parsed.query)
                 requested_device_id = params.get("device_id", [""])[0]
+                message = params.get("message", [""])[0]
                 available_device_ids = [
                     str(item.get("id", ""))
                     for item in serialized_devices
@@ -638,6 +763,7 @@ def serve_management(
                     default_chart_range=config.web.default_chart_range,
                     default_chart_metric=config.web.default_chart_metric,
                     language=request_language,
+                    message=message,
                 )
                 self._send_html(html)
                 return
@@ -1559,24 +1685,24 @@ def serve_management(
                 self.end_headers()
                 return
 
-            if parsed.path == "/actions/sync-history-now":
-                try:
-                    payload = sync_history_now(config_path=config_path, state_dir=state_dir)
-                    requested = _int_from_mapping(payload, "requested")
-                    synced = _int_from_mapping(payload, "synced")
-                    fetched = _int_from_mapping(payload, "fetched")
-                    inserted = _int_from_mapping(payload, "inserted")
-                    history_errors_payload = payload.get("errors", [])
-                    message = (
-                        f"History sync completed: synced {synced}/{requested} devices, "
-                        f"inserted {inserted} of {fetched} records"
-                    )
-                    if isinstance(history_errors_payload, list) and history_errors_payload:
-                        message += f"; errors {len(history_errors_payload)}"
-                except Exception as exc:  # pragma: no cover - defensive web boundary
-                    message = f"History sync failed: {exc}"
+            if parsed.path == "/actions/sync-device-history":
+                device_id = form.get("device_id", [""])[0]
+                sync_thread = _start_tracked_history_sync(
+                    config_path=config_path,
+                    device_id=device_id,
+                    state_dir=state_dir,
+                )
+                redirect_params: dict[str, str] = {}
+                if device_id:
+                    redirect_params["device_id"] = device_id
+                if sync_thread is None:
+                    redirect_params["message"] = "History sync already running"
                 self.send_response(303)
-                self.send_header("Location", "/settings?" + urlencode({"message": message}))
+                self.send_header(
+                    "Location",
+                    "/history-sync/progress"
+                    + (("?" + urlencode(redirect_params)) if redirect_params else ""),
+                )
                 self.end_headers()
                 return
 

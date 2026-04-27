@@ -108,6 +108,7 @@
   "Device added. First poll already running.": "Устройство добавлено. Первый опрос уже выполняется.",
   "Device added. First poll started.": "Устройство добавлено. Первый опрос запущен.",
   "Device discovery payloads": "Device discovery payloads",
+  "Download History": "Скачать историю",
   "Device registry path": "Device registry path",
   "Devices": "Устройства",
   "Devices online: 0 / 1": "Devices online: 0 / 1",
@@ -425,5 +426,15 @@
   "العربية (Arabic)": "العربية (Arabic)",
   "हिन्दी (Hindi)": "हिन्दी (Hindi)",
   "বাংলা (Bengali)": "বাংলা (Bengali)",
-  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))"
+  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))",
+  "Downloading history records": "Загрузка записей истории",
+  "History Sync": "Синхронизация истории",
+  "History import": "Импорт истории",
+  "History import status": "Статус импорта истории",
+  "History records are being downloaded from the selected monitor.": "Записи истории загружаются с выбранного монитора.",
+  "History sync already running": "Синхронизация истории уже выполняется",
+  "Importing history records": "Импорт записей истории",
+  "Preparing history download": "Подготовка загрузки истории",
+  "Records": "Записи",
+  "This page updates automatically and returns to history when the import finishes.": "Эта страница обновляется автоматически и возвращается к истории после завершения импорта."
 }

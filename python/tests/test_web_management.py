@@ -35,6 +35,7 @@ from bm_gateway.web import (
     render_frame_battery_overview_html,
     render_frame_fleet_trend_html,
     render_history_html,
+    render_history_sync_pending_html,
     render_home_html,
     render_management_html,
     render_settings_html,
@@ -60,6 +61,7 @@ from bm_gateway.web_actions import (
     restart_system_service,
     restore_usb_otg_boot_mode,
     schedule_host_shutdown,
+    sync_device_history_now,
     sync_history_now,
 )
 from bm_gateway.web_pages_frame import frame_battery_overview_page_count
@@ -494,6 +496,17 @@ def test_render_usb_otg_export_pending_html_contains_progress_status_page() -> N
     assert 'fetch("/api/usb-otg-export/status", { cache: "no-store" })' in html
     assert 'window.location.replace("/settings?message=" + message)' in html
     assert 'window.location.replace("/settings?edit=1&message=" + message)' not in html
+
+
+def test_render_history_sync_pending_html_contains_progress_status_page() -> None:
+    html = render_history_sync_pending_html(theme_preference="dark")
+
+    assert "History Sync" in html
+    assert 'id="history-sync-progress-bar"' in html
+    assert 'id="history-sync-percent"' in html
+    assert 'id="history-sync-status-text"' in html
+    assert 'fetch("/api/history-sync/status", { cache: "no-store" })' in html
+    assert 'window.location.replace("/history?" + params.toString())' in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -1531,6 +1544,67 @@ def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
     assert captured_pages == {"bm200_house": 2, "bm300_doc": 5}
 
 
+def test_sync_device_history_now_requests_full_bm200_retention(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_sync_bm200_device_archive(
+        *,
+        config: object,
+        device: Any,
+        database_path: Path,
+        page_count: int,
+        progress: Any | None = None,
+    ) -> dict[str, object]:
+        _ = (config, database_path, progress)
+        captured["device_id"] = device.id
+        captured["page_count"] = page_count
+        return {
+            "device_id": device.id,
+            "fetched": 512,
+            "inserted": 64,
+            "page_count": page_count,
+        }
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.sync_bm200_device_archive",
+        fake_sync_bm200_device_archive,
+    )
+
+    payload = sync_device_history_now(
+        config_path=config_path,
+        device_id="bm200_house",
+        state_dir=tmp_path / "state",
+    )
+
+    assert payload["requested"] == 1
+    assert payload["synced"] is True
+    assert payload["fetched"] == 512
+    assert payload["inserted"] == 64
+    assert captured == {"device_id": "bm200_house", "page_count": 85}
+
+
 def test_settings_display_post_persists_appearance_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
@@ -2051,7 +2125,7 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
     assert payload["message"] == "Immagini cornice USB OTG esportate"
 
 
-def test_manual_history_sync_action_redirects_with_import_summary(
+def test_manual_device_history_sync_action_redirects_to_selected_history(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
 ) -> None:
@@ -2063,19 +2137,33 @@ def test_manual_history_sync_action_redirects_with_import_summary(
     )
     from bm_gateway.web import serve_management
 
-    calls: list[tuple[Path, Path | None]] = []
+    history_finished = threading.Event()
+    calls: list[tuple[Path, str, Path | None]] = []
 
-    def _sync_history_now(*, config_path: Path, state_dir: Path | None = None) -> dict[str, object]:
-        calls.append((config_path, state_dir))
+    def _sync_device_history_now(
+        *,
+        config_path: Path,
+        device_id: str,
+        state_dir: Path | None = None,
+        progress: Any | None = None,
+    ) -> dict[str, object]:
+        calls.append((config_path, device_id, state_dir))
+        if callable(progress):
+            progress(0, 512, "Downloading history records")
+            progress(128, 512, "Importing history records")
+            progress(512, 512, "History sync completed")
+        history_finished.set()
         return {
-            "requested": 2,
-            "synced": 2,
+            "device_id": device_id,
+            "requested": 1,
+            "synced": True,
             "fetched": 512,
             "inserted": 128,
             "errors": [],
+            "page_count": 85,
         }
 
-    monkeypatch.setattr("bm_gateway.web.sync_history_now", _sync_history_now)
+    monkeypatch.setattr("bm_gateway.web.sync_device_history_now", _sync_device_history_now)
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -2094,8 +2182,8 @@ def test_manual_history_sync_action_redirects_with_import_summary(
     server_thread.start()
 
     request = urllib.request.Request(
-        f"http://{host}:{port}/actions/sync-history-now",
-        data=b"",
+        f"http://{host}:{port}/actions/sync-device-history",
+        data=urllib.parse.urlencode({"device_id": "bm200_house"}).encode("utf-8"),
         method="POST",
     )
     deadline = time.monotonic() + 2.0
@@ -2108,13 +2196,33 @@ def test_manual_history_sync_action_redirects_with_import_summary(
                 raise
             time.sleep(0.02)
     with response_handle as response:
+        html = response.read().decode("utf-8")
         assert response.status == 200
-        params = parse_qs(urlparse(response.url).query)
+        parsed_response_url = urlparse(response.url)
 
-    assert params["message"] == [
-        "History sync completed: synced 2/2 devices, inserted 128 of 512 records"
-    ]
-    assert calls == [(config_path, tmp_path / "state")]
+    assert parsed_response_url.path == "/history-sync/progress"
+    assert parse_qs(parsed_response_url.query)["device_id"] == ["bm200_house"]
+    assert "History Sync" in html
+    assert history_finished.wait(timeout=1.0)
+    assert calls == [(config_path, "bm200_house", tmp_path / "state")]
+
+    status_request = urllib.request.Request(
+        f"http://{host}:{port}/api/history-sync/status",
+        headers={"Accept-Language": "it"},
+    )
+    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    assert payload["status"] == "completed"
+    assert payload["device_id"] == "bm200_house"
+    assert payload["completed"] == 512
+    assert payload["total"] == 512
+    assert payload["fetched"] == 512
+    assert payload["inserted"] == 128
+    assert payload["message"] == "Sincronizzazione storico completata"
+    assert payload["redirect_message"] == (
+        "Sincronizzazione storico completata: bm200_house, inserted 128 of 512 records"
+    )
 
 
 def test_compact_mac_address_is_normalized() -> None:
@@ -2297,8 +2405,8 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Archive history import" in html
     assert "Periodic sync interval" in html
     assert "BM200 pages per sync" in html
-    assert "Sync History Now" in html
-    assert 'action="/actions/sync-history-now"' in html
+    assert "Sync History Now" not in html
+    assert 'action="/actions/sync-history-now"' not in html
     assert "Visible overview cards" not in html
     assert "Edit settings" in html
     assert 'href="/settings?edit=1"' in html
@@ -3734,6 +3842,46 @@ def test_render_history_html_reserves_second_badge_slot_for_non_vehicle_devices(
     assert "badge-placeholder" in html
 
 
+def test_render_history_html_shows_per_device_history_download_action() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+                "type": "bm200",
+            }
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert 'action="/actions/sync-device-history"' in html
+    assert 'name="device_id" value="bm200_house"' in html
+    assert "Download History" in html
+    assert html.index("History Chart") < html.index("Download History")
+
+
+def test_render_history_html_shows_history_action_message() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+                "type": "bm200",
+            }
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+        message="History sync completed: bm200_house, inserted 128 of 512 records",
+    )
+
+    assert "History sync completed: bm200_house, inserted 128 of 512 records" in html
+
+
 def test_render_settings_html_threads_appearance_to_document_root() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(config, web=replace(config.web, appearance="dark"))
@@ -4284,7 +4432,7 @@ def test_render_history_html_shows_device_selector_and_quick_switch_links() -> N
     assert "Batteries" in html
     assert "History Device" not in html
     assert 'action="/history"' not in html
-    assert 'name="device_id"' not in html
+    assert '<form method="get" action="/history"' not in html
     assert 'href="/history?device_id=bm200_house"' in html
     assert 'href="/history?device_id=starter_battery"' in html
     assert 'aria-current="page"' in html

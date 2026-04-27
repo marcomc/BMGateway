@@ -110,6 +110,7 @@
   "Device added. First poll already running.": "Appareil ajouté. Le premier relevé est déjà en cours.",
   "Device added. First poll started.": "Appareil ajoute. Premiere interrogation lancee.",
   "Device discovery payloads": "Charges utiles de découverte des appareils",
+  "Download History": "Télécharger l'historique",
   "Device registry path": "Chemin du registre des appareils",
   "Devices": "Appareils",
   "Devices online: 0 / 1": "Devices online: 0 / 1",
@@ -433,5 +434,15 @@
   "العربية (Arabic)": "العربية (Arabic)",
   "हिन्दी (Hindi)": "हिन्दी (Hindi)",
   "বাংলা (Bengali)": "বাংলা (Bengali)",
-  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))"
+  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))",
+  "Downloading history records": "Telechargement des enregistrements d'historique",
+  "History Sync": "Synchronisation de l'historique",
+  "History import": "Import de l'historique",
+  "History import status": "Etat de l'import de l'historique",
+  "History records are being downloaded from the selected monitor.": "Les enregistrements d'historique sont telecharges depuis le moniteur selectionne.",
+  "History sync already running": "La synchronisation de l'historique est deja en cours",
+  "Importing history records": "Import des enregistrements d'historique",
+  "Preparing history download": "Preparation du telechargement de l'historique",
+  "Records": "Enregistrements",
+  "This page updates automatically and returns to history when the import finishes.": "Cette page se met a jour automatiquement et retourne a l'historique a la fin de l'import."
 }
