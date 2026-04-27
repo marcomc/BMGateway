@@ -208,6 +208,8 @@ def _history_device_selector_html(
             "</div>"
             "</a>"
         )
+    initial_columns = min(max(len(device_cards), 1), 4)
+    initial_rows = 1 if len(device_cards) <= 4 else 2
     return section_card(
         title="Batteries",
         body=(
@@ -222,7 +224,8 @@ def _history_device_selector_html(
             "</div>"
             f'<div id="{track_id}" class="history-device-scroller is-single-page">'
             '<div class="history-device-page is-single-page page-multi-cards" '
-            'style="--history-device-columns: 1; --history-device-rows: 1">'
+            f'style="--history-device-columns: {initial_columns}; '
+            f'--history-device-rows: {initial_rows}">'
             f"{''.join(device_cards)}"
             "</div>"
             "</div>"
@@ -352,6 +355,7 @@ def _home_overview_script(track_id: str) -> str:
   const cards = Array.from(track.querySelectorAll(".home-overview-card"));
   let pages = [];
   let currentPage = 0;
+  let lastLayoutKey = "";
   function cardClass(count, isSinglePage) {{
     const classes = ["home-overview-page"];
     if (isSinglePage) classes.push("is-single-page");
@@ -376,6 +380,13 @@ def _home_overview_script(track_id: str) -> str:
   }}
   function buildPages() {{
     const {{ columns, capacity, cardSize }} = pageSizing();
+    const layoutKey = `${{columns}}:${{capacity}}:${{Math.round(cardSize)}}:${{cards.length}}`;
+    if (layoutKey === lastLayoutKey && pages.length > 0) {{
+      if (controls) controls.hidden = pages.length <= 1;
+      syncButtons();
+      return;
+    }}
+    lastLayoutKey = layoutKey;
     const groupedCards = [];
     for (let index = 0; index < cards.length; index += capacity) {{
       groupedCards.push(cards.slice(index, index + capacity));
@@ -407,7 +418,10 @@ def _home_overview_script(track_id: str) -> str:
   }}
   function scrollToPage(index) {{
     currentPage = Math.max(0, Math.min(index, pages.length - 1));
-    pages[currentPage].scrollIntoView({{ behavior: "smooth", inline: "start", block: "nearest" }});
+    track.scrollTo({{
+      left: pages[currentPage].offsetLeft - track.offsetLeft,
+      behavior: "smooth",
+    }});
     syncButtons();
   }}
   if (previousButton) {{
@@ -471,6 +485,7 @@ def _history_device_selector_script(track_id: str = "history-device-track") -> s
   const cards = Array.from(track.querySelectorAll(".history-device-card"));
   let pages = [];
   let currentPage = 0;
+  let lastLayoutKey = "";
   function pageClass(count, isSinglePage) {{
     const classes = ["history-device-page"];
     if (isSinglePage) classes.push("is-single-page");
@@ -482,15 +497,27 @@ def _history_device_selector_script(track_id: str = "history-device-track") -> s
   function pageSizing() {{
     const styles = window.getComputedStyle(track);
     const minCard = parseFloat(styles.getPropertyValue("--history-device-card-min")) || 220;
+    const maxCard = parseFloat(styles.getPropertyValue("--history-device-card-max")) || minCard;
     const gap = parseFloat(styles.getPropertyValue("--history-device-gap")) || 16;
-    const width = Math.max(track.clientWidth, minCard);
-    const rawColumns = Math.floor((width + gap) / (minCard + gap));
-    const columns = Math.max(1, Math.min(4, cards.length || 1, rawColumns));
-    const capacity = Math.max(1, Math.min(4, columns * 2));
-    return {{ columns, capacity }};
+    const pagePadding = parseFloat(styles.getPropertyValue("--history-device-page-padding")) || 0;
+    const width = Math.max(track.clientWidth - (pagePadding * 2), minCard);
+    const columnBasis = minCard;
+    const rawColumns = Math.floor((width + gap) / (columnBasis + gap));
+    const columns = Math.max(1, Math.min(cards.length || 1, rawColumns));
+    const availableCard = (width - (gap * Math.max(0, columns - 1))) / columns;
+    const cardSize = Math.max(minCard, Math.min(maxCard, availableCard));
+    const capacity = Math.max(1, columns * 2);
+    return {{ columns, capacity, cardSize }};
   }}
   function buildPages() {{
-    const {{ columns, capacity }} = pageSizing();
+    const {{ columns, capacity, cardSize }} = pageSizing();
+    const layoutKey = `${{columns}}:${{capacity}}:${{Math.round(cardSize)}}:${{cards.length}}`;
+    if (layoutKey === lastLayoutKey && pages.length > 0) {{
+      if (controls) controls.hidden = pages.length <= 1;
+      syncButtons();
+      return;
+    }}
+    lastLayoutKey = layoutKey;
     const groupedCards = [];
     for (let index = 0; index < cards.length; index += capacity) {{
       groupedCards.push(cards.slice(index, index + capacity));
@@ -507,6 +534,7 @@ def _history_device_selector_script(track_id: str = "history-device-track") -> s
       page.className = pageClass(group.length, isSinglePage);
       page.style.setProperty("--history-device-columns", String(columns));
       page.style.setProperty("--history-device-rows", String(rows));
+      page.style.setProperty("--history-device-card-size", `${{Math.round(cardSize)}}px`);
       group.forEach((card) => page.appendChild(card));
       track.appendChild(page);
       return page;
@@ -521,7 +549,10 @@ def _history_device_selector_script(track_id: str = "history-device-track") -> s
   }}
   function scrollToPage(index) {{
     currentPage = Math.max(0, Math.min(index, pages.length - 1));
-    pages[currentPage].scrollIntoView({{ behavior: "smooth", inline: "start", block: "nearest" }});
+    track.scrollTo({{
+      left: pages[currentPage].offsetLeft - track.offsetLeft,
+      behavior: "smooth",
+    }});
     syncButtons();
   }}
   if (previousButton) {{
@@ -560,6 +591,9 @@ def _history_device_selector_script(track_id: str = "history-device-track") -> s
     new ResizeObserver(scheduleBuild).observe(track);
   }} else {{
     window.addEventListener("resize", scheduleBuild);
+  }}
+  if (window.visualViewport) {{
+    window.visualViewport.addEventListener("resize", scheduleBuild, {{ passive: true }});
   }}
 }})();
 </script>
@@ -1301,6 +1335,8 @@ def _status_kind(state: str, error_code: str | None = None, connected: bool = Tr
         return "offline"
     if error_code is not None or normalized in {"error", "critical"}:
         return "error"
+    if normalized == "low":
+        return "low"
     if normalized in {"warning", "degraded", "timeout"}:
         return "warning"
     return "ok"

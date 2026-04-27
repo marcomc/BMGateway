@@ -34,12 +34,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `d15505` byte-6 selector and the shared `vvv ss tt p` record layout, with a
   separate opt-in setting and page cap for future 72-day retention validation.
 
+### Changed
+
+- Aligned the History `Batteries` selector pagination with the Home Battery
+  Overview responsive two-row pagination logic.
+- Reduced initial layout shifts in the Home Battery Overview and History
+  `Batteries` pagers, and made small History battery sets render as one row
+  when the available width supports it without browser-specific row stretching.
+
 ### Fixed
 
 - Hardened Raspberry Pi bootstrap dependency installation so fresh installs,
   Raspberry Pi Imager first-run setup, direct service refreshes, and Ansible
   provisioning install the documented runtime, web, Bluetooth, and USB OTG
   system packages consistently.
+- Fixed Home Battery Overview status rendering so monitor-reported `low`
+  battery states show red status, percentage, and battery-badge accents instead
+  of `Battery OK`.
 - Reduced History, Fleet Trend, Device Detail, and frame-chart render cost by
   compressing management responses, moving chart datasets out of heavy HTML
   attributes, compacting dense chart ranges before SVG rendering, limiting the
