@@ -175,6 +175,67 @@ def test_rename_history_device_id_updates_raw_daily_and_archive_tables(
     assert archive_metadata == [("bm200", "Starter Battery", "AA:BB:CC:DD:EE:99")]
 
 
+def test_import_archive_history_preserves_bm6_history_fields(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    inserted = import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="bm6_d15505_b7_v1",
+        readings=[
+            {
+                "ts": "2026-04-26T18:00:00+00:00",
+                "voltage": 13.23,
+                "soc": 76,
+                "temperature": 23.0,
+                "event_type": 0,
+                "raw_record": "52b4c170",
+                "page_selector": 2,
+                "record_index": 0,
+                "timestamp_quality": "estimated",
+            },
+            {
+                "ts": "2026-04-26T17:58:00+00:00",
+                "voltage": 13.23,
+                "soc": 77,
+                "temperature": 22.0,
+                "event_type": 0,
+                "raw_record": "52b4d160",
+                "page_selector": 2,
+                "record_index": 1,
+                "timestamp_quality": "estimated",
+            },
+        ],
+    )
+
+    assert inserted == 2
+    archive = fetch_archive_history(database_path, device_id="bm200_house", limit=10)
+    assert archive[0]["soc"] == 76
+    assert archive[0]["temperature"] == 23.0
+    assert archive[0]["raw_record"] == "52b4c170"
+    assert archive[0]["page_selector"] == 2
+    assert archive[0]["record_index"] == 0
+    assert archive[0]["timestamp_quality"] == "estimated"
+    assert fetch_recent_history(database_path, device_id="bm200_house", limit=1)[0] == {
+        "ts": "2026-04-26T18:00:00+00:00",
+        "voltage": 13.23,
+        "soc": 76,
+        "temperature": 23.0,
+        "state": "archive",
+        "error_code": None,
+        "error_detail": None,
+        "sample_source": "device_archive",
+    }
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+    assert daily[0]["avg_soc"] == 76.5
+    assert daily[0]["avg_temperature"] == 22.5
+
+
 def test_history_device_id_exists_detects_existing_storage_identity(tmp_path: Path) -> None:
     database_path = tmp_path / "gateway.db"
     persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))

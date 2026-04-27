@@ -2,19 +2,24 @@
 
 ## Next Steps
 
-- Implement BM6-family onboard-history import.
-  The latest BM200/BM6 history page is decoded from `hist_d15505_b7_01` as
-  `vvv ss tt p`, with newest-first 2-minute records containing voltage, SoC,
-  and temperature. Add the production reader, persistence, duplicate handling,
-  and tests before treating reconnect backfill as shipped on real hardware.
-  Keep the final `p` nibble raw until cranking or charging-test events explain
-  it, and keep full 30-day paging as a separate unresolved task.
+- Expand BM6-family archive-history recovery beyond the verified bounded sync.
+  BM200/BM6 archive import now reads cumulative `d15505` page counts, stores
+  voltage, SoC, temperature, raw record, page selector, record index, and
+  timestamp quality, and runs through periodic/reconnect backfill plus a manual
+  Settings action. Next work is full 30-day page-count validation, stronger
+  overlap-based timestamp alignment for long absences, and archive-sync status
+  reporting. Keep the final `p` nibble raw until cranking or charging-test
+  events explain it.
+  Reference:
+  [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.
-  Live voltage, SoC, temperature, RSSI, and device state now use a dedicated
-  BM300 Pro driver. Onboard history, semantic parsing of raw `d15501` version
-  payloads, cranking/charging event records, and rapid acceleration/deceleration
-  persistence still need protocol capture or live verification before they
-  should ship.
+  Live voltage, SoC, temperature, RSSI, device state, and bounded archive
+  import now use a dedicated BM300 Pro driver. Automatic BM7 archive import is
+  separately gated and disabled by default. Selector `01` imported 883 records
+  on `doc_fb12899`; remaining work is validating byte-6 selectors beyond `01`
+  toward the advertised 72-day retention, semantic parsing of raw `d15501`
+  version payloads, cranking/charging event records, the final archive `p`
+  nibble, and rapid acceleration/deceleration persistence.
 - Add richer degradation analytics beyond the current yearly summaries and
   rolling comparison windows.
 - Add MQTT birth/LWT republish handling beyond the current availability and
@@ -180,3 +185,23 @@
     downsampled before persistence and MQTT publishing
   - validate on real BM200 and BM300 Pro devices that the live session blocks
     or releases the original app as expected
+
+- [ ] Expand archive-history backfill beyond the verified bounded BM200 path.
+  BM200/BM6 automatic periodic and reconnect-triggered import is implemented
+  for verified cumulative page counts through 3 pages, with a manual Settings
+  action for immediate bounded import. BM300 Pro/BM7 archive import is also
+  implemented behind a separate opt-in gate using byte-6 selector `01`.
+  Validate higher BM200/BM6 page counts before claiming full 30-day recovery,
+  and validate BM300 Pro/BM7 byte-6 selectors beyond `01` before claiming full
+  72-day recovery.
+  Reference:
+  - [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
+  Actions:
+  - add stronger raw-sequence overlap timestamp alignment for long absences and
+    imports that cross service restarts
+  - report last archive-sync time, inserted count, duplicate count, and failure
+    reason in status output
+  - validate higher BM200/BM6 cumulative `d15505` page counts toward the
+    advertised 30-day retention
+  - validate higher BM300 Pro/BM7 byte-6 `d15505` selector counts toward the
+    advertised 72-day retention

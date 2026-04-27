@@ -109,6 +109,23 @@ d1550500000000010000000000000000
 
 In the probe tool this is named `hist_d15505_b7_01`.
 
+The byte at index 7 is now verified as a cumulative page count for BM200/BM6:
+
+| Selector | Meaning | Local validation |
+| --- | --- | --- |
+| `01` | latest page | verified |
+| `02` | latest 2 pages | verified by first 256-record overlap |
+| `03` | latest 3 pages | verified by first 512-record overlap |
+
+`BMGateway` uses this in production BM200/BM6 archive import through:
+
+```sh
+bm-gateway history sync-device --device-id spare_nlp5 --page-count 3
+```
+
+The command still treats timestamps as estimated because the device records do
+not include absolute timestamps.
+
 ### Response Size
 
 On `spare_nlp20`, a full page returned:
@@ -126,6 +143,14 @@ The final marker length matches one 256-record page:
 - `1024 / 4 = 256` records
 
 At 2 minutes per record, one page covers about 8 hours 32 minutes.
+
+Three cumulative pages cover about 25 hours 36 minutes. Local gateway
+validation imported:
+
+| Device | Page count | Imported records |
+| --- | --- | --- |
+| `spare_nlp5` | `3` | `765` |
+| `spare_nlp20` | `3` | `748` |
 
 ### Record Layout
 
@@ -209,23 +234,49 @@ The one-point gap between live `82%` and newest historical `83%` on
 - Cranking, charging-test, or waveform event records. These may use `p`,
   another `d15505` selector, or another command family.
 
-## BM300 Pro/BM7 Status
+## BM300 Pro/BM7 Onboard History
 
 Live `d15507` polling is implemented and verified for BM300 Pro/BM7 with the
 BM7 key. It uses the same live response offsets as BM6/BM200.
 
-BM300 Pro/BM7 onboard history is not decoded.
+BM300 Pro/BM7 archive import is implemented as profile `bm7_d15505_b6_v1` and
+is disabled by default for automatic background sync. Manual CLI sync can still
+run against a named BM300 Pro device for controlled tests.
 
 Known facts:
 
 - The BM2 `e7xx` history-count variants tested on BM7 produced no notification.
 - Zero-payload `d15505` can return marker-shaped responses.
-- `doc_fb12899` returned 30 historical-looking 4-byte chunks for byte-6 or
-  byte-7 `d15505` selectors during one probe.
-- Those BM7 chunks have not been validated for order, cadence, or field layout.
+- The verified BM7 history request uses byte 6:
 
-Do not import BM300 Pro/BM7 history until a BM7-specific validation test proves
-the record layout.
+  ```text
+  d1550500000001000000000000000000
+  ```
+
+- `doc_fb12899` returned newest records that match live voltage, SoC, and
+  temperature using the same record layout as BM200/BM6:
+
+  ```text
+  vvv ss tt p
+  ```
+
+Examples:
+
+| Raw record | Voltage | SoC | Temperature | Event/type |
+| --- | --- | --- | --- | --- |
+| `53b620f0` | `13.39 V` | `98%` | `15 C` | `0` |
+| `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
+
+The first production sync on `doc_fb12899` imported 883 selector-`01` records,
+which is about 29 hours 26 minutes at the observed 2-minute cadence.
+
+Open BM7 history items:
+
+- exact page/range semantics for byte-6 selectors beyond `01`
+- full recovery strategy for the advertised 72-day retention window
+- meaning of the final `p` nibble
+- whether cranking or charging-test records appear in the same stream or use
+  another command
 
 ## Dead Ends
 
@@ -274,12 +325,15 @@ Both services must be active after every probe.
 
 ## Next Work
 
-1. Implement a BM200/BM6 history reader for `hist_d15505_b7_01`.
-2. Store decoded `voltage`, `soc`, and `temperature`; keep raw record and `p`.
-3. Add duplicate handling for repeated 256-record pages.
-4. Research or capture the paging mechanism for older BM200/BM6 history.
+1. Validate higher BM200/BM6 byte-7 page counts before claiming full 30-day
+   recovery.
+2. Validate BM300 Pro/BM7 byte-6 selectors beyond `01` before claiming full
+   72-day recovery.
+3. Add stronger raw-sequence timestamp alignment for long absences and service
+   restarts.
+4. Report last archive-sync time, inserted rows, duplicate rows, and failure
+   reason in status output.
 5. Decode or validate `p` using known cranking or charging-test events.
-6. Run a separate BM300 Pro/BM7 history validation before importing BM7 history.
 
 ## References
 

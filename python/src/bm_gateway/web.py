@@ -38,6 +38,8 @@ from .web_actions import (
     schedule_host_reboot,
     schedule_host_shutdown,
     start_run_once_via_cli,
+    sync_history_now,
+    update_archive_sync_preferences,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -112,6 +114,8 @@ __all__ = [
     "refresh_usb_otg_drive",
     "restore_usb_otg_boot_mode",
     "start_run_once_via_cli",
+    "sync_history_now",
+    "update_archive_sync_preferences",
     "update_bluetooth_preferences",
     "update_config_from_text",
     "update_device_from_form",
@@ -1232,6 +1236,73 @@ def serve_management(
                 self.end_headers()
                 return
 
+            if parsed.path == "/settings/archive-sync":
+                config, snapshot, current_database_path = self._load_current()
+                try:
+                    periodic_interval_seconds = int(
+                        form.get("periodic_interval_seconds", ["64800"])[0]
+                    )
+                    reconnect_min_gap_seconds = int(
+                        form.get("reconnect_min_gap_seconds", ["28800"])[0]
+                    )
+                    safety_margin_seconds = int(form.get("safety_margin_seconds", ["7200"])[0])
+                    bm200_max_pages_per_sync = int(form.get("bm200_max_pages_per_sync", ["3"])[0])
+                    bm300_max_pages_per_sync = int(form.get("bm300_max_pages_per_sync", ["1"])[0])
+                except ValueError:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: archive sync values must be numeric",
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_archive_sync_preferences(
+                    config_path=config_path,
+                    enabled=_bool_from_form(form, "archive_sync_enabled"),
+                    periodic_interval_seconds=periodic_interval_seconds,
+                    reconnect_min_gap_seconds=reconnect_min_gap_seconds,
+                    safety_margin_seconds=safety_margin_seconds,
+                    bm200_max_pages_per_sync=bm200_max_pages_per_sync,
+                    bm300_enabled=_bool_from_form(form, "bm300_enabled"),
+                    bm300_max_pages_per_sync=bm300_max_pages_per_sync,
+                )
+                if errors:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
             if parsed.path == "/settings/bluetooth":
                 try:
                     scan_timeout_seconds = int(form.get("scan_timeout_seconds", ["15"])[0])
@@ -1485,6 +1556,27 @@ def serve_management(
                 )
                 self.send_response(303)
                 self.send_header("Location", "/usb-otg-export/progress")
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/sync-history-now":
+                try:
+                    payload = sync_history_now(config_path=config_path, state_dir=state_dir)
+                    requested = _int_from_mapping(payload, "requested")
+                    synced = _int_from_mapping(payload, "synced")
+                    fetched = _int_from_mapping(payload, "fetched")
+                    inserted = _int_from_mapping(payload, "inserted")
+                    history_errors_payload = payload.get("errors", [])
+                    message = (
+                        f"History sync completed: synced {synced}/{requested} devices, "
+                        f"inserted {inserted} of {fetched} records"
+                    )
+                    if isinstance(history_errors_payload, list) and history_errors_payload:
+                        message += f"; errors {len(history_errors_payload)}"
+                except Exception as exc:  # pragma: no cover - defensive web boundary
+                    message = f"History sync failed: {exc}"
+                self.send_response(303)
+                self.send_header("Location", "/settings?" + urlencode({"message": message}))
                 self.end_headers()
                 return
 

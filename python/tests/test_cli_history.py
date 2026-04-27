@@ -7,12 +7,18 @@ from typing import Any, cast
 
 import pytest
 from bm_gateway import cli
-from bm_gateway.archive_sync import plan_archive_backfill, sync_bm200_device_archive
+from bm_gateway.archive_sync import (
+    plan_archive_backfill,
+    sync_bm200_device_archive,
+    sync_bm300_device_archive,
+)
 from bm_gateway.config import load_config
-from bm_gateway.device_registry import load_device_registry
+from bm_gateway.device_registry import Device, load_device_registry
+from bm_gateway.drivers.bm200 import BM200HistoryReading
+from bm_gateway.drivers.bm300 import BM300HistoryReading
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.runtime import database_file_path
-from bm_gateway.state_store import persist_snapshot
+from bm_gateway.state_store import fetch_archive_history, import_archive_history, persist_snapshot
 
 
 def _write_example_files(tmp_path: Path) -> Path:
@@ -237,14 +243,21 @@ def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFi
     config_path = _write_example_files(tmp_path)
     state_dir = tmp_path / "state"
 
-    def fake_sync(*, config: object, device: object, database_path: Path) -> dict[str, object]:
+    def fake_sync(
+        *,
+        config: object,
+        device: object,
+        database_path: Path,
+        page_count: int,
+    ) -> dict[str, object]:
         assert database_path == state_dir / "runtime" / "gateway.db"
+        assert page_count == 5
         return {
             "device_id": "bm200_house",
             "fetched": 12,
             "inserted": 10,
             "adapter": "hci0",
-            "profile": "legacy_bm2_history",
+            "profile": "bm6_d15505_b7_v1",
         }
 
     from bm_gateway import cli as cli_module
@@ -263,6 +276,8 @@ def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFi
                 "bm200_house",
                 "--state-dir",
                 str(state_dir),
+                "--page-count",
+                "5",
                 "--json",
             ]
         )
@@ -277,9 +292,90 @@ def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFi
     assert payload["inserted"] == 10
 
 
+def test_history_sync_device_routes_bm300pro_to_bm7_archive_sync(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm300_doc"',
+                'type = "bm300pro"',
+                'name = "BM300 DOC"',
+                'mac = "AA:BB:CC:DD:EE:30"',
+                "enabled = true",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+
+    def fake_sync(
+        *,
+        config: object,
+        device: object,
+        database_path: Path,
+        page_count: int,
+    ) -> dict[str, object]:
+        _ = config
+        assert isinstance(device, Device)
+        assert device.id == "bm300_doc"
+        assert database_path == state_dir / "runtime" / "gateway.db"
+        assert page_count == 2
+        return {
+            "device_id": "bm300_doc",
+            "fetched": 32,
+            "inserted": 30,
+            "adapter": "hci0",
+            "profile": "bm7_d15505_b6_v1",
+        }
+
+    monkeypatch.setattr(cli, "sync_bm300_device_archive", fake_sync, raising=False)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "history",
+            "sync-device",
+            "--device-id",
+            "bm300_doc",
+            "--state-dir",
+            str(state_dir),
+            "--page-count",
+            "2",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    payload = json.loads(captured.out)
+    assert payload["synced"] is True
+    assert payload["profile"] == "bm7_d15505_b6_v1"
+    assert payload["inserted"] == 30
+
+
 def test_plan_archive_backfill_flags_connected_devices_with_real_history_gap(
     tmp_path: Path,
 ) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            reconnect_min_gap_seconds=3600,
+            safety_margin_seconds=7200,
+            bm200_max_pages_per_sync=3,
+        ),
+    )
     database_path = tmp_path / "gateway.db"
     persist_snapshot(
         database_path,
@@ -347,12 +443,294 @@ def test_plan_archive_backfill_flags_connected_devices_with_real_history_gap(
     )
 
     candidates = plan_archive_backfill(
+        config=config,
         database_path=database_path,
         snapshot=snapshot,
-        poll_interval_seconds=600,
     )
 
-    assert candidates == {"bm200_house"}
+    assert candidates == {"bm200_house": 1}
+
+
+def test_plan_archive_backfill_includes_bm300_when_bm7_archive_sync_is_enabled(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            bm300_enabled=True,
+            reconnect_min_gap_seconds=3600,
+            safety_margin_seconds=7200,
+            bm300_max_pages_per_sync=4,
+        ),
+    )
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T00:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=1,
+            poll_interval_seconds=600,
+            devices=[
+                DeviceReading(
+                    id="bm300_doc",
+                    type="bm300pro",
+                    name="BM300 DOC",
+                    mac="AA:BB:CC:DD:EE:30",
+                    enabled=True,
+                    connected=True,
+                    voltage=13.38,
+                    soc=98,
+                    temperature=15.0,
+                    rssi=None,
+                    state="normal",
+                    error_code=None,
+                    error_detail=None,
+                    last_seen="2024-01-01T00:00:00+00:00",
+                    adapter="hci0",
+                    driver="bm300pro",
+                )
+            ],
+        ),
+    )
+    snapshot = GatewaySnapshot(
+        generated_at="2024-01-04T00:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=600,
+        devices=[
+            DeviceReading(
+                id="bm300_doc",
+                type="bm300pro",
+                name="BM300 DOC",
+                mac="AA:BB:CC:DD:EE:30",
+                enabled=True,
+                connected=True,
+                voltage=13.39,
+                soc=98,
+                temperature=15.0,
+                rssi=-66,
+                state="normal",
+                error_code=None,
+                error_detail=None,
+                last_seen="2024-01-04T00:00:00+00:00",
+                adapter="hci0",
+                driver="bm300pro",
+            )
+        ],
+    )
+
+    candidates = plan_archive_backfill(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+    )
+
+    assert candidates == {"bm300_doc": 3}
+
+
+def test_plan_archive_backfill_uses_periodic_history_age_to_size_pages(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            periodic_interval_seconds=64800,
+            reconnect_min_gap_seconds=28800,
+            safety_margin_seconds=7200,
+            bm200_max_pages_per_sync=3,
+        ),
+    )
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="bm6_d15505_b7_v1",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.7,
+                "min_crank_voltage": None,
+                "event_type": 0,
+                "soc": 80,
+                "temperature": 22.0,
+                "raw_record": "4f614160",
+                "page_selector": 3,
+                "record_index": 0,
+                "timestamp_quality": "estimated",
+            }
+        ],
+    )
+    snapshot = GatewaySnapshot(
+        generated_at="2024-01-01T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=600,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=True,
+                voltage=12.81,
+                soc=61,
+                temperature=None,
+                rssi=-60,
+                state="normal",
+                error_code=None,
+                error_detail=None,
+                last_seen="2024-01-01T20:00:00+00:00",
+                adapter="hci0",
+                driver="bm200",
+            )
+        ],
+    )
+
+    candidates = plan_archive_backfill(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+    )
+
+    assert candidates == {"bm200_house": 3}
+
+
+def test_plan_archive_backfill_skips_when_archive_and_live_history_are_recent(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            periodic_interval_seconds=64800,
+            reconnect_min_gap_seconds=28800,
+            safety_margin_seconds=7200,
+            bm200_max_pages_per_sync=3,
+        ),
+    )
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T11:50:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=1,
+            poll_interval_seconds=600,
+            devices=[
+                DeviceReading(
+                    id="bm200_house",
+                    type="bm200",
+                    name="BM200 House",
+                    mac="AA:BB:CC:DD:EE:01",
+                    enabled=True,
+                    connected=True,
+                    voltage=12.73,
+                    soc=58,
+                    temperature=None,
+                    rssi=None,
+                    state="normal",
+                    error_code=None,
+                    error_detail=None,
+                    last_seen="2024-01-01T11:50:00+00:00",
+                    adapter="hci0",
+                    driver="bm200",
+                )
+            ],
+        ),
+    )
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="bm6_d15505_b7_v1",
+        readings=[
+            {
+                "ts": "2024-01-01T11:30:00+00:00",
+                "voltage": 12.7,
+                "min_crank_voltage": None,
+                "event_type": 0,
+                "soc": 80,
+                "temperature": 22.0,
+                "raw_record": "4f614160",
+                "page_selector": 3,
+                "record_index": 0,
+                "timestamp_quality": "estimated",
+            }
+        ],
+    )
+    snapshot = GatewaySnapshot(
+        generated_at="2024-01-01T12:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=600,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=True,
+                voltage=12.81,
+                soc=61,
+                temperature=None,
+                rssi=-60,
+                state="normal",
+                error_code=None,
+                error_detail=None,
+                last_seen="2024-01-01T12:00:00+00:00",
+                adapter="hci0",
+                driver="bm200",
+            )
+        ],
+    )
+
+    candidates = plan_archive_backfill(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+    )
+
+    assert candidates == {}
 
 
 def test_sync_bm200_device_archive_uses_extended_history_timeout(
@@ -371,11 +749,13 @@ def test_sync_bm200_device_archive_uses_extended_history_timeout(
         adapter: str,
         timeout_seconds: float,
         scan_timeout_seconds: float,
+        page_count: int,
         reference_ts: object = None,
         transport: object = None,
     ) -> list[object]:
         _ = (address, adapter, scan_timeout_seconds, reference_ts, transport)
         captured["timeout_seconds"] = timeout_seconds
+        captured["page_count"] = float(page_count)
         return []
 
     monkeypatch.setattr("bm_gateway.archive_sync.read_bm200_history", fake_read_history)
@@ -388,12 +768,145 @@ def test_sync_bm200_device_archive_uses_extended_history_timeout(
 
     assert payload["fetched"] == 0
     assert captured["timeout_seconds"] == 180.0
+    assert captured["page_count"] == 3.0
+    assert payload["profile"] == "bm6_d15505_b7_v1"
+
+
+def test_sync_bm200_device_archive_imports_bm6_history_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    database_path = tmp_path / "gateway.db"
+
+    async def fake_read_history(
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        page_count: int,
+        reference_ts: object = None,
+        transport: object = None,
+    ) -> list[BM200HistoryReading]:
+        _ = (
+            address,
+            adapter,
+            timeout_seconds,
+            scan_timeout_seconds,
+            page_count,
+            reference_ts,
+            transport,
+        )
+        return [
+            BM200HistoryReading(
+                ts="2026-04-26T18:00:00+00:00",
+                voltage=13.23,
+                min_crank_voltage=None,
+                event_type=0,
+                soc=76,
+                temperature=23.0,
+                raw_record="52b4c170",
+                page_selector=3,
+                record_index=0,
+                timestamp_quality="estimated",
+            )
+        ]
+
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm200_history", fake_read_history)
+
+    payload = sync_bm200_device_archive(
+        config=config,
+        device=devices[0],
+        database_path=database_path,
+    )
+
+    assert payload["inserted"] == 1
+    archive = fetch_archive_history(database_path, device_id="bm200_house", limit=1)
+    assert archive[0]["soc"] == 76
+    assert archive[0]["raw_record"] == "52b4c170"
+
+
+def test_sync_bm300_device_archive_imports_bm7_history_fields(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    device = Device(
+        id="bm300_doc",
+        type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+    )
+    database_path = tmp_path / "gateway.db"
+
+    async def fake_read_history(
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        page_count: int,
+        reference_ts: object = None,
+        transport: object = None,
+    ) -> list[BM300HistoryReading]:
+        _ = (
+            address,
+            adapter,
+            timeout_seconds,
+            scan_timeout_seconds,
+            page_count,
+            reference_ts,
+            transport,
+        )
+        return [
+            BM300HistoryReading(
+                ts="2026-04-26T18:54:00+00:00",
+                voltage=13.39,
+                min_crank_voltage=None,
+                event_type=0,
+                soc=98,
+                temperature=15.0,
+                raw_record="53b620f0",
+                page_selector=1,
+                record_index=0,
+                timestamp_quality="estimated",
+            )
+        ]
+
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history", fake_read_history)
+
+    payload = sync_bm300_device_archive(
+        config=config,
+        device=device,
+        database_path=database_path,
+        page_count=1,
+    )
+
+    assert payload["inserted"] == 1
+    assert payload["profile"] == "bm7_d15505_b6_v1"
+    archive = fetch_archive_history(database_path, device_id="bm300_doc", limit=1)
+    assert archive[0]["soc"] == 98
+    assert archive[0]["temperature"] == 15.0
+    assert archive[0]["raw_record"] == "53b620f0"
 
 
 def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
     config_path = _write_example_files(tmp_path)
     config = load_config(config_path)
-    config = replace(config, gateway=replace(config.gateway, reader_mode="live"))
+    config = replace(
+        config,
+        gateway=replace(config.gateway, reader_mode="live"),
+        archive_sync=replace(
+            config.archive_sync,
+            reconnect_min_gap_seconds=3600,
+            safety_margin_seconds=7200,
+            bm200_max_pages_per_sync=3,
+        ),
+    )
     devices = load_device_registry(config.device_registry_path)
     state_dir = tmp_path / "state"
 
@@ -464,7 +977,7 @@ def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
 
     from bm_gateway import cli as cli_module
 
-    calls: list[set[str]] = []
+    calls: list[dict[str, int]] = []
 
     class StubPublisher:
         def publish_runtime(
@@ -486,10 +999,10 @@ def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
         config: object,
         devices: object,
         database_path: Path,
-        device_ids: set[str],
+        device_pages: dict[str, int],
     ) -> list[dict[str, object]]:
         assert database_path == state_dir / "runtime" / "gateway.db"
-        calls.append(set(device_ids))
+        calls.append(dict(device_pages))
         return []
 
     cli_module_any = cast(Any, cli_module)
@@ -509,7 +1022,7 @@ def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
         cli_module_any.build_snapshot = original_build_snapshot
         cli_module_any.sync_archive_backfill_candidates = original_sync_candidates
 
-    assert calls == [{"bm200_house"}]
+    assert calls == [{"bm200_house": 1}]
 
 
 def test_history_stats_emits_storage_summary(

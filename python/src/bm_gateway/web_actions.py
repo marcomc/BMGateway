@@ -8,6 +8,7 @@ import tempfile
 from dataclasses import replace
 from pathlib import Path
 
+from .archive_sync import sync_archive_backfill_candidates
 from .config import load_config, write_config
 from .device_registry import (
     Device,
@@ -15,6 +16,7 @@ from .device_registry import (
     default_battery_profile,
     default_color_key,
     default_icon_key,
+    device_driver_type,
     generate_device_id,
     load_device_registry,
     normalize_mac_address,
@@ -473,6 +475,40 @@ def update_usb_otg_preferences(
     return []
 
 
+def update_archive_sync_preferences(
+    *,
+    config_path: Path,
+    enabled: bool,
+    periodic_interval_seconds: int,
+    reconnect_min_gap_seconds: int,
+    safety_margin_seconds: int,
+    bm200_max_pages_per_sync: int,
+    bm300_enabled: bool,
+    bm300_max_pages_per_sync: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            enabled=enabled,
+            periodic_interval_seconds=periodic_interval_seconds,
+            reconnect_min_gap_seconds=reconnect_min_gap_seconds,
+            safety_margin_seconds=safety_margin_seconds,
+            bm200_max_pages_per_sync=bm200_max_pages_per_sync,
+            bm300_enabled=bm300_enabled,
+            bm300_max_pages_per_sync=bm300_max_pages_per_sync,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        return errors
+    write_config(config_path, updated)
+    return []
+
+
 def update_gateway_preferences(
     *,
     config_path: Path,
@@ -636,6 +672,55 @@ def run_once_via_cli(
         capture_output=True,
         text=True,
     )
+
+
+def sync_history_now(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> dict[str, object]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    device_pages = {
+        device.id: (
+            config.archive_sync.bm300_max_pages_per_sync
+            if device_driver_type(device.type) == "bm300pro"
+            else config.archive_sync.bm200_max_pages_per_sync
+        )
+        for device in devices
+        if device.enabled
+        and (
+            device_driver_type(device.type) == "bm200"
+            or (device_driver_type(device.type) == "bm300pro" and config.archive_sync.bm300_enabled)
+        )
+    }
+    results = sync_archive_backfill_candidates(
+        config=config,
+        devices=devices,
+        database_path=database_file_path(config, state_dir=state_dir),
+        device_pages=device_pages,
+    )
+    errors = [result for result in results if result.get("synced") is not True]
+    return {
+        "requested": len(device_pages),
+        "synced": sum(1 for result in results if result.get("synced") is True),
+        "fetched": _sum_result_int(results, "fetched"),
+        "inserted": _sum_result_int(results, "inserted"),
+        "errors": errors,
+        "results": results,
+    }
+
+
+def _sum_result_int(results: list[dict[str, object]], key: str) -> int:
+    total = 0
+    for result in results:
+        value = result.get(key, 0)
+        if isinstance(value, str | int | float):
+            try:
+                total += int(value)
+            except ValueError:
+                continue
+    return total
 
 
 def start_run_once_via_cli(

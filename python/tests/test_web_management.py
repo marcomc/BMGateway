@@ -39,6 +39,7 @@ from bm_gateway.web import (
     render_management_html,
     render_settings_html,
     render_usb_otg_export_pending_html,
+    update_archive_sync_preferences,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -59,6 +60,7 @@ from bm_gateway.web_actions import (
     restart_system_service,
     restore_usb_otg_boot_mode,
     schedule_host_shutdown,
+    sync_history_now,
 )
 from bm_gateway.web_pages_frame import frame_battery_overview_page_count
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
@@ -1429,6 +1431,106 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.fleet_trend_device_ids == ("spare_nlp5", "spare_nlp20")
 
 
+def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_archive_sync_preferences(
+        config_path=config_path,
+        enabled=False,
+        periodic_interval_seconds=43200,
+        reconnect_min_gap_seconds=14400,
+        safety_margin_seconds=1800,
+        bm200_max_pages_per_sync=6,
+        bm300_enabled=True,
+        bm300_max_pages_per_sync=9,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.archive_sync.enabled is False
+    assert config.archive_sync.periodic_interval_seconds == 43200
+    assert config.archive_sync.reconnect_min_gap_seconds == 14400
+    assert config.archive_sync.safety_margin_seconds == 1800
+    assert config.archive_sync.bm200_max_pages_per_sync == 6
+    assert config.archive_sync.bm300_enabled is True
+    assert config.archive_sync.bm300_max_pages_per_sync == 9
+
+
+def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+                "",
+                "[[devices]]",
+                'id = "bm300_doc"',
+                'type = "bm300pro"',
+                'name = "BM300 DOC"',
+                'mac = "AA:BB:CC:DD:EE:30"',
+                "enabled = true",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    errors = update_archive_sync_preferences(
+        config_path=config_path,
+        enabled=True,
+        periodic_interval_seconds=43200,
+        reconnect_min_gap_seconds=14400,
+        safety_margin_seconds=1800,
+        bm200_max_pages_per_sync=2,
+        bm300_enabled=True,
+        bm300_max_pages_per_sync=5,
+    )
+    assert errors == []
+    captured_pages: dict[str, int] = {}
+
+    def fake_sync_candidates(
+        *,
+        config: object,
+        devices: object,
+        database_path: Path,
+        device_pages: dict[str, int],
+    ) -> list[dict[str, object]]:
+        _ = (config, devices, database_path)
+        captured_pages.update(device_pages)
+        return [
+            {"device_id": device_id, "synced": True, "fetched": pages, "inserted": pages}
+            for device_id, pages in device_pages.items()
+        ]
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.sync_archive_backfill_candidates",
+        fake_sync_candidates,
+    )
+
+    payload = sync_history_now(config_path=config_path, state_dir=tmp_path / "state")
+
+    assert payload["requested"] == 2
+    assert payload["synced"] == 2
+    assert captured_pages == {"bm200_house": 2, "bm300_doc": 5}
+
+
 def test_settings_display_post_persists_appearance_and_chart_defaults(
     tmp_path: Path,
 ) -> None:
@@ -1477,6 +1579,59 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
     assert config.web.appearance == "dark"
     assert config.web.default_chart_range == "90"
     assert config.web.default_chart_metric == "temperature"
+
+
+def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/archive-sync",
+        data=urllib.parse.urlencode(
+            {
+                "periodic_interval_seconds": "43200",
+                "reconnect_min_gap_seconds": "14400",
+                "safety_margin_seconds": "1800",
+                "bm200_max_pages_per_sync": "6",
+                "bm300_enabled": "on",
+                "bm300_max_pages_per_sync": "9",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        assert response.status in {200, 303}
+
+    config = load_config(config_path)
+    assert config.archive_sync.enabled is False
+    assert config.archive_sync.periodic_interval_seconds == 43200
+    assert config.archive_sync.reconnect_min_gap_seconds == 14400
+    assert config.archive_sync.safety_margin_seconds == 1800
+    assert config.archive_sync.bm200_max_pages_per_sync == 6
+    assert config.archive_sync.bm300_enabled is True
+    assert config.archive_sync.bm300_max_pages_per_sync == 9
 
 
 def test_settings_usb_otg_post_persists_enabled_flag(
@@ -1896,6 +2051,72 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
     assert payload["message"] == "Immagini cornice USB OTG esportate"
 
 
+def test_manual_history_sync_action_redirects_with_import_summary(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    calls: list[tuple[Path, Path | None]] = []
+
+    def _sync_history_now(*, config_path: Path, state_dir: Path | None = None) -> dict[str, object]:
+        calls.append((config_path, state_dir))
+        return {
+            "requested": 2,
+            "synced": 2,
+            "fetched": 512,
+            "inserted": 128,
+            "errors": [],
+        }
+
+    monkeypatch.setattr("bm_gateway.web.sync_history_now", _sync_history_now)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path / "state",
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/actions/sync-history-now",
+        data=b"",
+        method="POST",
+    )
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            break
+        except urllib.error.URLError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+    with response_handle as response:
+        assert response.status == 200
+        params = parse_qs(urlparse(response.url).query)
+
+    assert params["message"] == [
+        "History sync completed: synced 2/2 devices, inserted 128 of 512 records"
+    ]
+    assert calls == [(config_path, tmp_path / "state")]
+
+
 def test_compact_mac_address_is_normalized() -> None:
     assert normalize_mac_address("A1B2C3D4E5F6") == "A1:B2:C3:D4:E5:F6"
 
@@ -2072,11 +2293,18 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Home Assistant status topic" in html
     assert "Web Service" in html
     assert "Display Settings" in html
+    assert "Archive History Import" in html
+    assert "Archive history import" in html
+    assert "Periodic sync interval" in html
+    assert "BM200 pages per sync" in html
+    assert "Sync History Now" in html
+    assert 'action="/actions/sync-history-now"' in html
     assert "Visible overview cards" not in html
     assert "Edit settings" in html
     assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
+    assert "Save archive sync settings" not in html
     assert "Run One Collection Cycle" in html
     assert "Republish Home Assistant Discovery" in html
     assert 'action="/actions/republish-discovery"' in html
@@ -2106,6 +2334,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Web Service'
+    )
+    assert html.index('section-title">Display Settings') < html.index(
+        'section-title">Archive History Import'
     )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
@@ -2785,11 +3016,13 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert "Web Service" in html
     assert "Display Settings" in html
     assert "USB OTG Image Export" in html
+    assert "Archive History Import" in html
     assert "Save gateway settings" in html
     assert "Save MQTT settings" in html
     assert "Save Home Assistant settings" in html
     assert "Save web service settings" in html
     assert "Save display settings" in html
+    assert "Save archive sync settings" in html
     assert "Save USB OTG settings" in html
     assert 'name="gateway_name"' in html
     assert 'name="timezone"' in html
@@ -2821,6 +3054,13 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="fleet_trend_range"' in html
     assert 'name="fleet_trend_device_ids"' in html
     assert 'name="web_enabled"' in html
+    assert 'name="archive_sync_enabled"' in html
+    assert 'name="periodic_interval_seconds"' in html
+    assert 'name="reconnect_min_gap_seconds"' in html
+    assert 'name="safety_margin_seconds"' in html
+    assert 'name="bm200_max_pages_per_sync"' in html
+    assert 'name="bm300_enabled"' in html
+    assert 'name="bm300_max_pages_per_sync"' in html
     assert 'name="visible_device_limit"' not in html
     assert 'name="bluetooth_adapter"' in html
     assert 'name="scan_timeout_seconds"' in html

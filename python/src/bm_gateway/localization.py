@@ -75,6 +75,8 @@ _DYNAMIC_TRANSLATION_PREFIXES: Final = (
     ("Devices online: ", "Devices online"),
     ("MQTT connected: ", "MQTT connected"),
     ("Validation failed: ", "Validation failed"),
+    ("History sync completed: ", "History sync completed"),
+    ("History sync failed: ", "History sync failed"),
     ("Run failed: ", "Run failed"),
     ("USB OTG frame image export failed: ", "USB OTG frame image export failed"),
     (

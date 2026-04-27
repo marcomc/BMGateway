@@ -289,6 +289,18 @@ d1550500000000010000000000000000
 
 The probe tool names it `hist_d15505_b7_01`.
 
+The byte at index 7 is a cumulative page-count selector:
+
+| Selector | Meaning |
+| --- | --- |
+| `01` | latest page |
+| `02` | latest 2 pages |
+| `03` | latest 3 pages |
+
+This was verified on `spare_nlp5` and `spare_nlp20` by checking that selector
+`02` begins with the same 256 records as selector `01`, and selector `03`
+begins with the same 512 records as selector `02`.
+
 Verified record layout:
 
 ```text
@@ -302,8 +314,18 @@ vvv ss tt p
 | `tt` | Temperature in degrees Celsius |
 | `p` | Event or record-type nibble; unresolved |
 
-A full response contains 256 records. Records are newest-first and spaced about
-2 minutes apart, so one page covers about 8 hours 32 minutes.
+A full response contains 256 records per page. Records are newest-first and
+spaced about 2 minutes apart, so one page covers about 8 hours 32 minutes.
+Three cumulative pages cover about 25 hours 36 minutes.
+
+`BMGateway` now imports BM200/BM6 archive history with:
+
+```sh
+bm-gateway history sync-device --device-id spare_nlp5 --page-count 3
+```
+
+The import stores voltage, SoC, temperature, raw record, page selector, record
+index, and estimated timestamp quality in `device_archive_readings`.
 
 The lower-SoC validation on `spare_nlp20` and `spare_nlp5` proved that `ss`
 tracks live SoC below 100%. The canonical evidence and test artifacts are in
@@ -349,11 +371,13 @@ The current history page is decoded for time order, voltage, SoC, and
 temperature. Remaining gaps:
 
 - meaning of the final `p` nibble
-- how to request older pages beyond the latest 256 records
+- how high the cumulative `d15505` page count can safely go on BM200/BM6
+  before reaching the advertised 30-day retention
 - whether cranking or charging-test records use `p`, another `d15505` selector,
   or another command family
-- how to merge repeated 256-record pages into persistent archive history without
-  duplicates
+- overlap-based timestamp alignment for long-running imports; immediate
+  reimport on the same 2-minute grid is idempotent, but longer absence and full
+  30-day recovery still need broader validation
 
 ### Why the monitor disappears from advertising
 

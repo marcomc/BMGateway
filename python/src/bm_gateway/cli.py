@@ -14,10 +14,11 @@ from .archive_sync import (
     plan_archive_backfill,
     sync_archive_backfill_candidates,
     sync_bm200_device_archive,
+    sync_bm300_device_archive,
 )
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
-from .device_registry import Device, load_device_registry, validate_devices
+from .device_registry import Device, device_driver_type, load_device_registry, validate_devices
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
 from .protocol_probe import run_protocol_probe, utc_timestamp
@@ -135,7 +136,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     history_sync = history_subparsers.add_parser(
         "sync-device",
-        help="Download archive history from a BM200-class device into local storage.",
+        help="Download archive history from a supported device into local storage.",
     )
     history_stats = history_subparsers.add_parser(
         "stats", help="Show storage counts and per-device history ranges."
@@ -173,6 +174,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Override the base directory used for runtime state files.",
+    )
+    history_sync.add_argument(
+        "--page-count",
+        type=int,
+        default=3,
+        help=(
+            "Cumulative history pages to request. BM200/BM6 uses d15505 byte-7; "
+            "BM300 Pro/BM7 uses d15505 byte-6."
+        ),
     )
     history_compare.add_argument("--device-id", required=True, help="Device identifier.")
     history_compare.add_argument(
@@ -245,6 +255,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=3.5,
         help="Seconds to wait for notifications after each command.",
+    )
+    protocol_probe.add_argument(
+        "--history-page-limit",
+        type=int,
+        default=1,
+        help="Probe BM200/BM6 d15505 byte-7 history selectors from 01 up to this value.",
     )
 
     return parser
@@ -420,12 +436,12 @@ def _run_cycle(
     database_path = database_file_path(config, state_dir=state_dir)
     archive_backfill_candidates = (
         plan_archive_backfill(
+            config=config,
             database_path=database_path,
             snapshot=snapshot,
-            poll_interval_seconds=config.gateway.poll_interval_seconds,
         )
         if config.gateway.reader_mode == "live"
-        else set()
+        else {}
     )
     try:
         mqtt_connected = publisher.publish_runtime(
@@ -454,7 +470,7 @@ def _run_cycle(
             config=config,
             devices=devices,
             database_path=database_path,
-            device_ids=archive_backfill_candidates,
+            device_pages=archive_backfill_candidates,
         )
     prune_history(
         database_path,
@@ -574,6 +590,7 @@ def _handle_history_sync_device(
     device_id: str,
     as_json: bool,
     state_dir: Path | None,
+    page_count: int,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -586,11 +603,20 @@ def _handle_history_sync_device(
 
     database_path = database_file_path(config, state_dir=state_dir)
     try:
-        payload = sync_bm200_device_archive(
-            config=config,
-            device=device,
-            database_path=database_path,
-        )
+        if device_driver_type(device.type) == "bm300pro":
+            payload = sync_bm300_device_archive(
+                config=config,
+                device=device,
+                database_path=database_path,
+                page_count=page_count,
+            )
+        else:
+            payload = sync_bm200_device_archive(
+                config=config,
+                device=device,
+                database_path=database_path,
+                page_count=page_count,
+            )
     except Exception as exc:
         failure = {
             "device_id": device_id,
@@ -729,6 +755,7 @@ def _handle_protocol_probe_history(
     verbose: bool,
     device_ids: Sequence[str],
     command_timeout_seconds: float,
+    history_page_limit: int,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -754,6 +781,7 @@ def _handle_protocol_probe_history(
                 scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
                 connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
                 command_timeout_seconds=command_timeout_seconds,
+                history_page_limit=history_page_limit,
                 emit=emit,
             )
         )
@@ -834,6 +862,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             device_id=args.device_id,
             as_json=bool(args.json),
             state_dir=args.state_dir,
+            page_count=args.page_count,
         )
     if args.command == "history" and args.history_command == "stats":
         return _handle_history_stats(
@@ -856,6 +885,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=bool(args.verbose),
             device_ids=args.device_id,
             command_timeout_seconds=args.command_timeout_seconds,
+            history_page_limit=args.history_page_limit,
         )
 
     if args.command == "run":

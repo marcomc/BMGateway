@@ -25,12 +25,14 @@ Read these in order when you need architectural or implementation context:
 5. [BM300 Pro / BM7 Integration Notes](2026-04-25-bm300-bm7-integration-notes.md)
 6. [BM Protocol Research Handoff](2026-04-25-bm-protocol-research-handoff.md)
 7. [Protocol Probe Tools](protocol-probe-tools.md)
+8. [History Backfill Integration Proposal](architecture/2026-04-26-history-backfill-integration-proposal.md)
 
 ## Core Documents
 
 | Topic | Document |
 | --- | --- |
 | Architecture boundary | [architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](architecture/2026-04-20-shared-core-separate-web-runtime-plan.md) |
+| History backfill integration proposal | [architecture/2026-04-26-history-backfill-integration-proposal.md](architecture/2026-04-26-history-backfill-integration-proposal.md) |
 | Service account and privilege hardening proposal | [architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md](architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md) |
 | USB-OTG image export hardware test | [architecture/2026-04-23-usb-otg-image-export-test.md](architecture/2026-04-23-usb-otg-image-export-test.md) |
 | Foundation scope | [specs/2026-04-17-foundation-spec.md](specs/2026-04-17-foundation-spec.md) |
@@ -51,6 +53,8 @@ Read these in order when you need architectural or implementation context:
   [2026-04-25-bm-protocol-research-handoff.md](2026-04-25-bm-protocol-research-handoff.md)
 - Bounded BLE protocol probe tool usage:
   [protocol-probe-tools.md](protocol-probe-tools.md)
+- Archive-history backfill strategy for reconnect and periodic import:
+  [architecture/2026-04-26-history-backfill-integration-proposal.md](architecture/2026-04-26-history-backfill-integration-proposal.md)
 - Raspberry Pi 3B operating-system and web-surface research:
   [research/2026-04-17-pi3b-web-and-os-research.md](research/2026-04-17-pi3b-web-and-os-research.md)
 

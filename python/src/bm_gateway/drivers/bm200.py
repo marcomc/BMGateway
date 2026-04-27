@@ -47,8 +47,14 @@ class BM200Measurement:
 class BM200HistoryReading:
     ts: str
     voltage: float
-    min_crank_voltage: float
-    event_type: int
+    min_crank_voltage: float | None
+    event_type: int | None
+    soc: int | None = None
+    temperature: float | None = None
+    raw_record: str | None = None
+    page_selector: int | None = None
+    record_index: int | None = None
+    timestamp_quality: str = "estimated"
 
 
 class BM200Error(Exception):
@@ -83,6 +89,7 @@ class BM200HistoryTransport(Protocol):
         timeout_seconds: float,
         scan_timeout_seconds: float,
         reference_ts: datetime,
+        page_count: int = 1,
     ) -> list[BM200HistoryReading]: ...
 
 
@@ -127,6 +134,16 @@ def decrypt_payload(encrypted: bytes | bytearray) -> bytes:
 
 def decrypt_bm6_payload(encrypted: bytes | bytearray) -> bytes:
     return bytes(_create_cipher_for_key(BM6_AES_KEY).decrypt(bytes(encrypted)))
+
+
+def decode_bm6_frame_payloads(encrypted: bytes | bytearray) -> list[bytes]:
+    encrypted_bytes = bytes(encrypted)
+    if len(encrypted_bytes) % BM200_BLOCK_SIZE != 0:
+        raise BM200ProtocolError("BM6 encrypted payload is not block aligned")
+    return [
+        decrypt_bm6_payload(encrypted_bytes[index : index + BM200_BLOCK_SIZE])
+        for index in range(0, len(encrypted_bytes), BM200_BLOCK_SIZE)
+    ]
 
 
 def parse_plaintext_measurement(plaintext: bytes) -> BM200Measurement:
@@ -188,6 +205,12 @@ def encode_history_download_request(size: int) -> bytes:
     return bytes([0xE3, 0x00, 0x00, *struct.pack(">L", size)])
 
 
+def encode_bm6_history_request(page_count: int) -> bytes:
+    if page_count < 1 or page_count > 255:
+        raise ValueError("page_count must be between 1 and 255")
+    return bytes([0xD1, 0x55, 0x05, 0, 0, 0, 0, page_count, 0, 0, 0, 0, 0, 0, 0, 0])
+
+
 def decode_history_count_packet(plaintext: bytes) -> int:
     if len(plaintext) < 4 or plaintext[0] != 0xE7:
         raise BM200ProtocolError("plaintext does not contain a BM200 history-count packet")
@@ -236,6 +259,47 @@ def parse_history_items(
             )
         )
     return readings
+
+
+def parse_bm6_history_items(
+    payload: bytes,
+    *,
+    reference_ts: datetime,
+    page_selector: int,
+    timestamp_quality: str = "estimated",
+) -> list[BM200HistoryReading]:
+    items = [
+        payload[index : index + 4]
+        for index in range(0, len(payload), 4)
+        if len(payload[index : index + 4]) == 4 and payload[index : index + 4] != bytes(4)
+    ]
+    readings: list[BM200HistoryReading] = []
+    for index, item in enumerate(items):
+        raw = item.hex()
+        ts = reference_ts - timedelta(minutes=index * 2)
+        readings.append(
+            BM200HistoryReading(
+                ts=ts.isoformat(timespec="seconds"),
+                voltage=int(raw[0:3], 16) / 100,
+                min_crank_voltage=None,
+                event_type=int(raw[7], 16),
+                soc=int(raw[3:5], 16),
+                temperature=float(int(raw[5:7], 16)),
+                raw_record=raw,
+                page_selector=page_selector,
+                record_index=index,
+                timestamp_quality=timestamp_quality,
+            )
+        )
+    return readings
+
+
+def default_bm6_history_reference_ts(now: datetime | None = None) -> datetime:
+    active_now = now or datetime.now().astimezone()
+    if active_now.tzinfo is None:
+        active_now = active_now.astimezone()
+    reference_ts = active_now.replace(second=0, microsecond=0)
+    return reference_ts - timedelta(minutes=reference_ts.minute % 2)
 
 
 class BleakBM200Transport:
@@ -333,8 +397,9 @@ class BleakBM200HistoryTransport:
         timeout_seconds: float,
         scan_timeout_seconds: float,
         reference_ts: datetime,
+        page_count: int = 1,
     ) -> list[BM200HistoryReading]:
-        _ = adapter
+        _ = (adapter, page_count)
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         last_error: Exception | None = None
@@ -390,6 +455,82 @@ class BleakBM200HistoryTransport:
                             deadline=deadline,
                         )
                         return parse_history_items(payload, reference_ts=reference_ts)
+                    finally:
+                        await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
+            except BM200TimeoutError:
+                raise
+            except Exception as exc:
+                last_error = exc
+                await asyncio.sleep(min(1.0, max(deadline - loop.time(), 0.0)))
+                continue
+
+
+class BleakBM6HistoryTransport:
+    async def read_history(
+        self,
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        reference_ts: datetime,
+        page_count: int = 1,
+    ) -> list[BM200HistoryReading]:
+        _ = adapter
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_seconds
+        last_error: Exception | None = None
+        scan_timeout = max(1.0, scan_timeout_seconds)
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                if last_error is not None:
+                    raise last_error
+                raise BleakDeviceNotFoundError(address)
+
+            device = await BleakScanner.find_device_by_address(
+                address,
+                timeout=min(scan_timeout, remaining),
+            )
+            if device is None:
+                continue
+
+            client = BleakClient(device, timeout=min(scan_timeout, remaining))
+            packet_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+            def notification_handler(
+                _: object,
+                data: bytearray,
+                *,
+                notification_queue: asyncio.Queue[bytes] = packet_queue,
+            ) -> None:
+                notification_queue.put_nowait(bytes(data))
+
+            try:
+                async with client:
+                    await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
+                    try:
+                        await asyncio.sleep(min(0.4, max(deadline - loop.time(), 0.0)))
+                        await client.write_gatt_char(
+                            BM200_WRITE_CHARACTERISTIC,
+                            encrypt_bm6_payload(BM6_POLL_PLAINTEXT),
+                            response=False,
+                        )
+                        await _drain_bm6_wake_packets(packet_queue, deadline=deadline)
+                        await client.write_gatt_char(
+                            BM200_WRITE_CHARACTERISTIC,
+                            encrypt_bm6_payload(encode_bm6_history_request(page_count)),
+                            response=False,
+                        )
+                        payload = await _collect_bm6_history_payload(
+                            packet_queue,
+                            deadline=deadline,
+                        )
+                        return parse_bm6_history_items(
+                            payload,
+                            reference_ts=reference_ts,
+                            page_selector=page_count,
+                        )
                     finally:
                         await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
             except BM200TimeoutError:
@@ -460,6 +601,61 @@ async def _collect_history_payload(packet_queue: asyncio.Queue[bytes], *, deadli
         history_data += plaintext
 
 
+async def _collect_bm6_history_payload(
+    packet_queue: asyncio.Queue[bytes],
+    *,
+    deadline: float,
+) -> bytes:
+    loop = asyncio.get_running_loop()
+    payload = b""
+    seen_header = False
+    idle_timeout_seconds = 3.0
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            if payload:
+                return payload
+            raise BM200TimeoutError("bm6 history")
+        try:
+            encrypted = await asyncio.wait_for(
+                packet_queue.get(),
+                timeout=min(idle_timeout_seconds, remaining),
+            )
+        except TimeoutError:
+            if payload:
+                return payload
+            continue
+        for plaintext in decode_bm6_frame_payloads(encrypted):
+            if plaintext.startswith(bytes.fromhex("d15505")):
+                seen_header = True
+                continue
+            if plaintext.startswith(bytes.fromhex("d15507")):
+                continue
+            if plaintext.startswith(bytes.fromhex("fffffe")):
+                seen_header = True
+                continue
+            if plaintext.startswith(bytes.fromhex("fffefe")):
+                return payload
+            if seen_header:
+                payload += plaintext
+
+
+async def _drain_bm6_wake_packets(
+    packet_queue: asyncio.Queue[bytes],
+    *,
+    deadline: float,
+) -> None:
+    loop = asyncio.get_running_loop()
+    while True:
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            return
+        try:
+            await asyncio.wait_for(packet_queue.get(), timeout=min(0.3, remaining))
+        except TimeoutError:
+            return
+
+
 async def read_bm200_measurement(
     *,
     address: str,
@@ -487,14 +683,16 @@ async def read_bm200_history(
     adapter: str,
     timeout_seconds: float,
     scan_timeout_seconds: float,
+    page_count: int = 1,
     reference_ts: datetime | None = None,
     transport: BM200HistoryTransport | None = None,
 ) -> list[BM200HistoryReading]:
-    active_transport = transport or BleakBM200HistoryTransport()
+    active_transport = transport or BleakBM6HistoryTransport()
     return await active_transport.read_history(
         address=address,
         adapter=adapter,
         timeout_seconds=timeout_seconds,
         scan_timeout_seconds=scan_timeout_seconds,
-        reference_ts=reference_ts or datetime.now().replace(microsecond=0, second=0),
+        reference_ts=reference_ts or default_bm6_history_reference_ts(),
+        page_count=page_count,
     )

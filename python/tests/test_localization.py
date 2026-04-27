@@ -202,6 +202,8 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
         "Failed to refresh USB OTG drive",
         "Bluetooth adapter recovery triggered",
         "History pruned",
+        "History sync completed",
+        "History sync failed",
         "Settings saved",
         "USB OTG frame image export started",
         "Settings saved; USB OTG frame image export started",

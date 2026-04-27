@@ -10,6 +10,7 @@ Use it to:
 - confirm live `d15507` readings
 - capture encrypted and decrypted notifications
 - download the verified BM200/BM6 256-record history page
+- download the gated BM300 Pro/BM7 history selector for parser validation
 - preserve JSONL evidence for parser work
 
 It is not a fuzzer. It does not try unknown AES keys, brute force, bypass, or
@@ -27,7 +28,7 @@ The probe sends only this fixed allowlist:
 | `hist_d15505_b3_01` | `d1550501000000000000000000000000` | Bounded selector probe |
 | `hist_d15505_b4_01` | `d1550500010000000000000000000000` | Bounded selector probe |
 | `hist_d15505_b5_01` | `d1550500000100000000000000000000` | Bounded selector probe |
-| `hist_d15505_b6_01` | `d1550500000001000000000000000000` | Bounded selector probe |
+| `hist_d15505_b6_01` | `d1550500000001000000000000000000` | BM300 Pro/BM7 history selector |
 | `hist_d15505_b7_01` | `d1550500000000010000000000000000` | Verified BM200/BM6 history page |
 
 Do not add commands without public-source evidence, official-app capture, or a
@@ -55,11 +56,19 @@ sudo systemctl stop bm-gateway
 bm-gateway protocol probe-history \
   --device-id spare_nlp20 \
   --device-id spare_nlp5 \
+  --history-page-limit 5 \
   --command-timeout-seconds 3.5 \
   > /tmp/bm200-probe.jsonl
 sudo systemctl start bm-gateway
 systemctl is-active bm-gateway bm-gateway-web
 ```
+
+`--history-page-limit 5` adds BM7 byte-6 selectors
+`hist_d15505_b6_02` through `hist_d15505_b6_05` and BM6 byte-7 selectors
+`hist_d15505_b7_02` through `hist_d15505_b7_05` after the fixed baseline
+commands. Use a low value first; verified BM6 selectors are cumulative and can
+return a lot of BLE data, while BM7 selectors beyond `01` still need range
+validation.
 
 ## Command Reference
 
@@ -71,6 +80,7 @@ Options:
 | --- | --- |
 | `--device-id <id>` | Limit to one configured device. May be repeated. |
 | `--command-timeout-seconds <seconds>` | Wait time for notifications after each command. Default is `3.5`. |
+| `--history-page-limit <n>` | Add BM300 Pro/BM7 `d15505` byte-6 selectors and BM200/BM6 byte-7 selectors from `02` through `n`. |
 | `--config <path>` | Standard global CLI option for an alternate config file. |
 
 Family selection comes from configured device type:
@@ -150,6 +160,18 @@ Properties:
 - one record about every 2 minutes
 - one page covers about 8 hours 32 minutes
 
+Byte 7 is verified as a cumulative page-count selector on BM200/BM6:
+
+| Command | Meaning |
+| --- | --- |
+| `hist_d15505_b7_01` | latest page |
+| `hist_d15505_b7_02` | latest 2 pages |
+| `hist_d15505_b7_03` | latest 3 pages |
+
+The proof is overlap-based: the first 256 records from selector `02` match
+selector `01`, and the next 256 records are older. Selector `03` starts with
+the same first 512 records and then continues older.
+
 Record layout:
 
 ```text
@@ -183,11 +205,37 @@ cadence.
 
 ### BM300 Pro/BM7 History
 
-BM300 Pro/BM7 live polling is verified. BM7 history is not decoded.
+BM300 Pro/BM7 live polling and the head of the BM7 archive stream are
+verified. The implemented BM7 archive request uses byte 6:
 
-One BM7 unit returned 30 historical-looking 4-byte chunks for `d15505` byte-6
-or byte-7 selectors, but the order, cadence, and field layout are not validated.
-Do not import BM7 history yet.
+| Command | Meaning |
+| --- | --- |
+| `hist_d15505_b6_01` | latest verified BM300 Pro/BM7 archive selector |
+
+The record layout matches the BM200/BM6 archive layout for the newest records
+validated against live `d15507` values:
+
+```text
+vvv ss tt p
+```
+
+Examples from `doc_fb12899`:
+
+| Raw record | Voltage | SoC | Temperature | Event/type |
+| --- | --- | --- | --- | --- |
+| `53b620f0` | `13.39 V` | `98%` | `15 C` | `0` |
+| `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
+
+The production archive profile is `bm7_d15505_b6_v1`. Automatic BM300 Pro/BM7
+archive import is gated by `archive_sync.bm300_enabled` and remains disabled by
+default. Manual `history sync-device` can still request a BM300 Pro device
+explicitly for controlled tests.
+
+Selectors beyond `hist_d15505_b6_01` are not fully characterized. Use the probe
+tool to capture low page limits first, then compare overlap and record counts
+before increasing the configured limit toward the 72-day advertised retention
+cap. One live selector-`01` import from `doc_fb12899` returned 883 records,
+which is about 29 hours 26 minutes at 2-minute cadence.
 
 ## BM200 Shift Verification Recipe
 
@@ -220,6 +268,7 @@ Useful quick checks:
 ```sh
 grep '"event": "device_found"' /tmp/bm-protocol-probe.jsonl
 grep '"command": "live_d15507"' /tmp/bm-protocol-probe.jsonl
+grep '"command": "hist_d15505_b6_01"' /tmp/bm-protocol-probe.jsonl
 grep '"command": "hist_d15505_b7_01"' /tmp/bm-protocol-probe.jsonl
 ```
 
@@ -230,7 +279,7 @@ If a device is not found:
 - try one `--device-id`
 - check whether the official phone app is connected
 
-If `hist_d15505_b7_01` returns no record frames, save the JSONL anyway. Empty
+If a history selector returns no record frames, save the JSONL anyway. Empty
 responses are useful evidence for visibility, command timing, and family
 differences.
 

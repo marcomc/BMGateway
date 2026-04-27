@@ -89,6 +89,19 @@ def _usb_otg_refresh_interval_label(config: AppConfig) -> str:
     return f"{config.usb_otg.refresh_interval_seconds} seconds"
 
 
+def _duration_label(seconds: int) -> str:
+    if seconds % 86400 == 0:
+        value = seconds // 86400
+        return f"{value} day" if value == 1 else f"{value} days"
+    if seconds % 3600 == 0:
+        value = seconds // 3600
+        return f"{value} hour" if value == 1 else f"{value} hours"
+    if seconds % 60 == 0:
+        value = seconds // 60
+        return f"{value} minute" if value == 1 else f"{value} minutes"
+    return f"{seconds} seconds"
+
+
 def _usb_otg_refresh_interval_warning(config: AppConfig) -> str:
     refresh_interval = (
         config.gateway.poll_interval_seconds
@@ -280,6 +293,9 @@ def render_settings_html(
         '<form method="post" action="/actions/republish-discovery">'
         f"{button('Republish Home Assistant Discovery', kind='secondary')}"
         "</form>"
+        '<form method="post" action="/actions/sync-history-now">'
+        f"{button('Sync History Now', kind='secondary')}"
+        "</form>"
         + (
             '<form method="post" action="/actions/refresh-usb-otg-drive">'
             f"{button('Refresh USB OTG Drive', kind='secondary')}"
@@ -362,6 +378,36 @@ def render_settings_html(
         + settings_row(
             "Language",
             dict(locale_options()).get(config.web.language, config.web.language),
+        )
+    )
+    archive_sync_section_body = (
+        settings_row(
+            "Archive history import",
+            "Enabled" if config.archive_sync.enabled else "Disabled",
+        )
+        + settings_row(
+            "Periodic sync interval",
+            _duration_label(config.archive_sync.periodic_interval_seconds),
+        )
+        + settings_row(
+            "Reconnect backfill threshold",
+            _duration_label(config.archive_sync.reconnect_min_gap_seconds),
+        )
+        + settings_row(
+            "Safety margin",
+            _duration_label(config.archive_sync.safety_margin_seconds),
+        )
+        + settings_row(
+            "BM200 pages per sync",
+            str(config.archive_sync.bm200_max_pages_per_sync),
+        )
+        + settings_row(
+            "BM300 Pro history import",
+            "Enabled" if config.archive_sync.bm300_enabled else "Disabled",
+        )
+        + settings_row(
+            "BM300 pages per sync",
+            str(config.archive_sync.bm300_max_pages_per_sync),
         )
     )
     usb_otg_warning = (
@@ -944,6 +990,98 @@ def render_settings_html(
             + "</div>"
             + "</form>"
         )
+        archive_sync_section_body = (
+            '<form method="post" action="/settings/archive-sync">'
+            + settings_control_row(
+                "Archive history import",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="archive_sync_enabled"'
+                    f"{shared._checked_attr(config.archive_sync.enabled)}>"
+                    "<span>Enable periodic onboard history import</span></label>"
+                ),
+                help_text=(
+                    "Imports dense supported-device history periodically and after long "
+                    "offline gaps."
+                ),
+            )
+            + settings_control_row(
+                "Periodic sync interval",
+                (
+                    '<input id="archive-periodic-interval-input" type="text" '
+                    'name="periodic_interval_seconds" '
+                    f'value="{config.archive_sync.periodic_interval_seconds}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Run a history sync after this many seconds since the latest archive row."
+                ),
+            )
+            + settings_control_row(
+                "Reconnect backfill threshold",
+                (
+                    '<input id="archive-reconnect-gap-input" type="text" '
+                    'name="reconnect_min_gap_seconds" '
+                    f'value="{config.archive_sync.reconnect_min_gap_seconds}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "When a device returns after at least this many seconds offline, backfill "
+                    "the missed interval."
+                ),
+            )
+            + settings_control_row(
+                "Safety margin",
+                (
+                    '<input id="archive-safety-margin-input" type="text" '
+                    'name="safety_margin_seconds" '
+                    f'value="{config.archive_sync.safety_margin_seconds}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Add this many seconds of overlap to avoid gaps at page boundaries.",
+            )
+            + settings_control_row(
+                "BM200 pages per sync",
+                (
+                    '<input id="archive-bm200-pages-input" type="text" '
+                    'name="bm200_max_pages_per_sync" '
+                    f'value="{config.archive_sync.bm200_max_pages_per_sync}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Caps each automatic or manual BM200/BM6 history sync. One page is about "
+                    "8 hours and 32 minutes."
+                ),
+            )
+            + settings_control_row(
+                "BM300 Pro history import",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="bm300_enabled"'
+                    f"{shared._checked_attr(config.archive_sync.bm300_enabled)}>"
+                    "<span>Enable BM300 Pro/BM7 history import</span></label>"
+                ),
+                help_text="Keep BM300 Pro/BM7 archive imports separately gated.",
+            )
+            + settings_control_row(
+                "BM300 pages per sync",
+                (
+                    '<input id="archive-bm300-pages-input" type="text" '
+                    'name="bm300_max_pages_per_sync" '
+                    f'value="{config.archive_sync.bm300_max_pages_per_sync}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Caps each automatic or manual BM300 Pro/BM7 history sync. The configured "
+                    "maximum is based on the observed 883-record selector window and the "
+                    "advertised 72-day retention."
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save archive sync settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
         usb_otg_section_body = (
             '<form method="post" action="/settings/usb-otg">'
             + usb_otg_install_warning
@@ -1200,6 +1338,10 @@ def render_settings_html(
         + section_card(
             title="Display Settings",
             body=display_section_body,
+        )
+        + section_card(
+            title="Archive History Import",
+            body=archive_sync_section_body,
         )
         + section_card(
             title="USB OTG Image Export",

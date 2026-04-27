@@ -1,7 +1,7 @@
 # BM300 Pro / BM7 Integration Notes
 
-This note captures the protocol facts used to add live `BM300 Pro` support to
-`BMGateway`.
+This note captures the protocol facts used to add live and bounded archive
+`BM300 Pro` support to `BMGateway`.
 
 The goal is to keep BM300 Pro support separate from the existing BM200/BM6
 driver while preserving the same runtime features where the public protocol
@@ -87,6 +87,10 @@ BM200/BM6-family live polling:
 - temperature
 - RSSI when BlueZ/Bleak exposes it
 - device-reported state
+
+BM300 Pro/BM7 archive import is also implemented behind a separate config gate.
+It uses profile `bm7_d15505_b6_v1` and is disabled by default until page-range
+behavior beyond the verified selector is validated on the real devices.
 
 ## BMGateway-Verified Findings
 
@@ -186,12 +190,40 @@ fffefe00000000000000000000000000
 ```
 
 That is consistent with the BM6-family `d15505` result. A later BM7 probe on
-`doc_fb12899` also returned 30 historical-looking 4-byte chunks for byte-6 or
-byte-7 `d15505` selectors. Those chunks are raw evidence only: order, cadence,
-and field layout have not been validated for BM7.
+`doc_fb12899` showed that the byte-6 selector
+`d1550500000001000000000000000000` returns 4-byte history records using the
+same decoded layout as the verified BM200/BM6 archive records:
 
-Treat BM7 history as unresolved. Do not import BM300 Pro/BM7 history until a
-BM7-specific validation test proves the record layout.
+```text
+vvv ss tt p
+```
+
+Examples from the head of the BM7 stream:
+
+| Raw record | Voltage | SoC | Temperature | Event/type |
+| --- | --- | --- | --- | --- |
+| `53b620f0` | `13.39 V` | `98%` | `15 C` | `0` |
+| `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
+
+The same live probe window reported `doc_fb12899` at about `13.38 V`, `98%`,
+and `15 C`, which validates the field layout at the newest end of the archive
+stream.
+
+BM7 archive import therefore uses:
+
+- plaintext request `d1550500000001000000000000000000` for selector `1`
+- byte 6 as the BM7 cumulative selector candidate
+- AES-CBC with the BM7 key and zero IV
+- write characteristic `fff3` with response
+- notify characteristic `fff4`
+- newest-first 4-byte records at the same estimated 2-minute cadence
+
+Selectors beyond `1` are implemented as bounded page-count requests but still
+need controlled validation for exact page/range semantics. The configuration
+cap of 59 selectors comes from the advertised 72-day retention at 2-minute
+cadence and the observed 883-record selector-`01` import on `doc_fb12899`;
+treat it as an upper safety bound, not proof that all selectors have been
+validated.
 
 ### External Research Status
 
@@ -211,12 +243,11 @@ but not enough verified information for all original-app features.
 
 Open BM300 Pro/BM7 work:
 
-- onboard history download
+- validation of byte-6 selectors beyond `01` and full 72-day recovery behavior
 - semantic parsing of the raw `d15501` firmware or protocol-version response
 - cranking, charging, and trip-history event records
 - rapid acceleration and rapid deceleration persistence
-- validation of the observed `d15505` 4-byte chunks: order, cadence, field
-  layout, and relationship to live voltage, SoC, and temperature
+- meaning of the final `p` history nibble
 
 The 2026-04-25 probe added one project-local discovery: tested BM300 Pro units
 return raw `d15501` payload `d1550102021125000000000000000000`. The payload is

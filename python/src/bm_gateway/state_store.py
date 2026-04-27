@@ -93,6 +93,12 @@ def _connect_database(path: Path) -> sqlite3.Connection:
             voltage REAL NOT NULL,
             min_crank_voltage REAL,
             event_type INTEGER,
+            soc INTEGER,
+            temperature REAL,
+            raw_record TEXT,
+            page_selector INTEGER,
+            record_index INTEGER,
+            timestamp_quality TEXT NOT NULL DEFAULT 'estimated',
             imported_at TEXT NOT NULL,
             adapter TEXT NOT NULL,
             driver TEXT NOT NULL,
@@ -112,6 +118,22 @@ def _connect_database(path: Path) -> sqlite3.Connection:
         if column_name not in existing_columns:
             connection.execute(
                 f"ALTER TABLE device_daily_rollups ADD COLUMN {column_name} {definition}"
+            )
+    existing_archive_columns = {
+        row[1]
+        for row in connection.execute("PRAGMA table_info(device_archive_readings)").fetchall()
+    }
+    for column_name, definition in (
+        ("soc", "INTEGER"),
+        ("temperature", "REAL"),
+        ("raw_record", "TEXT"),
+        ("page_selector", "INTEGER"),
+        ("record_index", "INTEGER"),
+        ("timestamp_quality", "TEXT NOT NULL DEFAULT 'estimated'"),
+    ):
+        if column_name not in existing_archive_columns:
+            connection.execute(
+                f"ALTER TABLE device_archive_readings ADD COLUMN {column_name} {definition}"
             )
     connection.commit()
     return connection
@@ -609,8 +631,8 @@ def fetch_recent_history(
             SELECT
                 ts,
                 voltage,
-                NULL AS soc,
-                NULL AS temperature,
+                soc,
+                temperature,
                 'archive' AS state,
                 NULL AS error_code,
                 NULL AS error_detail,
@@ -677,11 +699,17 @@ def import_archive_history(
                     voltage,
                     min_crank_voltage,
                     event_type,
+                    soc,
+                    temperature,
+                    raw_record,
+                    page_selector,
+                    record_index,
+                    timestamp_quality,
                     imported_at,
                     adapter,
                     driver,
                     profile
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     device_id,
@@ -692,6 +720,12 @@ def import_archive_history(
                     reading["voltage"],
                     reading.get("min_crank_voltage"),
                     reading.get("event_type"),
+                    reading.get("soc"),
+                    reading.get("temperature"),
+                    reading.get("raw_record"),
+                    reading.get("page_selector"),
+                    reading.get("record_index"),
+                    reading.get("timestamp_quality", "estimated"),
                     imported_at,
                     adapter,
                     driver,
@@ -720,6 +754,12 @@ def fetch_archive_history(
                 voltage,
                 min_crank_voltage,
                 event_type,
+                soc,
+                temperature,
+                raw_record,
+                page_selector,
+                record_index,
+                timestamp_quality,
                 imported_at,
                 adapter,
                 driver,
@@ -739,10 +779,16 @@ def fetch_archive_history(
             "voltage": row[1],
             "min_crank_voltage": row[2],
             "event_type": row[3],
-            "imported_at": row[4],
-            "adapter": row[5],
-            "driver": row[6],
-            "profile": row[7],
+            "soc": row[4],
+            "temperature": row[5],
+            "raw_record": row[6],
+            "page_selector": row[7],
+            "record_index": row[8],
+            "timestamp_quality": row[9],
+            "imported_at": row[10],
+            "adapter": row[11],
+            "driver": row[12],
+            "profile": row[13],
             "sample_source": "device_archive",
         }
         for row in rows
@@ -779,6 +825,8 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
                 MIN(voltage) AS min_voltage,
                 MAX(voltage) AS max_voltage,
                 AVG(voltage) AS avg_voltage,
+                AVG(soc) AS avg_soc,
+                AVG(temperature) AS avg_temperature,
                 MAX(ts) AS last_seen
             FROM device_archive_readings
             WHERE device_id = ?
@@ -816,10 +864,10 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
             "min_voltage": row[2],
             "max_voltage": row[3],
             "avg_voltage": row[4],
-            "avg_soc": None,
-            "avg_temperature": None,
+            "avg_soc": row[5],
+            "avg_temperature": row[6],
             "error_count": 0,
-            "last_seen": row[5],
+            "last_seen": row[7],
         }
     return sorted(rows_by_day.values(), key=lambda item: str(item["day"]), reverse=True)[:limit]
 
@@ -847,6 +895,60 @@ def latest_history_timestamp(path: Path, *, device_id: str) -> str | None:
             """,
             (device_id, device_id),
         ).fetchone()
+    finally:
+        connection.close()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
+def latest_live_history_timestamp(path: Path, *, device_id: str) -> str | None:
+    connection = _connect_database(path)
+    try:
+        row = connection.execute(
+            """
+            SELECT MAX(snapshot_generated_at)
+            FROM device_readings
+            WHERE device_id = ?
+              AND error_code IS NULL
+              AND voltage > 0
+            """,
+            (device_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None or row[0] is None:
+        return None
+    return str(row[0])
+
+
+def latest_archive_history_timestamp(
+    path: Path,
+    *,
+    device_id: str,
+    profile: str | None = None,
+) -> str | None:
+    connection = _connect_database(path)
+    try:
+        if profile is None:
+            row = connection.execute(
+                """
+                SELECT MAX(ts)
+                FROM device_archive_readings
+                WHERE device_id = ?
+                """,
+                (device_id,),
+            ).fetchone()
+        else:
+            row = connection.execute(
+                """
+                SELECT MAX(ts)
+                FROM device_archive_readings
+                WHERE device_id = ?
+                  AND profile = ?
+                """,
+                (device_id, profile),
+            ).fetchone()
     finally:
         connection.close()
     if row is None or row[0] is None:

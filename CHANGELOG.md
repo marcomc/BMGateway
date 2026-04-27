@@ -11,6 +11,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a bounded `bm-gateway protocol probe-history` diagnostic command for
   safe BM6/BM7 live, version, and `d15505` history-candidate BLE probes with
   JSONL output.
+- Added BM200/BM6 archive-history import through
+  `bm-gateway history sync-device`, including decoded voltage, SoC,
+  temperature, raw record storage, and a `--page-count` option for cumulative
+  `d15505` history pages.
+- Added automatic BM200/BM6 archive-history backfill for visible devices,
+  driven by configurable periodic and reconnect thresholds, plus a Settings
+  action to run a bounded history import on demand.
+- Added gated BM300 Pro/BM7 archive-history import using the verified
+  `d15505` byte-6 selector and the shared `vvv ss tt p` record layout, with a
+  separate opt-in setting and page cap for future 72-day retention validation.
 
 ### Fixed
 

@@ -108,6 +108,66 @@ def safe_probe_commands() -> tuple[ProtocolProbeCommand, ...]:
     return SAFE_D155_PROBE_COMMANDS
 
 
+def build_probe_commands(*, history_page_limit: int = 1) -> tuple[ProtocolProbeCommand, ...]:
+    if history_page_limit < 1 or history_page_limit > 255:
+        raise ValueError("history_page_limit must be between 1 and 255")
+
+    commands = list(SAFE_D155_PROBE_COMMANDS)
+    for page in range(2, history_page_limit + 1):
+        commands.append(
+            ProtocolProbeCommand(
+                f"hist_d15505_b6_{page:02x}",
+                bytes(
+                    [
+                        0xD1,
+                        0x55,
+                        0x05,
+                        0x00,
+                        0x00,
+                        0x00,
+                        page,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                    ]
+                ),
+            )
+        )
+    for page in range(2, history_page_limit + 1):
+        commands.append(
+            ProtocolProbeCommand(
+                f"hist_d15505_b7_{page:02x}",
+                bytes(
+                    [
+                        0xD1,
+                        0x55,
+                        0x05,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        page,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                        0x00,
+                    ]
+                ),
+            )
+        )
+    return tuple(commands)
+
+
 def protocol_key(family: str) -> bytes:
     if family == "bm6":
         return BM6_AES_KEY
@@ -378,6 +438,7 @@ async def run_protocol_probe(
     scan_timeout_seconds: float,
     connect_timeout_seconds: float,
     command_timeout_seconds: float = 3.5,
+    history_page_limit: int = 1,
     transport: ProtocolProbeTransport | None = None,
     emit: Callable[[dict[str, object]], None],
 ) -> None:
@@ -388,7 +449,7 @@ async def run_protocol_probe(
         if device.enabled and (not selected_ids or device.id in selected_ids)
     ]
     active_transport = transport or BleakProtocolProbeTransport()
-    commands = safe_probe_commands()
+    commands = build_probe_commands(history_page_limit=history_page_limit)
     emit(
         {
             "event": "probe_start",

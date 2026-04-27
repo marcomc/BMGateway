@@ -61,6 +61,21 @@ fleet_trend_range = "7"
 # Empty means all configured devices. Settings writes explicit IDs when saved.
 fleet_trend_device_ids = []
 
+[archive_sync]
+enabled = true
+# Automatically import supported onboard history when the archive is stale.
+periodic_interval_seconds = 64800
+# Backfill after a device returns from at least this many seconds offline.
+reconnect_min_gap_seconds = 28800
+# Request overlap around page boundaries to avoid small timestamp gaps.
+safety_margin_seconds = 7200
+# One BM200/BM6 page is 256 records at 2-minute spacing, about 8h32m.
+bm200_max_pages_per_sync = 3
+# BM300 Pro/BM7 import is gated separately. Selector 1 returned 883 records in
+# live validation, about 29h26m at 2-minute cadence.
+bm300_enabled = false
+bm300_max_pages_per_sync = 1
+
 [retention]
 raw_retention_days = 180
 daily_retention_days = 0

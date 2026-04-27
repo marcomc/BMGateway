@@ -6,12 +6,14 @@ from typing import Callable
 
 import pytest
 from bm_gateway.drivers.bm200 import (
+    BleakBM6HistoryTransport,
     BleakBM200HistoryTransport,
     BleakBM200Transport,
     BleakDeviceNotFoundError,
     BM200Measurement,
     decrypt_bm6_payload,
     decrypt_payload,
+    encode_bm6_history_request,
     encode_history_count_request,
     encode_history_download_request,
     encrypt_bm6_payload,
@@ -508,3 +510,95 @@ def test_bleak_history_transport_downloads_archive(monkeypatch: pytest.MonkeyPat
     assert writes[0] == encrypt_payload(encode_history_count_request())
     assert writes[1] == encrypt_payload(encode_history_download_request(8))
     assert len(readings) == 2
+
+
+def test_bleak_bm6_history_transport_downloads_cumulative_pages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanned_device = object()
+    writes: list[bytes] = []
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+            self._callback: Callable[[object | None, bytearray], None] | None = None
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            self._callback = callback
+
+        async def write_gatt_char(self, _char: str, data: bytes, response: bool) -> None:
+            assert response is False
+            assert self._callback is not None
+            writes.append(data)
+            if len(writes) == 1:
+                self._callback(
+                    None,
+                    bytearray(
+                        encrypt_bm6_payload(bytes.fromhex("d15507ff000000000000000000000000"))
+                    ),
+                )
+            if len(writes) == 2:
+                ack = encrypt_bm6_payload(bytes.fromhex("d1550502000000000000000000000000"))
+                first_payload = encrypt_bm6_payload(
+                    bytes.fromhex("52b4c17052b4d1600000000000000000")
+                )
+                self._callback(None, bytearray(ack))
+                self._callback(None, bytearray(first_payload))
+
+                async def emit_later() -> None:
+                    await asyncio.sleep(1.1)
+                    second_payload = encrypt_bm6_payload(
+                        bytes.fromhex("52b4e160000000000000000000000000")
+                    )
+                    assert self._callback is not None
+                    self._callback(None, bytearray(second_payload))
+
+                asyncio.create_task(emit_later())
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(address: str, timeout: float) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout > 0
+        return scanned_device
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm200.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm200.BleakClient", FakeClient)
+
+    readings = asyncio.run(
+        BleakBM6HistoryTransport().read_history(
+            address="AA:BB:CC:DD:EE:FF",
+            adapter="hci0",
+            timeout_seconds=8.0,
+            scan_timeout_seconds=3.0,
+            reference_ts=datetime.fromisoformat("2026-04-26T18:00:00+00:00"),
+            page_count=2,
+        )
+    )
+
+    assert writes == [
+        encrypt_bm6_payload(bytes.fromhex("d1550700000000000000000000000000")),
+        encrypt_bm6_payload(encode_bm6_history_request(2)),
+    ]
+    assert [reading.raw_record for reading in readings] == ["52b4c170", "52b4d160", "52b4e160"]
+    assert [reading.soc for reading in readings] == [76, 77, 78]

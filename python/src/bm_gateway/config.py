@@ -81,6 +81,17 @@ class USBOTGConfig:
 
 
 @dataclass(frozen=True)
+class ArchiveSyncConfig:
+    enabled: bool = True
+    periodic_interval_seconds: int = 64800
+    reconnect_min_gap_seconds: int = 28800
+    safety_margin_seconds: int = 7200
+    bm200_max_pages_per_sync: int = 3
+    bm300_enabled: bool = False
+    bm300_max_pages_per_sync: int = 1
+
+
+@dataclass(frozen=True)
 class RetentionConfig:
     raw_retention_days: int = 180
     daily_retention_days: int = 0
@@ -97,6 +108,7 @@ class AppConfig:
     web: WebConfig
     retention: RetentionConfig
     usb_otg: USBOTGConfig = field(default_factory=USBOTGConfig)
+    archive_sync: ArchiveSyncConfig = field(default_factory=ArchiveSyncConfig)
     verbose: bool = False
 
     def with_cli_overrides(self, *, verbose: bool) -> "AppConfig":
@@ -112,6 +124,7 @@ class AppConfig:
             web=self.web,
             retention=self.retention,
             usb_otg=self.usb_otg,
+            archive_sync=self.archive_sync,
             verbose=True,
         )
 
@@ -174,6 +187,15 @@ class AppConfig:
                 "fleet_trend_metrics": self.usb_otg.fleet_trend_metrics,
                 "fleet_trend_range": self.usb_otg.fleet_trend_range,
                 "fleet_trend_device_ids": self.usb_otg.fleet_trend_device_ids,
+            },
+            "archive_sync": {
+                "enabled": self.archive_sync.enabled,
+                "periodic_interval_seconds": self.archive_sync.periodic_interval_seconds,
+                "reconnect_min_gap_seconds": self.archive_sync.reconnect_min_gap_seconds,
+                "safety_margin_seconds": self.archive_sync.safety_margin_seconds,
+                "bm200_max_pages_per_sync": self.archive_sync.bm200_max_pages_per_sync,
+                "bm300_enabled": self.archive_sync.bm300_enabled,
+                "bm300_max_pages_per_sync": self.archive_sync.bm300_max_pages_per_sync,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -296,6 +318,15 @@ def write_config(path: Path, config: AppConfig) -> None:
                 f"{_string_sequence_to_toml(config.usb_otg.fleet_trend_device_ids)}"
             ),
             "",
+            "[archive_sync]",
+            f"enabled = {_bool_to_toml(config.archive_sync.enabled)}",
+            f"periodic_interval_seconds = {config.archive_sync.periodic_interval_seconds}",
+            f"reconnect_min_gap_seconds = {config.archive_sync.reconnect_min_gap_seconds}",
+            f"safety_margin_seconds = {config.archive_sync.safety_margin_seconds}",
+            f"bm200_max_pages_per_sync = {config.archive_sync.bm200_max_pages_per_sync}",
+            f"bm300_enabled = {_bool_to_toml(config.archive_sync.bm300_enabled)}",
+            f"bm300_max_pages_per_sync = {config.archive_sync.bm300_max_pages_per_sync}",
+            "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
             f"daily_retention_days = {config.retention.daily_retention_days}",
@@ -313,6 +344,7 @@ def load_config(path: Path) -> AppConfig:
     home_assistant_table = _require_table(data, "home_assistant")
     web_table = _require_table(data, "web")
     usb_otg_table = _require_table(data, "usb_otg")
+    archive_sync_table = _require_table(data, "archive_sync")
     retention_table = _require_table(data, "retention")
 
     gateway = GatewayConfig(
@@ -383,6 +415,15 @@ def load_config(path: Path) -> AppConfig:
         raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
         daily_retention_days=int(retention_table.get("daily_retention_days", 0)),
     )
+    archive_sync = ArchiveSyncConfig(
+        enabled=bool(archive_sync_table.get("enabled", True)),
+        periodic_interval_seconds=int(archive_sync_table.get("periodic_interval_seconds", 64800)),
+        reconnect_min_gap_seconds=int(archive_sync_table.get("reconnect_min_gap_seconds", 28800)),
+        safety_margin_seconds=int(archive_sync_table.get("safety_margin_seconds", 7200)),
+        bm200_max_pages_per_sync=int(archive_sync_table.get("bm200_max_pages_per_sync", 3)),
+        bm300_enabled=bool(archive_sync_table.get("bm300_enabled", False)),
+        bm300_max_pages_per_sync=int(archive_sync_table.get("bm300_max_pages_per_sync", 1)),
+    )
     source_path = path.resolve()
     device_registry_path = _resolve_registry_path(source_path, gateway.device_registry)
 
@@ -396,6 +437,7 @@ def load_config(path: Path) -> AppConfig:
         web=web,
         retention=retention,
         usb_otg=usb_otg,
+        archive_sync=archive_sync,
     )
 
 
@@ -469,6 +511,16 @@ def validate_config(config: AppConfig) -> list[str]:
     allowed_usb_otg_fleet_ranges = {"1", "3", "5", "7", "30", "90", "365", "730", "all"}
     if config.usb_otg.fleet_trend_range not in allowed_usb_otg_fleet_ranges:
         errors.append("usb_otg.fleet_trend_range must be one of: 1, 3, 5, 7, 30, 90, 365, 730, all")
+    if config.archive_sync.periodic_interval_seconds <= 0:
+        errors.append("archive_sync.periodic_interval_seconds must be greater than zero")
+    if config.archive_sync.reconnect_min_gap_seconds < 0:
+        errors.append("archive_sync.reconnect_min_gap_seconds must be zero or greater")
+    if config.archive_sync.safety_margin_seconds < 0:
+        errors.append("archive_sync.safety_margin_seconds must be zero or greater")
+    if not 1 <= config.archive_sync.bm200_max_pages_per_sync <= 85:
+        errors.append("archive_sync.bm200_max_pages_per_sync must be between 1 and 85")
+    if not 1 <= config.archive_sync.bm300_max_pages_per_sync <= 59:
+        errors.append("archive_sync.bm300_max_pages_per_sync must be between 1 and 59")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:

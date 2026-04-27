@@ -9,6 +9,7 @@ from bm_gateway.device_registry import Device
 from bm_gateway.protocol_probe import (
     ProtocolProbeCommand,
     ProtocolProbeTarget,
+    build_probe_commands,
     decode_probe_packet,
     encrypt_probe_payload,
     run_protocol_probe,
@@ -31,6 +32,32 @@ def test_safe_probe_commands_are_bounded_d155_commands() -> None:
         "hist_d15505_b7_01",
     ]
     assert all(command.plaintext.startswith(bytes.fromhex("d155")) for command in commands)
+
+
+def test_build_probe_commands_extends_b6_and_b7_history_selectors() -> None:
+    commands = build_probe_commands(history_page_limit=4)
+
+    assert [command.name for command in commands[-6:]] == [
+        "hist_d15505_b6_02",
+        "hist_d15505_b6_03",
+        "hist_d15505_b6_04",
+        "hist_d15505_b7_02",
+        "hist_d15505_b7_03",
+        "hist_d15505_b7_04",
+    ]
+    assert [command.plaintext.hex() for command in commands[-6:]] == [
+        "d1550500000002000000000000000000",
+        "d1550500000003000000000000000000",
+        "d1550500000004000000000000000000",
+        "d1550500000000020000000000000000",
+        "d1550500000000030000000000000000",
+        "d1550500000000040000000000000000",
+    ]
+
+
+def test_build_probe_commands_rejects_unbounded_history_limit() -> None:
+    with pytest.raises(ValueError, match="history_page_limit"):
+        build_probe_commands(history_page_limit=256)
 
 
 def test_target_for_device_maps_commercial_types_to_protocol_family() -> None:
@@ -101,6 +128,7 @@ def test_run_protocol_probe_uses_enabled_selected_devices() -> None:
     class FakeTransport:
         def __init__(self) -> None:
             self.targets: list[ProtocolProbeTarget] = []
+            self.commands: list[ProtocolProbeCommand] = []
 
         async def probe(
             self,
@@ -114,7 +142,6 @@ def test_run_protocol_probe_uses_enabled_selected_devices() -> None:
             emit: Callable[[dict[str, object]], None],
         ) -> None:
             _ = (
-                commands,
                 adapter,
                 scan_timeout_seconds,
                 connect_timeout_seconds,
@@ -122,6 +149,7 @@ def test_run_protocol_probe_uses_enabled_selected_devices() -> None:
                 emit,
             )
             self.targets.append(target)
+            self.commands.extend(commands)
 
     devices = [
         Device(id="one", type="bm200", name="One", mac="AA:BB:CC:DD:EE:01"),
@@ -141,14 +169,19 @@ def test_run_protocol_probe_uses_enabled_selected_devices() -> None:
             scan_timeout_seconds=1,
             connect_timeout_seconds=1,
             command_timeout_seconds=1,
+            history_page_limit=3,
             transport=transport,
             emit=events.append,
         )
     )
 
     assert [target.id for target in transport.targets] == ["two"]
+    assert [command.name for command in transport.commands] == [
+        command.name for command in build_probe_commands(history_page_limit=3)
+    ]
     assert events[0]["event"] == "probe_start"
     assert events[0]["device_count"] == 1
+    assert events[0]["command_count"] == 12
     assert events[-1]["event"] == "probe_end"
 
 
