@@ -274,10 +274,79 @@ Follow-up shift baseline captured on 2026-04-27:
 | --- | --- | --- |
 | Byte-4 shift `t0` | `/tmp/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl` | Captured `b7=55`, `b4=2f`, and `b4=47`; first `b4=09` attempt returned empty. |
 | Byte-4 shift `t0b` | `/tmp/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl` | Recaptured group A with `b4=09`, `0a`, and `10`; `b4=09` returned 8063 records. |
+| Byte-4 shift `t1` | `/tmp/bm200-b4-shift-t1-spare_nlp5-20260427-211240.jsonl` | Repeated `b7=55`, `b4=09`, `0a`, `10`, `2f`, and `47`; the first `b7=55` command returned empty. |
+| Byte-7 retry `t1` | `/tmp/bm200-b7-55-retry-t1-spare_nlp5-20260427-211824.jsonl` | Retried `b7=55` after the empty result; returned 1649 records. |
 
-Repeat the same focused capture about 20 minutes later and compare whether
-`b4=09`, `b4=2f`, and `b4=47` shift by about 10 records. If they do, the
-segments can be timestamp-anchored with much higher confidence.
+The `t1` comparison is conclusive for cadence and partly conclusive for
+stitching:
+
+- The `b7=55` retry contained the whole `t0` byte-7 window at offset `93`,
+  matching the elapsed time between captures at a two-minute cadence.
+- `b4=0a` and `b4=10` contained their whole `t0b` windows at offset `90`.
+  These selectors therefore behave like newest-first rolling windows inside
+  the byte-4 archive group.
+- `b4=47` contained the old `t0` prefix at offset `91`, with the oldest tail
+  trimmed to keep the returned window size fixed.
+- `b4=2f` showed a long overlap of 4490 records, aligned from old offset `40`
+  to new offset `91`. That confirms the same cadence, but the first 40 old
+  records need extra caution before treating `b4=2f` as a clean standalone
+  window.
+- `b4=09` reached the 8192-record cap in `t1`. It contained the earlier
+  `t0b` `b4=09` capture at offset `129`, while `b4=0a` inside `b4=09` shifted
+  consistently with the rest of group A. Treat `b4=09` as a capped group-head
+  window, not as a simple fixed-size page.
+
+The practical import order should start from the reliable rolling selectors:
+use byte 7 for the current window, then byte-4 group tails such as `0a`, `10`,
+and `47` for anchoring. Do not import all byte-4 group heads blindly until the
+overlap logic can place repeated raw values by sequence position and reject
+ambiguous prefix records.
+
+The byte-4 records are not random bytes. They decode with the same modern
+BM6/BM900 and BM7/BM300 4-byte layout already used by the importers:
+
+```text
+vvv ss tt p
+```
+
+where `vvv` is voltage in centivolts, `ss` is SoC, `tt` is temperature Celsius,
+and `p` is the event/status nibble. Examples from the `t1` capture:
+
+| Raw | Decoded |
+| --- | --- |
+| `53055120` | 13.28 V, 85%, 18 C, event `0` |
+| `4ee5a080` | 12.62 V, 90%, 8 C, event `0` |
+| `4f764080` | 12.71 V, 100%, 8 C, event `0` |
+| `53d63120` | 13.41 V, 99%, 18 C, event `0` |
+| `5b164122` | 14.57 V, 100%, 18 C, event `2` |
+
+The `t1` windows were almost entirely plausible as decoded physical readings:
+`b4=0a` had 7890 normal plausible records out of 7897, `b4=10` had 6354 out
+of 6361, and `b4=47` had 3580 out of 3580. The few non-plausible records were
+zero-like markers such as `00000001`, usually adjacent to event-nibble records
+such as `...4`. Keep those as raw event/marker records until cranking or
+charging tests explain them.
+
+Raw values are not unique IDs: stable batteries can repeat the same 4-byte
+reading many times. Use long sequence overlap plus selector/index/timestamp
+placement for deduplication, not raw-record equality alone.
+
+Focused byte-4/byte-7 matrix captures on 2026-04-27 tested whether byte 7 is
+the requested depth inside a byte-4-selected window. This is partly confirmed:
+
+| Selector | Non-empty byte-7 values | Relationship |
+| --- | --- | --- |
+| `b4=0a` | `b7=10`, `20`, `55` | `b7=10` is contained at offset `0` in `b7=20`; `b7=20` is contained at offset `1` in `b7=55`. |
+| `b4=10` | `b7=20`, `55` | `b7=20` is contained at offset `0` in `b7=55`. |
+| `b4=2f` | `b7=55` only | Lower tested byte-7 values returned empty. |
+| `b4=09` | none in this matrix | `b7=55` also returned empty, despite earlier successful captures. |
+| `b4=47` | none in this matrix | `b7=55` also returned empty, despite earlier successful captures. |
+
+This supports the model `byte 4 = history window/bank selector` and
+`byte 7 = cumulative depth within that selected window`, but only above
+selector-specific thresholds. The empty `b4=09` and `b4=47` retries show that
+some byte-4 windows can fail transiently or depend on device/session state, so
+do not treat a single empty response as proof that a selector is invalid.
 
 The probe summaries estimate timestamps by anchoring the first returned record
 to the probe time and walking backward at two-minute cadence. That is useful

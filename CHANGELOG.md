@@ -16,6 +16,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   triage without importing data into SQLite.
 - Added a BM200/BM6 `d15505` sweep mode for controlled full-range byte-value
   probes when matrix or deepen results identify a candidate selector byte.
+- Added an offline `bm-gateway protocol analyze-history-captures` report for
+  saved protocol-probe JSONL files, including decoded history-field profiling,
+  marker counts, sequence overlap checks, and stitch recommendations.
 - Added BM200/BM6 archive-history import through
   `bm-gateway history sync-device`, including decoded voltage, SoC,
   temperature, raw record storage, and a `--page-count` option for cumulative

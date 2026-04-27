@@ -22,6 +22,25 @@ from bm_gateway.protocol_probe import (
 )
 
 
+def _write_probe_capture(path: Path, *, command: str, records: list[str]) -> None:
+    path.write_text(
+        "\n".join(
+            [
+                '{"event":"probe_start","ts":"2026-04-27T18:00:00+00:00"}',
+                (
+                    '{"event":"command_result","ts":"2026-04-27T18:00:10+00:00",'
+                    f'"command":"{command}","packets":['
+                    '{"plaintext":"d1550506710000000000000000000000"},'
+                    f'{{"plaintext":"{"".join(records)}"}}'
+                    "]}"
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+
 def test_safe_probe_commands_are_bounded_d155_commands() -> None:
     commands = safe_probe_commands()
 
@@ -494,6 +513,41 @@ def test_cli_protocol_probe_rejects_invalid_bm200_sweep_hex(
     captured = capsys.readouterr()
     assert result == 2
     assert "--sweep-start must be a hex byte between 00 and ff" in captured.err
+
+
+def test_cli_protocol_analyze_history_captures_outputs_json_report(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    first = tmp_path / "first.jsonl"
+    second = tmp_path / "second.jsonl"
+    _write_probe_capture(
+        first,
+        command="bm6_hist_d15505_b7_55_b4_0a",
+        records=["53055120", "4ee5a080"],
+    )
+    _write_probe_capture(
+        second,
+        command="bm6_hist_d15505_b7_55_b4_0a",
+        records=["53155120", "53055120", "4ee5a080"],
+    )
+
+    result = cli.main(
+        [
+            "protocol",
+            "analyze-history-captures",
+            "--input",
+            str(first),
+            "--input",
+            str(second),
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 0
+    assert '"selector": "b4_0a"' in captured.out
+    assert '"classification": "rolling_window"' in captured.out
 
 
 def test_cli_help_mentions_protocol_command(capsys: pytest.CaptureFixture[str]) -> None:

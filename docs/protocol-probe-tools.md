@@ -365,6 +365,48 @@ Do not import byte-4 sweep records into SQLite until raw-record overlap proves
 how to order and timestamp those segments. The existing archive importer uses
 the verified newest-first byte-7 selector only.
 
+A follow-up shift comparison about three hours later confirmed that several
+byte-4 windows move at the same two-minute cadence as the current byte-7
+window. The byte-7 retry contained the old byte-7 window at offset `93`;
+`b4=0a` and `b4=10` contained their previous windows at offset `90`; `b4=47`
+contained its previous prefix at offset `91`. `b4=2f` had a long overlap
+aligned to the same cadence, but the first 40 old records did not line up
+cleanly. Use overlap-based stitching before importing byte-4 results into
+SQLite.
+
+The byte-4 payload is meaningful data, not opaque noise. When decoded with the
+same `vvv ss tt p` layout used for modern BM6/BM900 and BM7/BM300 history,
+representative records become normal readings, for example `53055120` is
+13.28 V, 85%, 18 C, event `0`, and `4ee5a080` is 12.62 V, 90%, 8 C, event
+`0`. A few zero-like records such as `00000001` appear next to event-nibble
+records and should be kept as raw event markers until charging or cranking
+tests explain them. Do not deduplicate by raw value alone because unchanged
+battery readings repeat exact 4-byte records; use long sequence overlap and
+timestamp placement.
+
+Analyze saved JSONL captures offline before writing an importer:
+
+```sh
+bm-gateway protocol analyze-history-captures \
+  --input output/protocol-probes/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t1-spare_nlp5-20260427-211240.jsonl \
+  --input output/protocol-probes/bm200-b7-55-retry-t1-spare_nlp5-20260427-211824.jsonl
+```
+
+The command profiles decoded field ranges, event counts, marker counts, exact
+sequence overlaps, and stitch recommendations. Add `--json` when another tool
+needs the structured report.
+
+A focused byte-4/byte-7 matrix tested whether byte 7 acts as cumulative depth
+inside a byte-4-selected window. The first results support that model for
+`b4=0a` and `b4=10`: `b4=0a,b7=10` was contained at offset `0` in
+`b4=0a,b7=20`, and `b4=10,b7=20` was contained at offset `0` in
+`b4=10,b7=55`. Values below the apparent threshold returned empty. `b4=09`
+and `b4=47` returned empty even at `b7=55` in that session, despite earlier
+successful captures, so repeat key selectors before concluding that a window
+is absent.
+
 ## BM200 Shift Verification Recipe
 
 To verify page order and cadence on a BM200/BM6 device:

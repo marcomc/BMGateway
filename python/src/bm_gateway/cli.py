@@ -21,6 +21,7 @@ from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, device_driver_type, load_device_registry, validate_devices
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
+from .protocol_analysis import analyze_history_captures
 from .protocol_probe import (
     ProtocolProbeCommand,
     build_bm200_b7_55_deepen_commands,
@@ -247,6 +248,23 @@ def build_parser() -> argparse.ArgumentParser:
         "protocol", help="Run bounded BM6/BM7 BLE protocol probes."
     )
     protocol_subparsers = protocol_parser.add_subparsers(dest="protocol_command")
+    protocol_analyze = protocol_subparsers.add_parser(
+        "analyze-history-captures",
+        help="Analyze saved protocol probe JSONL history captures offline.",
+    )
+    protocol_analyze.add_argument(
+        "--input",
+        action="append",
+        type=Path,
+        default=[],
+        required=True,
+        help="Protocol probe JSONL capture path. May be repeated in chronological order.",
+    )
+    protocol_analyze.add_argument(
+        "--json",
+        action="store_true",
+        help="Print structured JSON output.",
+    )
     protocol_probe = protocol_subparsers.add_parser(
         "probe-history",
         help="Probe known safe live/version/history-candidate commands and print JSONL.",
@@ -873,6 +891,47 @@ def _handle_protocol_probe_history(
     return 0
 
 
+def _handle_protocol_analyze_history_captures(
+    *,
+    inputs: Sequence[Path],
+    as_json: bool,
+) -> int:
+    missing = [path for path in inputs if not path.exists()]
+    if missing:
+        for path in missing:
+            print(f"Capture not found: {path}", file=sys.stderr)
+        return 2
+    report = analyze_history_captures(list(inputs))
+    if as_json:
+        _print_json(report)
+        return 0
+    print(f"Analyzed {len(report['captures'])} capture file(s).")
+    for command in report["commands"]:
+        print(
+            f"{command['selector']}: records={command['record_count']} "
+            f"plausible={command['plausible_count']} markers={command['marker_count']} "
+            f"events={command['event_counts']}"
+        )
+    if report["overlaps"]:
+        print("Overlaps:")
+        for overlap in report["overlaps"]:
+            print(
+                f"{overlap['selector']}: {overlap['classification']} "
+                f"old_in_new={overlap['old_in_new_offset']} "
+                f"best_run={overlap['best_run_length']} "
+                f"old_offset={overlap['best_run_old_offset']} "
+                f"new_offset={overlap['best_run_new_offset']}"
+            )
+    if report["selector_recommendations"]:
+        print("Stitch recommendations:")
+        for recommendation in report["selector_recommendations"]:
+            print(
+                f"{recommendation['selector']}: {recommendation['status']} "
+                f"({recommendation['reason']})"
+            )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv) if argv is not None else sys.argv[1:]
     if not args_list or args_list == ["--help"] or args_list == ["-h"]:
@@ -973,6 +1032,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             bm200_b7_55_sweep_byte=args.bm200_b7_55_sweep_byte,
             sweep_start=args.sweep_start,
             sweep_end=args.sweep_end,
+        )
+    if args.command == "protocol" and args.protocol_command == "analyze-history-captures":
+        return _handle_protocol_analyze_history_captures(
+            inputs=args.input,
+            as_json=bool(args.json),
         )
 
     if args.command == "run":

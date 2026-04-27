@@ -20,15 +20,23 @@
   before `98..ff` saturated again. The first raw-overlap pass showed `b4=02`
   is only a suffix of the current byte-7 window, while representative groups
   `b4=09`, `b4=2f`, and `b4=47` do not overlap the current window or each
-  other with long exact record runs. Next work is determining the chronological
-  order and timestamp anchors for those byte-4 groups before importing them,
-  because the current timestamp assumption is only proven for newest-first
-  byte-7 pages. Also add stronger overlap-based timestamp alignment for long
-  absences and richer archive-sync status reporting beyond the manual progress
-  page. Keep the final `p` nibble raw until cranking or charging-test events
-  explain it.
+  other with long exact record runs. A later shift comparison showed `b7=55`
+  moved by 93 records, `b4=0a` and `b4=10` moved by 90 records, `b4=47`
+  moved by 91 records, and `b4=2f` had a long 4490-record overlap aligned to
+  the same cadence but with an ambiguous old prefix. Next work is implementing
+  overlap-based stitching and timestamp anchoring for byte-4 windows, starting
+  from the clean rolling selectors. The byte-4 payload decodes as meaningful
+  BM6/BM900-style and BM7/BM300-style `vvv ss tt p` readings, but raw values
+  are not unique enough for deduplication by equality alone; stable batteries
+  repeat identical records, and zero-like event markers still need to remain
+  raw. Use `bm-gateway protocol analyze-history-captures` and the byte-4
+  profiling proposal as the offline gate before importing these ranges. Also
+  add richer archive-sync status reporting beyond the manual progress page.
+  Keep the final `p` nibble raw until cranking or charging-test events explain
+  it.
   Reference:
   [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
+  [docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md](docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md)
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.
   Live voltage, SoC, temperature, RSSI, device state, and bounded archive
   import now use a dedicated BM300 Pro driver. Automatic BM7 archive import is
