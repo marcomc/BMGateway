@@ -3349,6 +3349,44 @@ def test_render_home_html_renders_device_icon() -> None:
     )
 
 
+def test_render_home_html_shows_low_state_as_red_status() -> None:
+    from bm_gateway.web import render_home_html
+
+    html = render_home_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "spare_nlp20",
+                    "name": "Spare NLP20",
+                    "type": "bm200",
+                    "soc": 28,
+                    "voltage": 12.95,
+                    "temperature": 22.0,
+                    "state": "low",
+                    "connected": True,
+                    "error_code": None,
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "spare_nlp20",
+                "name": "Spare NLP20",
+                "type": "bm200",
+                "enabled": True,
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "Battery OK" not in html
+    assert "<span>Low</span>" in html
+    assert "home-overview-orb tone-card green status-low" in html
+    assert "home-orb-center status-low" in html
+    assert "battery-card-status battery-card-status-inline low" in html
+
+
 def test_render_home_html_threads_appearance_to_document_root() -> None:
     html = render_home_html(
         snapshot={"devices": []},
@@ -3592,6 +3630,21 @@ def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     assert ".device-icon-frame.device-list-badge .device-icon-svg {" in css
 
 
+def test_base_css_renders_low_home_status_in_error_red() -> None:
+    css = base_css()
+
+    assert ".home-orb-center.status-low .battery-card-gauge-value {" in css
+    assert "color: var(--state-error);" in css
+    assert ".home-overview-orb.status-low .battery-card-badge .stroke-accent {" in css
+    assert ".home-overview-orb.status-low .battery-card-badge .fill-accent {" in css
+    assert ".battery-card-status.low { color: var(--state-error); }" in css
+    assert (
+        ".status-badge.low { background: rgba(239, 68, 68, 0.12); color: var(--state-error); }"
+        in css
+    )
+    assert ".status-scale-active-segment.tone-low {" in css
+
+
 def test_base_css_highlights_selected_history_device_with_device_accent() -> None:
     css = base_css()
 
@@ -3618,13 +3671,139 @@ def test_base_css_uses_wrapping_flex_layout_for_history_device_selector() -> Non
     assert ".history-device-stage {" in css
     assert "margin-top: 1.15rem;" in css
     assert ".history-device-scroller {" in css
+    assert "--history-device-card-max:" in css
+    assert "--history-device-card-size: min(var(--history-device-card-max), 100%);" in css
     assert "--history-device-page-padding: calc(var(--history-device-gap) / 2);" in css
     assert ".history-device-page {" in css
     assert "display: flex;" in css
     assert "scroll-padding-inline: var(--history-device-page-padding);" in css
+    assert "justify-items: center;" in css
     assert "grid-template-columns: repeat(var(--history-device-columns), minmax(0, 1fr));" in css
+    assert "grid-template-rows: repeat(var(--history-device-rows), auto);" in css
     assert "gap: 1rem;" in css
     assert ".history-device-page .history-device-card {" in css
+    assert "width: var(--history-device-card-size);" in css
+    assert (
+        "height: 100%;"
+        not in css[
+            css.index(".history-device-page .history-device-card {") : css.index(
+                ".device-list-rows {"
+            )
+        ]
+    )
+
+
+def test_base_css_compacts_history_device_selector_card_bounds_on_mobile() -> None:
+    css = base_css()
+    mobile_css = css[css.index("@media (max-width: 640px)") :]
+
+    assert ".history-device-scroller {" in mobile_css
+    assert "--history-device-card-min: 132px;" in mobile_css
+    assert "--history-device-card-max: 164px;" in mobile_css
+    assert "--history-device-gap: 0.25rem;" in mobile_css
+
+
+def test_history_device_selector_uses_home_overview_pagination_sizing() -> None:
+    html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 10)
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert 'styles.getPropertyValue("--history-device-card-max")' in html
+    assert "track.clientWidth - (pagePadding * 2)" in html
+    assert "const columnBasis = minCard;" in html
+    assert "Math.min(cards.length || 1, rawColumns)" in html
+    assert "const capacity = Math.max(1, columns * 2);" in html
+    assert 'page.style.setProperty("--history-device-card-size"' in html
+    assert 'window.visualViewport.addEventListener("resize", scheduleBuild' in html
+    assert "Math.min(4" not in html
+
+
+def test_history_device_selector_initial_layout_uses_one_row_for_four_devices() -> None:
+    html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 5)
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert (
+        'class="history-device-page is-single-page page-multi-cards" '
+        'style="--history-device-columns: 4; --history-device-rows: 1"'
+    ) in html
+
+
+def test_home_and_history_pagers_skip_unchanged_layout_rebuilds() -> None:
+    home_html = render_home_html(
+        snapshot={"devices": [{"id": "battery_1", "name": "Battery 1"}]},
+        devices=[{"id": "battery_1", "name": "Battery 1", "enabled": True}],
+        chart_points=[],
+        legend=[],
+    )
+    history_html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[{"id": "battery_1", "name": "Battery 1"}],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert 'let lastLayoutKey = "";' in home_html
+    home_guard = home_html[
+        home_html.index("if (layoutKey === lastLayoutKey && pages.length > 0)") : home_html.index(
+            "return;", home_html.index("if (layoutKey === lastLayoutKey")
+        )
+    ]
+    assert "if (controls) controls.hidden = pages.length <= 1;" in home_guard
+    assert "syncButtons();" in home_guard
+    assert 'let lastLayoutKey = "";' in history_html
+    history_guard = history_html[
+        history_html.index(
+            "if (layoutKey === lastLayoutKey && pages.length > 0)"
+        ) : history_html.index("return;", history_html.index("if (layoutKey === lastLayoutKey"))
+    ]
+    assert "if (controls) controls.hidden = pages.length <= 1;" in history_guard
+    assert "syncButtons();" in history_guard
+
+
+def test_home_and_history_pagers_scroll_inside_their_tracks() -> None:
+    home_html = render_home_html(
+        snapshot={
+            "devices": [
+                {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 6)
+            ]
+        },
+        devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}", "enabled": True}
+            for index in range(1, 6)
+        ],
+        chart_points=[],
+        legend=[],
+    )
+    history_html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 6)
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "track.scrollTo({" in home_html
+    assert "left: pages[currentPage].offsetLeft - track.offsetLeft," in home_html
+    assert ".scrollIntoView(" not in home_html
+    assert "track.scrollTo({" in history_html
+    assert "left: pages[currentPage].offsetLeft - track.offsetLeft," in history_html
+    assert ".scrollIntoView(" not in history_html
 
 
 def test_base_css_compacts_raw_history_table() -> None:
