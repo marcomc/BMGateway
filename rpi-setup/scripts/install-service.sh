@@ -196,6 +196,7 @@ mqtt = dict(data.get("mqtt", {}))
 home_assistant = dict(data.get("home_assistant", {}))
 web = dict(data.get("web", {}))
 usb_otg = dict(data.get("usb_otg", {}))
+archive_sync = dict(data.get("archive_sync", {}))
 retention = dict(data.get("retention", {}))
 
 if str(gateway.get("name", "")).startswith("__"):
@@ -267,6 +268,15 @@ payload = "\n".join(
         f'fleet_trend_metrics = {string_sequence_to_toml(usb_otg.get("fleet_trend_metrics", ["soc"]))}',
         f'fleet_trend_range = {string_to_toml(usb_otg.get("fleet_trend_range", "7"))}',
         f'fleet_trend_device_ids = {string_sequence_to_toml(usb_otg.get("fleet_trend_device_ids", []))}',
+        "",
+        "[archive_sync]",
+        f'enabled = {bool_to_toml(bool(archive_sync.get("enabled", True)))}',
+        f'periodic_interval_seconds = {int(archive_sync.get("periodic_interval_seconds", 64800))}',
+        f'reconnect_min_gap_seconds = {int(archive_sync.get("reconnect_min_gap_seconds", 28800))}',
+        f'safety_margin_seconds = {int(archive_sync.get("safety_margin_seconds", 7200))}',
+        f'bm200_max_pages_per_sync = {int(archive_sync.get("bm200_max_pages_per_sync", 3))}',
+        f'bm300_enabled = {bool_to_toml(bool(archive_sync.get("bm300_enabled", False)))}',
+        f'bm300_max_pages_per_sync = {int(archive_sync.get("bm300_max_pages_per_sync", 1))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',
