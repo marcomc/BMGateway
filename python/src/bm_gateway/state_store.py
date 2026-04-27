@@ -109,6 +109,18 @@ def _connect_database(path: Path) -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_device_readings_device_ts
+        ON device_readings (device_id, snapshot_generated_at DESC)
+        """
+    )
+    connection.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_device_archive_readings_device_ts
+        ON device_archive_readings (device_id, ts DESC)
+        """
+    )
     existing_columns = {
         row[1] for row in connection.execute("PRAGMA table_info(device_daily_rollups)").fetchall()
     }

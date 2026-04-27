@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Reduced History, Fleet Trend, Device Detail, and frame-chart render cost by
+  compressing management responses, moving chart datasets out of heavy HTML
+  attributes, compacting dense chart ranges before SVG rendering, limiting the
+  History diagnostic raw table, and adding chronological history indexes.
 - Corrected BM6-family live state code `2` to display as `charging`, matching
   public BM6 integration code, official-app behavior, and local BM200 probes.
 

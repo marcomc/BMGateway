@@ -204,6 +204,23 @@ def test_chart_script_supports_range_paging_and_drag_panning() -> None:
     assert 'frame.classList.add("is-panning");' in script
 
 
+def test_chart_script_compacts_dense_ranges_before_svg_rendering() -> None:
+    script = chart_script("history-chart")
+
+    assert "function displayPointLimit(rangeValue)" in script
+    assert "function compactPointsForDisplay(points, metric, rangeValue)" in script
+    assert 'const dataScript = document.getElementById(id + "-data");' in script
+    assert 'JSON.parse(dataScript?.textContent || frame.dataset.chartPoints || "[]");' in script
+    assert (
+        "const displayPoints = compactPointsForDisplay(points, currentMetric, currentRange);"
+        in script
+    )
+    assert (
+        "const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);"
+        in script
+    )
+
+
 def test_chart_script_renders_multi_series_tooltip_rows() -> None:
     script = chart_script("history-chart")
 
@@ -247,6 +264,8 @@ def test_chart_card_markup_includes_side_navigation_buttons() -> None:
     assert 'class="chart-nav-arrow previous"' in html
     assert 'class="chart-nav-arrow next"' in html
     assert 'class="chart-canvas"' in html
+    assert 'type="application/json" id="home-overview-chart-data"' in html
+    assert "data-chart-points=" not in html
     assert 'class="legend-item active"' in html
     assert 'data-series-label="No devices"' in html
     assert 'aria-pressed="true"' in html
@@ -3882,6 +3901,40 @@ def test_render_history_html_shows_history_action_message() -> None:
     assert "History sync completed: bm200_house, inserted 128 of 512 records" in html
 
 
+def test_render_history_html_limits_diagnostic_raw_table_rows() -> None:
+    raw_history: list[dict[str, object]] = [
+        {
+            "ts": f"2026-04-27T12:{index % 60:02d}:00+02:00",
+            "voltage": 13.2,
+            "soc": 84,
+            "temperature": 20.0,
+            "state": "normal",
+            "error_code": None,
+            "error_detail": None,
+        }
+        for index in range(350)
+    ]
+
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+                "type": "bm200",
+                "enabled": True,
+            }
+        ],
+        raw_history=raw_history,
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "Valid samples" in html
+    assert ">350<" in html
+    assert html.count("<td>normal</td>") == 300
+
+
 def test_render_settings_html_threads_appearance_to_document_root() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(config, web=replace(config.web, appearance="dark"))
@@ -4339,7 +4392,7 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
     assert "hero-shell" in html
     assert "chart-tooltip" in html
     assert "chart-overlay" in html
-    assert "&quot;series&quot;:&quot;BM200 House&quot;" in html
+    assert '"series":"BM200 House"' in html
 
 
 def test_redirect_message_query_round_trips_special_characters() -> None:
@@ -4408,7 +4461,7 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert '<a class="secondary-button" href="/">Battery</a>' not in html
     assert "Device Detail" not in html
     assert 'aria-current="page"' in html
-    assert "&quot;series&quot;:&quot;bm200_house" in html
+    assert '"series":"bm200_house' in html
 
 
 def test_render_history_html_shows_device_selector_and_quick_switch_links() -> None:

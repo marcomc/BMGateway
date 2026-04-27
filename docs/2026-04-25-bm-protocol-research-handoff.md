@@ -152,6 +152,34 @@ validation imported:
 | `spare_nlp5` | `3` | `765` |
 | `spare_nlp20` | `3` | `748` |
 
+Manual full-window sync on `spare_nlp5` currently requests byte-7 selector
+`0x55` (`85`) to match the 30-day advertised BM200 retention estimate. On
+2026-04-27, the device returned only about 1455-1456 non-empty records, covering
+roughly 48 hours 30 minutes:
+
+| Selector | Records | Observed range |
+| --- | --- | --- |
+| `01` | `256` | `2026-04-27 08:20` .. `2026-04-27 16:50` |
+| `03` | `768` | `2026-04-26 15:16` .. `2026-04-27 16:50` |
+| `0a` | `1456` | `2026-04-25 16:22` .. `2026-04-27 16:52` |
+| `55` | `1456` | `2026-04-25 16:22` .. `2026-04-27 16:52` |
+
+This proves only that the current selector form saturates around 1456 records
+on that capture. It does not prove the BM200 has no older retained data. Two
+open explanations remain:
+
+- the device may have had only that many records available because older memory
+  was reset or overwritten before the test;
+- another byte in `d15505` may select an offset, bank, cursor, direction, or
+  segment needed to reach older history.
+
+A controlled single-byte matrix was prepared for `spare_nlp5` using base
+command `d1550500000000550000000000000000` and mutating one zero byte at a
+time to `0x01`. The first run was interrupted because the ad-hoc remote script
+blocked without progress output. The next attempt should run through the
+packaged probe tooling or an unbuffered diagnostic command that writes JSONL
+after each command.
+
 ### Record Layout
 
 Each historical sample is 4 bytes:
@@ -229,8 +257,9 @@ The one-point gap between live `82%` and newest historical `83%` on
 - Meaning of `p`. Observed values include `0`, `2`, and `4`. It is not the live
   status code, because monitors reporting live `charging` still usually had
   `p=0` in history.
-- Paging or range selection for the full advertised 30-day history. The known
-  selector returns one 256-record page.
+- Paging or range selection for the full advertised 30-day history. Byte 7 is
+  a cumulative selector, but `0x55` saturated around 1456 records in the latest
+  `spare_nlp5` capture.
 - Cranking, charging-test, or waveform event records. These may use `p`,
   another `d15505` selector, or another command family.
 

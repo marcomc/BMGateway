@@ -393,6 +393,7 @@ def _render_history_sections(
     daily_history: list[dict[str, object]],
     monthly_history: list[dict[str, object]],
 ) -> str:
+    visible_raw_history = raw_history[:300]
     raw_rows = "\n".join(
         "<tr>"
         f"<td>{shared._escape_cell(row['ts'])}</td>"
@@ -402,7 +403,7 @@ def _render_history_sections(
         f"<td>{shared._escape_cell(row['state'])}</td>"
         f"<td>{_error_cell(row)}</td>"
         "</tr>"
-        for row in raw_history
+        for row in visible_raw_history
     )
     daily_rows = "\n".join(
         "<tr>"

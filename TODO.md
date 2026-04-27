@@ -7,11 +7,15 @@
   voltage, SoC, temperature, raw record, page selector, record index, and
   timestamp quality, and runs through periodic/reconnect backfill plus a
   per-device History page action. Manual BM200/BM6 sync now requests 85
-  cumulative pages, matching the 30-day retention estimate; next work is live
-  validation of the full-window result, stronger overlap-based timestamp
-  alignment for long absences, and richer archive-sync status reporting beyond
-  the manual progress page. Keep the final `p` nibble raw until cranking or
-  charging-test events explain it.
+  cumulative pages, matching the 30-day retention estimate, but the latest
+  `spare_nlp5` capture saturated around 1456 records, or about 48 hours
+  30 minutes. Next work is a controlled `d15505` matrix that mutates one byte
+  at a time around the known byte-7 selector to look for an offset, bank,
+  cursor, direction, or segment selector; then repeat full-window validation
+  after several days of uninterrupted recording. Also add stronger
+  overlap-based timestamp alignment for long absences and richer archive-sync
+  status reporting beyond the manual progress page. Keep the final `p` nibble
+  raw until cranking or charging-test events explain it.
   Reference:
   [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.

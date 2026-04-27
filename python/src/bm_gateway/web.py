@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -494,28 +495,51 @@ def serve_management(
     state_dir: Path | None = None,
 ) -> None:
     class Handler(BaseHTTPRequestHandler):
-        def _send_html(self, html: str, status: int = 200) -> None:
-            payload = html.encode("utf-8")
+        def _client_accepts_gzip(self) -> bool:
+            accept_encoding = self.headers.get("Accept-Encoding", "")
+            return any(
+                item.strip().split(";", 1)[0].lower() == "gzip"
+                for item in accept_encoding.split(",")
+            )
+
+        def _send_payload(
+            self,
+            payload: bytes,
+            *,
+            content_type: str,
+            status: int = 200,
+            compressible: bool = True,
+        ) -> None:
             self.send_response(status)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", content_type)
+            if compressible and len(payload) >= 1024 and self._client_accepts_gzip():
+                payload = gzip.compress(payload, compresslevel=6)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+
+        def _send_html(self, html: str, status: int = 200) -> None:
+            payload = html.encode("utf-8")
+            self._send_payload(payload, content_type="text/html; charset=utf-8", status=status)
 
         def _send_json(self, payload_obj: object, status: int = 200) -> None:
             payload = json.dumps(payload_obj, indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            self._send_payload(
+                payload,
+                content_type="application/json; charset=utf-8",
+                status=status,
+            )
 
         def _send_bytes(self, payload: bytes, *, content_type: str, status: int = 200) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            compressible = content_type.startswith(("text/", "application/json", "image/svg+xml"))
+            self._send_payload(
+                payload,
+                content_type=content_type,
+                status=status,
+                compressible=compressible,
+            )
 
         def _load_current(self) -> tuple[AppConfig, dict[str, object], Path]:
             config = load_config(config_path)
