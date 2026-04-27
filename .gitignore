@@ -13,6 +13,7 @@ python/config/data/
 output/images/
 output/spf71e-layout-tests/
 output/spf71e-test-images/
+output/protocol-probes/
 BMGateway-v2-premium-scaffold/
 *.img
 *.img.xz

@@ -12,6 +12,8 @@ Use it to:
 - download the verified BM200/BM6 256-record history page
 - download the gated BM300 Pro/BM7 history selector for parser validation
 - preserve JSONL evidence for parser work
+- run a controlled BM200/BM6 `d15505` byte matrix around the verified
+  byte-7 cumulative selector
 
 It is not a fuzzer. It does not try unknown AES keys, brute force, bypass, or
 broad command sweeps.
@@ -33,6 +35,10 @@ The probe sends only this fixed allowlist:
 
 Do not add commands without public-source evidence, official-app capture, or a
 written local test plan.
+
+The BM200/BM6 matrix mode is a separate written test-plan mode. It keeps the
+command ID fixed at `d15505`, uses the verified BM6 key, starts from the known
+byte-7 selector `0x55`, and mutates only one byte per command.
 
 ## Operational Workflow
 
@@ -236,6 +242,128 @@ tool to capture low page limits first, then compare overlap and record counts
 before increasing the configured limit toward the 72-day advertised retention
 cap. One live selector-`01` import from `doc_fb12899` returned 883 records,
 which is about 29 hours 26 minutes at 2-minute cadence.
+
+## BM200 `b7=55` Matrix
+
+Use this mode for the controlled `spare_nlp5` investigation into whether
+another byte selects an older BM200/BM6 history bank, cursor, offset, or
+segment.
+
+It does not import anything into SQLite. It prints one JSONL event at a time
+with `flush=True`, including a `command_start` before every write and a
+`command_result` after every notification window.
+
+Stop the runtime service first:
+
+```sh
+sudo systemctl stop bm-gateway
+bm-gateway protocol probe-history \
+  --device-id spare_nlp5 \
+  --bm200-b7-55-matrix \
+  --command-timeout-seconds 3.5 \
+  > /tmp/bm200-b7-55-matrix-spare_nlp5.jsonl
+sudo systemctl start bm-gateway
+systemctl is-active bm-gateway bm-gateway-web
+```
+
+The baseline command is:
+
+```text
+d1550500000000550000000000000000
+```
+
+The matrix then mutates one byte at a time from zero to `01` for byte indexes
+`3..15`, excluding index `7`.
+
+Every `command_result` includes:
+
+- `plaintext`: exact command plaintext
+- `packet_count`: captured BLE notification count
+- `packets`: encrypted/decrypted packet evidence
+- `history_summary.payload_bytes`
+- `history_summary.non_empty_payload_bytes`
+- `history_summary.record_count`
+- `history_summary.newest_estimated_ts`
+- `history_summary.oldest_estimated_ts`
+- `history_summary.newest_raw`
+- `history_summary.oldest_raw`
+- `history_summary.frame_count`
+- `history_summary.data_frame_count`
+- `history_summary.headers`
+- `history_summary.trailers`
+- `history_summary.decode_error_count`
+
+The estimated timestamp fields assume the first returned history record is the
+newest sample at probe time and that following records walk backward at the
+known two-minute cadence. That assumption is valid for the verified
+newest-first BM200/BM6 byte-7 pages. It is only a triage aid for experimental
+segment or range selectors until raw-record overlap proves the true placement.
+
+If one byte changes record count, payload size, newest/oldest raw record, or
+estimated range compared with `bm6_hist_d15505_b7_55_baseline`, deepen only
+that byte:
+
+```sh
+sudo systemctl stop bm-gateway
+bm-gateway protocol probe-history \
+  --device-id spare_nlp5 \
+  --bm200-b7-55-deepen-byte 6 \
+  --command-timeout-seconds 3.5 \
+  > /tmp/bm200-b7-55-b6-deepen-spare_nlp5.jsonl
+sudo systemctl start bm-gateway
+systemctl is-active bm-gateway bm-gateway-web
+```
+
+The deepen mode runs the same baseline plus values
+`02,03,04,10,20,40,80,ff` for the selected byte index. Valid indexes are
+`3..15`, excluding index `7`.
+
+For a complete value sweep of one byte, use:
+
+```sh
+sudo systemctl stop bm-gateway
+bm-gateway protocol probe-history \
+  --device-id spare_nlp5 \
+  --bm200-b7-55-sweep-byte 4 \
+  --sweep-start 00 \
+  --sweep-end ff \
+  --command-timeout-seconds 3.5 \
+  > /tmp/bm200-b7-55-b4-sweep-spare_nlp5.jsonl
+sudo systemctl start bm-gateway
+systemctl is-active bm-gateway bm-gateway-web
+```
+
+Sweep mode allows byte indexes `3..15`, including byte `7` when the goal is to
+walk the known cumulative selector itself. Keep sweeps bounded to owned devices
+and save the raw JSONL because the useful evidence is often the raw boundary
+and overlap, not just the count.
+
+### `spare_nlp5` Sweep Findings
+
+The 2026-04-27 full sweeps on `spare_nlp5` produced these working conclusions:
+
+- Byte `4` is the only strong BM200/BM6 segment or range selector candidate.
+  It returned several non-empty groups, including `09..28`, `2f..40`, and
+  `47..54`; `b4=09` returned 7998 records.
+- Byte `6` did not change the BM200/BM6 history range. Every value `00..ff`
+  returned the same current saturated byte-7 window.
+- Byte `7` is still the cumulative page-count selector. Values `01..05`
+  returned 256-record increments, `06..76` saturated on the current window,
+  `77..97` alternated empty odd selectors with saturated even selectors, and
+  `98..ff` saturated again.
+
+The first byte-4 content comparison showed that `b4=02` is only a suffix of
+the current byte-7 window. It also showed that higher values inside each
+non-empty byte-4 group are mostly tails of the group head. Compare and import
+only the group heads first when continuing analysis:
+
+- `b4=09`
+- `b4=2f`
+- `b4=47`
+
+Do not import byte-4 sweep records into SQLite until raw-record overlap proves
+how to order and timestamp those segments. The existing archive importer uses
+the verified newest-first byte-7 selector only.
 
 ## BM200 Shift Verification Recipe
 

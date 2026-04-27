@@ -173,12 +173,119 @@ open explanations remain:
 - another byte in `d15505` may select an offset, bank, cursor, direction, or
   segment needed to reach older history.
 
-A controlled single-byte matrix was prepared for `spare_nlp5` using base
-command `d1550500000000550000000000000000` and mutating one zero byte at a
-time to `0x01`. The first run was interrupted because the ad-hoc remote script
-blocked without progress output. The next attempt should run through the
-packaged probe tooling or an unbuffered diagnostic command that writes JSONL
-after each command.
+A controlled single-byte matrix was run for `spare_nlp5` using base command
+`d1550500000000550000000000000000` and mutating one zero byte at a time to
+`0x01`. The packaged probe tooling now writes unbuffered JSONL after each
+command so long captures do not appear silent.
+
+Primary captures:
+
+| Capture | Path |
+| --- | --- |
+| Matrix | `/tmp/bm200-b7-55-matrix-spare_nlp5-20260427-153247.jsonl` |
+| Byte-4 deepen | `/tmp/bm200-b7-55-b4-deepen-repeat-spare_nlp5-20260427-154307.jsonl` |
+| Byte-8 deepen | `/tmp/bm200-b7-55-b8-deepen-spare_nlp5-20260427-153804.jsonl` |
+| Byte-10 deepen | `/tmp/bm200-b7-55-b10-deepen-spare_nlp5-20260427-153855.jsonl` |
+| Byte-12 deepen | `/tmp/bm200-b7-55-b12-deepen-spare_nlp5-20260427-153946.jsonl` |
+| Byte-14 deepen | `/tmp/bm200-b7-55-b14-deepen-spare_nlp5-20260427-154036.jsonl` |
+| Byte-4 sweep | `/tmp/bm200-b7-55-b4-sweep-00-ff-spare_nlp5-20260427-160351.jsonl` |
+| Byte-6 sweep | `/tmp/bm200-b7-55-b6-sweep-00-ff-spare_nlp5-20260427-161648.jsonl` |
+| Byte-7 sweep | `/tmp/bm200-b7-55-b7-sweep-00-ff-spare_nlp5-20260427-164223.jsonl` |
+
+Matrix result:
+
+- Baseline `d1550500000000550000000000000000` returned 1476 records, with the
+  same approximate 48-hour range seen earlier.
+- Byte indexes `4`, `8`, `10`, `12`, and `14` set to `01` returned only a
+  short marker response (`fefefe...` followed by `fffefe...`) rather than
+  history records. The first matrix file was captured just before the
+  `fefefe` marker-count fix, so its summary counts those marker rows as one
+  record; treat them as zero history records.
+- Other tested byte indexes returned the same current 48-hour window, with
+  one-record count differences consistent with new two-minute samples arriving
+  during the run.
+
+Byte index `4` is now the strongest BM200/BM6 segment or range selector
+candidate. The repeat deepen produced:
+
+| Command | Records | Notable raw boundary |
+| --- | ---: | --- |
+| `b4=02` | 970 | oldest raw `5b164122` |
+| `b4=03` | 714 | oldest raw `5b164122` |
+| `b4=04` | 458 | oldest raw `5b164122` |
+| `b4=10` | 6198 | newest raw `4f056080`, oldest raw `50a59130` |
+| `b4=20` | 2111 | newest raw `51560200`, oldest raw `50a59130` |
+| `b4=40` | 77 | `4ee5d090` .. `4ef5e090` |
+| `b4=80` | 0 | empty marker |
+| `b4=ff` | 0 | empty marker |
+
+The full byte-4 sweep confirmed multiple valid groups, not one continuous
+linear page selector:
+
+| Byte-4 range | Result |
+| --- | --- |
+| `00..01` | empty |
+| `02..05` | non-empty current-window suffixes ending at oldest raw `5b164122` |
+| `06..08` | empty |
+| `09..28` | non-empty large group ending at oldest raw `50a59130`; `09` returned 7998 records |
+| `29..2e` | empty |
+| `2f..40` | non-empty group ending at oldest raw `4ef5e090` |
+| `41..46` | empty |
+| `47..54` | non-empty group ending at oldest raw `5325a170` |
+| `55..ff` | empty |
+
+Byte index `6` is not useful for BM200/BM6 archive range selection in this
+test. Every `00..ff` value returned the same current byte-7 window with the
+same oldest raw boundary `5b164122`; small count changes were consistent with
+new two-minute samples arriving during the long sweep.
+
+Byte index `7` remains the cumulative page-count selector. The full byte-7
+sweep showed:
+
+| Byte-7 range | Result |
+| --- | --- |
+| `00` | empty |
+| `01..05` | 256-record increments: 256, 512, 768, 1024, 1280 |
+| `06..76` | saturated current window, about 1511-1517 records |
+| `77..97` | odd values empty, even values saturated |
+| `98..ff` | saturated current window, ending around 1522 records |
+
+The byte-7 sweep did not reveal access to older history beyond the saturated
+current window. It only clarified selector behavior and the empty-marker
+pattern for high odd values.
+
+The first raw-record overlap pass found:
+
+- `b4=02` is a suffix of the current byte-7 window. In the `b7=55` capture, the
+  whole `b4=02` sequence starts at record offset `535`, so it does not add new
+  historical coverage.
+- Inside each non-empty byte-4 group, higher selector values are usually tails
+  of the lower selector value. For example, `b4=0a` is a tail of `b4=09`,
+  `b4=30` is a tail of `b4=2f`, and `b4=48` is a tail of `b4=47`.
+- Representative group heads `b4=09`, `b4=2f`, and `b4=47` did not show long
+  exact raw-record overlap with the current byte-7 window or with each other.
+
+This means byte 4 likely exposes separate archive segments, but their
+chronological order and timestamp anchors are not proven yet.
+
+Follow-up shift baseline captured on 2026-04-27:
+
+| Capture | Path | Notes |
+| --- | --- | --- |
+| Byte-4 shift `t0` | `/tmp/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl` | Captured `b7=55`, `b4=2f`, and `b4=47`; first `b4=09` attempt returned empty. |
+| Byte-4 shift `t0b` | `/tmp/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl` | Recaptured group A with `b4=09`, `0a`, and `10`; `b4=09` returned 8063 records. |
+
+Repeat the same focused capture about 20 minutes later and compare whether
+`b4=09`, `b4=2f`, and `b4=47` shift by about 10 records. If they do, the
+segments can be timestamp-anchored with much higher confidence.
+
+The probe summaries estimate timestamps by anchoring the first returned record
+to the probe time and walking backward at two-minute cadence. That is useful
+for ordinary newest-first pages but is not proven for byte-4 segmented ranges.
+Before importing byte-4 ranges into SQLite, compare raw-record overlap and
+ordering against the baseline and against each other. Do not import byte-4
+segments into SQLite until that stitching is proven; otherwise duplicate raw
+records or false timestamps are likely.
 
 ### Record Layout
 
@@ -257,9 +364,10 @@ The one-point gap between live `82%` and newest historical `83%` on
 - Meaning of `p`. Observed values include `0`, `2`, and `4`. It is not the live
   status code, because monitors reporting live `charging` still usually had
   `p=0` in history.
-- Paging or range selection for the full advertised 30-day history. Byte 7 is
-  a cumulative selector, but `0x55` saturated around 1456 records in the latest
-  `spare_nlp5` capture.
+- Safe stitching for byte-4 ranges before claiming full advertised 30-day
+  history recovery. Byte 7 is a cumulative selector, but the full byte-7 sweep
+  still saturated around 1511-1522 records on `spare_nlp5`; byte 4 is the only
+  strong segment/range candidate found so far.
 - Cranking, charging-test, or waveform event records. These may use `p`,
   another `d15505` selector, or another command family.
 
@@ -354,8 +462,8 @@ Both services must be active after every probe.
 
 ## Next Work
 
-1. Validate higher BM200/BM6 byte-7 page counts before claiming full 30-day
-   recovery.
+1. Analyze raw-record overlap across the BM200/BM6 byte-4 captures before
+   importing those segments or claiming full 30-day recovery.
 2. Validate BM300 Pro/BM7 byte-6 selectors beyond `01` before claiming full
    72-day recovery.
 3. Add stronger raw-sequence timestamp alignment for long absences and service

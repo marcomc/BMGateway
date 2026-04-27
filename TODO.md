@@ -8,14 +8,25 @@
   timestamp quality, and runs through periodic/reconnect backfill plus a
   per-device History page action. Manual BM200/BM6 sync now requests 85
   cumulative pages, matching the 30-day retention estimate, but the latest
-  `spare_nlp5` capture saturated around 1456 records, or about 48 hours
-  30 minutes. Next work is a controlled `d15505` matrix that mutates one byte
-  at a time around the known byte-7 selector to look for an offset, bank,
-  cursor, direction, or segment selector; then repeat full-window validation
-  after several days of uninterrupted recording. Also add stronger
-  overlap-based timestamp alignment for long absences and richer archive-sync
-  status reporting beyond the manual progress page. Keep the final `p` nibble
-  raw until cranking or charging-test events explain it.
+  `spare_nlp5` byte-7 sweep saturated around 1511-1522 records, or about
+  50 hours. The controlled `d15505` matrix and full sweeps found byte index
+  `4` as the only strong BM200/BM6 segment or range selector candidate:
+  `b4=09..28`, `2f..40`, and `47..54` returned distinct non-empty groups,
+  with `b4=09` returning 7998 records and older raw boundaries. Byte `6`
+  returned the same current window for every value and is not useful on BM200.
+  Byte `7` remains the cumulative page-count selector: `01..05` returned
+  256-record increments, `06..76` saturated on the current window, and higher
+  values mostly alternated empty odd selectors with saturated even selectors
+  before `98..ff` saturated again. The first raw-overlap pass showed `b4=02`
+  is only a suffix of the current byte-7 window, while representative groups
+  `b4=09`, `b4=2f`, and `b4=47` do not overlap the current window or each
+  other with long exact record runs. Next work is determining the chronological
+  order and timestamp anchors for those byte-4 groups before importing them,
+  because the current timestamp assumption is only proven for newest-first
+  byte-7 pages. Also add stronger overlap-based timestamp alignment for long
+  absences and richer archive-sync status reporting beyond the manual progress
+  page. Keep the final `p` nibble raw until cranking or charging-test events
+  explain it.
   Reference:
   [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.

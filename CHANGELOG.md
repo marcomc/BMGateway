@@ -11,6 +11,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added a bounded `bm-gateway protocol probe-history` diagnostic command for
   safe BM6/BM7 live, version, and `d15505` history-candidate BLE probes with
   JSONL output.
+- Added a controlled BM200/BM6 `d15505` byte-matrix probe mode around the
+  verified byte-7 selector, including per-command history summaries for JSONL
+  triage without importing data into SQLite.
+- Added a BM200/BM6 `d15505` sweep mode for controlled full-range byte-value
+  probes when matrix or deepen results identify a candidate selector byte.
 - Added BM200/BM6 archive-history import through
   `bm-gateway history sync-device`, including decoded voltage, SoC,
   temperature, raw record storage, and a `--page-count` option for cumulative
@@ -28,6 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Hardened Raspberry Pi bootstrap dependency installation so fresh installs,
+  Raspberry Pi Imager first-run setup, direct service refreshes, and Ansible
+  provisioning install the documented runtime, web, Bluetooth, and USB OTG
+  system packages consistently.
 - Reduced History, Fleet Trend, Device Detail, and frame-chart render cost by
   compressing management responses, moving chart datasets out of heavy HTML
   attributes, compacting dense chart ranges before SVG rendering, limiting the

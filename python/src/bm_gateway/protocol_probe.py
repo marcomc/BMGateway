@@ -6,7 +6,7 @@ import asyncio
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Protocol
 
 from bleak import BleakClient, BleakScanner
@@ -168,6 +168,84 @@ def build_probe_commands(*, history_page_limit: int = 1) -> tuple[ProtocolProbeC
     return tuple(commands)
 
 
+def _bm200_b7_55_command_name(byte_index: int | None, value: int | None) -> str:
+    if byte_index is None or value is None:
+        return "bm6_hist_d15505_b7_55_baseline"
+    return f"bm6_hist_d15505_b7_55_b{byte_index}_{value:02x}"
+
+
+def _bm200_b7_55_command(*, byte_index: int | None = None, value: int | None = None) -> bytes:
+    command = bytearray.fromhex("d1550500000000550000000000000000")
+    if byte_index is not None and value is not None:
+        command[byte_index] = value
+    return bytes(command)
+
+
+def _validate_bm200_b7_55_mutation_byte(byte_index: int) -> None:
+    if byte_index < 3 or byte_index > 15 or byte_index == 7:
+        raise ValueError("byte_index must be between 3 and 15, excluding 7")
+
+
+def _validate_bm200_b7_55_sweep(byte_index: int, start: int, end: int) -> None:
+    if byte_index < 3 or byte_index > 15:
+        raise ValueError("sweep byte_index must be between 3 and 15")
+    if start < 0 or start > 0xFF or end < 0 or end > 0xFF or start > end:
+        raise ValueError("sweep range must be between 00 and ff with start <= end")
+
+
+def build_bm200_b7_55_matrix_commands() -> tuple[ProtocolProbeCommand, ...]:
+    commands = [
+        ProtocolProbeCommand(
+            _bm200_b7_55_command_name(None, None),
+            _bm200_b7_55_command(),
+        )
+    ]
+    for byte_index in range(3, 16):
+        if byte_index == 7:
+            continue
+        commands.append(
+            ProtocolProbeCommand(
+                _bm200_b7_55_command_name(byte_index, 0x01),
+                _bm200_b7_55_command(byte_index=byte_index, value=0x01),
+            )
+        )
+    return tuple(commands)
+
+
+def build_bm200_b7_55_deepen_commands(*, byte_index: int) -> tuple[ProtocolProbeCommand, ...]:
+    _validate_bm200_b7_55_mutation_byte(byte_index)
+    values = (0x02, 0x03, 0x04, 0x10, 0x20, 0x40, 0x80, 0xFF)
+    return (
+        ProtocolProbeCommand(
+            _bm200_b7_55_command_name(None, None),
+            _bm200_b7_55_command(),
+        ),
+        *(
+            ProtocolProbeCommand(
+                _bm200_b7_55_command_name(byte_index, value),
+                _bm200_b7_55_command(byte_index=byte_index, value=value),
+            )
+            for value in values
+        ),
+    )
+
+
+def build_bm200_b7_55_sweep_commands(
+    *,
+    byte_index: int,
+    start: int = 0x00,
+    end: int = 0xFF,
+) -> tuple[ProtocolProbeCommand, ...]:
+    _validate_bm200_b7_55_sweep(byte_index, start, end)
+    return tuple(
+        ProtocolProbeCommand(
+            _bm200_b7_55_command_name(byte_index, value),
+            _bm200_b7_55_command(byte_index=byte_index, value=value),
+        )
+        for value in range(start, end + 1)
+    )
+
+
 def protocol_key(family: str) -> bytes:
     if family == "bm6":
         return BM6_AES_KEY
@@ -245,6 +323,83 @@ def _decode_probe_frames(family: str, encrypted: bytes) -> list[dict[str, object
             }
         )
     return frames
+
+
+def summarize_d15505_probe_packets(
+    family: str,
+    packets: Sequence[DecodedProbePacket],
+    *,
+    reference_ts: str | datetime,
+    decode_error_count: int = 0,
+) -> dict[str, object]:
+    _ = family
+    if isinstance(reference_ts, str):
+        active_reference_ts = datetime.fromisoformat(reference_ts)
+        reference_ts_text = reference_ts
+    else:
+        active_reference_ts = reference_ts
+        reference_ts_text = reference_ts.isoformat(timespec="seconds")
+
+    payload = b""
+    headers: list[str] = []
+    trailers: list[str] = []
+    frame_count = 0
+    data_frame_count = 0
+    seen_header = False
+
+    for packet in packets:
+        plaintext_frames = (
+            [
+                str(frame["plaintext"])
+                for frame in packet.frames
+                if isinstance(frame.get("plaintext"), str)
+            ]
+            if packet.frames
+            else [packet.plaintext_hex]
+        )
+        for plaintext_hex in plaintext_frames:
+            frame_count += 1
+            plaintext = bytes.fromhex(plaintext_hex)
+            if plaintext.startswith(bytes.fromhex("d15505")):
+                headers.append(plaintext_hex)
+                seen_header = True
+                continue
+            if plaintext.startswith(bytes.fromhex("fffffe")):
+                headers.append(plaintext_hex)
+                seen_header = True
+                continue
+            if plaintext.startswith(bytes.fromhex("fffefe")):
+                trailers.append(plaintext_hex)
+                continue
+            if plaintext.startswith(bytes.fromhex("fefefe")):
+                trailers.append(plaintext_hex)
+                continue
+            if plaintext.startswith(bytes.fromhex("d15507")):
+                continue
+            if seen_header:
+                payload += plaintext
+                data_frame_count += 1
+
+    records = [
+        payload[index : index + 4]
+        for index in range(0, len(payload), 4)
+        if len(payload[index : index + 4]) == 4 and payload[index : index + 4] != bytes(4)
+    ]
+    oldest_ts = active_reference_ts - timedelta(minutes=(len(records) - 1) * 2) if records else None
+    return {
+        "payload_bytes": len(payload),
+        "non_empty_payload_bytes": len(records) * 4,
+        "record_count": len(records),
+        "newest_estimated_ts": reference_ts_text if records else None,
+        "oldest_estimated_ts": oldest_ts.isoformat(timespec="seconds") if oldest_ts else None,
+        "newest_raw": records[0].hex() if records else None,
+        "oldest_raw": records[-1].hex() if records else None,
+        "frame_count": frame_count,
+        "data_frame_count": data_frame_count,
+        "headers": headers,
+        "trailers": trailers,
+        "decode_error_count": decode_error_count,
+    }
 
 
 def _device_rssi(device: object) -> int | None:
@@ -407,10 +562,15 @@ async def _probe_command(
 
     packets = await _drain_packets(queue, seconds=command_timeout_seconds)
     decoded: list[dict[str, object]] = []
+    decoded_packets: list[DecodedProbePacket] = []
+    decode_error_count = 0
     for packet in packets:
         try:
-            decoded.append(decode_probe_packet(target.family, packet).to_dict())
+            decoded_packet = decode_probe_packet(target.family, packet)
+            decoded_packets.append(decoded_packet)
+            decoded.append(decoded_packet.to_dict())
         except Exception as exc:
+            decode_error_count += 1
             decoded.append(
                 {
                     "encrypted": packet.hex(),
@@ -418,15 +578,22 @@ async def _probe_command(
                     "decrypt_error": str(exc) or exc.__class__.__name__,
                 }
             )
-    emit(
-        {
-            "event": "command_result",
-            "id": target.id,
-            "command": command.name,
-            "packet_count": len(packets),
-            "packets": decoded,
-        }
-    )
+    event: dict[str, object] = {
+        "event": "command_result",
+        "id": target.id,
+        "command": command.name,
+        "plaintext": command.plaintext.hex(),
+        "packet_count": len(packets),
+        "packets": decoded,
+    }
+    if command.plaintext.startswith(bytes.fromhex("d15505")):
+        event["history_summary"] = summarize_d15505_probe_packets(
+            target.family,
+            decoded_packets,
+            reference_ts=datetime.now().astimezone().replace(microsecond=0),
+            decode_error_count=decode_error_count,
+        )
+    emit(event)
     await asyncio.sleep(0.7)
 
 
@@ -439,6 +606,7 @@ async def run_protocol_probe(
     connect_timeout_seconds: float,
     command_timeout_seconds: float = 3.5,
     history_page_limit: int = 1,
+    commands: Sequence[ProtocolProbeCommand] | None = None,
     transport: ProtocolProbeTransport | None = None,
     emit: Callable[[dict[str, object]], None],
 ) -> None:
@@ -449,12 +617,16 @@ async def run_protocol_probe(
         if device.enabled and (not selected_ids or device.id in selected_ids)
     ]
     active_transport = transport or BleakProtocolProbeTransport()
-    commands = build_probe_commands(history_page_limit=history_page_limit)
+    active_commands = (
+        tuple(commands)
+        if commands is not None
+        else build_probe_commands(history_page_limit=history_page_limit)
+    )
     emit(
         {
             "event": "probe_start",
             "device_count": len(selected_devices),
-            "command_count": len(commands),
+            "command_count": len(active_commands),
         }
     )
     for device in selected_devices:
@@ -464,7 +636,7 @@ async def run_protocol_probe(
             continue
         await active_transport.probe(
             target=target,
-            commands=commands,
+            commands=active_commands,
             adapter=adapter,
             scan_timeout_seconds=scan_timeout_seconds,
             connect_timeout_seconds=connect_timeout_seconds,

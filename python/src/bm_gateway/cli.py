@@ -21,7 +21,14 @@ from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, device_driver_type, load_device_registry, validate_devices
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
-from .protocol_probe import run_protocol_probe, utc_timestamp
+from .protocol_probe import (
+    ProtocolProbeCommand,
+    build_bm200_b7_55_deepen_commands,
+    build_bm200_b7_55_matrix_commands,
+    build_bm200_b7_55_sweep_commands,
+    run_protocol_probe,
+    utc_timestamp,
+)
 from .runtime import (
     build_snapshot,
     database_file_path,
@@ -262,12 +269,62 @@ def build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Probe BM200/BM6 d15505 byte-7 history selectors from 01 up to this value.",
     )
+    bm200_matrix_group = protocol_probe.add_mutually_exclusive_group()
+    bm200_matrix_group.add_argument(
+        "--bm200-b7-55-matrix",
+        action="store_true",
+        help=(
+            "Run the controlled BM200/BM6 d15505 b7=55 matrix, mutating one byte "
+            "from index 3 through 15 except index 7 to 01."
+        ),
+    )
+    bm200_matrix_group.add_argument(
+        "--bm200-b7-55-deepen-byte",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help=(
+            "Run the BM200/BM6 b7=55 baseline plus values "
+            "02,03,04,10,20,40,80,ff for one byte index from 3 through 15 except 7."
+        ),
+    )
+    bm200_matrix_group.add_argument(
+        "--bm200-b7-55-sweep-byte",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help=(
+            "Run a BM200/BM6 b7=55 sweep for one byte index from 3 through 15. "
+            "Use --sweep-start and --sweep-end to bound the hex value range."
+        ),
+    )
+    protocol_probe.add_argument(
+        "--sweep-start",
+        default="00",
+        help="Inclusive hex start value for --bm200-b7-55-sweep-byte. Default: 00.",
+    )
+    protocol_probe.add_argument(
+        "--sweep-end",
+        default="ff",
+        help="Inclusive hex end value for --bm200-b7-55-sweep-byte. Default: ff.",
+    )
 
     return parser
 
 
 def _print_json(payload: object) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _parse_hex_byte(value: str, *, option: str) -> int:
+    normalized = value.lower().removeprefix("0x")
+    try:
+        parsed = int(normalized, 16)
+    except ValueError as exc:
+        raise ValueError(f"{option} must be a hex byte between 00 and ff") from exc
+    if parsed < 0 or parsed > 0xFF:
+        raise ValueError(f"{option} must be a hex byte between 00 and ff")
+    return parsed
 
 
 def _load_runtime(
@@ -756,6 +813,11 @@ def _handle_protocol_probe_history(
     device_ids: Sequence[str],
     command_timeout_seconds: float,
     history_page_limit: int,
+    bm200_b7_55_matrix: bool,
+    bm200_b7_55_deepen_byte: int | None,
+    bm200_b7_55_sweep_byte: int | None,
+    sweep_start: str,
+    sweep_end: str,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -767,6 +829,25 @@ def _handle_protocol_probe_history(
         for device_id in unknown_ids:
             print(f"Unknown device: {device_id}", file=sys.stderr)
         return 2
+    commands: tuple[ProtocolProbeCommand, ...] | None = None
+    if bm200_b7_55_matrix:
+        commands = build_bm200_b7_55_matrix_commands()
+    elif bm200_b7_55_deepen_byte is not None:
+        try:
+            commands = build_bm200_b7_55_deepen_commands(byte_index=bm200_b7_55_deepen_byte)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    elif bm200_b7_55_sweep_byte is not None:
+        try:
+            commands = build_bm200_b7_55_sweep_commands(
+                byte_index=bm200_b7_55_sweep_byte,
+                start=_parse_hex_byte(sweep_start, option="--sweep-start"),
+                end=_parse_hex_byte(sweep_end, option="--sweep-end"),
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
 
     def emit(event: dict[str, object]) -> None:
         event.setdefault("ts", utc_timestamp())
@@ -782,6 +863,7 @@ def _handle_protocol_probe_history(
                 connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
                 command_timeout_seconds=command_timeout_seconds,
                 history_page_limit=history_page_limit,
+                commands=commands,
                 emit=emit,
             )
         )
@@ -886,6 +968,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             device_ids=args.device_id,
             command_timeout_seconds=args.command_timeout_seconds,
             history_page_limit=args.history_page_limit,
+            bm200_b7_55_matrix=bool(args.bm200_b7_55_matrix),
+            bm200_b7_55_deepen_byte=args.bm200_b7_55_deepen_byte,
+            bm200_b7_55_sweep_byte=args.bm200_b7_55_sweep_byte,
+            sweep_start=args.sweep_start,
+            sweep_end=args.sweep_end,
         )
 
     if args.command == "run":
