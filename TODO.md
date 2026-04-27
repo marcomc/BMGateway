@@ -29,11 +29,17 @@
   BM6/BM900-style and BM7/BM300-style `vvv ss tt p` readings, but raw values
   are not unique enough for deduplication by equality alone; stable batteries
   repeat identical records, and zero-like event markers still need to remain
-  raw. Use `bm-gateway protocol analyze-history-captures` and the byte-4
-  profiling proposal as the offline gate before importing these ranges. Also
-  add richer archive-sync status reporting beyond the manual progress page.
-  Keep the final `p` nibble raw until cranking or charging-test events explain
-  it.
+  raw. Focused byte-4/byte-7 matrix probing supports the model that byte `4`
+  selects a history window or bank and byte `7` selects cumulative depth inside
+  that window for at least `b4=0a` and `b4=10`, but some selectors returned
+  empty transiently. Pause byte-4 import work until the gateway has collected a
+  few weeks of local samples. During the pause, keep importing only the
+  already-supported byte-7 current-window BM200/BM6 history into the main DB.
+  After enough samples exist, use `bm-gateway protocol analyze-history-captures`
+  and the byte-4 profiling proposal as the offline gate before importing byte-4
+  ranges. Also add richer archive-sync status reporting beyond the manual
+  progress page. Keep the final `p` nibble raw until cranking or charging-test
+  events explain it.
   Reference:
   [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
   [docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md](docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md)
