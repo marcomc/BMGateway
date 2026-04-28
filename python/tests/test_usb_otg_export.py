@@ -12,7 +12,9 @@ from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.usb_otg import usb_otg_support_installed
 from bm_gateway.usb_otg_export import (
     _chromium_capture_height,
+    _compact_frame_chart_points,
     _crop_screenshot_to_frame,
+    _run_chromium_screenshot,
     build_drive_export_command,
     effective_refresh_interval_seconds,
     expected_usb_otg_export_steps,
@@ -73,6 +75,62 @@ def test_crop_screenshot_to_frame_preserves_top_left_frame(tmp_path: Path) -> No
 def test_chromium_capture_height_compensates_headless_window_inset() -> None:
     assert _chromium_capture_height(234) == 321
     assert _chromium_capture_height(1080) == 1167
+
+
+def test_chromium_screenshot_timeout_kills_process_group(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    killed: list[tuple[int, int]] = []
+
+    class FakeProcess:
+        pid = 1234
+        returncode = -15
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def communicate(self, timeout: int | None = None) -> tuple[str, str]:
+            self.calls += 1
+            if self.calls == 1:
+                raise subprocess.TimeoutExpired(["chromium"], timeout or 0.0)
+            return "", ""
+
+    monkeypatch.setattr(
+        "bm_gateway.usb_otg_export.subprocess.Popen",
+        lambda *_, **__: FakeProcess(),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.usb_otg_export.os.killpg",
+        lambda pid, sig: killed.append((pid, sig)),
+    )
+
+    try:
+        _run_chromium_screenshot(["chromium"])
+    except RuntimeError as exc:
+        assert "Chromium screenshot timed out" in str(exc)
+    else:  # pragma: no cover - defensive assertion guard
+        raise AssertionError("expected Chromium timeout")
+
+    assert killed == [(1234, 15)]
+
+
+def test_compact_frame_chart_points_limits_dense_series_and_keeps_latest() -> None:
+    points = [
+        {
+            "ts": f"2026-04-27T{8 + index // 60:02d}:{index % 60:02d}:00+00:00",
+            "series_id": "bm200_house",
+            "kind": "raw",
+            "soc": index,
+        }
+        for index in range(240)
+    ]
+
+    compacted = _compact_frame_chart_points(points, range_value="7", limit=24)
+
+    assert len(compacted) <= 24
+    assert compacted[-1]["soc"] == 239
+    raw_values = [point.get("soc") for point in compacted if point.get("kind") == "raw"]
+    assert raw_values[:4] == [0, 20, 40, 60]
 
 
 def _snapshot() -> GatewaySnapshot:
@@ -513,19 +571,54 @@ def test_update_usb_otg_drive_makes_staging_directory_readable_by_helper(
         files = list(source_dir.iterdir())
         observed["source_mode"] = source_dir.stat().st_mode & 0o777
         observed["file_mode"] = files[0].stat().st_mode & 0o777
+        assert source_dir.parent == tmp_path / "runtime"
         return subprocess.CompletedProcess(command, 0, "", "")
 
     result = update_usb_otg_drive(
         config=config,
         devices=devices,
         snapshot=_snapshot(),
-        database_path=tmp_path / "gateway.db",
+        database_path=tmp_path / "runtime" / "gateway.db",
         runner=_runner,
         page_renderer=_fake_frame_renderer,
     )
 
     assert result.exported
     assert observed == {"source_mode": 0o755, "file_mode": 0o644}
+
+
+def test_update_usb_otg_drive_returns_failure_when_rendering_fails(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, usb_otg=replace(config.usb_otg, enabled=True))
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="House Battery",
+            mac="AA:BB:CC:DD:EE:01",
+            color_key="green",
+        )
+    ]
+
+    def _failing_renderer(
+        html_text: str,
+        output_path: Path,
+        width: int,
+        height: int,
+        image_format: str,
+    ) -> None:
+        raise RuntimeError("render failed")
+
+    result = update_usb_otg_drive(
+        config=config,
+        devices=devices,
+        snapshot=_snapshot(),
+        database_path=tmp_path / "runtime" / "gateway.db",
+        page_renderer=_failing_renderer,
+    )
+
+    assert result.exported is False
+    assert result.reason == "render failed"
 
 
 def test_usb_otg_export_due_uses_poll_interval_when_refresh_interval_is_zero(

@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import signal
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from dataclasses import replace as dataclass_replace
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from shutil import which
 from typing import Any, Callable
@@ -26,6 +28,9 @@ DriveCommandRunner = Callable[[list[str]], subprocess.CompletedProcess[str]]
 FramePageRenderer = Callable[[str, Path, int, int, str], None]
 ProgressReporter = Callable[[int, int, str], None]
 _CHROMIUM_HEADLESS_WINDOW_VERTICAL_INSET_PX = 87
+_CHROMIUM_SCREENSHOT_TIMEOUT_SECONDS = 90
+_FRAME_CHART_POINT_LIMIT = 180
+_FRAME_CHART_RAW_SAMPLE_SECONDS = 20 * 60
 
 
 @dataclass(frozen=True)
@@ -114,6 +119,35 @@ def _find_chromium() -> str:
     )
 
 
+def _run_chromium_screenshot(command: list[str]) -> subprocess.CompletedProcess[str]:
+    process = subprocess.Popen(  # noqa: S603
+        command,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=_CHROMIUM_SCREENSHOT_TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        try:
+            os.killpg(process.pid, signal.SIGTERM)
+            process.communicate(timeout=5)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                pass
+        raise RuntimeError(
+            f"Chromium screenshot timed out after {_CHROMIUM_SCREENSHOT_TIMEOUT_SECONDS} seconds"
+        ) from exc
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
 def _render_frame_page_with_chromium(
     html_text: str,
     output_path: Path,
@@ -122,11 +156,16 @@ def _render_frame_page_with_chromium(
     image_format: str,
 ) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryDirectory(prefix="bm-gateway-frame-page-") as temp_dir_name:
+    with tempfile.TemporaryDirectory(
+        prefix="bm-gateway-frame-page-",
+        dir=output_path.parent,
+    ) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         html_path = temp_dir / "frame.html"
         png_path = temp_dir / "frame.png"
         cropped_png_path = temp_dir / "frame-cropped.png"
+        chromium_profile_dir = temp_dir / "chromium-profile"
+        chromium_cache_dir = temp_dir / "chromium-cache"
         html_path.write_text(html_text, encoding="utf-8")
         capture_height = _chromium_capture_height(height)
         command = [
@@ -134,14 +173,22 @@ def _render_frame_page_with_chromium(
             "--headless=new",
             "--disable-gpu",
             "--disable-dev-shm-usage",
+            "--disable-extensions",
+            "--disable-background-networking",
+            "--disable-component-extensions-with-background-pages",
+            "--disable-sync",
             "--no-sandbox",
+            "--no-first-run",
+            "--noerrdialogs",
             "--hide-scrollbars",
+            f"--user-data-dir={chromium_profile_dir}",
+            f"--disk-cache-dir={chromium_cache_dir}",
             "--virtual-time-budget=1200",
             f"--window-size={width},{capture_height}",
             f"--screenshot={png_path}",
             html_path.as_uri(),
         ]
-        completed = subprocess.run(command, check=False, capture_output=True, text=True, timeout=90)
+        completed = _run_chromium_screenshot(command)
         if completed.returncode != 0 or not png_path.exists():
             reason = (
                 completed.stderr.strip() or completed.stdout.strip() or "Chromium screenshot failed"
@@ -199,6 +246,91 @@ def _fleet_metric_filename(metric: str) -> str:
     return f"fleet-trend-{metric}"
 
 
+def _parse_chart_timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str) or not value.strip():
+        return None
+    normalized = value.strip()
+    if normalized.endswith("Z"):
+        normalized = f"{normalized[:-1]}+00:00"
+    try:
+        timestamp = datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+    if timestamp.tzinfo is None:
+        return timestamp.replace(tzinfo=timezone.utc)
+    return timestamp
+
+
+def _point_series_key(point: dict[str, object]) -> str:
+    series_id = str(point.get("series_id") or "").strip()
+    if series_id:
+        return series_id
+    return str(point.get("series") or "").strip()
+
+
+def _compact_frame_chart_points(
+    chart_points: list[dict[str, object]],
+    *,
+    range_value: str,
+    limit: int = _FRAME_CHART_POINT_LIMIT,
+) -> list[dict[str, object]]:
+    timestamped = [
+        (timestamp, point)
+        for point in chart_points
+        if (timestamp := _parse_chart_timestamp(point.get("ts"))) is not None
+    ]
+    if range_value not in {"all", "raw"} and timestamped:
+        try:
+            newest = max(timestamp for timestamp, _point in timestamped)
+            cutoff = newest - timedelta(days=int(range_value))
+            chart_points = [point for timestamp, point in timestamped if timestamp >= cutoff]
+        except ValueError:
+            pass
+    thinned: list[dict[str, object]] = []
+    last_raw_by_series: dict[str, datetime] = {}
+    latest_raw_by_series: dict[str, dict[str, object]] = {}
+    for point in sorted(chart_points, key=lambda item: str(item.get("ts") or "")):
+        timestamp = _parse_chart_timestamp(point.get("ts"))
+        if timestamp is None:
+            continue
+        series = _point_series_key(point)
+        if point.get("kind") != "raw":
+            thinned.append(point)
+            continue
+        latest_raw_by_series[series] = point
+        previous = last_raw_by_series.get(series)
+        raw_sample_elapsed = (
+            previous is None
+            or (timestamp - previous).total_seconds() >= _FRAME_CHART_RAW_SAMPLE_SECONDS
+        )
+        if raw_sample_elapsed:
+            thinned.append(point)
+            last_raw_by_series[series] = timestamp
+    for point in latest_raw_by_series.values():
+        if point not in thinned:
+            thinned.append(point)
+    chart_points = sorted(thinned, key=lambda point: str(point.get("ts") or ""))
+    if len(chart_points) <= limit:
+        return chart_points
+
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for point in chart_points:
+        grouped.setdefault(_point_series_key(point), []).append(point)
+    per_series_limit = max(2, limit // max(1, len(grouped)))
+    compacted: list[dict[str, object]] = []
+    for points in grouped.values():
+        ordered = sorted(points, key=lambda point: str(point.get("ts") or ""))
+        if len(ordered) <= per_series_limit:
+            compacted.extend(ordered)
+            continue
+        step = max(1, len(ordered) // (per_series_limit - 1))
+        sampled = ordered[::step][: per_series_limit - 1]
+        if sampled[-1] is not ordered[-1]:
+            sampled.append(ordered[-1])
+        compacted.extend(sampled)
+    return sorted(compacted, key=lambda point: str(point.get("ts") or ""))
+
+
 def render_fleet_trend_image(
     *,
     config: AppConfig,
@@ -221,6 +353,10 @@ def render_fleet_trend_image(
     chart_points, legend = _fleet_chart_points(
         database_path=database_path,
         devices=serialized_devices,
+    )
+    chart_points = _compact_frame_chart_points(
+        chart_points,
+        range_value=config.usb_otg.fleet_trend_range,
     )
     page_html = render_frame_fleet_trend_html(
         chart_points=chart_points,
@@ -361,18 +497,30 @@ def update_usb_otg_drive(
     total_steps = expected_usb_otg_export_steps(config, devices)
     if progress is not None:
         progress(0, total_steps, "Preparing USB OTG frame image export")
-    with tempfile.TemporaryDirectory(prefix="bm-gateway-usb-otg-") as temp_dir_name:
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="bm-gateway-usb-otg-",
+        dir=database_path.parent,
+    ) as temp_dir_name:
         temp_dir = Path(temp_dir_name)
-        files = render_usb_otg_export_images(
-            config=config,
-            devices=devices,
-            snapshot=snapshot,
-            database_path=database_path,
-            output_dir=temp_dir,
-            page_renderer=page_renderer,
-            progress=progress,
-            total_steps=total_steps,
-        )
+        try:
+            files = render_usb_otg_export_images(
+                config=config,
+                devices=devices,
+                snapshot=snapshot,
+                database_path=database_path,
+                output_dir=temp_dir,
+                page_renderer=page_renderer,
+                progress=progress,
+                total_steps=total_steps,
+            )
+        except Exception as exc:
+            if progress is not None:
+                progress(total_steps, total_steps, "USB OTG frame image export failed")
+            return USBOTGExportResult(
+                exported=False,
+                reason=str(exc) or exc.__class__.__name__,
+            )
         _prepare_source_dir_for_root_helper(temp_dir, files)
         if progress is not None:
             progress(max(0, total_steps - 1), total_steps, "Writing images to USB OTG drive")

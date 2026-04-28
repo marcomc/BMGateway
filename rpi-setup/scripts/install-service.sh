@@ -134,8 +134,17 @@ chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
-  apt-get update
-  apt-get install -y chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev
+  usb_otg_packages=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
+  missing_usb_otg_packages=()
+  for package in "${usb_otg_packages[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -Fxq 'install ok installed'; then
+      missing_usb_otg_packages+=("${package}")
+    fi
+  done
+  if [[ "${#missing_usb_otg_packages[@]}" -gt 0 ]]; then
+    apt-get update
+    apt-get install -y "${missing_usb_otg_packages[@]}"
+  fi
   install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-boot-mode.sh" \
     "${usb_otg_boot_mode_path}"
   install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-frame-test.sh" \
