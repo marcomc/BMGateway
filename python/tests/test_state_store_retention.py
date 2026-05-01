@@ -5,6 +5,7 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import cast
 
+import pytest
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import (
     delete_archive_history_profiles,
@@ -21,6 +22,7 @@ from bm_gateway.state_store import (
     prune_history,
     rebuild_daily_rollups,
     rename_history_device_id,
+    replace_archive_history_profiles,
 )
 
 
@@ -795,6 +797,63 @@ def test_delete_archive_history_profiles_removes_only_selected_profiles(tmp_path
     assert deleted == 1
     assert len(archive_rows) == 1
     assert archive_rows[0]["profile"] == "bm7_d15505_b7_v1"
+
+
+def test_replace_archive_history_profiles_rolls_back_when_import_fails(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    original_readings = [
+        {
+            "ts": "2024-01-01T00:00:00+00:00",
+            "voltage": 12.61,
+            "min_crank_voltage": None,
+            "event_type": 0,
+        }
+    ]
+    import_archive_history(
+        database_path,
+        device_id="bm300_doc",
+        device_type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+        adapter="hci0",
+        driver="bm300pro",
+        profile="bm7_d15505_b6_v1",
+        readings=original_readings,
+    )
+
+    replacement_readings: list[dict[str, object]] = [
+        {
+            "ts": "2024-01-01T00:02:00+00:00",
+            "voltage": 12.7,
+            "min_crank_voltage": None,
+            "event_type": 1,
+        },
+        {
+            "ts": "2024-01-01T00:04:00+00:00",
+            "min_crank_voltage": None,
+            "event_type": 2,
+        },
+    ]
+
+    with pytest.raises(KeyError, match="voltage"):
+        replace_archive_history_profiles(
+            database_path,
+            device_id="bm300_doc",
+            device_type="bm300pro",
+            name="BM300 DOC",
+            mac="AA:BB:CC:DD:EE:30",
+            adapter="hci0",
+            driver="bm300pro",
+            profile="bm7_d15505_b7_v1",
+            replace_profiles=("bm7_d15505_b6_v1",),
+            readings=replacement_readings,
+        )
+
+    archive_rows = fetch_archive_history(database_path, device_id="bm300_doc", limit=10)
+
+    assert len(archive_rows) == 1
+    assert archive_rows[0]["profile"] == "bm7_d15505_b6_v1"
+    assert archive_rows[0]["ts"] == "2024-01-01T00:00:00+00:00"
 
 
 def test_fetch_recent_history_prefers_live_rows_over_archive_rows_with_same_timestamp(

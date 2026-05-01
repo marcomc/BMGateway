@@ -936,6 +936,9 @@ def _handle_protocol_probe_history(
     sweep_start: str,
     sweep_end: str,
 ) -> int:
+    if history_page_limit < 1 or history_page_limit > 255:
+        print("--history-page-limit must be between 1 and 255.", file=sys.stderr)
+        return 2
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
         return 2

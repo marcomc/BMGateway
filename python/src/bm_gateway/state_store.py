@@ -699,63 +699,137 @@ def import_archive_history(
     progress: ArchiveImportProgress | None = None,
 ) -> int:
     connection = _connect_database(path)
-    imported_at = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
-    inserted = 0
-    total = len(readings)
     try:
-        if progress is not None:
-            progress(0, total, "Importing history records")
-        for index, reading in enumerate(readings, start=1):
-            cursor = connection.execute(
-                """
-                INSERT OR IGNORE INTO device_archive_readings (
-                    device_id,
-                    device_type,
-                    name,
-                    mac,
-                    ts,
-                    voltage,
-                    min_crank_voltage,
-                    event_type,
-                    soc,
-                    temperature,
-                    raw_record,
-                    page_selector,
-                    record_index,
-                    timestamp_quality,
-                    imported_at,
-                    adapter,
-                    driver,
-                    profile
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    device_id,
-                    device_type,
-                    name,
-                    mac,
-                    reading["ts"],
-                    reading["voltage"],
-                    reading.get("min_crank_voltage"),
-                    reading.get("event_type"),
-                    reading.get("soc"),
-                    reading.get("temperature"),
-                    reading.get("raw_record"),
-                    reading.get("page_selector"),
-                    reading.get("record_index"),
-                    reading.get("timestamp_quality", "estimated"),
-                    imported_at,
-                    adapter,
-                    driver,
-                    profile,
-                ),
-            )
-            inserted += int(cursor.rowcount or 0)
-            if progress is not None:
-                progress(index, total, "Importing history records")
+        inserted = _import_archive_history_rows(
+            connection,
+            device_id=device_id,
+            device_type=device_type,
+            name=name,
+            mac=mac,
+            adapter=adapter,
+            driver=driver,
+            profile=profile,
+            readings=readings,
+            progress=progress,
+        )
         connection.commit()
     finally:
         connection.close()
+    return inserted
+
+
+def replace_archive_history_profiles(
+    path: Path,
+    *,
+    device_id: str,
+    device_type: str,
+    name: str,
+    mac: str,
+    adapter: str,
+    driver: str,
+    profile: str,
+    replace_profiles: tuple[str, ...],
+    readings: list[dict[str, object]],
+    progress: ArchiveImportProgress | None = None,
+) -> int:
+    connection = _connect_database(path)
+    try:
+        if replace_profiles:
+            placeholders = ", ".join("?" for _ in replace_profiles)
+            connection.execute(
+                f"""
+                DELETE FROM device_archive_readings
+                WHERE device_id = ? AND profile IN ({placeholders})
+                """,
+                (device_id, *replace_profiles),
+            )
+        inserted = _import_archive_history_rows(
+            connection,
+            device_id=device_id,
+            device_type=device_type,
+            name=name,
+            mac=mac,
+            adapter=adapter,
+            driver=driver,
+            profile=profile,
+            readings=readings,
+            progress=progress,
+        )
+        connection.commit()
+        return inserted
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def _import_archive_history_rows(
+    connection: sqlite3.Connection,
+    *,
+    device_id: str,
+    device_type: str,
+    name: str,
+    mac: str,
+    adapter: str,
+    driver: str,
+    profile: str,
+    readings: list[dict[str, object]],
+    progress: ArchiveImportProgress | None,
+) -> int:
+    imported_at = datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+    inserted = 0
+    total = len(readings)
+    if progress is not None:
+        progress(0, total, "Importing history records")
+    for index, reading in enumerate(readings, start=1):
+        cursor = connection.execute(
+            """
+            INSERT OR IGNORE INTO device_archive_readings (
+                device_id,
+                device_type,
+                name,
+                mac,
+                ts,
+                voltage,
+                min_crank_voltage,
+                event_type,
+                soc,
+                temperature,
+                raw_record,
+                page_selector,
+                record_index,
+                timestamp_quality,
+                imported_at,
+                adapter,
+                driver,
+                profile
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                device_id,
+                device_type,
+                name,
+                mac,
+                reading["ts"],
+                reading["voltage"],
+                reading.get("min_crank_voltage"),
+                reading.get("event_type"),
+                reading.get("soc"),
+                reading.get("temperature"),
+                reading.get("raw_record"),
+                reading.get("page_selector"),
+                reading.get("record_index"),
+                reading.get("timestamp_quality", "estimated"),
+                imported_at,
+                adapter,
+                driver,
+                profile,
+            ),
+        )
+        inserted += int(cursor.rowcount or 0)
+        if progress is not None:
+            progress(index, total, "Importing history records")
     return inserted
 
 

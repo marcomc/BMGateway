@@ -410,6 +410,58 @@ def test_cli_protocol_probe_rejects_unknown_device(
     assert "Unknown device: missing" in captured.err
 
 
+def test_cli_protocol_probe_rejects_out_of_range_history_page_limit(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    devices_path = tmp_path / "devices.toml"
+    devices_path.write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "known"',
+                'type = "bm200"',
+                'name = "Known"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'device_registry = "devices.toml"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "protocol",
+            "probe-history",
+            "--device-id",
+            "known",
+            "--history-page-limit",
+            "256",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert result == 2
+    assert "--history-page-limit must be between 1 and 255." in captured.err
+
+
 def test_cli_protocol_probe_rejects_invalid_bm200_matrix_deepen_byte(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

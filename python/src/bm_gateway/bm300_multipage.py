@@ -9,7 +9,7 @@ from typing import Callable
 
 from .device_registry import Device, device_driver_type
 from .drivers.bm300 import BM300HistoryReading
-from .state_store import delete_archive_history_profiles, import_archive_history
+from .state_store import import_archive_history, replace_archive_history_profiles
 
 BM300_MULTIPAGE_SELECTORS = (1, 2, 3)
 BM300_MULTIPAGE_MIN_OVERLAP = 128
@@ -147,25 +147,36 @@ def run_bm300_multipage_import(
         validated_depth = current_fetch.selector
 
     rebuilt_readings = _rebuild_stitched_timestamps(stitched)
-    if replace_profiles:
-        delete_archive_history_profiles(
-            output_database_path,
-            device_id=device.id,
-            profiles=replace_profiles,
-        )
     if progress is not None:
         progress(0, len(rebuilt_readings), "Importing history records")
-    inserted = import_archive_history(
-        output_database_path,
-        device_id=device.id,
-        device_type=device.type,
-        name=device.name,
-        mac=device.mac,
-        adapter=adapter,
-        driver=BM300_MULTIPAGE_DRIVER,
-        profile=profile,
-        readings=[asdict(reading) for reading in rebuilt_readings],
-        progress=progress,
+    readings_payload = [asdict(reading) for reading in rebuilt_readings]
+    inserted = (
+        replace_archive_history_profiles(
+            output_database_path,
+            device_id=device.id,
+            device_type=device.type,
+            name=device.name,
+            mac=device.mac,
+            adapter=adapter,
+            driver=BM300_MULTIPAGE_DRIVER,
+            profile=profile,
+            replace_profiles=replace_profiles,
+            readings=readings_payload,
+            progress=progress,
+        )
+        if replace_profiles
+        else import_archive_history(
+            output_database_path,
+            device_id=device.id,
+            device_type=device.type,
+            name=device.name,
+            mac=device.mac,
+            adapter=adapter,
+            driver=BM300_MULTIPAGE_DRIVER,
+            profile=profile,
+            readings=readings_payload,
+            progress=progress,
+        )
     )
     if progress is not None:
         progress(len(rebuilt_readings), len(rebuilt_readings), "History sync completed")
