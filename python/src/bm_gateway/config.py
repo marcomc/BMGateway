@@ -215,7 +215,8 @@ def _read_toml(path: Path) -> dict[str, Any]:
     return data
 
 
-def _require_table(data: dict[str, Any], key: str) -> dict[str, Any]:
+def _table_or_empty(data: dict[str, Any], key: str) -> dict[str, Any]:
+    """Load a top-level config table, defaulting missing sections to an empty table."""
     table = data.get(key, {})
     if not isinstance(table, dict):
         raise ValueError(f"Config key [{key}] must be a TOML table.")
@@ -338,14 +339,14 @@ def write_config(path: Path, config: AppConfig) -> None:
 
 def load_config(path: Path) -> AppConfig:
     data = _read_toml(path)
-    gateway_table = _require_table(data, "gateway")
-    bluetooth_table = _require_table(data, "bluetooth")
-    mqtt_table = _require_table(data, "mqtt")
-    home_assistant_table = _require_table(data, "home_assistant")
-    web_table = _require_table(data, "web")
-    usb_otg_table = _require_table(data, "usb_otg")
-    archive_sync_table = _require_table(data, "archive_sync")
-    retention_table = _require_table(data, "retention")
+    gateway_table = _table_or_empty(data, "gateway")
+    bluetooth_table = _table_or_empty(data, "bluetooth")
+    mqtt_table = _table_or_empty(data, "mqtt")
+    home_assistant_table = _table_or_empty(data, "home_assistant")
+    web_table = _table_or_empty(data, "web")
+    usb_otg_table = _table_or_empty(data, "usb_otg")
+    archive_sync_table = _table_or_empty(data, "archive_sync")
+    retention_table = _table_or_empty(data, "retention")
 
     gateway = GatewayConfig(
         name=str(gateway_table.get("name", "BMGateway")),
