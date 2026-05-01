@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Iterator
+from typing import Any, Iterator
 
 import pytest
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
@@ -357,6 +357,63 @@ def test_build_snapshot_uses_live_bm300_reader_when_enabled() -> None:
     assert snapshot.devices[0].state == "normal"
     assert snapshot.devices[0].temperature == 24.0
     assert snapshot.devices[0].rssi == -61
+
+
+def test_build_snapshot_uses_hard_timeout_runner_for_default_bm300_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm300_van",
+            type="bm300pro",
+            name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+    captured: dict[str, Any] = {}
+
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: object,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: object,
+    ) -> BM300Measurement:
+        _ = timeout_error
+        captured["function"] = function
+        captured["args"] = args
+        captured["timeout_seconds"] = timeout_seconds
+        return BM300Measurement(
+            voltage=25.42,
+            soc=83,
+            status_code=0,
+            state="normal",
+            temperature=24.0,
+            rssi=-61,
+        )
+
+    monkeypatch.setattr(
+        "bm_gateway.runtime.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
+
+    snapshot = build_snapshot(config, devices)
+
+    assert snapshot.devices_online == 1
+    assert captured["function"].__name__ == "_read_live_bm300"
+    assert captured["args"] == (devices[0], "hci0", 45.0, 15.0)
+    assert captured["timeout_seconds"] == 67.5
 
 
 def test_build_snapshot_serializes_live_reads_with_cross_process_lock(

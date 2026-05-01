@@ -12,6 +12,7 @@ from bm_gateway.drivers.bm300 import (
     BM300HistoryReading,
     BM300Measurement,
     BM300ProtocolError,
+    BM300TimeoutError,
     decode_bm300_frame_payloads,
     decrypt_bm300_payload,
     default_bm7_history_reference_ts,
@@ -338,6 +339,136 @@ def test_bleak_bm300_transport_uses_configured_bluez_adapter(
     assert rssi is None
     assert scanner_bluez_args == [{"adapter": "hci1"}]
     assert client_bluez_args == [{"adapter": "hci1"}]
+
+
+def test_bleak_bm300_transport_times_out_when_session_setup_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanned_device = object()
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float, bluez: dict[str, str]) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+            assert bluez == {"adapter": "hci1"}
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            _ = callback
+            await asyncio.sleep(3600)
+
+        async def write_gatt_char(self, _char: str, _data: bytes, response: bool) -> None:
+            _ = response
+            raise AssertionError("write_gatt_char should not be reached")
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(
+        address: str,
+        timeout: float,
+        bluez: dict[str, str],
+    ) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout > 0
+        assert bluez == {"adapter": "hci1"}
+        return scanned_device
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm300.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm300.BleakClient", FakeClient)
+
+    with pytest.raises(BM300TimeoutError, match="AA:BB:CC:DD:EE:FF"):
+        asyncio.run(
+            BleakBM300Transport().read_voltage_notification(
+                address="AA:BB:CC:DD:EE:FF",
+                adapter="hci1",
+                timeout_seconds=0.2,
+                scan_timeout_seconds=0.1,
+            )
+        )
+
+
+def test_bleak_bm7_history_transport_times_out_when_session_setup_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanned_device = object()
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float, bluez: dict[str, str]) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+            assert bluez == {"adapter": "hci1"}
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            _ = callback
+            await asyncio.sleep(3600)
+
+        async def write_gatt_char(self, _char: str, data: bytes, response: bool) -> None:
+            _ = (data, response)
+            raise AssertionError("write_gatt_char should not be reached")
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(
+        address: str,
+        timeout: float,
+        bluez: dict[str, str],
+    ) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout > 0
+        assert bluez == {"adapter": "hci1"}
+        return scanned_device
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm300.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm300.BleakClient", FakeClient)
+
+    with pytest.raises(BM300TimeoutError, match="AA:BB:CC:DD:EE:FF"):
+        asyncio.run(
+            BleakBM7HistoryTransport().read_history(
+                address="AA:BB:CC:DD:EE:FF",
+                adapter="hci1",
+                timeout_seconds=0.2,
+                scan_timeout_seconds=0.1,
+                reference_ts=datetime.fromisoformat("2026-04-26T18:54:00+00:00"),
+                page_count=1,
+            )
+        )
 
 
 def test_bleak_bm7_history_transport_downloads_cumulative_pages(

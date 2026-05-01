@@ -31,6 +31,7 @@ from .drivers.bm300 import (
     read_bm300_measurement,
 )
 from .models import DeviceReading, GatewaySnapshot
+from .subprocess_runner import run_in_subprocess_with_timeout
 
 BM200Reader = Callable[[Device, str, float, float], BM200Measurement]
 BM300Reader = Callable[[Device, str, float, float], BM300Measurement]
@@ -190,6 +191,27 @@ def _read_live_bm300(
     )
 
 
+def _bm300_live_hard_timeout_seconds(timeout_seconds: float) -> float:
+    return max(timeout_seconds + 15.0, timeout_seconds * 1.5)
+
+
+def _read_live_bm300_isolated(
+    device: Device,
+    adapter: str,
+    timeout_seconds: float,
+    scan_timeout_seconds: float,
+) -> BM300Measurement:
+    hard_timeout_seconds = _bm300_live_hard_timeout_seconds(timeout_seconds)
+    return run_in_subprocess_with_timeout(
+        function=_read_live_bm300,
+        args=(device, adapter, timeout_seconds, scan_timeout_seconds),
+        timeout_seconds=hard_timeout_seconds,
+        timeout_error=lambda: BM300TimeoutError(
+            f"{device.mac} exceeded the {hard_timeout_seconds:.1f}s hard timeout."
+        ),
+    )
+
+
 def _ensure_adapter_ready(adapter: str) -> None:
     # Best-effort power-on before polling. This keeps the service resilient on
     # boards where BlueZ starts with the controller present but powered off.
@@ -234,7 +256,7 @@ def build_snapshot(
     adapter = _active_adapter(config)
     readings: list[DeviceReading] = []
     bm200_live_reader = bm200_reader or _read_live_bm200
-    bm300_live_reader = bm300_reader or _read_live_bm300
+    bm300_live_reader = bm300_reader or _read_live_bm300_isolated
     if config.gateway.reader_mode == "live" and any(
         device.enabled and device_driver_type(device.type) in LIVE_DEVICE_TYPES
         for device in devices

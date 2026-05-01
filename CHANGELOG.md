@@ -66,6 +66,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Isolated BM300 live polls and non-interactive BM300 archive imports in
+  child processes with hard timeouts, so a stuck BlueZ/DBus `bleak` call can
+  no longer hold the gateway loop or periodic sync scheduler indefinitely
+  after the configured BLE timeout has already elapsed.
 - Serialized BLE access across runtime polling, web-triggered run-once polls,
   and BM200/BM300 archive imports with a shared cross-process lock so
   concurrent gateway operations no longer collide and leave BlueZ or `bleak`

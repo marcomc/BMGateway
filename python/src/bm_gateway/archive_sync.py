@@ -20,7 +20,7 @@ from .bm300_multipage import (
 from .config import AppConfig
 from .device_registry import Device, device_driver_type
 from .drivers.bm200 import read_bm200_history
-from .drivers.bm300 import BM300HistoryReading, read_bm300_history_selector
+from .drivers.bm300 import BM300HistoryReading, BM300TimeoutError, read_bm300_history_selector
 from .models import GatewaySnapshot
 from .runtime import _active_adapter
 from .state_store import (
@@ -28,6 +28,7 @@ from .state_store import (
     latest_archive_history_timestamp,
     latest_live_history_timestamp,
 )
+from .subprocess_runner import run_in_subprocess_with_timeout
 
 BM200_ARCHIVE_PROFILE = "bm6_d15505_b7_v1"
 BM300_ARCHIVE_PROFILE = BM300_STANDARD_PROFILE
@@ -105,11 +106,55 @@ def sync_bm300_device_archive(
             f"BM7 archive sync is only implemented for bm300pro devices, got {device.type}"
         )
 
-    adapter = _active_adapter(config)
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
     requested_depth = min(max(1, page_count), 3)
-    progress_state: dict[str, datetime | None] = {"reference_ts": None}
     state_dir = database_path.parent.parent
+
+    with exclusive_bluetooth_operation(
+        config,
+        state_dir=state_dir,
+        operation=f"archive_sync:{device.id}",
+    ):
+        if progress is None:
+            payload = run_in_subprocess_with_timeout(
+                function=_run_bm300_device_archive_import,
+                args=(
+                    config,
+                    device,
+                    database_path,
+                    requested_depth,
+                    history_timeout_seconds,
+                ),
+                timeout_seconds=(history_timeout_seconds * requested_depth) + 30.0,
+                timeout_error=lambda: BM300TimeoutError(
+                    f"{device.mac} archive import exceeded the hard timeout."
+                ),
+            )
+        else:
+            payload = _run_bm300_device_archive_import(
+                config,
+                device,
+                database_path,
+                requested_depth,
+                history_timeout_seconds,
+                progress,
+            )
+    fetched_record_counts = cast(dict[str, int], payload["fetched_record_counts"])
+    payload["fetched"] = max(fetched_record_counts.values())
+    payload["page_count"] = requested_depth
+    return payload
+
+
+def _run_bm300_device_archive_import(
+    config: AppConfig,
+    device: Device,
+    database_path: Path,
+    requested_depth: int,
+    history_timeout_seconds: float,
+    progress: ArchiveSyncProgress | None = None,
+) -> dict[str, object]:
+    adapter = _active_adapter(config)
+    progress_state: dict[str, datetime | None] = {"reference_ts": None}
 
     def selector_reader(selector: int) -> list[BM300HistoryReading]:
         if selector > requested_depth:
@@ -132,28 +177,19 @@ def sync_bm300_device_archive(
             )
         )
 
-    with exclusive_bluetooth_operation(
-        config,
-        state_dir=state_dir,
-        operation=f"archive_sync:{device.id}",
-    ):
-        payload = run_bm300_multipage_import(
-            device=device,
-            output_database_path=database_path,
-            adapter=adapter,
-            selector_reader=selector_reader,
-            profile=BM300_ARCHIVE_PROFILE,
-            replace_profiles=(
-                BM300_ARCHIVE_PROFILE,
-                BM300_LEGACY_PROFILE,
-                "bm7_d15505_b7_v1_experimental",
-            ),
-            progress=progress,
-        )
-    fetched_record_counts = cast(dict[str, int], payload["fetched_record_counts"])
-    payload["fetched"] = max(fetched_record_counts.values())
-    payload["page_count"] = requested_depth
-    return payload
+    return run_bm300_multipage_import(
+        device=device,
+        output_database_path=database_path,
+        adapter=adapter,
+        selector_reader=selector_reader,
+        profile=BM300_ARCHIVE_PROFILE,
+        replace_profiles=(
+            BM300_ARCHIVE_PROFILE,
+            BM300_LEGACY_PROFILE,
+            "bm7_d15505_b7_v1_experimental",
+        ),
+        progress=progress,
+    )
 
 
 def bm200_history_pages_for_coverage_seconds(

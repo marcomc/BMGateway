@@ -277,6 +277,55 @@ def _is_bm300_measurement_packet(encrypted: bytes) -> bool:
 
 
 class BleakBM300Transport:
+    async def _read_voltage_notification_attempt(
+        self,
+        *,
+        client: BleakClient,
+        deadline: float,
+    ) -> bytes:
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        def notification_handler(
+            _: object,
+            data: bytearray,
+            *,
+            notification_queue: asyncio.Queue[bytes] = queue,
+        ) -> None:
+            notification_queue.put_nowait(bytes(data))
+
+        async with client:
+            await client.start_notify(BM300_NOTIFY_CHARACTERISTIC, notification_handler)
+            try:
+                request_attempts = 0
+                while True:
+                    remaining = deadline - loop.time()
+                    if remaining <= 0:
+                        raise BM300TimeoutError(str(getattr(client, "address", "bm300")))
+                    try:
+                        if request_attempts == 0:
+                            await asyncio.sleep(min(0.5, remaining))
+                        await client.write_gatt_char(
+                            BM300_WRITE_CHARACTERISTIC,
+                            encrypt_bm300_payload(BM300_POLL_PLAINTEXT),
+                            response=True,
+                        )
+                        request_attempts += 1
+                        encrypted = await asyncio.wait_for(
+                            queue.get(),
+                            timeout=min(4.0, remaining),
+                        )
+                    except TimeoutError as exc:
+                        if request_attempts >= 2:
+                            raise BM300TimeoutError(
+                                str(getattr(client, "address", "bm300"))
+                            ) from exc
+                        continue
+                    if _is_bm300_measurement_packet(encrypted):
+                        return encrypted
+            finally:
+                await client.stop_notify(BM300_NOTIFY_CHARACTERISTIC)
+
     async def read_voltage_notification(
         self,
         *,
@@ -298,16 +347,6 @@ class BleakBM300Transport:
                     raise last_error
                 raise BleakBM300DeviceNotFoundError(address)
 
-            queue: asyncio.Queue[bytes] = asyncio.Queue()
-
-            def notification_handler(
-                _: object,
-                data: bytearray,
-                *,
-                notification_queue: asyncio.Queue[bytes] = queue,
-            ) -> None:
-                notification_queue.put_nowait(bytes(data))
-
             device = await BleakScanner.find_device_by_address(
                 address,
                 timeout=min(scan_timeout, remaining),
@@ -323,35 +362,18 @@ class BleakBM300Transport:
                 bluez=bluez_client_args,
             )
             try:
-                async with client:
-                    await client.start_notify(BM300_NOTIFY_CHARACTERISTIC, notification_handler)
-                    try:
-                        request_attempts = 0
-                        while True:
-                            remaining = deadline - loop.time()
-                            if remaining <= 0:
-                                raise BM300TimeoutError(address)
-                            try:
-                                if request_attempts == 0:
-                                    await asyncio.sleep(min(0.5, remaining))
-                                await client.write_gatt_char(
-                                    BM300_WRITE_CHARACTERISTIC,
-                                    encrypt_bm300_payload(BM300_POLL_PLAINTEXT),
-                                    response=True,
-                                )
-                                request_attempts += 1
-                                encrypted = await asyncio.wait_for(
-                                    queue.get(),
-                                    timeout=min(4.0, remaining),
-                                )
-                            except TimeoutError as exc:
-                                if request_attempts >= 2:
-                                    raise BM300TimeoutError(address) from exc
-                                continue
-                            if _is_bm300_measurement_packet(encrypted):
-                                return encrypted, rssi
-                    finally:
-                        await client.stop_notify(BM300_NOTIFY_CHARACTERISTIC)
+                encrypted = await asyncio.wait_for(
+                    self._read_voltage_notification_attempt(
+                        client=client,
+                        deadline=deadline,
+                    ),
+                    timeout=max(deadline - loop.time(), 0.0),
+                )
+                return encrypted, rssi
+            except TimeoutError as exc:
+                last_error = BM300TimeoutError(address)
+                if deadline - loop.time() <= 0:
+                    raise last_error from exc
             except BM300TimeoutError:
                 raise
             except Exception as exc:
@@ -361,6 +383,54 @@ class BleakBM300Transport:
 
 
 class BleakBM7HistoryTransport:
+    async def _read_history_request_attempt(
+        self,
+        *,
+        client: BleakClient,
+        deadline: float,
+        reference_ts: datetime,
+        request: bytes,
+        page_selector: int,
+    ) -> list[BM300HistoryReading]:
+        packet_queue: asyncio.Queue[bytes] = asyncio.Queue()
+
+        def notification_handler(
+            _: object,
+            data: bytearray,
+            *,
+            notification_queue: asyncio.Queue[bytes] = packet_queue,
+        ) -> None:
+            notification_queue.put_nowait(bytes(data))
+
+        async with client:
+            await client.start_notify(BM300_NOTIFY_CHARACTERISTIC, notification_handler)
+            try:
+                await asyncio.sleep(
+                    min(0.4, max(deadline - asyncio.get_running_loop().time(), 0.0))
+                )
+                await client.write_gatt_char(
+                    BM300_WRITE_CHARACTERISTIC,
+                    encrypt_bm300_payload(BM300_POLL_PLAINTEXT),
+                    response=True,
+                )
+                await _drain_bm7_wake_packets(packet_queue, deadline=deadline)
+                await client.write_gatt_char(
+                    BM300_WRITE_CHARACTERISTIC,
+                    encrypt_bm300_payload(request),
+                    response=True,
+                )
+                payload = await _collect_bm7_history_payload(
+                    packet_queue,
+                    deadline=deadline,
+                )
+                return parse_bm7_history_items(
+                    payload,
+                    reference_ts=reference_ts,
+                    page_selector=page_selector,
+                )
+            finally:
+                await client.stop_notify(BM300_NOTIFY_CHARACTERISTIC)
+
     async def read_history_request(
         self,
         *,
@@ -398,43 +468,22 @@ class BleakBM7HistoryTransport:
                 timeout=min(scan_timeout, remaining),
                 bluez=bluez_client_args,
             )
-            packet_queue: asyncio.Queue[bytes] = asyncio.Queue()
-
-            def notification_handler(
-                _: object,
-                data: bytearray,
-                *,
-                notification_queue: asyncio.Queue[bytes] = packet_queue,
-            ) -> None:
-                notification_queue.put_nowait(bytes(data))
 
             try:
-                async with client:
-                    await client.start_notify(BM300_NOTIFY_CHARACTERISTIC, notification_handler)
-                    try:
-                        await asyncio.sleep(min(0.4, max(deadline - loop.time(), 0.0)))
-                        await client.write_gatt_char(
-                            BM300_WRITE_CHARACTERISTIC,
-                            encrypt_bm300_payload(BM300_POLL_PLAINTEXT),
-                            response=True,
-                        )
-                        await _drain_bm7_wake_packets(packet_queue, deadline=deadline)
-                        await client.write_gatt_char(
-                            BM300_WRITE_CHARACTERISTIC,
-                            encrypt_bm300_payload(request),
-                            response=True,
-                        )
-                        payload = await _collect_bm7_history_payload(
-                            packet_queue,
-                            deadline=deadline,
-                        )
-                        return parse_bm7_history_items(
-                            payload,
-                            reference_ts=reference_ts,
-                            page_selector=page_selector,
-                        )
-                    finally:
-                        await client.stop_notify(BM300_NOTIFY_CHARACTERISTIC)
+                return await asyncio.wait_for(
+                    self._read_history_request_attempt(
+                        client=client,
+                        deadline=deadline,
+                        reference_ts=reference_ts,
+                        request=request,
+                        page_selector=page_selector,
+                    ),
+                    timeout=max(deadline - loop.time(), 0.0),
+                )
+            except TimeoutError as exc:
+                last_error = BM300TimeoutError(address)
+                if deadline - loop.time() <= 0:
+                    raise last_error from exc
             except BM300TimeoutError:
                 raise
             except Exception as exc:

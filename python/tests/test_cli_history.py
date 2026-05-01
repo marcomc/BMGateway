@@ -1017,6 +1017,7 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
         device=device,
         database_path=database_path,
         page_count=9,
+        progress=lambda _current, _total, _message: None,
     )
 
     assert selector_calls == [1, 2, 3]
@@ -1108,10 +1109,81 @@ def test_sync_bm300_device_archive_serializes_cross_process_bluetooth_access(
         device=device,
         database_path=database_path,
         page_count=3,
+        progress=lambda _current, _total, _message: None,
     )
 
     assert payload["inserted"] == 180
     assert calls == [(tmp_path / "state", "archive_sync:bm300_doc")]
+
+
+def test_sync_bm300_device_archive_uses_hard_timeout_runner_without_progress(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    device = Device(
+        id="bm300_doc",
+        type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+    )
+    database_path = tmp_path / "state" / "runtime" / "gateway.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    calls: list[tuple[Path | None, str]] = []
+    captured: dict[str, Any] = {}
+
+    @contextmanager
+    def fake_lock(
+        _config: object,
+        *,
+        operation: str,
+        state_dir: Path | None = None,
+        timeout_seconds: float = 600.0,
+        retry_interval_seconds: float = 0.25,
+    ) -> Iterator[dict[str, object]]:
+        _ = (timeout_seconds, retry_interval_seconds)
+        calls.append((state_dir, operation))
+        yield {}
+
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: object,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: object,
+    ) -> dict[str, object]:
+        _ = timeout_error
+        captured["function"] = function
+        captured["args"] = args
+        captured["timeout_seconds"] = timeout_seconds
+        return {
+            "device_id": device.id,
+            "inserted": 180,
+            "profile": BM300_ARCHIVE_PROFILE,
+            "fetched_record_counts": {"b7=01": 130, "b7=02": 160, "b7=03": 180},
+        }
+
+    monkeypatch.setattr("bm_gateway.archive_sync.exclusive_bluetooth_operation", fake_lock)
+    monkeypatch.setattr(
+        "bm_gateway.archive_sync.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
+
+    payload = sync_bm300_device_archive(
+        config=config,
+        device=device,
+        database_path=database_path,
+        page_count=9,
+    )
+
+    assert payload["inserted"] == 180
+    assert payload["fetched"] == 180
+    assert payload["page_count"] == 3
+    assert calls == [(tmp_path / "state", "archive_sync:bm300_doc")]
+    assert captured["function"].__name__ == "_run_bm300_device_archive_import"
+    assert captured["args"] == (config, device, database_path, 3, 180.0)
+    assert captured["timeout_seconds"] == 570.0
 
 
 def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
