@@ -542,7 +542,7 @@ def test_build_snapshot_uses_bm300_driver_for_commercial_aliases() -> None:
             id="bm7_bench",
             type="bm7",
             name="BM7 Bench",
-            mac="E0:4E:7A:AF:9B:E8",
+            mac="00:00:5E:00:53:03",
             enabled=True,
         )
     ]

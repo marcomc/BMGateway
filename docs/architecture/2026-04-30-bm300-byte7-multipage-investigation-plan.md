@@ -27,7 +27,7 @@ layout already used by BM200/BM6.
 
 Earlier project evidence established:
 
-- selector `b6=01` imported `883` records on `doc_fb12899`, about 29 hours
+- selector `b6=01` imported `883` records on `bm300_alpha`, about 29 hours
   26 minutes at the observed 2-minute cadence;
 - the newest selector-`01` records matched live voltage, SoC, and
   temperature;
@@ -225,7 +225,7 @@ surface.
 
 ### Phase 4: Live validation
 
-- Run the protocol command against `doc_fb12899` on `admin@<gateway-host>.local`.
+- Run the protocol command against `bm300_alpha` on `admin@<gateway-host>.local`.
 - Save JSONL or equivalent structured captures.
 - Verify whether `b7=01 -> 02` and `02 -> 03` meet the `128`-record gate.
 - Only after the gate passes, test controlled import into a disposable SQLite

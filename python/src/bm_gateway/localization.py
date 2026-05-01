@@ -99,6 +99,10 @@ _DYNAMIC_TRANSLATION_PREFIXES: Final = (
     ("Temperature ", "Temperature"),
     ("Voltage ", "Voltage"),
 )
+_DYNAMIC_TRANSLATION_SUFFIXES: Final = (
+    (" Device", "Device"),
+    (" History", "History"),
+)
 _IGNORED_TEXT_PATTERNS: Final = (
     re.compile(r"^/[-A-Za-z0-9._:/?=&%#<>]+$"),
     re.compile(r"^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)+$"),
@@ -137,8 +141,8 @@ _IGNORED_TRANSLATION_VALUES: Final = {
     "Auto",
     "Primary",
     "Bench",
-    "Spare NLP5",
-    "Spare NLP20",
+    "Battery Alpha",
+    "Battery Beta",
     "NOCO NLP5 12 V 5.0 Ah",
     "NOCO NLP20 12 V 20.0 Ah",
     "NOCO NLP5 12 V 5.0 Ah 2025",
@@ -249,7 +253,7 @@ def missing_translations_for_html(document: str, locale: str | None) -> tuple[st
         for value in collector.values
         if _is_translation_candidate(value)
         and value not in translation.catalog
-        and not _has_translated_dynamic_prefix(value, translation.catalog)
+        and not _has_translated_dynamic_affix(value, translation.catalog)
     }
     return tuple(sorted(missing))
 
@@ -307,10 +311,29 @@ def _is_translation_candidate(value: str) -> bool:
     return True
 
 
-def _has_translated_dynamic_prefix(value: str, catalog: dict[str, str]) -> bool:
+def _has_translated_dynamic_affix(value: str, catalog: dict[str, str]) -> bool:
     return any(
         value.startswith(prefix) and key in catalog for prefix, key in _DYNAMIC_TRANSLATION_PREFIXES
+    ) or any(
+        value.endswith(suffix) and key in catalog for suffix, key in _DYNAMIC_TRANSLATION_SUFFIXES
     )
+
+
+def _translated_dynamic_text(value: str, catalog: dict[str, str]) -> str:
+    for prefix, catalog_key in _DYNAMIC_TRANSLATION_PREFIXES:
+        if value.startswith(prefix) and catalog_key in catalog:
+            translated_prefix = catalog[catalog_key]
+            if prefix.endswith(": "):
+                return f"{translated_prefix}: {value[len(prefix) :]}"
+            if prefix.endswith(" · "):
+                return f"{translated_prefix} · {value[len(prefix) :]}"
+            if prefix.endswith("("):
+                return f"{translated_prefix} ({value[len(prefix) :]}"
+            return translated_prefix + " " + value[len(prefix) :]
+    for suffix, catalog_key in _DYNAMIC_TRANSLATION_SUFFIXES:
+        if value.endswith(suffix) and catalog_key in catalog:
+            return value[: -len(suffix)] + " " + catalog[catalog_key]
+    return value
 
 
 class _SourceTextCollector(HTMLParser):
@@ -319,14 +342,16 @@ class _SourceTextCollector(HTMLParser):
         self.values: list[str] = []
         self._skip_depth = 0
         self._translate_disabled_depth = 0
-        self._translate_disabled_tags: list[str] = []
+        self._translate_disabled_stack: list[bool] = []
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _SKIP_TAGS:
             self._skip_depth += 1
-        if _LocalizingHTMLParser._has_translate_no(attrs):
+        translate_disabled = _LocalizingHTMLParser._has_translate_no(attrs)
+        if translate_disabled:
             self._translate_disabled_depth += 1
-            self._translate_disabled_tags.append(tag)
+        if tag not in _VOID_TAGS:
+            self._translate_disabled_stack.append(translate_disabled)
         for name, value in attrs:
             if value is not None and name in _TRANSLATABLE_ATTRIBUTES:
                 confirm_message = _confirm_message_from_attribute(name, value)
@@ -335,9 +360,10 @@ class _SourceTextCollector(HTMLParser):
     def handle_endtag(self, tag: str) -> None:
         if tag in _SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
-        if self._translate_disabled_tags and self._translate_disabled_tags[-1] == tag:
-            self._translate_disabled_tags.pop()
-            self._translate_disabled_depth -= 1
+        if self._translate_disabled_stack:
+            translate_disabled = self._translate_disabled_stack.pop()
+            if translate_disabled and self._translate_disabled_depth > 0:
+                self._translate_disabled_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if not self._skip_depth and not self._translate_disabled_depth:
@@ -392,7 +418,7 @@ class _LocalizingHTMLParser(HTMLParser):
         self._pieces: list[str] = []
         self._skip_depth = 0
         self._translate_disabled_depth = 0
-        self._translate_disabled_tags: list[str] = []
+        self._translate_disabled_stack: list[bool] = []
 
     @property
     def output(self) -> str:
@@ -404,9 +430,11 @@ class _LocalizingHTMLParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _SKIP_TAGS:
             self._skip_depth += 1
-        if self._has_translate_no(attrs):
+        translate_disabled = self._has_translate_no(attrs)
+        if translate_disabled:
             self._translate_disabled_depth += 1
-            self._translate_disabled_tags.append(tag)
+        if tag not in _VOID_TAGS:
+            self._translate_disabled_stack.append(translate_disabled)
         self._pieces.append(self._start_tag(tag, attrs, closed=False))
 
     def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
@@ -416,9 +444,10 @@ class _LocalizingHTMLParser(HTMLParser):
         self._pieces.append(f"</{tag}>")
         if tag in _SKIP_TAGS and self._skip_depth > 0:
             self._skip_depth -= 1
-        if self._translate_disabled_tags and self._translate_disabled_tags[-1] == tag:
-            self._translate_disabled_tags.pop()
-            self._translate_disabled_depth -= 1
+        if self._translate_disabled_stack:
+            translate_disabled = self._translate_disabled_stack.pop()
+            if translate_disabled and self._translate_disabled_depth > 0:
+                self._translate_disabled_depth -= 1
 
     def handle_data(self, data: str) -> None:
         if self._skip_depth or self._translate_disabled_depth:
@@ -478,17 +507,7 @@ class _LocalizingHTMLParser(HTMLParser):
         return f"{value[:prefix_length]}{translated}{value[len(value) - suffix_length :]}"
 
     def _translate_dynamic_text(self, value: str) -> str:
-        for prefix, catalog_key in _DYNAMIC_TRANSLATION_PREFIXES:
-            if value.startswith(prefix):
-                translated_prefix = self._translation.gettext(catalog_key)
-                if prefix.endswith(": "):
-                    return f"{translated_prefix}: {value[len(prefix) :]}"
-                if prefix.endswith(" · "):
-                    return f"{translated_prefix} · {value[len(prefix) :]}"
-                if prefix.endswith("("):
-                    return f"{translated_prefix} ({value[len(prefix) :]}"
-                return translated_prefix + " " + value[len(prefix) :]
-        return value
+        return _translated_dynamic_text(value, self._translation.catalog)
 
     @staticmethod
     def _has_translate_no(attrs: list[tuple[str, str | None]]) -> bool:

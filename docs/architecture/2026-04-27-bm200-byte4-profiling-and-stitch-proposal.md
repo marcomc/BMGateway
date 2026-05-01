@@ -8,7 +8,7 @@ an offline stitch plan for importing missing history.
 
 ## Current Evidence
 
-The 2026-04-27 `spare_nlp5` captures show that byte 4 is not opaque noise.
+The 2026-04-27 `battery_alpha` captures show that byte 4 is not opaque noise.
 When decoded with the same modern BM6/BM900 and BM7/BM300 history layout,
 records become plausible physical readings:
 
@@ -42,10 +42,10 @@ saved JSONL captures:
 
 ```sh
 bm-gateway protocol analyze-history-captures \
-  --input output/protocol-probes/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl \
-  --input output/protocol-probes/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl \
-  --input output/protocol-probes/bm200-b4-shift-t1-spare_nlp5-20260427-211240.jsonl \
-  --input output/protocol-probes/bm200-b7-55-retry-t1-spare_nlp5-20260427-211824.jsonl
+  --input output/protocol-probes/bm200-b4-shift-t0-battery_alpha-20260427-181107.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t0b-group09-battery_alpha-20260427-181324.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t1-battery_alpha-20260427-211240.jsonl \
+  --input output/protocol-probes/bm200-b7-55-retry-t1-battery_alpha-20260427-211824.jsonl
 ```
 
 The profiler must report:
@@ -195,12 +195,12 @@ Important local artifacts are ignored by Git under output/protocol-probes/.
 Start by reviewing output/protocol-probes/MANIFEST.md and rerun:
 
 bm-gateway protocol analyze-history-captures \
-  --input output/protocol-probes/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl \
-  --input output/protocol-probes/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl \
-  --input output/protocol-probes/bm200-b4-shift-t1-spare_nlp5-20260427-211240.jsonl \
-  --input output/protocol-probes/bm200-b7-55-retry-t1-spare_nlp5-20260427-211824.jsonl \
-  --input output/protocol-probes/bm200-b4-b7-matrix-spare_nlp5-20260427-223814.jsonl \
-  --input output/protocol-probes/bm200-b4-b7-matrix-retry-spare_nlp5-20260427-224234.jsonl
+  --input output/protocol-probes/bm200-b4-shift-t0-battery_alpha-20260427-181107.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t0b-group09-battery_alpha-20260427-181324.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t1-battery_alpha-20260427-211240.jsonl \
+  --input output/protocol-probes/bm200-b7-55-retry-t1-battery_alpha-20260427-211824.jsonl \
+  --input output/protocol-probes/bm200-b4-b7-matrix-battery_alpha-20260427-223814.jsonl \
+  --input output/protocol-probes/bm200-b4-b7-matrix-retry-battery_alpha-20260427-224234.jsonl
 
 Then inspect the current SQLite archive/history collected since the pause,
 compare it against byte-4 captures, and only propose/import byte-4 records when

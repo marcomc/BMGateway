@@ -490,9 +490,9 @@ def test_render_usb_otg_export_images_uses_configured_web_language(tmp_path: Pat
     )
     devices = [
         Device(
-            id="spare_nlp5",
+            id="battery_alpha",
             type="bm200",
-            name="Spare NLP5",
+            name="Battery Alpha",
             mac="AA:BB:CC:DD:EE:01",
             color_key="green",
             installed_in_vehicle=True,
@@ -503,8 +503,8 @@ def test_render_usb_otg_export_images_uses_configured_web_language(tmp_path: Pat
     snapshot = replace(
         base_snapshot,
         devices=[
-            replace(base_snapshot.devices[0], id="spare_nlp5", name="Spare NLP5"),
-            replace(base_snapshot.devices[1], id="spare_nlp20", name="Spare NLP20"),
+            replace(base_snapshot.devices[0], id="battery_alpha", name="Battery Alpha"),
+            replace(base_snapshot.devices[1], id="battery_beta", name="Battery Beta"),
         ],
     )
     rendered_pages: list[str] = []

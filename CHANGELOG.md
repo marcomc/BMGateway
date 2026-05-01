@@ -52,7 +52,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Switched the standard BM300 Pro/BM7 archive-history path from the older
   byte-6 selector candidate to the validated byte-7 depth path. Standard
   BM300 imports now request selectors `b7=01`, `02`, and `03`, require exact
-  raw-record overlap of 256 then 512 records on `doc_fb12899`, and import a
+  raw-record overlap of 256 then 512 records on `bm300_alpha`, and import a
   validated 769-record window of about 25 hours 38 minutes.
 - Enabled BM300 Pro/BM7 automatic archive sync by default for new configs and
   service installs, with the standard path capped to the currently validated

@@ -141,7 +141,7 @@ The byte at index 7 is now verified as a cumulative page count for BM200/BM6:
 `BMGateway` uses this in production BM200/BM6 archive import through:
 
 ```sh
-bm-gateway history sync-device --device-id spare_nlp5 --page-count 3
+bm-gateway history sync-device --device-id battery_alpha --page-count 3
 ```
 
 The command still treats timestamps as estimated because the device records do
@@ -149,7 +149,7 @@ not include absolute timestamps.
 
 ### Response Size
 
-On `spare_nlp20`, a full page returned:
+On `battery_beta`, a full page returned:
 
 ```text
 d1550501000000000000000000000000
@@ -170,10 +170,10 @@ validation imported:
 
 | Device | Page count | Imported records |
 | --- | --- | --- |
-| `spare_nlp5` | `3` | `765` |
-| `spare_nlp20` | `3` | `748` |
+| `battery_alpha` | `3` | `765` |
+| `battery_beta` | `3` | `748` |
 
-Manual full-window sync on `spare_nlp5` currently requests byte-7 selector
+Manual full-window sync on `battery_alpha` currently requests byte-7 selector
 `0x55` (`85`) to match the 30-day advertised BM200 retention estimate. On
 2026-04-27, the device returned only about 1455-1456 non-empty records, covering
 roughly 48 hours 30 minutes:
@@ -194,7 +194,7 @@ open explanations remain:
 - another byte in `d15505` may select an offset, bank, cursor, direction, or
   segment needed to reach older history.
 
-A controlled single-byte matrix was run for `spare_nlp5` using base command
+A controlled single-byte matrix was run for `battery_alpha` using base command
 `d1550500000000550000000000000000` and mutating one zero byte at a time to
 `0x01`. The packaged probe tooling now writes unbuffered JSONL after each
 command so long captures do not appear silent.
@@ -203,15 +203,15 @@ Primary captures:
 
 | Capture | Path |
 | --- | --- |
-| Matrix | `/tmp/bm200-b7-55-matrix-spare_nlp5-20260427-153247.jsonl` |
-| Byte-4 deepen | `/tmp/bm200-b7-55-b4-deepen-repeat-spare_nlp5-20260427-154307.jsonl` |
-| Byte-8 deepen | `/tmp/bm200-b7-55-b8-deepen-spare_nlp5-20260427-153804.jsonl` |
-| Byte-10 deepen | `/tmp/bm200-b7-55-b10-deepen-spare_nlp5-20260427-153855.jsonl` |
-| Byte-12 deepen | `/tmp/bm200-b7-55-b12-deepen-spare_nlp5-20260427-153946.jsonl` |
-| Byte-14 deepen | `/tmp/bm200-b7-55-b14-deepen-spare_nlp5-20260427-154036.jsonl` |
-| Byte-4 sweep | `/tmp/bm200-b7-55-b4-sweep-00-ff-spare_nlp5-20260427-160351.jsonl` |
-| Byte-6 sweep | `/tmp/bm200-b7-55-b6-sweep-00-ff-spare_nlp5-20260427-161648.jsonl` |
-| Byte-7 sweep | `/tmp/bm200-b7-55-b7-sweep-00-ff-spare_nlp5-20260427-164223.jsonl` |
+| Matrix | `/tmp/bm200-b7-55-matrix-battery_alpha-20260427-153247.jsonl` |
+| Byte-4 deepen | `/tmp/bm200-b7-55-b4-deepen-repeat-battery_alpha-20260427-154307.jsonl` |
+| Byte-8 deepen | `/tmp/bm200-b7-55-b8-deepen-battery_alpha-20260427-153804.jsonl` |
+| Byte-10 deepen | `/tmp/bm200-b7-55-b10-deepen-battery_alpha-20260427-153855.jsonl` |
+| Byte-12 deepen | `/tmp/bm200-b7-55-b12-deepen-battery_alpha-20260427-153946.jsonl` |
+| Byte-14 deepen | `/tmp/bm200-b7-55-b14-deepen-battery_alpha-20260427-154036.jsonl` |
+| Byte-4 sweep | `/tmp/bm200-b7-55-b4-sweep-00-ff-battery_alpha-20260427-160351.jsonl` |
+| Byte-6 sweep | `/tmp/bm200-b7-55-b6-sweep-00-ff-battery_alpha-20260427-161648.jsonl` |
+| Byte-7 sweep | `/tmp/bm200-b7-55-b7-sweep-00-ff-battery_alpha-20260427-164223.jsonl` |
 
 Matrix result:
 
@@ -293,10 +293,10 @@ Follow-up shift baseline captured on 2026-04-27:
 
 | Capture | Path | Notes |
 | --- | --- | --- |
-| Byte-4 shift `t0` | `/tmp/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl` | Captured `b7=55`, `b4=2f`, and `b4=47`; first `b4=09` attempt returned empty. |
-| Byte-4 shift `t0b` | `/tmp/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl` | Recaptured group A with `b4=09`, `0a`, and `10`; `b4=09` returned 8063 records. |
-| Byte-4 shift `t1` | `/tmp/bm200-b4-shift-t1-spare_nlp5-20260427-211240.jsonl` | Repeated `b7=55`, `b4=09`, `0a`, `10`, `2f`, and `47`; the first `b7=55` command returned empty. |
-| Byte-7 retry `t1` | `/tmp/bm200-b7-55-retry-t1-spare_nlp5-20260427-211824.jsonl` | Retried `b7=55` after the empty result; returned 1649 records. |
+| Byte-4 shift `t0` | `/tmp/bm200-b4-shift-t0-battery_alpha-20260427-181107.jsonl` | Captured `b7=55`, `b4=2f`, and `b4=47`; first `b4=09` attempt returned empty. |
+| Byte-4 shift `t0b` | `/tmp/bm200-b4-shift-t0b-group09-battery_alpha-20260427-181324.jsonl` | Recaptured group A with `b4=09`, `0a`, and `10`; `b4=09` returned 8063 records. |
+| Byte-4 shift `t1` | `/tmp/bm200-b4-shift-t1-battery_alpha-20260427-211240.jsonl` | Repeated `b7=55`, `b4=09`, `0a`, `10`, `2f`, and `47`; the first `b7=55` command returned empty. |
+| Byte-7 retry `t1` | `/tmp/bm200-b7-55-retry-t1-battery_alpha-20260427-211824.jsonl` | Retried `b7=55` after the empty result; returned 1649 records. |
 
 The `t1` comparison is conclusive for cadence and partly conclusive for
 stitching:
@@ -411,7 +411,7 @@ Decodes as:
 
 The page is newest-first. Each next record is about 2 minutes older.
 
-Four captures from `spare_nlp20` proved the shift behavior:
+Four captures from `battery_beta` proved the shift behavior:
 
 | Pair | Interval | Best offset | Matching records | Mismatches |
 | --- | --- | --- | --- | --- |
@@ -435,18 +435,18 @@ Live `d15507` packets during that probe:
 
 | Device | Live voltage | Live SoC | Live temperature | Live status |
 | --- | --- | --- | --- | --- |
-| `spare_nlp20` | `13.22-13.23 V` | `82%` | `23-24 C` | `0` / `normal` |
-| `spare_nlp5` | `13.29-13.30 V` | `88%` | `20 C` | `0` / `normal` |
+| `battery_beta` | `13.22-13.23 V` | `82%` | `23-24 C` | `0` / `normal` |
+| `battery_alpha` | `13.29-13.30 V` | `88%` | `20 C` | `0` / `normal` |
 
 Historical `ss` values in the same probe:
 
 | Device | Newest historical `ss` values | Distribution |
 | --- | --- | --- |
-| `spare_nlp20` | `83, 84, 85, 86, 88, 90, 91, 93, 94, 96, 98, 99` | recent `83..99`, older `100` |
-| `spare_nlp5` | `88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88` | `88`, `89`, `90` |
+| `battery_beta` | `83, 84, 85, 86, 88, 90, 91, 93, 94, 96, 98, 99` | recent `83..99`, older `100` |
+| `battery_alpha` | `88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88, 88` | `88`, `89`, `90` |
 
 The one-point gap between live `82%` and newest historical `83%` on
-`spare_nlp20` is consistent with live data being newer than the latest
+`battery_beta` is consistent with live data being newer than the latest
 2-minute historical sample.
 
 ### Unresolved BM200/BM6 History Items
@@ -456,7 +456,7 @@ The one-point gap between live `82%` and newest historical `83%` on
   `p=0` in history.
 - Safe stitching for byte-4 ranges before claiming full advertised 30-day
   history recovery. Byte 7 is a cumulative selector, but the full byte-7 sweep
-  still saturated around 1511-1522 records on `spare_nlp5`; byte 4 is the only
+  still saturated around 1511-1522 records on `battery_alpha`; byte 4 is the only
   strong segment/range candidate found so far.
 - Cranking, charging-test, or waveform event records. These may use `p`,
   another `d15505` selector, or another command family.
@@ -467,7 +467,7 @@ Live `d15507` polling is implemented and verified for BM300 Pro/BM7 with the
 BM7 key. It uses the same live response offsets as BM6/BM200.
 
 BM300 Pro/BM7 standard archive import now uses profile `bm7_d15505_b7_v1`.
-Live validation on `doc_fb12899` proved a practical cumulative byte-7 depth
+Live validation on `bm300_alpha` proved a practical cumulative byte-7 depth
 path for selectors `01..03`, and standard background sync is now enabled by
 default for new configs.
 
@@ -482,13 +482,13 @@ Known facts:
   ```
 
 - The current standard BM300 import uses byte 7 selectors `01`, `02`, and
-  `03`, and `doc_fb12899` validated exact overlap of:
+  `03`, and `bm300_alpha` validated exact overlap of:
   - `256` consecutive records for `01 -> 02`
   - `512` consecutive records for `02 -> 03`
 - The current practical BM300 standard import depth is `769` rows, about
   `25h 38m` at the current 2-minute cadence assumption.
 
-- `doc_fb12899` returned newest records that match live voltage, SoC, and
+- `bm300_alpha` returned newest records that match live voltage, SoC, and
   temperature using the same record layout as BM200/BM6:
 
   ```text
@@ -502,7 +502,7 @@ Examples:
 | `53b620f0` | `13.39 V` | `98%` | `15 C` | `0` |
 | `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
 
-The first production sync on `doc_fb12899` imported 883 selector-`01` records,
+The first production sync on `bm300_alpha` imported 883 selector-`01` records,
 which is about 29 hours 26 minutes at the observed 2-minute cadence.
 
 Open BM7 history items:
@@ -559,11 +559,11 @@ Configured live gateway devices:
 
 | Device | Type | MAC | Note |
 | --- | --- | --- | --- |
-| `spare_nlp5` | `bm200` | `00:00:5E:00:53:01` | BM6-family, sometimes harder to find |
-| `spare_nlp20` | `bm200` | `00:00:5E:00:53:02` | Reliable BM6-family responder |
-| `libertv_ld13czt` | `bm300pro` | `00:00:5E:00:53:03` | BM7-family, intermittent |
-| `doc_fb12899` | `bm300pro` | `00:00:5E:00:53:04` | BM7-family, responded to probes |
-| `punto_fa376ht` | `bm300pro` | `00:00:5E:00:53:05` | BM7-family, weak RSSI |
+| `battery_alpha` | `bm200` | `00:00:5E:00:53:01` | BM6-family, sometimes harder to find |
+| `battery_beta` | `bm200` | `00:00:5E:00:53:02` | Reliable BM6-family responder |
+| `bm300_gamma` | `bm300pro` | `00:00:5E:00:53:03` | BM7-family, intermittent |
+| `bm300_alpha` | `bm300pro` | `00:00:5E:00:53:04` | BM7-family, responded to probes |
+| `bm300_beta` | `bm300pro` | `00:00:5E:00:53:05` | BM7-family, weak RSSI |
 
 ## Safe Probe Workflow
 
@@ -571,7 +571,7 @@ Stop the normal gateway service only during direct BLE probes:
 
 ```sh
 ssh admin@<gateway-host>.local 'sudo systemctl stop bm-gateway'
-ssh admin@<gateway-host>.local 'bm-gateway protocol probe-history --device-id spare_nlp20'
+ssh admin@<gateway-host>.local 'bm-gateway protocol probe-history --device-id battery_beta'
 ssh admin@<gateway-host>.local 'sudo systemctl start bm-gateway && systemctl is-active bm-gateway bm-gateway-web'
 ```
 

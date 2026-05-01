@@ -64,7 +64,7 @@ The History page has one extra page-specific optimization: its diagnostic raw
 table renders only the latest 300 rows. Summary cards and chart data still use
 the full history payload fetched for the page.
 
-Validation on `bmgateway.local` for `spare_nlp5` after dense archive import:
+Validation on `bmgateway.local` for `battery_alpha` after dense archive import:
 
 | Request | Result |
 | --- | --- |

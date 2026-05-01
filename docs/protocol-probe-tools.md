@@ -49,7 +49,7 @@ On the gateway host:
 
 ```sh
 sudo systemctl stop bm-gateway
-bm-gateway protocol probe-history --device-id spare_nlp20
+bm-gateway protocol probe-history --device-id battery_beta
 sudo systemctl start bm-gateway
 systemctl is-active bm-gateway bm-gateway-web
 ```
@@ -61,8 +61,8 @@ For two BM200 devices:
 ```sh
 sudo systemctl stop bm-gateway
 bm-gateway protocol probe-history \
-  --device-id spare_nlp20 \
-  --device-id spare_nlp5 \
+  --device-id battery_beta \
+  --device-id battery_alpha \
   --history-page-limit 5 \
   --command-timeout-seconds 3.5 \
   > /tmp/bm200-probe.jsonl
@@ -204,10 +204,10 @@ The latest lower-SoC validation proved `ss` varies with live SoC:
 
 | Device | Live SoC | Newest historical `ss` |
 | --- | --- | --- |
-| `spare_nlp20` | `82%` | first record `83%`, then older `84..100%` |
-| `spare_nlp5` | `88%` | first records `88%`, then older `89..90%` |
+| `battery_beta` | `82%` | first record `83%`, then older `84..100%` |
+| `battery_alpha` | `88%` | first records `88%`, then older `89..90%` |
 
-The `spare_nlp20` one-point difference is consistent with the 2-minute history
+The `battery_beta` one-point difference is consistent with the 2-minute history
 cadence.
 
 ### BM300 Pro/BM7 History
@@ -226,7 +226,7 @@ validated against live `d15507` values:
 vvv ss tt p
 ```
 
-Examples from `doc_fb12899`:
+Examples from `bm300_alpha`:
 
 | Raw record | Voltage | SoC | Temperature | Event/type |
 | --- | --- | --- | --- | --- |
@@ -234,7 +234,7 @@ Examples from `doc_fb12899`:
 | `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
 
 The standard archive profile is now `bm7_d15505_b7_v1`. Live validation on
-`doc_fb12899` proved exact cumulative overlap for:
+`bm300_alpha` proved exact cumulative overlap for:
 
 - `b7=01 -> 02`: 256 identical raw records
 - `b7=02 -> 03`: 512 identical raw records
@@ -247,7 +247,7 @@ capped to this validated depth-3 window until deeper selectors are proven.
 Selectors beyond `hist_d15505_b6_01` are not fully characterized. Use the probe
 tool to capture low page limits first, then compare overlap and record counts
 before increasing the configured limit toward the 72-day advertised retention
-cap. One live selector-`01` import from `doc_fb12899` returned 883 records,
+cap. One live selector-`01` import from `bm300_alpha` returned 883 records,
 which is about 29 hours 26 minutes at 2-minute cadence.
 
 ### `bm-gateway protocol bm300-multipage-import`
@@ -263,7 +263,7 @@ Use it only with an explicitly supplied disposable or review SQLite path:
 
 ```sh
 bm-gateway protocol bm300-multipage-import \
-  --device-id doc_fb12899 \
+  --device-id bm300_alpha \
   --output-db /tmp/bm300-multipage.db \
   --json
 ```
@@ -285,7 +285,7 @@ selectors before changing the standard BM300 import depth.
 
 ## BM200 `b7=55` Matrix
 
-Use this mode for the controlled `spare_nlp5` investigation into whether
+Use this mode for the controlled `battery_alpha` investigation into whether
 another byte selects an older BM200/BM6 history bank, cursor, offset, or
 segment.
 
@@ -298,10 +298,10 @@ Stop the runtime service first:
 ```sh
 sudo systemctl stop bm-gateway
 bm-gateway protocol probe-history \
-  --device-id spare_nlp5 \
+  --device-id battery_alpha \
   --bm200-b7-55-matrix \
   --command-timeout-seconds 3.5 \
-  > /tmp/bm200-b7-55-matrix-spare_nlp5.jsonl
+  > /tmp/bm200-b7-55-matrix-battery_alpha.jsonl
 sudo systemctl start bm-gateway
 systemctl is-active bm-gateway bm-gateway-web
 ```
@@ -346,10 +346,10 @@ that byte:
 ```sh
 sudo systemctl stop bm-gateway
 bm-gateway protocol probe-history \
-  --device-id spare_nlp5 \
+  --device-id battery_alpha \
   --bm200-b7-55-deepen-byte 6 \
   --command-timeout-seconds 3.5 \
-  > /tmp/bm200-b7-55-b6-deepen-spare_nlp5.jsonl
+  > /tmp/bm200-b7-55-b6-deepen-battery_alpha.jsonl
 sudo systemctl start bm-gateway
 systemctl is-active bm-gateway bm-gateway-web
 ```
@@ -363,12 +363,12 @@ For a complete value sweep of one byte, use:
 ```sh
 sudo systemctl stop bm-gateway
 bm-gateway protocol probe-history \
-  --device-id spare_nlp5 \
+  --device-id battery_alpha \
   --bm200-b7-55-sweep-byte 4 \
   --sweep-start 00 \
   --sweep-end ff \
   --command-timeout-seconds 3.5 \
-  > /tmp/bm200-b7-55-b4-sweep-spare_nlp5.jsonl
+  > /tmp/bm200-b7-55-b4-sweep-battery_alpha.jsonl
 sudo systemctl start bm-gateway
 systemctl is-active bm-gateway bm-gateway-web
 ```
@@ -378,9 +378,9 @@ walk the known cumulative selector itself. Keep sweeps bounded to owned devices
 and save the raw JSONL because the useful evidence is often the raw boundary
 and overlap, not just the count.
 
-### `spare_nlp5` Sweep Findings
+### `battery_alpha` Sweep Findings
 
-The 2026-04-27 full sweeps on `spare_nlp5` produced these working conclusions:
+The 2026-04-27 full sweeps on `battery_alpha` produced these working conclusions:
 
 - Byte `4` is the only strong BM200/BM6 segment or range selector candidate.
   It returned several non-empty groups, including `09..28`, `2f..40`, and
@@ -428,10 +428,10 @@ Analyze saved JSONL captures offline before writing an importer:
 
 ```sh
 bm-gateway protocol analyze-history-captures \
-  --input output/protocol-probes/bm200-b4-shift-t0-spare_nlp5-20260427-181107.jsonl \
-  --input output/protocol-probes/bm200-b4-shift-t0b-group09-spare_nlp5-20260427-181324.jsonl \
-  --input output/protocol-probes/bm200-b4-shift-t1-spare_nlp5-20260427-211240.jsonl \
-  --input output/protocol-probes/bm200-b7-55-retry-t1-spare_nlp5-20260427-211824.jsonl
+  --input output/protocol-probes/bm200-b4-shift-t0-battery_alpha-20260427-181107.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t0b-group09-battery_alpha-20260427-181324.jsonl \
+  --input output/protocol-probes/bm200-b4-shift-t1-battery_alpha-20260427-211240.jsonl \
+  --input output/protocol-probes/bm200-b7-55-retry-t1-battery_alpha-20260427-211824.jsonl
 ```
 
 The command profiles decoded field ranges, event counts, marker counts, exact
@@ -462,7 +462,7 @@ Expected result:
 - `later[10:]` should match `earlier[:-10]`, allowing one-record variation when
   the interval is closer to 21 minutes
 
-The verified `spare_nlp20` run produced:
+The verified `battery_beta` run produced:
 
 | Pair | Interval | Offset | Mismatches |
 | --- | --- | --- | --- |

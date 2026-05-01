@@ -175,7 +175,7 @@ def test_chart_points_prefer_daily_last_seen_timestamp_for_right_edge_alignment(
                 "last_seen": "2026-04-22T01:33:56+02:00",
             }
         ],
-        series="Spare NLP20",
+        series="Battery Beta",
     )
 
     daily_points = [point for point in points if point["kind"] == "daily"]
@@ -387,9 +387,9 @@ def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
         "\n".join(
             [
                 "[[devices]]",
-                'id = "spare_nlp5"',
+                'id = "battery_alpha"',
                 'type = "bm200"',
-                'name = "Spare NLP5"',
+                'name = "Battery Alpha"',
                 'mac = "A1:B2:C3:D4:E5:F6"',
                 "",
             ]
@@ -416,9 +416,9 @@ def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
                 "poll_interval_seconds": 300,
                 "devices": [
                     {
-                        "id": "spare_nlp5",
+                        "id": "battery_alpha",
                         "type": "bm200",
-                        "name": "Spare NLP5",
+                        "name": "Battery Alpha",
                         "mac": "A1:B2:C3:D4:E5:F6",
                         "enabled": True,
                         "connected": True,
@@ -454,7 +454,7 @@ def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
     assert len(calls) == 1
     snapshot = calls[0]["snapshot"]
     assert isinstance(snapshot, GatewaySnapshot)
-    assert snapshot.devices[0].id == "spare_nlp5"
+    assert snapshot.devices[0].id == "battery_alpha"
     assert calls[0]["force"] is True
 
 
@@ -1444,7 +1444,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
         export_fleet_trend=False,
         fleet_trend_metrics=("voltage", "temperature"),
         fleet_trend_range="30",
-        fleet_trend_device_ids=("spare_nlp5", "spare_nlp20"),
+        fleet_trend_device_ids=("battery_alpha", "battery_beta"),
     )
 
     assert errors == []
@@ -1460,7 +1460,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.export_fleet_trend is False
     assert config.usb_otg.fleet_trend_metrics == ("voltage", "temperature")
     assert config.usb_otg.fleet_trend_range == "30"
-    assert config.usb_otg.fleet_trend_device_ids == ("spare_nlp5", "spare_nlp20")
+    assert config.usb_otg.fleet_trend_device_ids == ("battery_alpha", "battery_beta")
 
 
 def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Path) -> None:
@@ -1807,15 +1807,15 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
         "\n".join(
             [
                 "[[devices]]",
-                'id = "spare_nlp5"',
+                'id = "battery_alpha"',
                 'type = "bm200"',
-                'name = "Spare NLP5"',
+                'name = "Battery Alpha"',
                 'mac = "A1:B2:C3:D4:E5:F6"',
                 "",
                 "[[devices]]",
-                'id = "spare_nlp20"',
+                'id = "battery_beta"',
                 'type = "bm200"',
-                'name = "Spare NLP20"',
+                'name = "Battery Beta"',
                 'mac = "A1:B2:C3:D4:E5:F7"',
                 "",
             ]
@@ -1850,8 +1850,8 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
         data=urllib.parse.urlencode(
             [
                 ("fleet_trend_device_ids", ""),
-                ("fleet_trend_device_ids", "spare_nlp5"),
-                ("fleet_trend_device_ids", "spare_nlp20"),
+                ("fleet_trend_device_ids", "battery_alpha"),
+                ("fleet_trend_device_ids", "battery_beta"),
             ]
         ).encode("utf-8"),
         method="POST",
@@ -2270,7 +2270,7 @@ def test_validate_devices_rejects_mqtt_unsafe_device_ids() -> None:
             Device(
                 id="spare/nlp5",
                 type="bm200",
-                name="Spare NLP5",
+                name="Battery Alpha",
                 mac="AA:BB:CC:DD:EE:01",
             )
         ]
@@ -2513,9 +2513,9 @@ def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
                 "mac": "AA:BB:CC:DD:EE:01",
             },
             {
-                "id": "spare_nlp20",
+                "id": "battery_beta",
                 "type": "bm200",
-                "name": "Spare NLP20",
+                "name": "Battery Beta",
                 "mac": "AA:BB:CC:DD:EE:02",
             },
         ],
@@ -2531,13 +2531,13 @@ def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
                 {"device_id": "bm200_house", "raw_samples": 10},
                 {"device_id": "bm300_van", "raw_samples": 10},
                 {"device_id": "fake_serial_test", "raw_samples": 10},
-                {"device_id": "spare_nlp20", "raw_samples": 10},
+                {"device_id": "battery_beta", "raw_samples": 10},
             ],
         },
     )
 
     assert "ancell_bm200" in html
-    assert "spare_nlp20" in html
+    assert "battery_beta" in html
     assert "bm200_house" not in html
     assert "bm300_van" not in html
     assert "fake_serial_test" not in html
@@ -2679,7 +2679,7 @@ def test_render_diagnostics_html_lists_only_enabled_fleet_metric_previews() -> N
 def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
     html = render_frame_fleet_trend_html(
         chart_points=[],
-        legend=[("Spare NLP5", "#f0b429")],
+        legend=[("Battery Alpha", "#f0b429")],
         show_chart_markers=False,
         appearance="dark",
         default_chart_range="7",
@@ -2690,7 +2690,7 @@ def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
 
     assert "<span>Fleet Trend</span> · <span>SoC</span> · <span>7 days</span>" in html
     assert "<span>Latest:</span> <span>No data</span>" in html
-    assert "Spare NLP5" in html
+    assert "Battery Alpha" in html
     assert 'id="frame-fleet-trend-chart"' in html
     assert 'class="bottom-nav"' not in html
     assert 'class="page-shell"' not in html
@@ -2720,14 +2720,14 @@ def test_render_frame_fleet_trend_html_localizes_latest_label_to_italian() -> No
         chart_points=[
             {
                 "ts": "2026-04-24T01:05:00+02:00",
-                "series": "Spare NLP20",
+                "series": "Battery Beta",
                 "series_color": "#ec5c86",
                 "soc": 91,
                 "voltage": 13.31,
                 "temperature": 24.0,
             },
         ],
-        legend=[("Spare NLP20", "#ec5c86")],
+        legend=[("Battery Beta", "#ec5c86")],
         show_chart_markers=False,
         appearance="dark",
         default_chart_range="30",
@@ -2749,7 +2749,7 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
         chart_points=[
             {
                 "ts": "2026-04-24T01:00:00+02:00",
-                "series": "Spare NLP5",
+                "series": "Battery Alpha",
                 "series_color": "#f0b429",
                 "soc": 88,
                 "voltage": 13.29,
@@ -2757,14 +2757,14 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
             },
             {
                 "ts": "2026-04-24T01:05:00+02:00",
-                "series": "Spare NLP20",
+                "series": "Battery Beta",
                 "series_color": "#ec5c86",
                 "soc": 91,
                 "voltage": 13.31,
                 "temperature": 24.0,
             },
         ],
-        legend=[("Spare NLP5", "#f0b429"), ("Spare NLP20", "#ec5c86")],
+        legend=[("Battery Alpha", "#f0b429"), ("Battery Beta", "#ec5c86")],
         show_chart_markers=False,
         appearance="dark",
         default_chart_range="30",
@@ -2775,8 +2775,8 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
 
     assert "<span>Fleet Trend</span> · <span>Temperature</span> · <span>30 days</span>" in html
     assert "<span>Latest:</span> <span>2026-04-24 01:05</span>" in html
-    assert "Spare NLP5 23.0°C" in html
-    assert "Spare NLP20 24.0°C" in html
+    assert "Battery Alpha 23.0°C" in html
+    assert "Battery Beta 24.0°C" in html
     assert 'data-metric="temperature" class="active"' in html
     assert 'data-range="30" data-range-label="30 days" class="active"' in html
 
@@ -2787,7 +2787,7 @@ def test_render_frame_fleet_trend_html_keeps_duplicate_device_names_distinct() -
             {
                 "ts": "2026-04-24T01:00:00+02:00",
                 "series": "Spare",
-                "series_id": "spare_nlp5",
+                "series_id": "battery_alpha",
                 "series_color": "#f0b429",
                 "soc": 88,
                 "voltage": 13.29,
@@ -2796,7 +2796,7 @@ def test_render_frame_fleet_trend_html_keeps_duplicate_device_names_distinct() -
             {
                 "ts": "2026-04-24T01:05:00+02:00",
                 "series": "Spare",
-                "series_id": "spare_nlp20",
+                "series_id": "battery_beta",
                 "series_color": "#ec5c86",
                 "soc": 91,
                 "voltage": 13.31,
@@ -2821,8 +2821,8 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
         snapshot={
             "devices": [
                 {
-                    "id": "spare_nlp5",
-                    "name": "Spare NLP5",
+                    "id": "battery_alpha",
+                    "name": "Battery Alpha",
                     "soc": 91,
                     "voltage": 13.1,
                     "temperature": 22.5,
@@ -2834,8 +2834,8 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
         },
         devices=[
             {
-                "id": "spare_nlp5",
-                "name": "Spare NLP5",
+                "id": "battery_alpha",
+                "name": "Battery Alpha",
                 "color_key": "amber",
                 "icon_key": "lead_acid_battery",
             }
@@ -2849,7 +2849,7 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
 
     assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
     assert "<span>2026-04-24 03:12</span>" in html
-    assert "Spare NLP5" in html
+    assert "Battery Alpha" in html
     assert "frame-battery-card" in html
     assert "frame-battery-soc" in html
     assert "Battery OK" in html
@@ -2956,10 +2956,10 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     html = render_frame_battery_overview_html(
         snapshot={
             "devices": [
-                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
+                {"id": "one", "name": "Battery Alpha", "soc": 86, "voltage": 13.29},
                 {
                     "id": "two",
-                    "name": "Spare NLP20",
+                    "name": "Battery Beta",
                     "soc": 88,
                     "voltage": 13.29,
                     "last_seen": "2026-04-24T03:20:00+02:00",
@@ -2967,8 +2967,8 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
             ]
         },
         devices=[
-            {"id": "one", "name": "Spare NLP5", "enabled": True},
-            {"id": "two", "name": "Spare NLP20", "enabled": True},
+            {"id": "one", "name": "Battery Alpha", "enabled": True},
+            {"id": "two", "name": "Battery Beta", "enabled": True},
         ],
         page=1,
         devices_per_page=5,
@@ -2993,14 +2993,14 @@ def test_render_frame_battery_overview_html_keeps_three_cards_in_one_row() -> No
     html = render_frame_battery_overview_html(
         snapshot={
             "devices": [
-                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
-                {"id": "two", "name": "Spare NLP20", "soc": 88, "voltage": 13.29},
+                {"id": "one", "name": "Battery Alpha", "soc": 86, "voltage": 13.29},
+                {"id": "two", "name": "Battery Beta", "soc": 88, "voltage": 13.29},
                 {"id": "three", "name": "Liberty", "soc": 91, "voltage": 13.5},
             ]
         },
         devices=[
-            {"id": "one", "name": "Spare NLP5", "enabled": True},
-            {"id": "two", "name": "Spare NLP20", "enabled": True},
+            {"id": "one", "name": "Battery Alpha", "enabled": True},
+            {"id": "two", "name": "Battery Beta", "enabled": True},
             {"id": "three", "name": "Liberty", "enabled": True},
         ],
         page=1,
@@ -3366,8 +3366,8 @@ def test_render_home_html_shows_low_state_as_red_status() -> None:
         snapshot={
             "devices": [
                 {
-                    "id": "spare_nlp20",
-                    "name": "Spare NLP20",
+                    "id": "battery_beta",
+                    "name": "Battery Beta",
                     "type": "bm200",
                     "soc": 28,
                     "voltage": 12.95,
@@ -3380,8 +3380,8 @@ def test_render_home_html_shows_low_state_as_red_status() -> None:
         },
         devices=[
             {
-                "id": "spare_nlp20",
-                "name": "Spare NLP20",
+                "id": "battery_beta",
+                "name": "Battery Beta",
                 "type": "bm200",
                 "enabled": True,
             }
@@ -3576,8 +3576,8 @@ def test_render_home_html_uses_compact_home_metadata_line_with_nominal_voltage()
         snapshot={
             "devices": [
                 {
-                    "id": "spare_nlp5",
-                    "name": "Spare NLP5",
+                    "id": "battery_alpha",
+                    "name": "Battery Alpha",
                     "type": "bm200",
                     "soc": 88,
                     "voltage": 13.30,
@@ -3596,8 +3596,8 @@ def test_render_home_html_uses_compact_home_metadata_line_with_nominal_voltage()
         },
         devices=[
             {
-                "id": "spare_nlp5",
-                "name": "Spare NLP5",
+                "id": "battery_alpha",
+                "name": "Battery Alpha",
                 "type": "bm200",
                 "mac": "00:00:5E:00:53:01",
                 "enabled": True,
@@ -3975,7 +3975,7 @@ def test_render_devices_html_reserves_second_badge_slot_for_non_vehicle_devices(
                 "id": "bench_battery",
                 "type": "bm200",
                 "name": "Bench Battery",
-                "mac": "3C:AB:72:00:00:01",
+                "mac": "00:00:5E:00:53:11",
                 "enabled": True,
                 "installed_in_vehicle": False,
                 "battery": {
@@ -5028,9 +5028,9 @@ def _write_edit_device_config(tmp_path: Path) -> Path:
                 'color_key = "green"',
                 "",
                 "[[devices]]",
-                'id = "spare_nlp20"',
+                'id = "battery_beta"',
                 'type = "bm200"',
-                'name = "Spare NLP20"',
+                'name = "Battery Beta"',
                 'mac = "AA:BB:CC:DD:EE:02"',
                 'color_key = "blue"',
                 "",
@@ -5107,7 +5107,7 @@ def test_update_device_from_form_renames_device_id_and_history(tmp_path: Path) -
     assert errors == []
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
-    assert [device.id for device in devices] == ["starter_battery", "spare_nlp20"]
+    assert [device.id for device in devices] == ["starter_battery", "battery_beta"]
     assert fetch_recent_history(database_path, device_id="bm200_house", limit=10) == []
     assert fetch_recent_history(database_path, device_id="starter_battery", limit=10)
 
@@ -5196,7 +5196,7 @@ def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> 
     errors = update_device_from_form(
         config_path=config_path,
         device_id="bm200_house",
-        new_device_id="spare_nlp20",
+        new_device_id="battery_beta",
         device_type="bm200",
         device_name="Starter Battery",
         device_mac="AA:BB:CC:DD:EE:01",
@@ -5214,10 +5214,10 @@ def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> 
         battery_production_year=None,
     )
 
-    assert errors == ["duplicate device id: spare_nlp20"]
+    assert errors == ["duplicate device id: battery_beta"]
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
-    assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+    assert [device.id for device in devices] == ["bm200_house", "battery_beta"]
 
 
 def test_devices_update_redirect_uses_normalized_renamed_device_id(tmp_path: Path) -> None:
@@ -5296,7 +5296,7 @@ def test_update_device_from_form_rejects_history_collision(tmp_path: Path) -> No
     assert errors == ["device id spare_history already has stored history; choose a different id"]
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
-    assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+    assert [device.id for device in devices] == ["bm200_house", "battery_beta"]
 
 
 def test_bottom_nav_renders_generated_icons() -> None:

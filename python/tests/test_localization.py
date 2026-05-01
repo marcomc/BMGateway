@@ -131,6 +131,22 @@ def test_localize_html_keeps_nested_translate_no_content_literal() -> None:
     assert "<p>Panoramica batteria</p>" in localized
 
 
+def test_localize_html_keeps_nested_same_tag_translate_no_content_literal() -> None:
+    source_html = (
+        '<!doctype html><html lang="en"><body>'
+        '<span translate="no"><span class="legend-swatch"></span>Battery Beta 13.31V</span>'
+        "</body></html>"
+    )
+
+    localized = localize_html(source_html, "it")
+
+    assert (
+        '<span translate="no"><span class="legend-swatch"></span>Battery Beta 13.31V</span>'
+        in localized
+    )
+    assert missing_translations_for_html(source_html, "it") == ()
+
+
 def test_localize_html_warns_when_catalog_is_missing_translatable_text() -> None:
     source_html = (
         '<!doctype html><html lang="en"><body><h1>Settings</h1><p>New Label</p></body></html>'
@@ -154,14 +170,29 @@ def test_missing_translations_for_html_reports_untranslated_catalog_entries() ->
 def test_dynamic_prefixes_do_not_require_device_value_specific_catalog_entries() -> None:
     source_html = (
         '<!doctype html><html lang="en"><body>'
-        '<a aria-label="Open details for Spare NLP5">Serial / MAC: AA:BB:CC:DD:EE:01</a>'
+        '<a aria-label="Open details for Battery Alpha">Serial / MAC: AA:BB:CC:DD:EE:01</a>'
         "</body></html>"
     )
 
     localized = localize_html(source_html, "it")
 
-    assert "Apri dettagli per Spare NLP5" in localized
+    assert "Apri dettagli per Battery Alpha" in localized
     assert "Seriale / MAC: AA:BB:CC:DD:EE:01" in localized
+    assert missing_translations_for_html(source_html, "it") == ()
+
+
+def test_dynamic_suffixes_do_not_require_device_value_specific_catalog_entries() -> None:
+    source_html = (
+        '<!doctype html><html lang="en"><body>'
+        "<h1>Battery Alpha Device</h1>"
+        "<p>battery_gamma History</p>"
+        "</body></html>"
+    )
+
+    localized = localize_html(source_html, "it")
+
+    assert "Battery Alpha Dispositivo" in localized
+    assert "battery_gamma Cronologia" in localized
     assert missing_translations_for_html(source_html, "it") == ()
 
 
@@ -261,7 +292,7 @@ def test_mqtt_anonymous_placeholders_are_translated_to_italian() -> None:
 
 def test_device_status_explainer_uses_selected_language() -> None:
     html = render_device_html(
-        device_id="spare_nlp5",
+        device_id="battery_alpha",
         raw_history=[
             {
                 "ts": "2026-04-24T12:23:40+02:00",
@@ -285,7 +316,7 @@ def test_device_status_explainer_uses_selected_language() -> None:
         yearly_history=[],
         analytics={"windows": []},
         device_summary={
-            "name": "Spare NLP5",
+            "name": "Battery Alpha",
             "soc": 85,
             "voltage": 13.29,
             "temperature": 24.0,
@@ -445,9 +476,9 @@ def test_supported_locale_catalogs_warn_for_missing_rendered_page_text() -> None
 def _representative_english_pages() -> list[str]:
     config = load_config(Path("python/config/config.toml.example"))
     device = {
-        "id": "spare_nlp5",
+        "id": "battery_alpha",
         "type": "bm200",
-        "name": "Spare NLP5",
+        "name": "Battery Alpha",
         "mac": "AA:BB:CC:DD:EE:01",
         "connected": False,
         "voltage": 12.6,
@@ -532,13 +563,13 @@ def _representative_english_pages() -> list[str]:
     chart_points = [
         {
             "ts": "2026-04-24T11:26:14+02:00",
-            "series": "Spare NLP5",
+            "series": "Battery Alpha",
             "voltage": 12.6,
             "soc": 86,
             "temperature": 22.3,
         }
     ]
-    legend = [("Spare NLP5", "#17c45a")]
+    legend = [("Battery Alpha", "#17c45a")]
     storage_summary: dict[str, object] = {
         "counts": {"gateway_snapshots": 1, "device_readings": 1, "device_daily_rollups": 1},
         "devices": [],
@@ -548,7 +579,7 @@ def _representative_english_pages() -> list[str]:
             "state_topic": "bm_gateway/gateway/state",
             "discovery_topic": "homeassistant/device/bm_gateway/config",
         },
-        "devices": [{"id": "spare_nlp5"}],
+        "devices": [{"id": "battery_alpha"}],
     }
     return [
         render_home_html(
@@ -585,14 +616,14 @@ def _representative_english_pages() -> list[str]:
             usb_otg_support_installed=True,
         ),
         render_history_html(
-            device_id="spare_nlp5",
+            device_id="battery_alpha",
             configured_devices=[device],
             raw_history=raw_history,
             daily_history=daily_history,
             monthly_history=monthly_history,
         ),
         render_device_html(
-            device_id="spare_nlp5",
+            device_id="battery_alpha",
             raw_history=raw_history,
             daily_history=daily_history,
             monthly_history=monthly_history,

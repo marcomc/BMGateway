@@ -112,7 +112,7 @@ def render_frame_fleet_trend_html(
     )
     device_value_markup = "".join(
         (
-            '<span class="frame-device-value">'
+            '<span class="frame-device-value" translate="no">'
             f'<span class="legend-swatch" style="background:{html.escape(color)}"></span>'
             f"{html.escape(label)} {html.escape(value)}"
             "</span>"

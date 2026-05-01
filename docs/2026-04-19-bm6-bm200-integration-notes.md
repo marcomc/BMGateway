@@ -227,7 +227,7 @@ the monitor protocol or from an app-side interpretation.
 
 ### 10. BM6 exposes a raw version command but standard GATT identity is fake
 
-During the 2026-04-25 protocol pass, `Spare NLP20` advertised as `BM6` and
+During the 2026-04-25 protocol pass, `Battery Beta` advertised as `BM6` and
 returned the following raw response after writing encrypted plaintext command
 `d1550100000000000000000000000000` with the BM6 key:
 
@@ -262,7 +262,7 @@ BM6 request/response devices. It does not prove BM6 lacks onboard history,
 because the official app and exported logs show history and cranking data exist
 somewhere in the product workflow.
 
-Additional `e7xx` variants were also tested on `Spare NLP20`:
+Additional `e7xx` variants were also tested on `Battery Beta`:
 
 - `e700`
 - `e701`
@@ -297,7 +297,7 @@ The byte at index 7 is a cumulative page-count selector:
 | `02` | latest 2 pages |
 | `03` | latest 3 pages |
 
-This was verified on `spare_nlp5` and `spare_nlp20` by checking that selector
+This was verified on `battery_alpha` and `battery_beta` by checking that selector
 `02` begins with the same 256 records as selector `01`, and selector `03`
 begins with the same 512 records as selector `02`.
 
@@ -321,13 +321,13 @@ Three cumulative pages cover about 25 hours 36 minutes.
 `BMGateway` now imports BM200/BM6 archive history with:
 
 ```sh
-bm-gateway history sync-device --device-id spare_nlp5 --page-count 3
+bm-gateway history sync-device --device-id battery_alpha --page-count 3
 ```
 
 The import stores voltage, SoC, temperature, raw record, page selector, record
 index, and estimated timestamp quality in `device_archive_readings`.
 
-The lower-SoC validation on `spare_nlp20` and `spare_nlp5` proved that `ss`
+The lower-SoC validation on `battery_beta` and `battery_alpha` proved that `ss`
 tracks live SoC below 100%. The canonical evidence and test artifacts are in
 [BM Protocol Research Handoff](2026-04-25-bm-protocol-research-handoff.md).
 

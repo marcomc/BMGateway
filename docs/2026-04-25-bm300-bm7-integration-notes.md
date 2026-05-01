@@ -196,7 +196,7 @@ fffefe00000000000000000000000000
 ```
 
 That is consistent with the BM6-family `d15505` result. A later BM7 probe on
-`doc_fb12899` showed that the byte-6 selector
+`bm300_alpha` showed that the byte-6 selector
 `d1550500000001000000000000000000` returns 4-byte history records using the
 same decoded layout as the verified BM200/BM6 archive records:
 
@@ -211,7 +211,7 @@ Examples from the head of the BM7 stream:
 | `53b620f0` | `13.39 V` | `98%` | `15 C` | `0` |
 | `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
 
-The same live probe window reported `doc_fb12899` at about `13.38 V`, `98%`,
+The same live probe window reported `bm300_alpha` at about `13.38 V`, `98%`,
 and `15 C`, which validates the field layout at the newest end of the archive
 stream.
 
@@ -227,13 +227,13 @@ BM7 archive import therefore uses:
 Selectors beyond `1` are implemented as bounded page-count requests but still
 need controlled validation for exact page/range semantics. The configuration
 cap of 59 selectors comes from the advertised 72-day retention at 2-minute
-cadence and the observed 883-record selector-`01` import on `doc_fb12899`;
+cadence and the observed 883-record selector-`01` import on `bm300_alpha`;
 treat it as an upper safety bound, not proof that all selectors have been
 validated.
 
 ### Live Multipage Validation: 2026-04-30
 
-The new controlled byte-7 importer was run on `doc_fb12899` against a copied
+The new controlled byte-7 importer was run on `bm300_alpha` against a copied
 SQLite database on `admin@<gateway-host>.local`, not the runtime DB.
 
 Validated result:
@@ -259,7 +259,7 @@ Imported result on the copied DB:
   cumulative pattern
 
 This is enough to treat byte `7` as the practical BM300 cumulative depth axis
-for selectors `01..03` on `doc_fb12899`.
+for selectors `01..03` on `bm300_alpha`.
 
 ## What Still Needs Investigation
 

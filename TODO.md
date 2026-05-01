@@ -8,7 +8,7 @@
   timestamp quality, and runs through periodic/reconnect backfill plus a
   per-device History page action. Manual BM200/BM6 sync now requests 85
   cumulative pages, matching the 30-day retention estimate, but the latest
-  `spare_nlp5` byte-7 sweep saturated around 1511-1522 records, or about
+  `battery_alpha` byte-7 sweep saturated around 1511-1522 records, or about
   50 hours. The controlled `d15505` matrix and full sweeps found byte index
   `4` as the only strong BM200/BM6 segment or range selector candidate:
   `b4=09..28`, `2f..40`, and `47..54` returned distinct non-empty groups,
@@ -47,7 +47,7 @@
   Live voltage, SoC, temperature, RSSI, device state, and bounded archive
   import now use a dedicated BM300 Pro driver. Automatic BM7 archive import is
   now uses the validated byte-7 depth path in both the standard sync command
-  and automatic backfill. Live validation on `doc_fb12899` proved cumulative
+  and automatic backfill. Live validation on `bm300_alpha` proved cumulative
   overlap across `b7=01`, `02`, and `03` with exact 256-record then 512-record
   overlap, and the standard BM300 import now covers 769 records, about
   25 hours 38 minutes, on that device. Remaining work is extending beyond the
