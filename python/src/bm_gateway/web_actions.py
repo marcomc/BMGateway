@@ -973,6 +973,8 @@ def sync_device_history_now(
                 progress=progress,
             )
         elif driver_type == "bm300pro":
+            if not config.archive_sync.bm300_enabled:
+                raise ValueError("BM300 archive sync is disabled in settings.")
             payload = sync_bm300_device_archive(
                 config=config,
                 device=device,

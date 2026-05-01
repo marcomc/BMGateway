@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway import __version__
 from bm_gateway.config import load_config
@@ -1632,6 +1633,53 @@ def test_sync_device_history_now_requests_full_bm200_retention(
     assert payload["fetched"] == 512
     assert payload["inserted"] == 64
     assert captured == {"device_id": "bm200_house", "page_count": 85}
+
+
+def test_sync_device_history_now_rejects_bm300_when_archive_sync_is_disabled(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm300_doc"',
+                'type = "bm300pro"',
+                'name = "BM300 Doc"',
+                'mac = "AA:BB:CC:DD:EE:02"',
+                "enabled = true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example")
+        .read_text(encoding="utf-8")
+        .replace("bm300_enabled = true", "bm300_enabled = false"),
+        encoding="utf-8",
+    )
+    called = False
+
+    def fake_sync_bm300_device_archive(**_kwargs: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.sync_bm300_device_archive",
+        fake_sync_bm300_device_archive,
+    )
+
+    with pytest.raises(ValueError, match="BM300 archive sync is disabled in settings."):
+        sync_device_history_now(
+            config_path=config_path,
+            device_id="bm300_doc",
+            state_dir=tmp_path / "state",
+        )
+
+    assert called is False
 
 
 def test_settings_display_post_persists_appearance_and_chart_defaults(
