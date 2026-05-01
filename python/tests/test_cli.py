@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 from bm_gateway import __version__, cli
+from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.models import GatewaySnapshot
 
 
@@ -446,3 +447,80 @@ def test_run_reloads_config_and_device_registry_between_iterations(
 
     assert result == 0
     assert observed_devices == [[], ["ancell_bm200"]]
+
+
+def test_run_returns_error_when_bluetooth_recovery_is_required(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    devices_path = tmp_path / "devices.toml"
+    devices_path.write_text("", encoding="utf-8")
+    config_path = tmp_path / "gateway.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'name = "BMGateway"',
+                'timezone = "Europe/Rome"',
+                "poll_interval_seconds = 1",
+                'device_registry = "devices.toml"',
+                'data_dir = "data"',
+                'reader_mode = "live"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+                "scan_timeout_seconds = 8",
+                "connect_timeout_seconds = 10",
+                "",
+                "[mqtt]",
+                "enabled = false",
+                'host = "mqtt.local"',
+                "port = 1883",
+                'username = "homeassistant"',
+                'password = "CHANGE_ME"',
+                'base_topic = "bm_gateway"',
+                'discovery_prefix = "homeassistant"',
+                "retain_discovery = true",
+                "retain_state = false",
+                "",
+                "[home_assistant]",
+                "enabled = false",
+                'status_topic = "homeassistant/status"',
+                'gateway_device_id = "bm_gateway"',
+                "",
+                "[web]",
+                "enabled = true",
+                'host = "127.0.0.1"',
+                "port = 8080",
+                "",
+                "[retention]",
+                "raw_retention_days = 180",
+                "daily_retention_days = 0",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    def fake_run_cycle(**_kwargs: object) -> GatewaySnapshot:
+        raise BluetoothRecoveryRequiredError(
+            error=RuntimeError("fatal dbus transport"),
+            recovery_attempted=True,
+        )
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", fake_run_cycle)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert "Bluetooth transport entered a fatal state" in captured.err

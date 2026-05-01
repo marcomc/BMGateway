@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.config import (
     AppConfig,
     BluetoothConfig,
@@ -151,6 +152,68 @@ def test_build_snapshot_classifies_device_not_found_as_offline() -> None:
     assert snapshot.devices[0].state == "offline"
     assert snapshot.devices[0].error_code == "device_not_found"
     assert snapshot.devices[0].error_detail == "No BLE advertisement seen during the scan window."
+
+
+def test_build_snapshot_requests_bluetooth_recovery_for_fatal_dbus_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+    calls: list[list[str]] = []
+
+    class Completed:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stderr = ""
+
+    def fake_run(command: list[str], **_kwargs: object) -> Completed:
+        calls.append(command)
+        return Completed()
+
+    def failing_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        _ = (device, adapter, timeout_seconds, scan_timeout_seconds)
+        raise RuntimeError(
+            "[org.freedesktop.DBus.Error.AccessDenied] Client tried to send a message "
+            "other than Hello without being registered"
+        )
+
+    monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
+    monkeypatch.setattr(
+        "bm_gateway.bluetooth_recovery.shutil.which",
+        lambda _name: f"/usr/bin/{_name}",
+    )
+    monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("bm_gateway.bluetooth_recovery.subprocess.run", fake_run)
+
+    with pytest.raises(BluetoothRecoveryRequiredError):
+        build_snapshot(config, devices, bm200_reader=failing_reader)
+
+    assert calls == [
+        ["bluetoothctl", "power", "on"],
+        ["sudo", "-n", "systemctl", "restart", "bluetooth.service"],
+    ]
 
 
 def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None:

@@ -16,6 +16,7 @@ from .archive_sync import (
     sync_bm200_device_archive,
     sync_bm300_device_archive,
 )
+from .bluetooth_recovery import BluetoothRecoveryRequiredError
 from .bm300_multipage import BM300MultipageValidationError, run_bm300_multipage_import
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
@@ -604,13 +605,22 @@ def _handle_run(
         runtime = _load_runtime_or_print_errors(path, verbose=verbose)
         if runtime is not None:
             config, devices = runtime
-        last_snapshot = _run_cycle(
-            config=config,
-            devices=devices,
-            publisher=publisher,
-            publish_discovery=publish_discovery,
-            state_dir=state_dir,
-        )
+        try:
+            last_snapshot = _run_cycle(
+                config=config,
+                devices=devices,
+                publisher=publisher,
+                publish_discovery=publish_discovery,
+                state_dir=state_dir,
+            )
+        except BluetoothRecoveryRequiredError as exc:
+            message = (
+                "Bluetooth transport entered a fatal state; requested bluetooth.service restart"
+            )
+            if exc.recovery_detail:
+                message += f": {exc.recovery_detail}"
+            print(message, file=sys.stderr)
+            return 1
         if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
             from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive
 

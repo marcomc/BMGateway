@@ -10,6 +10,7 @@ from pathlib import Path
 from time import sleep
 from typing import Callable
 
+from .bluetooth_recovery import is_fatal_bluetooth_error, require_bluetooth_recovery
 from .config import AppConfig, GatewayConfig
 from .device_registry import Device, device_driver_type
 from .drivers.bm200 import (
@@ -281,6 +282,8 @@ def build_snapshot(
                     float(config.bluetooth.scan_timeout_seconds),
                 )
         except Exception as error:
+            if is_fatal_bluetooth_error(error):
+                require_bluetooth_recovery(error)
             readings.append(
                 _build_error_reading(
                     device,

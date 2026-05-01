@@ -11,9 +11,11 @@ from bm_gateway import cli
 from bm_gateway.archive_sync import (
     BM300_ARCHIVE_PROFILE,
     plan_archive_backfill,
+    sync_archive_backfill_candidates,
     sync_bm200_device_archive,
     sync_bm300_device_archive,
 )
+from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import Device, load_device_registry
 from bm_gateway.drivers.bm200 import BM200HistoryReading
@@ -1114,3 +1116,36 @@ def test_history_prune_uses_configured_retention(
     payload = json.loads(captured.out)
     assert payload["before"]["device_readings"] == 1
     assert payload["after"]["device_readings"] == 1
+
+
+def test_sync_archive_backfill_candidates_raises_for_fatal_bluetooth_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+
+    def failing_sync(**_kwargs: object) -> dict[str, object]:
+        raise RuntimeError(
+            "[org.freedesktop.DBus.Error.AccessDenied] Client tried to send a message "
+            "other than Hello without being registered"
+        )
+
+    monkeypatch.setattr("bm_gateway.archive_sync.sync_bm200_device_archive", failing_sync)
+    monkeypatch.setattr(
+        "bm_gateway.bluetooth_recovery.restart_bluetooth_service",
+        lambda: type(
+            "Completed",
+            (),
+            {"returncode": 0, "stderr": ""},
+        )(),
+    )
+
+    with pytest.raises(BluetoothRecoveryRequiredError):
+        sync_archive_backfill_candidates(
+            config=config,
+            devices=devices,
+            database_path=tmp_path / "gateway.db",
+            device_pages={"bm200_house": 1},
+        )

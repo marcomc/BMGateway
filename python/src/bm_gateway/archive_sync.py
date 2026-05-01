@@ -9,6 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Mapping, cast
 
+from .bluetooth_recovery import is_fatal_bluetooth_error, require_bluetooth_recovery
 from .bm300_multipage import (
     BM300_LEGACY_PROFILE,
     BM300_STANDARD_PROFILE,
@@ -285,6 +286,8 @@ def sync_archive_backfill_candidates(
             else:
                 continue
         except Exception as exc:
+            if is_fatal_bluetooth_error(exc):
+                require_bluetooth_recovery(exc)
             results.append(
                 {
                     "device_id": device_id,
