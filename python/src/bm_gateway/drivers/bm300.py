@@ -524,8 +524,6 @@ async def _collect_bm7_history_payload(
     while True:
         remaining = deadline - loop.time()
         if remaining <= 0:
-            if payload:
-                return payload
             raise BM300TimeoutError("bm7 history")
         try:
             encrypted = await asyncio.wait_for(
@@ -533,9 +531,7 @@ async def _collect_bm7_history_payload(
                 timeout=min(idle_timeout_seconds, remaining),
             )
         except TimeoutError:
-            if payload:
-                return payload
-            continue
+            raise BM300TimeoutError("bm7 history") from None
         for plaintext in decode_bm300_frame_payloads(encrypted):
             if plaintext.startswith(bytes.fromhex("d15505")):
                 seen_header = True

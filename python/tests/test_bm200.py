@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable
 from datetime import datetime
 from typing import Callable
 
@@ -11,6 +12,8 @@ from bm_gateway.drivers.bm200 import (
     BleakBM200Transport,
     BleakDeviceNotFoundError,
     BM200Measurement,
+    BM200TimeoutError,
+    _collect_bm6_history_payload,
     decrypt_bm6_payload,
     decrypt_payload,
     encode_bm6_history_request,
@@ -566,8 +569,10 @@ def test_bleak_bm6_history_transport_downloads_cumulative_pages(
                     second_payload = encrypt_bm6_payload(
                         bytes.fromhex("52b4e160000000000000000000000000")
                     )
+                    trailer = encrypt_bm6_payload(bytes.fromhex("fffefe00000000000000000000000000"))
                     assert self._callback is not None
                     self._callback(None, bytearray(second_payload))
+                    self._callback(None, bytearray(trailer))
 
                 asyncio.create_task(emit_later())
 
@@ -602,3 +607,38 @@ def test_bleak_bm6_history_transport_downloads_cumulative_pages(
     ]
     assert [reading.raw_record for reading in readings] == ["52b4c170", "52b4d160", "52b4e160"]
     assert [reading.soc for reading in readings] == [76, 77, 78]
+
+
+def test_collect_bm6_history_payload_rejects_partial_payload_after_idle_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_wait_for = asyncio.wait_for
+    wait_calls = 0
+
+    async def fake_wait_for(awaitable: Awaitable[object], timeout: float) -> object:
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls == 1:
+            return await original_wait_for(awaitable, timeout)
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        raise TimeoutError
+
+    async def run() -> None:
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        await queue.put(
+            encrypt_payload(
+                bytes.fromhex("fffffe00000000000000000000000000")
+                + bytes.fromhex("00112233445566778899aabbccddeeff")
+            )
+        )
+        with pytest.raises(BM200TimeoutError, match="bm6 history"):
+            await _collect_bm6_history_payload(
+                queue,
+                deadline=asyncio.get_running_loop().time() + 1.0,
+            )
+
+    monkeypatch.setattr("bm_gateway.drivers.bm200.asyncio.wait_for", fake_wait_for)
+
+    asyncio.run(run())

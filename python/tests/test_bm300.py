@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 
 import pytest
@@ -159,6 +159,41 @@ def test_collect_bm7_history_payload_stops_at_embedded_trailer() -> None:
     payload = asyncio.run(run())
 
     assert payload == bytes.fromhex("53a620d053b620f0")
+
+
+def test_collect_bm7_history_payload_rejects_partial_payload_after_idle_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_wait_for = asyncio.wait_for
+    wait_calls = 0
+
+    async def fake_wait_for(awaitable: Awaitable[object], timeout: float) -> object:
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls == 1:
+            return await original_wait_for(awaitable, timeout)
+        close = getattr(awaitable, "close", None)
+        if callable(close):
+            close()
+        raise TimeoutError
+
+    async def run() -> None:
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        await queue.put(
+            encrypt_bm300_payload(
+                bytes.fromhex("d1550503000000000000000000000000")
+                + bytes.fromhex("53a620d053b620f053a620e053b620f0")
+            )
+        )
+        with pytest.raises(BM300TimeoutError, match="bm7 history"):
+            await _collect_bm7_history_payload(
+                queue,
+                deadline=asyncio.get_running_loop().time() + 1.0,
+            )
+
+    monkeypatch.setattr("bm_gateway.drivers.bm300.asyncio.wait_for", fake_wait_for)
+
+    asyncio.run(run())
 
 
 def test_default_bm7_history_reference_ts_uses_even_minute_with_timezone() -> None:
@@ -533,8 +568,10 @@ def test_bleak_bm7_history_transport_downloads_cumulative_pages(
             if len(writes) == 2:
                 ack = encrypt_bm300_payload(bytes.fromhex("d1550503670000000000000000000000"))
                 payload = encrypt_bm300_payload(bytes.fromhex("53b620f053a620e00000000000000000"))
+                trailer = encrypt_bm300_payload(bytes.fromhex("fffefe00000000000000000000000000"))
                 self._callback(None, bytearray(ack))
                 self._callback(None, bytearray(payload))
+                self._callback(None, bytearray(trailer))
 
         async def stop_notify(self, _char: str) -> None:
             return None
