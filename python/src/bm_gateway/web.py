@@ -497,9 +497,12 @@ def serve_management(
     class Handler(BaseHTTPRequestHandler):
         def _client_accepts_gzip(self) -> bool:
             accept_encoding = self.headers.get("Accept-Encoding", "")
+            gzip_quality: float | None = None
+            wildcard_quality: float | None = None
             for item in accept_encoding.split(","):
                 token, *params = (part.strip() for part in item.split(";"))
-                if token.lower() not in {"gzip", "*"}:
+                lowered_token = token.lower()
+                if lowered_token not in {"gzip", "*"}:
                     continue
                 quality = 1.0
                 for param in params:
@@ -511,9 +514,13 @@ def serve_management(
                     except ValueError:
                         quality = 0.0
                     break
-                if quality > 0:
-                    return True
-            return False
+                if lowered_token == "gzip":
+                    gzip_quality = quality
+                else:
+                    wildcard_quality = quality
+            if gzip_quality is not None:
+                return gzip_quality > 0
+            return (wildcard_quality or 0.0) > 0
 
         def _send_payload(
             self,

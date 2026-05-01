@@ -642,3 +642,19 @@ def test_collect_bm6_history_payload_rejects_partial_payload_after_idle_timeout(
     monkeypatch.setattr("bm_gateway.drivers.bm200.asyncio.wait_for", fake_wait_for)
 
     asyncio.run(run())
+
+
+def test_collect_bm6_history_payload_stops_at_embedded_trailer() -> None:
+    async def run() -> bytes:
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        await queue.put(encrypt_bm6_payload(bytes.fromhex("d1550503000000000000000000000000")))
+        await queue.put(encrypt_bm6_payload(bytes.fromhex("52b4c17052b4d160fffefe0000000000")))
+        await queue.put(encrypt_bm6_payload(bytes.fromhex("d15507000d0062053a00000000000000")))
+        return await _collect_bm6_history_payload(
+            queue,
+            deadline=asyncio.get_running_loop().time() + 1.0,
+        )
+
+    payload = asyncio.run(run())
+
+    assert payload == bytes.fromhex("52b4c17052b4d160")

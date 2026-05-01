@@ -630,10 +630,19 @@ async def _collect_bm6_history_payload(
             if plaintext.startswith(bytes.fromhex("fffffe")):
                 seen_header = True
                 continue
-            if plaintext.startswith(bytes.fromhex("fffefe")):
-                return payload
             if seen_header:
+                trailer_offset = _bm6_history_trailer_offset(plaintext)
+                if trailer_offset is not None:
+                    payload += plaintext[:trailer_offset]
+                    return payload
                 payload += plaintext
+
+
+def _bm6_history_trailer_offset(plaintext: bytes) -> int | None:
+    trailer_offset = plaintext.find(bytes.fromhex("fffefe"))
+    if trailer_offset < 0:
+        return None
+    return trailer_offset
 
 
 async def _drain_bm6_wake_packets(
