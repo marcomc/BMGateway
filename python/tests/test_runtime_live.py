@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Iterator
 
 import pytest
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
@@ -355,6 +357,72 @@ def test_build_snapshot_uses_live_bm300_reader_when_enabled() -> None:
     assert snapshot.devices[0].state == "normal"
     assert snapshot.devices[0].temperature == 24.0
     assert snapshot.devices[0].rssi == -61
+
+
+def test_build_snapshot_serializes_live_reads_with_cross_process_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = AppConfig(
+        source_path=tmp_path / "gateway.toml",
+        device_registry_path=tmp_path / "devices.toml",
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm300_van",
+            type="bm300pro",
+            name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+    state_dir = tmp_path / "state"
+    calls: list[tuple[Path | None, str]] = []
+
+    @contextmanager
+    def fake_lock(
+        _config: AppConfig,
+        *,
+        operation: str,
+        state_dir: Path | None = None,
+        timeout_seconds: float = 600.0,
+        retry_interval_seconds: float = 0.25,
+    ) -> Iterator[dict[str, object]]:
+        _ = (timeout_seconds, retry_interval_seconds)
+        calls.append((state_dir, operation))
+        yield {}
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM300Measurement:
+        assert device.id == "bm300_van"
+        assert adapter == "hci0"
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
+        return BM300Measurement(
+            voltage=25.42,
+            soc=83,
+            status_code=0,
+            state="normal",
+            temperature=24.0,
+            rssi=-61,
+        )
+
+    monkeypatch.setattr("bm_gateway.runtime.exclusive_bluetooth_operation", fake_lock)
+
+    snapshot = build_snapshot(config, devices, bm300_reader=fake_reader, state_dir=state_dir)
+
+    assert snapshot.devices_online == 1
+    assert calls == [(state_dir, "live_poll:bm300_van")]
 
 
 def test_build_snapshot_uses_bm200_driver_for_commercial_aliases() -> None:

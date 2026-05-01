@@ -10,6 +10,7 @@ from pathlib import Path
 from time import sleep
 from typing import Callable
 
+from .bluetooth_lock import BluetoothOperationBusyError, exclusive_bluetooth_operation
 from .bluetooth_recovery import is_fatal_bluetooth_error, require_bluetooth_recovery
 from .config import AppConfig, GatewayConfig
 from .device_registry import Device, device_driver_type
@@ -115,6 +116,8 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
 
 def _classify_live_error(error: Exception) -> tuple[str, str]:
     detail = str(error) or error.__class__.__name__
+    if isinstance(error, BluetoothOperationBusyError):
+        return "bluetooth_busy", detail
     if isinstance(error, BleakDeviceNotFoundError | BleakBM300DeviceNotFoundError):
         return "device_not_found", "No BLE advertisement seen during the scan window."
     if isinstance(error, BM200TimeoutError | BM300TimeoutError):
@@ -225,6 +228,7 @@ def build_snapshot(
     *,
     bm200_reader: BM200Reader | None = None,
     bm300_reader: BM300Reader | None = None,
+    state_dir: Path | None = None,
 ) -> GatewaySnapshot:
     generated_at = _generated_at()
     adapter = _active_adapter(config)
@@ -261,26 +265,31 @@ def build_snapshot(
             continue
 
         try:
-            try:
-                measurement = live_reader(
-                    device,
-                    adapter,
-                    float(config.bluetooth.connect_timeout_seconds),
-                    float(config.bluetooth.scan_timeout_seconds),
-                )
-            except (
-                BleakDeviceNotFoundError,
-                BleakBM300DeviceNotFoundError,
-                BM200TimeoutError,
-                BM300TimeoutError,
+            with exclusive_bluetooth_operation(
+                config,
+                state_dir=state_dir,
+                operation=f"live_poll:{device.id}",
             ):
-                recover_adapter(adapter)
-                measurement = live_reader(
-                    device,
-                    adapter,
-                    float(config.bluetooth.connect_timeout_seconds),
-                    float(config.bluetooth.scan_timeout_seconds),
-                )
+                try:
+                    measurement = live_reader(
+                        device,
+                        adapter,
+                        float(config.bluetooth.connect_timeout_seconds),
+                        float(config.bluetooth.scan_timeout_seconds),
+                    )
+                except (
+                    BleakDeviceNotFoundError,
+                    BleakBM300DeviceNotFoundError,
+                    BM200TimeoutError,
+                    BM300TimeoutError,
+                ):
+                    recover_adapter(adapter)
+                    measurement = live_reader(
+                        device,
+                        adapter,
+                        float(config.bluetooth.connect_timeout_seconds),
+                        float(config.bluetooth.scan_timeout_seconds),
+                    )
         except Exception as error:
             if is_fatal_bluetooth_error(error):
                 require_bluetooth_recovery(error)

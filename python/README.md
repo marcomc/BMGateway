@@ -72,6 +72,7 @@ Runtime persistence uses:
 
 - `runtime/latest_snapshot.json`
 - `runtime/gateway.db`
+- `runtime/audit/YYYY-MM-DD.jsonl`
 
 History surfaces include:
 
@@ -82,6 +83,11 @@ History surfaces include:
 
 Archive-history merge/backfill plumbing exists, but BM6-family onboard archive
 retrieval is still incomplete on real hardware.
+
+The audit log is newline-delimited JSON intended for machine correlation during
+operations debugging. It records automatic polling cycles, per-device poll
+results, archive-sync activity, and key manual web-managed actions, and prunes
+files older than 90 days automatically.
 
 ## Device Registry Coverage
 

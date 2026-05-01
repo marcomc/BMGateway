@@ -217,6 +217,22 @@ This creates:
 - a config template at `~/.config/bm-gateway/config.toml` if missing
 - a devices registry at `~/.config/bm-gateway/devices.toml` if missing
 
+## Structured Audit Logs
+
+The runtime keeps machine-readable audit logs under the state directory:
+
+```text
+/var/lib/bm-gateway/runtime/audit/YYYY-MM-DD.jsonl
+```
+
+These logs are newline-delimited JSON and are intended for diagnosing gateway
+behavior over time, including automatic polling, per-device BLE poll outcomes,
+archive sync activity, manual history sync requests, and key web-managed
+configuration or device changes.
+
+Retention is enforced automatically by the application: files older than
+90 days are pruned as new audit events are written.
+
 ## Optional: Install Glances for Home Assistant
 
 Home Assistant's Glances integration requires a running `glances` instance in

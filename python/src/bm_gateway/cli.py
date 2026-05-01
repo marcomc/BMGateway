@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, cast
 
@@ -16,6 +17,7 @@ from .archive_sync import (
     sync_bm200_device_archive,
     sync_bm300_device_archive,
 )
+from .audit_log import append_audit_event
 from .bluetooth_recovery import BluetoothRecoveryRequiredError
 from .bm300_multipage import BM300MultipageValidationError, run_bm300_multipage_import
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
@@ -532,7 +534,8 @@ def _run_cycle(
     publish_discovery: bool,
     state_dir: Path | None,
 ) -> GatewaySnapshot:
-    snapshot = build_snapshot(config, devices)
+    snapshot = build_snapshot(config, devices, state_dir=state_dir)
+    audit_now = datetime.fromisoformat(snapshot.generated_at)
     database_path = database_file_path(config, state_dir=state_dir)
     archive_backfill_candidates = (
         plan_archive_backfill(
@@ -577,6 +580,43 @@ def _run_cycle(
         raw_retention_days=config.retention.raw_retention_days,
         daily_retention_days=config.retention.daily_retention_days,
     )
+    for reading in snapshot.devices:
+        append_audit_event(
+            config=config,
+            state_dir=state_dir,
+            source="runtime",
+            trigger="automatic",
+            action="device_poll_completed",
+            status="completed" if reading.error_code is None else "failed",
+            now=audit_now,
+            details={
+                "device_id": reading.id,
+                "device_type": reading.type,
+                "connected": reading.connected,
+                "state": reading.state,
+                "error_code": reading.error_code,
+                "error_detail": reading.error_detail,
+                "voltage": reading.voltage,
+                "soc": reading.soc,
+                "rssi": reading.rssi,
+            },
+        )
+    append_audit_event(
+        config=config,
+        state_dir=state_dir,
+        source="runtime",
+        trigger="automatic",
+        action="run_cycle_completed",
+        status="completed",
+        now=audit_now,
+        details={
+            "generated_at": snapshot.generated_at,
+            "devices_total": snapshot.devices_total,
+            "devices_online": snapshot.devices_online,
+            "mqtt_connected": snapshot.mqtt_connected,
+            "archive_backfill_candidates": archive_backfill_candidates,
+        },
+    )
     return snapshot
 
 
@@ -614,6 +654,20 @@ def _handle_run(
                 state_dir=state_dir,
             )
         except BluetoothRecoveryRequiredError as exc:
+            append_audit_event(
+                config=config,
+                state_dir=state_dir,
+                source="runtime",
+                trigger="automatic",
+                action="bluetooth_recovery_requested",
+                status="failed",
+                details={
+                    "error_type": exc.error.__class__.__name__,
+                    "error": str(exc.error) or exc.error.__class__.__name__,
+                    "recovery_attempted": exc.recovery_attempted,
+                    "recovery_detail": exc.recovery_detail,
+                },
+            )
             message = (
                 "Bluetooth transport entered a fatal state; requested bluetooth.service restart"
             )

@@ -1543,8 +1543,10 @@ def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
         devices: object,
         database_path: Path,
         device_pages: dict[str, int],
+        source: str,
+        trigger: str,
     ) -> list[dict[str, object]]:
-        _ = (config, devices, database_path)
+        _ = (config, devices, database_path, source, trigger)
         captured_pages.update(device_pages)
         return [
             {"device_id": device_id, "synced": True, "fetched": pages, "inserted": pages}
@@ -1561,6 +1563,14 @@ def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
     assert payload["requested"] == 2
     assert payload["synced"] == 2
     assert captured_pages == {"bm200_house": 2, "bm300_doc": 5}
+    audit_files = list((tmp_path / "state" / "runtime" / "audit").glob("*.jsonl"))
+    assert len(audit_files) == 1
+    payloads = [
+        json.loads(line) for line in audit_files[0].read_text(encoding="utf-8").splitlines()
+    ]
+    assert payloads[-1]["action"] == "history_sync_batch_completed"
+    assert payloads[-1]["trigger"] == "manual"
+    assert payloads[-1]["details"]["requested"] == 2
 
 
 def test_sync_device_history_now_requests_full_bm200_retention(

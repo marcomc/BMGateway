@@ -9,6 +9,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Callable, Mapping, cast
 
+from .audit_log import append_audit_event
+from .bluetooth_lock import exclusive_bluetooth_operation
 from .bluetooth_recovery import is_fatal_bluetooth_error, require_bluetooth_recovery
 from .bm300_multipage import (
     BM300_LEGACY_PROFILE,
@@ -46,17 +48,23 @@ def sync_bm200_device_archive(
 
     adapter = _active_adapter(config)
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
+    state_dir = database_path.parent.parent
     if progress is not None:
         progress(0, max(1, page_count * 256), "Downloading history records")
-    history = asyncio.run(
-        read_bm200_history(
-            address=device.mac,
-            adapter=adapter,
-            timeout_seconds=history_timeout_seconds,
-            scan_timeout_seconds=float(config.bluetooth.scan_timeout_seconds),
-            page_count=page_count,
+    with exclusive_bluetooth_operation(
+        config,
+        state_dir=state_dir,
+        operation=f"archive_sync:{device.id}",
+    ):
+        history = asyncio.run(
+            read_bm200_history(
+                address=device.mac,
+                adapter=adapter,
+                timeout_seconds=history_timeout_seconds,
+                scan_timeout_seconds=float(config.bluetooth.scan_timeout_seconds),
+                page_count=page_count,
+            )
         )
-    )
     rows = [asdict(reading) for reading in history]
     if progress is not None:
         progress(0, len(rows), "Importing history records")
@@ -101,6 +109,7 @@ def sync_bm300_device_archive(
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
     requested_depth = min(max(1, page_count), 3)
     progress_state: dict[str, datetime | None] = {"reference_ts": None}
+    state_dir = database_path.parent.parent
 
     def selector_reader(selector: int) -> list[BM300HistoryReading]:
         if selector > requested_depth:
@@ -123,19 +132,24 @@ def sync_bm300_device_archive(
             )
         )
 
-    payload = run_bm300_multipage_import(
-        device=device,
-        output_database_path=database_path,
-        adapter=adapter,
-        selector_reader=selector_reader,
-        profile=BM300_ARCHIVE_PROFILE,
-        replace_profiles=(
-            BM300_ARCHIVE_PROFILE,
-            BM300_LEGACY_PROFILE,
-            "bm7_d15505_b7_v1_experimental",
-        ),
-        progress=progress,
-    )
+    with exclusive_bluetooth_operation(
+        config,
+        state_dir=state_dir,
+        operation=f"archive_sync:{device.id}",
+    ):
+        payload = run_bm300_multipage_import(
+            device=device,
+            output_database_path=database_path,
+            adapter=adapter,
+            selector_reader=selector_reader,
+            profile=BM300_ARCHIVE_PROFILE,
+            replace_profiles=(
+                BM300_ARCHIVE_PROFILE,
+                BM300_LEGACY_PROFILE,
+                "bm7_d15505_b7_v1_experimental",
+            ),
+            progress=progress,
+        )
     fetched_record_counts = cast(dict[str, int], payload["fetched_record_counts"])
     payload["fetched"] = max(fetched_record_counts.values())
     payload["page_count"] = requested_depth
@@ -260,13 +274,29 @@ def sync_archive_backfill_candidates(
     devices: list[Device],
     database_path: Path,
     device_pages: Mapping[str, int],
+    source: str = "runtime",
+    trigger: str = "automatic",
 ) -> list[dict[str, object]]:
     devices_by_id = {device.id: device for device in devices}
     results: list[dict[str, object]] = []
+    state_dir = database_path.parent.parent
     for device_id in sorted(device_pages):
         device = devices_by_id.get(device_id)
         if device is None or not device.enabled:
             continue
+        append_audit_event(
+            config=config,
+            state_dir=state_dir,
+            source=source,
+            trigger=trigger,
+            action="archive_sync_started",
+            status="started",
+            details={
+                "device_id": device_id,
+                "device_type": device.type,
+                "page_count": device_pages[device_id],
+            },
+        )
         try:
             driver_type = device_driver_type(device.type)
             if driver_type == "bm200":
@@ -287,16 +317,47 @@ def sync_archive_backfill_candidates(
                 continue
         except Exception as exc:
             if is_fatal_bluetooth_error(exc):
+                append_audit_event(
+                    config=config,
+                    state_dir=state_dir,
+                    source=source,
+                    trigger=trigger,
+                    action="archive_sync_completed",
+                    status="failed",
+                    details={
+                        "device_id": device_id,
+                        "error_type": exc.__class__.__name__,
+                        "error": str(exc) or exc.__class__.__name__,
+                        "fatal_bluetooth_error": True,
+                    },
+                )
                 require_bluetooth_recovery(exc)
-            results.append(
-                {
-                    "device_id": device_id,
-                    "synced": False,
-                    "error_type": exc.__class__.__name__,
-                    "error": str(exc) or exc.__class__.__name__,
-                }
+            failure = {
+                "device_id": device_id,
+                "synced": False,
+                "error_type": exc.__class__.__name__,
+                "error": str(exc) or exc.__class__.__name__,
+            }
+            append_audit_event(
+                config=config,
+                state_dir=state_dir,
+                source=source,
+                trigger=trigger,
+                action="archive_sync_completed",
+                status="failed",
+                details=failure,
             )
+            results.append(failure)
             continue
         payload["synced"] = True
+        append_audit_event(
+            config=config,
+            state_dir=state_dir,
+            source=source,
+            trigger=trigger,
+            action="archive_sync_completed",
+            status="completed",
+            details=payload,
+        )
         results.append(payload)
     return results

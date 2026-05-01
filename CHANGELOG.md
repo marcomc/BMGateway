@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- Added structured JSONL audit logs under the runtime state directory for
+  automatic polling, per-device poll outcomes, archive sync activity, manual
+  history sync requests, and key web-managed configuration or device changes,
+  with automatic 90-day retention pruning for Raspberry Pi diagnostics.
 - Added a bounded `bm-gateway protocol probe-history` diagnostic command for
   safe BM6/BM7 live, version, and `d15505` history-candidate BLE probes with
   JSONL output.
@@ -59,6 +63,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Serialized BLE access across runtime polling, web-triggered run-once polls,
+  and BM200/BM300 archive imports with a shared cross-process lock so
+  concurrent gateway operations no longer collide and leave BlueZ or `bleak`
+  in `NotReady`-style failure states.
+- Fixed fatal BLE/D-Bus runtime failures so the gateway no longer stays alive in
+  a broken state after `bleak` or `dbus_fast` transport errors. The runtime now
+  treats those failures as unrecoverable, requests Bluetooth service recovery,
+  and exits so `systemd` can restart a clean polling process.
 - Hardened Raspberry Pi bootstrap dependency installation so fresh installs,
   Raspberry Pi Imager first-run setup, direct service refreshes, and Ansible
   provisioning install the documented runtime, web, Bluetooth, and USB OTG

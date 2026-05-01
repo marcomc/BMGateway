@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Iterator, cast
 
 import pytest
 from bm_gateway import cli
@@ -911,6 +912,89 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
     assert archive[-1]["raw_record"] == "5634e1d9"
 
 
+def test_sync_bm300_device_archive_serializes_cross_process_bluetooth_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    device = Device(
+        id="bm300_doc",
+        type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+    )
+    database_path = tmp_path / "state" / "runtime" / "gateway.db"
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    calls: list[tuple[Path | None, str]] = []
+
+    @contextmanager
+    def fake_lock(
+        _config: object,
+        *,
+        operation: str,
+        state_dir: Path | None = None,
+        timeout_seconds: float = 600.0,
+        retry_interval_seconds: float = 0.25,
+    ) -> Iterator[dict[str, object]]:
+        _ = (timeout_seconds, retry_interval_seconds)
+        calls.append((state_dir, operation))
+        yield {}
+
+    async def fake_read_selector(
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        selector_byte: int,
+        selector_value: int,
+        reference_ts: object = None,
+        transport: object = None,
+    ) -> list[BM300HistoryReading]:
+        _ = (
+            address,
+            adapter,
+            timeout_seconds,
+            scan_timeout_seconds,
+            selector_byte,
+            reference_ts,
+            transport,
+        )
+        reference_ts = datetime(2026, 4, 26, 18, 54, tzinfo=timezone.utc)
+        counts = {1: 130, 2: 160, 3: 180}
+        return [
+            BM300HistoryReading(
+                ts=(reference_ts - timedelta(minutes=index * 2)).isoformat(timespec="seconds"),
+                voltage=(0x4B0 + index) / 100,
+                min_crank_voltage=None,
+                event_type=index % 10,
+                soc=index % 101,
+                temperature=float(10 + (index % 40)),
+                raw_record=(
+                    f"{0x4B0 + index:03x}{index % 101:02x}{10 + (index % 40):02x}{index % 10:x}"
+                ),
+                page_selector=selector_value,
+                record_index=index,
+                timestamp_quality="estimated",
+            )
+            for index in range(counts[selector_value])
+        ]
+
+    monkeypatch.setattr("bm_gateway.archive_sync.exclusive_bluetooth_operation", fake_lock)
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history_selector", fake_read_selector)
+
+    payload = sync_bm300_device_archive(
+        config=config,
+        device=device,
+        database_path=database_path,
+        page_count=3,
+    )
+
+    assert payload["inserted"] == 180
+    assert calls == [(tmp_path / "state", "archive_sync:bm300_doc")]
+
+
 def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
     config_path = _write_example_files(tmp_path)
     config = load_config(config_path)
@@ -1008,7 +1092,13 @@ def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
             _ = (config, devices, snapshot, publish_discovery)
             return False
 
-    def fake_build_snapshot(_config: object, _devices: object) -> GatewaySnapshot:
+    def fake_build_snapshot(
+        _config: object,
+        _devices: object,
+        *,
+        state_dir: Path | None = None,
+    ) -> GatewaySnapshot:
+        _ = state_dir
         return second_snapshot
 
     def fake_sync(
@@ -1078,6 +1168,91 @@ def test_history_stats_emits_storage_summary(
     payload = json.loads(captured.out)
     assert payload["counts"]["gateway_snapshots"] == 1
     assert payload["devices"][0]["device_id"] == "bm200_house"
+
+
+def test_run_cycle_writes_machine_audit_log(tmp_path: Path) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    state_dir = tmp_path / "state"
+    snapshot = GatewaySnapshot(
+        generated_at="2026-05-01T12:05:00+02:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=15,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=True,
+                voltage=12.73,
+                soc=58,
+                temperature=18.5,
+                rssi=-67,
+                state="charging",
+                error_code=None,
+                error_detail=None,
+                last_seen="2026-05-01T12:05:00+02:00",
+                adapter="hci0",
+                driver="bm200",
+            )
+        ],
+    )
+
+    class StubPublisher:
+        def publish_runtime(
+            self,
+            *,
+            config: object,
+            devices: object,
+            snapshot: object,
+            publish_discovery: bool,
+        ) -> bool:
+            _ = (config, devices, snapshot, publish_discovery)
+            return False
+
+    def fake_build_snapshot(
+        _config: object,
+        _devices: object,
+        *,
+        state_dir: Path | None = None,
+    ) -> GatewaySnapshot:
+        _ = state_dir
+        return snapshot
+
+    cli_module_any = cast(Any, cli)
+    original_build_snapshot = cli_module_any.build_snapshot
+    original_sync_candidates = cli_module_any.sync_archive_backfill_candidates
+    cli_module_any.build_snapshot = fake_build_snapshot
+    cli_module_any.sync_archive_backfill_candidates = lambda **_kwargs: []
+    try:
+        cli._run_cycle(
+            config=config,
+            devices=devices,
+            publisher=StubPublisher(),
+            publish_discovery=False,
+            state_dir=state_dir,
+        )
+    finally:
+        cli_module_any.build_snapshot = original_build_snapshot
+        cli_module_any.sync_archive_backfill_candidates = original_sync_candidates
+
+    audit_files = list((state_dir / "runtime" / "audit").glob("*.jsonl"))
+    assert len(audit_files) == 1
+    payloads = [
+        json.loads(line) for line in audit_files[0].read_text(encoding="utf-8").splitlines()
+    ]
+    assert payloads[-2]["action"] == "device_poll_completed"
+    assert payloads[-2]["details"]["device_id"] == "bm200_house"
+    assert payloads[-1]["action"] == "run_cycle_completed"
+    assert payloads[-1]["details"]["devices_online"] == 1
 
 
 def test_history_prune_uses_configured_retention(
