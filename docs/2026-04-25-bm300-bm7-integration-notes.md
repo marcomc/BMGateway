@@ -234,7 +234,7 @@ validated.
 ### Live Multipage Validation: 2026-04-30
 
 The new controlled byte-7 importer was run on `doc_fb12899` against a copied
-SQLite database on `admin@bmgateway.local`, not the runtime DB.
+SQLite database on `admin@<gateway-host>.local`, not the runtime DB.
 
 Validated result:
 

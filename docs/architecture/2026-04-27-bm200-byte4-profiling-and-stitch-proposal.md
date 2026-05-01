@@ -176,7 +176,7 @@ Copy this prompt into a future Codex chat to resume the work:
 
 ```text
 We are resuming BM200/BM6 history protocol work in
-/Users/mmassari/Development/BMGateway. Read AGENTS.md, TODO.md,
+/path/to/BMGateway. Read AGENTS.md, TODO.md,
 docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md,
 docs/2026-04-25-bm-protocol-research-handoff.md, and
 docs/protocol-probe-tools.md.
@@ -207,6 +207,6 @@ compare it against byte-4 captures, and only propose/import byte-4 records when
 timestamp placement is proven by long sequence overlap. Do not deduplicate by
 raw record equality alone because stable batteries repeat identical records.
 Keep zero-like records such as 00000001 as raw markers. If code changes are
-made, use TDD, run make check, and deploy to bmgateway.local for CLI/runtime
+made, use TDD, run make check, and deploy to <gateway-host>.local for CLI/runtime
 changes.
 ```

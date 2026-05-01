@@ -34,7 +34,7 @@ Earlier project evidence established:
 - selectors beyond `01` were implemented only as bounded candidates and were
   never validated strongly enough for normal import.
 
-The 2026-04-30 live probe on `admin@bmgateway.local` added a more important
+The 2026-04-30 live probe on `admin@<gateway-host>.local` added a more important
 finding:
 
 - `hist_d15505_b6_01` returned `3709` records;
@@ -225,7 +225,7 @@ surface.
 
 ### Phase 4: Live validation
 
-- Run the protocol command against `doc_fb12899` on `admin@bmgateway.local`.
+- Run the protocol command against `doc_fb12899` on `admin@<gateway-host>.local`.
 - Save JSONL or equivalent structured captures.
 - Verify whether `b7=01 -> 02` and `02 -> 03` meet the `128`-record gate.
 - Only after the gate passes, test controlled import into a disposable SQLite
@@ -268,7 +268,7 @@ Copy this prompt into a future Codex chat to implement the next slice:
 
 ```text
 We are resuming BM300 Pro / BM7 multipage history work in
-/Users/mmassari/Development/BMGateway.
+/path/to/BMGateway.
 
 Read:
 - AGENTS.md
@@ -305,7 +305,7 @@ Also:
 - run markdownlint on any edited Markdown files
 
 If live validation is needed, the real gateway is reachable at:
-- ssh admin@bmgateway.local
+- ssh admin@<gateway-host>.local
 
 Use non-destructive live probes first. Do not write to the gateway runtime DB.
 ```

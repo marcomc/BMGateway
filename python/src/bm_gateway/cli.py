@@ -200,7 +200,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=3,
         help=(
             "Cumulative history pages to request. BM200/BM6 uses d15505 byte-7; "
-            "BM300 Pro/BM7 uses d15505 byte-6."
+            "BM300 Pro/BM7 uses the validated d15505 byte-7 depth path."
         ),
     )
     history_compare.add_argument("--device-id", required=True, help="Device identifier.")

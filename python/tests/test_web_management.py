@@ -1087,7 +1087,7 @@ def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
                 'id = "ancell_bm200"',
                 'type = "bm200"',
                 'name = "Ancell BM200"',
-                'mac = "3C:AB:72:82:86:EA"',
+                'mac = "00:00:5E:00:53:01"',
                 "enabled = true",
                 'icon_key = "lead_acid_battery"',
                 "[devices.battery]",
@@ -3320,7 +3320,7 @@ def test_render_home_html_renders_device_icon() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "installed_in_vehicle": True,
                 "vehicle_type": "motorcycle",
@@ -3469,7 +3469,7 @@ def test_render_home_html_uses_shared_icon_badge_markup() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "installed_in_vehicle": True,
                 "vehicle_type": "motorcycle",
@@ -3507,7 +3507,7 @@ def test_render_home_html_prefers_registry_name_over_stale_snapshot_name() -> No
                 "id": "ancell_bm200",
                 "name": "NLP5",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
             }
         ],
@@ -3544,7 +3544,7 @@ def test_render_home_html_places_identity_and_badges_inside_home_orb() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "installed_in_vehicle": True,
                 "vehicle_type": "motorcycle",
@@ -3599,7 +3599,7 @@ def test_render_home_html_uses_compact_home_metadata_line_with_nominal_voltage()
                 "id": "spare_nlp5",
                 "name": "Spare NLP5",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "battery": {
                     "brand": "NOCO",
@@ -3952,7 +3952,7 @@ def test_render_devices_html_wraps_single_device_in_grid_layout_hook() -> None:
                 "id": "ancell_bm200",
                 "type": "bm200",
                 "name": "Ancell BM200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
             }
         ],
@@ -4212,7 +4212,7 @@ def test_render_home_html_marks_single_page_card_count() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "icon_key": "lithium_battery",
             }
@@ -4334,7 +4334,7 @@ def test_render_home_html_shows_charging_status_with_explicit_icon() -> None:
                 "id": "bm_charging",
                 "name": "Charging Battery",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "icon_key": "lithium_battery",
             }
@@ -4373,7 +4373,7 @@ def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
                 "id": "bm_offline",
                 "name": "Offline Battery",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "icon_key": "lithium_battery",
             }
@@ -4837,7 +4837,7 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
                 "id": "ancell_bm200",
                 "type": "bm200",
                 "name": "Ancell BM200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
             }
         ],
@@ -4846,7 +4846,7 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert 'href="/devices/new"' in html
     assert "Register new BM devices directly from the device registry." not in html
-    assert "Serial / MAC: 3C:AB:72:82:86:EA" in html
+    assert "Serial / MAC: 00:00:5E:00:53:01" in html
     assert "Touch a device card to edit it." in html
     assert "device-list-row tone-card green" in html
     assert "Edit device" not in html
@@ -4861,7 +4861,7 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
                 "id": "ancell_bm200",
                 "type": "bm200",
                 "name": "Ancell BM200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "battery": {
                     "family": "lead_acid",
@@ -4939,7 +4939,7 @@ def test_render_edit_device_html_prefills_device_fields() -> None:
             "id": "ancell_bm200",
             "type": "bm200",
             "name": "Ancell BM200",
-            "mac": "3C:AB:72:82:86:EA",
+            "mac": "00:00:5E:00:53:01",
             "enabled": True,
             "icon_key": "motorcycle_12v",
             "installed_in_vehicle": True,
@@ -4989,7 +4989,7 @@ def test_render_edit_device_html_preserves_original_id_after_validation_error() 
             "id": "duplicate_id",
             "type": "bm200",
             "name": "Ancell BM200",
-            "mac": "3C:AB:72:82:86:EA",
+            "mac": "00:00:5E:00:53:01",
             "enabled": True,
             "battery": {
                 "family": "lead_acid",

@@ -298,6 +298,19 @@ def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFi
     assert payload["inserted"] == 10
 
 
+def test_history_sync_device_help_mentions_bm300_byte7_path(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        cli.main(["history", "sync-device", "--help"])
+
+    captured = capsys.readouterr()
+
+    assert exc_info.value.code == 0
+    assert "d15505 byte-7; BM300 Pro/BM7 uses the validated d15505" in captured.out
+    assert "byte-7 depth path." in captured.out
+
+
 def test_history_sync_device_routes_bm300pro_to_bm7_archive_sync(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],

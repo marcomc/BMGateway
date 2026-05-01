@@ -22,7 +22,7 @@ DEVICES_PATH ?= $(CONFIG_DIR)/devices.toml
 PYTHON_SRC ?= python/src
 PYTHON_TESTS ?= python/tests
 PYTHON_CONFIG ?= python/config
-MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs python home-assistant rpi-setup web -type f -name '*.md' | sort)
+MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs python home-assistant rpi-setup web -type f -name '*.md' ! -path 'docs/qa/*' | sort)
 INSTALL_SPEC := .
 ifneq ($(strip $(INSTALL_EXTRAS)),)
 INSTALL_SPEC := .[$(INSTALL_EXTRAS)]

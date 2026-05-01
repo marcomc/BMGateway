@@ -55,7 +55,7 @@ The Pi-side test helper is:
 
 ```bash
 sudo ./rpi-setup/scripts/usb-otg-frame-test.sh setup \
-  --source-dir /home/admin/BMGateway-dev/output/spf71e-test-images
+  --source-dir /home/<user>/BMGateway-dev/output/spf71e-test-images
 ```
 
 The helper creates:

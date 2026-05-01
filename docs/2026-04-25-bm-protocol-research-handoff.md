@@ -559,20 +559,20 @@ Configured live gateway devices:
 
 | Device | Type | MAC | Note |
 | --- | --- | --- | --- |
-| `spare_nlp5` | `bm200` | `3C:AB:72:82:86:EA` | BM6-family, sometimes harder to find |
-| `spare_nlp20` | `bm200` | `3C:AB:72:EB:68:C9` | Reliable BM6-family responder |
-| `libertv_ld13czt` | `bm300pro` | `E0:4E:7A:AF:9B:E8` | BM7-family, intermittent |
-| `doc_fb12899` | `bm300pro` | `3C:AB:72:B2:C6:67` | BM7-family, responded to probes |
-| `punto_fa376ht` | `bm300pro` | `C8:17:F5:29:91:01` | BM7-family, weak RSSI |
+| `spare_nlp5` | `bm200` | `00:00:5E:00:53:01` | BM6-family, sometimes harder to find |
+| `spare_nlp20` | `bm200` | `00:00:5E:00:53:02` | Reliable BM6-family responder |
+| `libertv_ld13czt` | `bm300pro` | `00:00:5E:00:53:03` | BM7-family, intermittent |
+| `doc_fb12899` | `bm300pro` | `00:00:5E:00:53:04` | BM7-family, responded to probes |
+| `punto_fa376ht` | `bm300pro` | `00:00:5E:00:53:05` | BM7-family, weak RSSI |
 
 ## Safe Probe Workflow
 
 Stop the normal gateway service only during direct BLE probes:
 
 ```sh
-ssh admin@bmgateway.local 'sudo systemctl stop bm-gateway'
-ssh admin@bmgateway.local 'bm-gateway protocol probe-history --device-id spare_nlp20'
-ssh admin@bmgateway.local 'sudo systemctl start bm-gateway && systemctl is-active bm-gateway bm-gateway-web'
+ssh admin@<gateway-host>.local 'sudo systemctl stop bm-gateway'
+ssh admin@<gateway-host>.local 'bm-gateway protocol probe-history --device-id spare_nlp20'
+ssh admin@<gateway-host>.local 'sudo systemctl start bm-gateway && systemctl is-active bm-gateway bm-gateway-web'
 ```
 
 Both services must be active after every probe.

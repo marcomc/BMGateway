@@ -168,7 +168,7 @@ To add another language:
 
    ```bash
    uv run pytest python/tests/test_localization.py -q
-   markdownlint --config /Users/mmassari/.markdownlint.json web/README.md
+   markdownlint --config .markdownlint.json web/README.md
    ```
 
 7. Run `make check` before shipping.
