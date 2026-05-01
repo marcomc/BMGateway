@@ -78,6 +78,7 @@ def run_bm300_multipage_import(
     output_database_path: Path,
     adapter: str,
     selector_reader: BM300SelectorReader,
+    selectors: tuple[int, ...] = BM300_MULTIPAGE_SELECTORS,
     profile: str = BM300_MULTIPAGE_PROFILE,
     replace_profiles: tuple[str, ...] = (),
     progress: ArchiveImportProgress | None = None,
@@ -86,12 +87,18 @@ def run_bm300_multipage_import(
         raise ValueError(
             f"BM300 multipage import requires a BM300 Pro/BM7 device, got {device.type}"
         )
+    if not selectors:
+        raise ValueError("BM300 multipage import requires at least one selector.")
+    if selectors[0] != BM300_MULTIPAGE_SELECTORS[0]:
+        raise ValueError("BM300 multipage import must start from selector 1.")
+    if any(selector not in BM300_MULTIPAGE_SELECTORS for selector in selectors):
+        raise ValueError("BM300 multipage import selectors must be within 1..3.")
 
-    expected_total = BM300_MULTIPAGE_SELECTORS[-1] * 256
+    expected_total = len(selectors) * 256
     if progress is not None:
         progress(0, expected_total, "Downloading history records")
     fetched_items: list[BM300SelectorFetch] = []
-    for selector in BM300_MULTIPAGE_SELECTORS:
+    for selector in selectors:
         fetch = BM300SelectorFetch(selector=selector, readings=tuple(selector_reader(selector)))
         fetched_items.append(fetch)
         if progress is not None:
@@ -187,7 +194,7 @@ def _report(
 ) -> dict[str, object]:
     return {
         "device_id": device.id,
-        "selectors": list(BM300_MULTIPAGE_SELECTORS),
+        "selectors": [fetch.selector for fetch in fetches],
         "selector_byte": BM300_SELECTOR_BYTE,
         "fetched_record_counts": {str(fetch.selector): fetch.record_count for fetch in fetches},
         "validated_depth": validated_depth,

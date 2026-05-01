@@ -981,6 +981,8 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
     database_path = tmp_path / "gateway.db"
 
     selector_calls: list[int] = []
+    captured: dict[str, Any] = {}
+    progress_updates: list[tuple[int, int, str]] = []
 
     async def fake_read_selector(
         *,
@@ -1023,14 +1025,31 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
             for index in range(counts[selector_value])
         ]
 
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: Any,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: Any,
+    ) -> dict[str, object]:
+        _ = timeout_error
+        captured["function"] = function
+        captured["args"] = args
+        captured["timeout_seconds"] = timeout_seconds
+        return cast(dict[str, object], function(*args))
+
     monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history_selector", fake_read_selector)
+    monkeypatch.setattr(
+        "bm_gateway.archive_sync.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
 
     payload = sync_bm300_device_archive(
         config=config,
         device=device,
         database_path=database_path,
         page_count=9,
-        progress=lambda _current, _total, _message: None,
+        progress=lambda current, total, message: progress_updates.append((current, total, message)),
     )
 
     assert selector_calls == [1, 2, 3]
@@ -1038,6 +1057,11 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
     assert payload["inserted"] == 180
     assert payload["profile"] == BM300_ARCHIVE_PROFILE
     assert payload["page_count"] == 3
+    assert captured["function"].__name__ == "_run_bm300_device_archive_import"
+    assert captured["args"] == (config, device, database_path, 3, 180.0)
+    assert captured["timeout_seconds"] == 570.0
+    assert progress_updates[0] == (0, 768, "Downloading history records")
+    assert progress_updates[-1] == (180, 180, "History sync completed")
     archive = fetch_archive_history(database_path, device_id="bm300_doc", limit=200)
     assert archive[0]["soc"] == 0
     assert archive[0]["temperature"] == 10.0
@@ -1060,6 +1084,7 @@ def test_sync_bm300_device_archive_serializes_cross_process_bluetooth_access(
     database_path = tmp_path / "state" / "runtime" / "gateway.db"
     database_path.parent.mkdir(parents=True, exist_ok=True)
     calls: list[tuple[Path | None, str]] = []
+    captured: dict[str, Any] = {}
 
     @contextmanager
     def fake_lock(
@@ -1114,8 +1139,25 @@ def test_sync_bm300_device_archive_serializes_cross_process_bluetooth_access(
             for index in range(counts[selector_value])
         ]
 
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: Any,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: Any,
+    ) -> dict[str, object]:
+        _ = timeout_error
+        captured["function"] = function
+        captured["args"] = args
+        captured["timeout_seconds"] = timeout_seconds
+        return cast(dict[str, object], function(*args))
+
     monkeypatch.setattr("bm_gateway.archive_sync.exclusive_bluetooth_operation", fake_lock)
     monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history_selector", fake_read_selector)
+    monkeypatch.setattr(
+        "bm_gateway.archive_sync.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
 
     payload = sync_bm300_device_archive(
         config=config,
@@ -1127,6 +1169,7 @@ def test_sync_bm300_device_archive_serializes_cross_process_bluetooth_access(
 
     assert payload["inserted"] == 180
     assert calls == [(tmp_path / "state", "archive_sync:bm300_doc")]
+    assert captured["function"].__name__ == "_run_bm300_device_archive_import"
 
 
 def test_sync_bm300_device_archive_uses_hard_timeout_runner_without_progress(
@@ -1197,6 +1240,96 @@ def test_sync_bm300_device_archive_uses_hard_timeout_runner_without_progress(
     assert captured["function"].__name__ == "_run_bm300_device_archive_import"
     assert captured["args"] == (config, device, database_path, 3, 180.0)
     assert captured["timeout_seconds"] == 570.0
+
+
+def test_sync_bm300_device_archive_honors_bounded_page_depth(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    device = Device(
+        id="bm300_doc",
+        type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+    )
+    database_path = tmp_path / "gateway.db"
+    selector_calls: list[int] = []
+
+    async def fake_read_selector(
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        selector_byte: int,
+        selector_value: int,
+        reference_ts: object = None,
+        transport: object = None,
+    ) -> list[BM300HistoryReading]:
+        _ = (
+            address,
+            adapter,
+            timeout_seconds,
+            scan_timeout_seconds,
+            selector_byte,
+            reference_ts,
+            transport,
+        )
+        selector_calls.append(selector_value)
+        counts = {1: 130, 2: 160, 3: 180}
+        reference_ts = datetime(2026, 4, 26, 18, 54, tzinfo=timezone.utc)
+        return [
+            BM300HistoryReading(
+                ts=(reference_ts - timedelta(minutes=index * 2)).isoformat(timespec="seconds"),
+                voltage=(0x4B0 + index) / 100,
+                min_crank_voltage=None,
+                event_type=index % 10,
+                soc=index % 101,
+                temperature=float(10 + (index % 40)),
+                raw_record=(
+                    f"{0x4B0 + index:03x}{index % 101:02x}{10 + (index % 40):02x}{index % 10:x}"
+                ),
+                page_selector=selector_value,
+                record_index=index,
+                timestamp_quality="estimated",
+            )
+            for index in range(counts[selector_value])
+        ]
+
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: Any,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: Any,
+    ) -> dict[str, object]:
+        _ = (timeout_seconds, timeout_error)
+        return cast(dict[str, object], function(*args))
+
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history_selector", fake_read_selector)
+    monkeypatch.setattr(
+        "bm_gateway.archive_sync.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
+
+    payload = sync_bm300_device_archive(
+        config=config,
+        device=device,
+        database_path=database_path,
+        page_count=1,
+    )
+
+    archive = fetch_archive_history(database_path, device_id="bm300_doc", limit=200)
+
+    assert selector_calls == [1]
+    assert payload["fetched"] == 130
+    assert payload["inserted"] == 130
+    assert payload["page_count"] == 1
+    assert payload["validated_depth"] == 1
+    assert payload["selectors"] == [1]
+    assert len(archive) == 130
 
 
 def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:

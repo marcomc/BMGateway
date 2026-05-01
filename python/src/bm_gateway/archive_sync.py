@@ -115,33 +115,29 @@ def sync_bm300_device_archive(
         state_dir=state_dir,
         operation=f"archive_sync:{device.id}",
     ):
-        if progress is None:
-            payload = run_in_subprocess_with_timeout(
-                function=_run_bm300_device_archive_import,
-                args=(
-                    config,
-                    device,
-                    database_path,
-                    requested_depth,
-                    history_timeout_seconds,
-                ),
-                timeout_seconds=(history_timeout_seconds * requested_depth) + 30.0,
-                timeout_error=lambda: BM300TimeoutError(
-                    f"{device.mac} archive import exceeded the hard timeout."
-                ),
-            )
-        else:
-            payload = _run_bm300_device_archive_import(
+        if progress is not None:
+            progress(0, requested_depth * 256, "Downloading history records")
+        payload = run_in_subprocess_with_timeout(
+            function=_run_bm300_device_archive_import,
+            args=(
                 config,
                 device,
                 database_path,
                 requested_depth,
                 history_timeout_seconds,
-                progress,
-            )
+            ),
+            timeout_seconds=(history_timeout_seconds * requested_depth) + 30.0,
+            timeout_error=lambda: BM300TimeoutError(
+                f"{device.mac} archive import exceeded the hard timeout."
+            ),
+        )
     fetched_record_counts = cast(dict[str, int], payload["fetched_record_counts"])
     payload["fetched"] = max(fetched_record_counts.values())
     payload["page_count"] = requested_depth
+    if progress is not None:
+        inserted = cast(int, payload["inserted"])
+        progress(0, inserted, "Importing history records")
+        progress(inserted, inserted, "History sync completed")
     return payload
 
 
@@ -182,6 +178,7 @@ def _run_bm300_device_archive_import(
         output_database_path=database_path,
         adapter=adapter,
         selector_reader=selector_reader,
+        selectors=(1, 2, 3)[:requested_depth],
         profile=BM300_ARCHIVE_PROFILE,
         replace_profiles=(
             BM300_ARCHIVE_PROFILE,

@@ -181,6 +181,54 @@ def test_run_bm300_multipage_import_rejects_short_overlap_without_writing(
     assert not output_db.exists()
 
 
+@pytest.mark.parametrize(
+    ("selectors", "expected_inserted", "expected_depth"),
+    [
+        ((1,), 130, 1),
+        ((1, 2), 160, 2),
+    ],
+)
+def test_run_bm300_multipage_import_accepts_bounded_selector_depth(
+    tmp_path: Path,
+    selectors: tuple[int, ...],
+    expected_inserted: int,
+    expected_depth: int,
+) -> None:
+    output_db = tmp_path / "bm300-multipage.db"
+    device = Device(
+        id="bm300_doc",
+        type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+    )
+    selector_rows = {
+        1: _history(1, 0, 130),
+        2: _history(2, 0, 160),
+        3: _history(3, 0, 180),
+    }
+    selector_calls: list[int] = []
+
+    def selector_reader(selector: int) -> list[BM300HistoryReading]:
+        selector_calls.append(selector)
+        return selector_rows[selector]
+
+    payload = run_bm300_multipage_import(
+        device=device,
+        output_database_path=output_db,
+        adapter="hci0",
+        selector_reader=selector_reader,
+        selectors=selectors,
+    )
+
+    archive_rows = fetch_archive_history(output_db, device_id="bm300_doc", limit=250)
+
+    assert selector_calls == list(selectors)
+    assert payload["selectors"] == list(selectors)
+    assert payload["validated_depth"] == expected_depth
+    assert payload["inserted"] == expected_inserted
+    assert len(archive_rows) == expected_inserted
+
+
 def test_cli_bm300_multipage_import_rejects_runtime_database_path(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
