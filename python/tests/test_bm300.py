@@ -13,6 +13,7 @@ from bm_gateway.drivers.bm300 import (
     BM300Measurement,
     BM300ProtocolError,
     BM300TimeoutError,
+    _collect_bm7_history_payload,
     decode_bm300_frame_payloads,
     decrypt_bm300_payload,
     default_bm7_history_reference_ts,
@@ -142,6 +143,22 @@ def test_parse_bm7_history_items_decodes_newest_first_voltage_soc_and_temperatur
             timestamp_quality="estimated",
         ),
     ]
+
+
+def test_collect_bm7_history_payload_stops_at_embedded_trailer() -> None:
+    async def run() -> bytes:
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        await queue.put(encrypt_bm300_payload(bytes.fromhex("d1550503000000000000000000000000")))
+        await queue.put(encrypt_bm300_payload(bytes.fromhex("53a620d053b620f0fffefe0000000000")))
+        await queue.put(encrypt_bm300_payload(bytes.fromhex("d15507000d0062053a00000000000000")))
+        return await _collect_bm7_history_payload(
+            queue,
+            deadline=asyncio.get_running_loop().time() + 1.0,
+        )
+
+    payload = asyncio.run(run())
+
+    assert payload == bytes.fromhex("53a620d053b620f0")
 
 
 def test_default_bm7_history_reference_ts_uses_even_minute_with_timezone() -> None:
