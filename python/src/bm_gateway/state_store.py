@@ -759,6 +759,30 @@ def import_archive_history(
     return inserted
 
 
+def delete_archive_history_profiles(
+    path: Path,
+    *,
+    device_id: str,
+    profiles: tuple[str, ...],
+) -> int:
+    if not profiles:
+        return 0
+    connection = _connect_database(path)
+    try:
+        placeholders = ", ".join("?" for _ in profiles)
+        cursor = connection.execute(
+            f"""
+            DELETE FROM device_archive_readings
+            WHERE device_id = ? AND profile IN ({placeholders})
+            """,
+            (device_id, *profiles),
+        )
+        connection.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        connection.close()
+
+
 def fetch_archive_history(
     path: Path,
     *,

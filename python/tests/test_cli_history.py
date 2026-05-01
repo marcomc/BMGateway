@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 from bm_gateway import cli
 from bm_gateway.archive_sync import (
+    BM300_ARCHIVE_PROFILE,
     plan_archive_backfill,
     sync_bm200_device_archive,
     sync_bm300_device_archive,
@@ -332,7 +334,7 @@ def test_history_sync_device_routes_bm300pro_to_bm7_archive_sync(
             "fetched": 32,
             "inserted": 30,
             "adapter": "hci0",
-            "profile": "bm7_d15505_b6_v1",
+            "profile": BM300_ARCHIVE_PROFILE,
         }
 
     monkeypatch.setattr(cli, "sync_bm300_device_archive", fake_sync, raising=False)
@@ -358,7 +360,7 @@ def test_history_sync_device_routes_bm300pro_to_bm7_archive_sync(
     assert result == 0
     payload = json.loads(captured.out)
     assert payload["synced"] is True
-    assert payload["profile"] == "bm7_d15505_b6_v1"
+    assert payload["profile"] == BM300_ARCHIVE_PROFILE
     assert payload["inserted"] == 30
 
 
@@ -843,13 +845,16 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
     )
     database_path = tmp_path / "gateway.db"
 
-    async def fake_read_history(
+    selector_calls: list[int] = []
+
+    async def fake_read_selector(
         *,
         address: str,
         adapter: str,
         timeout_seconds: float,
         scan_timeout_seconds: float,
-        page_count: int,
+        selector_byte: int,
+        selector_value: int,
         reference_ts: object = None,
         transport: object = None,
     ) -> list[BM300HistoryReading]:
@@ -858,40 +863,50 @@ def test_sync_bm300_device_archive_imports_bm7_history_fields(
             adapter,
             timeout_seconds,
             scan_timeout_seconds,
-            page_count,
+            selector_byte,
             reference_ts,
             transport,
         )
+        selector_calls.append(selector_value)
+        counts = {1: 130, 2: 160, 3: 180}
+        reference_ts = datetime(2026, 4, 26, 18, 54, tzinfo=timezone.utc)
         return [
             BM300HistoryReading(
-                ts="2026-04-26T18:54:00+00:00",
-                voltage=13.39,
+                ts=(reference_ts - timedelta(minutes=index * 2)).isoformat(timespec="seconds"),
+                voltage=(0x4B0 + index) / 100,
                 min_crank_voltage=None,
-                event_type=0,
-                soc=98,
-                temperature=15.0,
-                raw_record="53b620f0",
-                page_selector=1,
-                record_index=0,
+                event_type=index % 10,
+                soc=index % 101,
+                temperature=float(10 + (index % 40)),
+                raw_record=(
+                    f"{0x4B0 + index:03x}{index % 101:02x}{10 + (index % 40):02x}{index % 10:x}"
+                ),
+                page_selector=selector_value,
+                record_index=index,
                 timestamp_quality="estimated",
             )
+            for index in range(counts[selector_value])
         ]
 
-    monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history", fake_read_history)
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history_selector", fake_read_selector)
 
     payload = sync_bm300_device_archive(
         config=config,
         device=device,
         database_path=database_path,
-        page_count=1,
+        page_count=9,
     )
 
-    assert payload["inserted"] == 1
-    assert payload["profile"] == "bm7_d15505_b6_v1"
-    archive = fetch_archive_history(database_path, device_id="bm300_doc", limit=1)
-    assert archive[0]["soc"] == 98
-    assert archive[0]["temperature"] == 15.0
-    assert archive[0]["raw_record"] == "53b620f0"
+    assert selector_calls == [1, 2, 3]
+    assert payload["fetched"] == 180
+    assert payload["inserted"] == 180
+    assert payload["profile"] == BM300_ARCHIVE_PROFILE
+    assert payload["page_count"] == 3
+    archive = fetch_archive_history(database_path, device_id="bm300_doc", limit=200)
+    assert archive[0]["soc"] == 0
+    assert archive[0]["temperature"] == 10.0
+    assert archive[0]["raw_record"] == "4b0000a0"
+    assert archive[-1]["raw_record"] == "5634e1d9"
 
 
 def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:

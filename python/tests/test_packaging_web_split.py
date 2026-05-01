@@ -95,8 +95,8 @@ def test_install_service_script_preserves_archive_sync_preferences() -> None:
     assert 'archive_sync.get("reconnect_min_gap_seconds", 28800)' in payload
     assert 'archive_sync.get("safety_margin_seconds", 7200)' in payload
     assert 'archive_sync.get("bm200_max_pages_per_sync", 3)' in payload
-    assert 'archive_sync.get("bm300_enabled", False)' in payload
-    assert 'archive_sync.get("bm300_max_pages_per_sync", 1)' in payload
+    assert 'archive_sync.get("bm300_enabled", True)' in payload
+    assert 'archive_sync.get("bm300_max_pages_per_sync", 3)' in payload
 
 
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:

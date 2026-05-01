@@ -97,6 +97,32 @@ However, byte-7 depth appears to have selector-specific thresholds; values
 `01..06` can return empty for byte-4 windows even when higher byte-7 values
 return data.
 
+## Falsification Gates
+
+Treat the byte-4 model as a strong working model only if it keeps surviving
+deliberate attempts to break it.
+
+The current model predicts:
+
+- repeated captures of the same non-empty `byte 4` selector should shift
+  forward at about the same 2-minute cadence seen in ordinary byte-7 windows;
+- long exact raw-record overlap should still exist between earlier and later
+  captures of that selector, even when the window trims or caps;
+- changing `byte 4` should move to a distinct archive range more often than it
+  merely perturbs the current byte-7 window.
+
+Demote or discard the model if bounded retests show any of these:
+
+- the same selector cannot be reproduced with a stable overlap pattern;
+- the overlap exists but cannot be placed uniquely against the local timeline;
+- a future `byte 6` or plain `byte 7` sweep reaches the same older ranges
+  without needing `byte 4`;
+- the decoded values stay plausible, but the ordering or cadence becomes
+  inconsistent enough that a bank/window interpretation no longer explains it.
+
+Surviving these gates does not prove the model uniquely true. It means the
+model is strong enough to support the next controlled stitch attempt.
+
 ## Offline Stitch Phase
 
 After profiling, build the import timeline offline before touching the real

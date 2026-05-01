@@ -11,6 +11,7 @@ Use it to:
 - capture encrypted and decrypted notifications
 - download the verified BM200/BM6 256-record history page
 - download the gated BM300 Pro/BM7 history selector for parser validation
+- run the experimental BM300 Pro/BM7 byte-7 controlled multipage import
 - preserve JSONL evidence for parser work
 - run a controlled BM200/BM6 `d15505` byte matrix around the verified
   byte-7 cumulative selector
@@ -232,16 +233,55 @@ Examples from `doc_fb12899`:
 | `53b620f0` | `13.39 V` | `98%` | `15 C` | `0` |
 | `53a620e0` | `13.38 V` | `98%` | `14 C` | `0` |
 
-The production archive profile is `bm7_d15505_b6_v1`. Automatic BM300 Pro/BM7
-archive import is gated by `archive_sync.bm300_enabled` and remains disabled by
-default. Manual `history sync-device` can still request a BM300 Pro device
-explicitly for controlled tests.
+The standard archive profile is now `bm7_d15505_b7_v1`. Live validation on
+`doc_fb12899` proved exact cumulative overlap for:
+
+- `b7=01 -> 02`: 256 identical raw records
+- `b7=02 -> 03`: 512 identical raw records
+
+That standard path imported `769` rows on the copied validation database, about
+`25h 38m` at the observed 2-minute cadence. Automatic BM300 Pro/BM7 archive
+import is now enabled by default for new configs, but the standard path stays
+capped to this validated depth-3 window until deeper selectors are proven.
 
 Selectors beyond `hist_d15505_b6_01` are not fully characterized. Use the probe
 tool to capture low page limits first, then compare overlap and record counts
 before increasing the configured limit toward the 72-day advertised retention
 cap. One live selector-`01` import from `doc_fb12899` returned 883 records,
 which is about 29 hours 26 minutes at 2-minute cadence.
+
+### `bm-gateway protocol bm300-multipage-import`
+
+This is the first controlled importer for the current BM300 working model:
+
+```text
+byte 7 = cumulative depth candidate
+byte 6 = unresolved bank/window candidate
+```
+
+Use it only with an explicitly supplied disposable or review SQLite path:
+
+```sh
+bm-gateway protocol bm300-multipage-import \
+  --device-id doc_fb12899 \
+  --output-db /tmp/bm300-multipage.db \
+  --json
+```
+
+Behavior:
+
+- fetches BM300 selectors `b7=01`, `b7=02`, and `b7=03`
+- compares consecutive selectors by exact `raw_record` sequence only
+- requires at least `128` consecutive identical raw records between
+  `01 -> 02` and `02 -> 03`
+- fails explicitly and writes nothing when the overlap gate is not met
+- writes only to `--output-db`, never to the normal runtime database
+- imports selector `01` plus only the validated older extension from deeper
+  selectors when both overlap checks pass
+
+This command remains experimental protocol tooling. It writes only to the
+caller-supplied SQLite path and is still the safe place to investigate deeper
+selectors before changing the standard BM300 import depth.
 
 ## BM200 `b7=55` Matrix
 

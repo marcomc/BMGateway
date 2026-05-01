@@ -75,10 +75,11 @@ reconnect_min_gap_seconds = 28800
 safety_margin_seconds = 7200
 # One BM200/BM6 page is 256 records at 2-minute spacing, about 8h32m.
 bm200_max_pages_per_sync = 3
-# BM300 Pro/BM7 import is gated separately. Selector 1 returned 883 records in
-# live validation, about 29h26m at 2-minute cadence.
-bm300_enabled = false
-bm300_max_pages_per_sync = 1
+# BM300 Pro/BM7 uses the validated byte-7 depth path. The current standard
+# import requests selectors 01, 02, and 03, which reached 769 records in live
+# validation, about 25h38m at 2-minute cadence.
+bm300_enabled = true
+bm300_max_pages_per_sync = 3
 
 [retention]
 raw_retention_days = 180

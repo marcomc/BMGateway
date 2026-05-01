@@ -88,9 +88,15 @@ BM200/BM6-family live polling:
 - RSSI when BlueZ/Bleak exposes it
 - device-reported state
 
-BM300 Pro/BM7 archive import is also implemented behind a separate config gate.
-It uses profile `bm7_d15505_b6_v1` and is disabled by default until page-range
-behavior beyond the verified selector is validated on the real devices.
+BM300 Pro/BM7 archive import now has two distinct paths:
+
+- the older byte-6 candidate path kept as legacy protocol evidence
+- the current standard byte-7 depth path used by normal history sync
+
+The standard importer now uses profile `bm7_d15505_b7_v1`, requests selectors
+`b7=01`, `02`, and `03`, and is enabled by default for new configs. It still
+stops at depth 3 because deeper selectors and the byte-6 axis are not yet
+proven.
 
 ## BMGateway-Verified Findings
 
@@ -224,6 +230,61 @@ cap of 59 selectors comes from the advertised 72-day retention at 2-minute
 cadence and the observed 883-record selector-`01` import on `doc_fb12899`;
 treat it as an upper safety bound, not proof that all selectors have been
 validated.
+
+### Live Multipage Validation: 2026-04-30
+
+The new controlled byte-7 importer was run on `doc_fb12899` against a copied
+SQLite database on `admin@bmgateway.local`, not the runtime DB.
+
+Validated result:
+
+| Selector | Records |
+| --- | ---: |
+| `b7=01` | `256` |
+| `b7=02` | `512` |
+| `b7=03` | `769` |
+
+Exact overlap checks:
+
+| Pair | Strongest exact overlap | Result |
+| --- | ---: | --- |
+| `01 -> 02` | `256` consecutive raw records | accepted |
+| `02 -> 03` | `512` consecutive raw records | accepted |
+
+Imported result on the copied DB:
+
+- `769` rows inserted
+- about `25 hours 38 minutes` at the current 2-minute cadence assumption
+- overlap starts at offset `0` in both deeper selectors, which is the expected
+  cumulative pattern
+
+This is enough to treat byte `7` as the practical BM300 cumulative depth axis
+for selectors `01..03` on `doc_fb12899`.
+
+## What Still Needs Investigation
+
+The BM300 practical import path is now real and validated, but it is still far
+from the advertised retention claim.
+
+Open gaps:
+
+- whether selectors above `b7=03` remain cumulative or change behavior
+- whether byte `6` selects banks, windows, time ranges, or another axis needed
+  to approach the claimed 72-day retention
+- whether different BM300 devices show the same `01..03` cumulative pattern
+- whether timestamps can be anchored more strongly than the current estimated
+  2-minute cadence
+- semantic meaning of the final history `p` nibble
+- cranking, charging, and other event-record interpretation
+
+Current practical ceiling:
+
+- validated import coverage: about `25h 38m`
+- claimed device retention: about `72` days
+
+So the resolved question is no longer "can BM300 import multipage history at
+all?" It can. The remaining question is how to move from the validated
+25-hour byte-7 window toward the claimed multi-day or multi-week retention.
 
 ### External Research Status
 

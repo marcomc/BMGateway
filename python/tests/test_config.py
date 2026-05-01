@@ -82,8 +82,8 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.archive_sync.reconnect_min_gap_seconds == 28800
     assert config.archive_sync.safety_margin_seconds == 7200
     assert config.archive_sync.bm200_max_pages_per_sync == 3
-    assert config.archive_sync.bm300_enabled is False
-    assert config.archive_sync.bm300_max_pages_per_sync == 1
+    assert config.archive_sync.bm300_enabled is True
+    assert config.archive_sync.bm300_max_pages_per_sync == 3
 
 
 def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:

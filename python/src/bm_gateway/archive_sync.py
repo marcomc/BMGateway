@@ -7,12 +7,17 @@ import math
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Mapping
+from typing import Callable, Mapping, cast
 
+from .bm300_multipage import (
+    BM300_LEGACY_PROFILE,
+    BM300_STANDARD_PROFILE,
+    run_bm300_multipage_import,
+)
 from .config import AppConfig
 from .device_registry import Device, device_driver_type
 from .drivers.bm200 import read_bm200_history
-from .drivers.bm300 import read_bm300_history
+from .drivers.bm300 import BM300HistoryReading, read_bm300_history_selector
 from .models import GatewaySnapshot
 from .runtime import _active_adapter
 from .state_store import (
@@ -22,9 +27,8 @@ from .state_store import (
 )
 
 BM200_ARCHIVE_PROFILE = "bm6_d15505_b7_v1"
-BM300_ARCHIVE_PROFILE = "bm7_d15505_b6_v1"
+BM300_ARCHIVE_PROFILE = BM300_STANDARD_PROFILE
 BM200_HISTORY_PAGE_SECONDS = 256 * 2 * 60
-BM300_HISTORY_PAGE_SECONDS = 883 * 2 * 60
 ArchiveSyncProgress = Callable[[int, int, str], None]
 
 
@@ -94,42 +98,47 @@ def sync_bm300_device_archive(
 
     adapter = _active_adapter(config)
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
-    if progress is not None:
-        progress(0, max(1, page_count * 883), "Downloading history records")
-    history = asyncio.run(
-        read_bm300_history(
-            address=device.mac,
-            adapter=adapter,
-            timeout_seconds=history_timeout_seconds,
-            scan_timeout_seconds=float(config.bluetooth.scan_timeout_seconds),
-            page_count=page_count,
+    requested_depth = min(max(1, page_count), 3)
+    progress_state: dict[str, datetime | None] = {"reference_ts": None}
+
+    def selector_reader(selector: int) -> list[BM300HistoryReading]:
+        if selector > requested_depth:
+            return []
+        reference_ts = progress_state["reference_ts"]
+        if reference_ts is None:
+            from .drivers.bm300 import default_bm7_history_reference_ts
+
+            reference_ts = default_bm7_history_reference_ts()
+            progress_state["reference_ts"] = reference_ts
+        return asyncio.run(
+            read_bm300_history_selector(
+                address=device.mac,
+                adapter=adapter,
+                timeout_seconds=history_timeout_seconds,
+                scan_timeout_seconds=float(config.bluetooth.scan_timeout_seconds),
+                selector_byte=7,
+                selector_value=selector,
+                reference_ts=reference_ts,
+            )
         )
-    )
-    rows = [asdict(reading) for reading in history]
-    if progress is not None:
-        progress(0, len(rows), "Importing history records")
-    inserted = import_archive_history(
-        database_path,
-        device_id=device.id,
-        device_type=device.type,
-        name=device.name,
-        mac=device.mac,
+
+    payload = run_bm300_multipage_import(
+        device=device,
+        output_database_path=database_path,
         adapter=adapter,
-        driver="bm300pro",
+        selector_reader=selector_reader,
         profile=BM300_ARCHIVE_PROFILE,
-        readings=rows,
+        replace_profiles=(
+            BM300_ARCHIVE_PROFILE,
+            BM300_LEGACY_PROFILE,
+            "bm7_d15505_b7_v1_experimental",
+        ),
         progress=progress,
     )
-    if progress is not None:
-        progress(len(rows), len(rows), "History sync completed")
-    return {
-        "device_id": device.id,
-        "fetched": len(rows),
-        "inserted": inserted,
-        "adapter": adapter,
-        "profile": BM300_ARCHIVE_PROFILE,
-        "page_count": page_count,
-    }
+    fetched_record_counts = cast(dict[str, int], payload["fetched_record_counts"])
+    payload["fetched"] = max(fetched_record_counts.values())
+    payload["page_count"] = requested_depth
+    return payload
 
 
 def bm200_history_pages_for_coverage_seconds(
@@ -147,9 +156,8 @@ def bm300_history_pages_for_coverage_seconds(
     *,
     max_pages: int,
 ) -> int:
-    page_limit = max(1, max_pages)
-    requested_pages = math.ceil(max(1.0, coverage_seconds) / BM300_HISTORY_PAGE_SECONDS)
-    return max(1, min(page_limit, requested_pages))
+    _ = coverage_seconds
+    return min(max(1, max_pages), 3)
 
 
 def _archive_sync_profile_for_reading(device_type: str, bm300_enabled: bool) -> str | None:

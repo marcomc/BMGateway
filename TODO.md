@@ -46,11 +46,19 @@
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.
   Live voltage, SoC, temperature, RSSI, device state, and bounded archive
   import now use a dedicated BM300 Pro driver. Automatic BM7 archive import is
-  separately gated and disabled by default. Selector `01` imported 883 records
-  on `doc_fb12899`; remaining work is validating byte-6 selectors beyond `01`
-  toward the advertised 72-day retention, semantic parsing of raw `d15501`
-  version payloads, cranking/charging event records, the final archive `p`
-  nibble, and rapid acceleration/deceleration persistence.
+  now uses the validated byte-7 depth path in both the standard sync command
+  and automatic backfill. Live validation on `doc_fb12899` proved cumulative
+  overlap across `b7=01`, `02`, and `03` with exact 256-record then 512-record
+  overlap, and the standard BM300 import now covers 769 records, about
+  25 hours 38 minutes, on that device. Remaining work is extending beyond the
+  current depth-3 validated window, proving whether selectors above `03` stay
+  cumulative, and profiling whether `byte 6` is a bank/window selector needed
+  to approach the claimed 72-day retention.
+  Remaining work also includes semantic parsing of raw `d15501` version
+  payloads, cranking/charging event records, the final archive `p` nibble, and
+  rapid acceleration/deceleration persistence.
+  Reference:
+  [docs/architecture/2026-04-30-bm300-byte7-multipage-investigation-plan.md](docs/architecture/2026-04-30-bm300-byte7-multipage-investigation-plan.md)
 - Add richer degradation analytics beyond the current yearly summaries and
   rolling comparison windows.
 - Add MQTT birth/LWT republish handling beyond the current availability and

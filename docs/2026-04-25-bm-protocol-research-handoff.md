@@ -14,6 +14,27 @@ The work covers local, authorized communication with owned monitors only:
 Do not brute force AES keys, try random command IDs, bypass access controls, or
 probe third-party devices. Direct BLE probes should stay bounded and read-like.
 
+## Evidence Status
+
+Treat the current conclusions as a mix of verified facts and working models,
+not as final truth.
+
+Use these labels consistently:
+
+- Verified fact: repeated captures or cross-checks show the same result, and a
+  clear contradiction would require discarding it.
+- Strong working model: current evidence explains the observed behavior and has
+  survived at least one deliberate attempt to break it, but alternative models
+  may still fit.
+- Open hypothesis: plausible, but not stable enough to drive normal import.
+- Dead end: bounded probes produced no useful evidence.
+
+Protocol reverse engineering does not get absolute proof from "we could not
+disprove it." The practical standard is falsification-first: state the model,
+state what observation would break it, then actively try to produce that
+observation. If the model survives, confidence rises enough to guide the next
+experiment or a bounded importer. It still remains revisable.
+
 ## Code Paths
 
 | Area | Files |
@@ -445,19 +466,27 @@ The one-point gap between live `82%` and newest historical `83%` on
 Live `d15507` polling is implemented and verified for BM300 Pro/BM7 with the
 BM7 key. It uses the same live response offsets as BM6/BM200.
 
-BM300 Pro/BM7 archive import is implemented as profile `bm7_d15505_b6_v1` and
-is disabled by default for automatic background sync. Manual CLI sync can still
-run against a named BM300 Pro device for controlled tests.
+BM300 Pro/BM7 standard archive import now uses profile `bm7_d15505_b7_v1`.
+Live validation on `doc_fb12899` proved a practical cumulative byte-7 depth
+path for selectors `01..03`, and standard background sync is now enabled by
+default for new configs.
 
 Known facts:
 
 - The BM2 `e7xx` history-count variants tested on BM7 produced no notification.
 - Zero-payload `d15505` can return marker-shaped responses.
-- The verified BM7 history request uses byte 6:
+- The older verified non-empty BM7 history request uses byte 6:
 
   ```text
   d1550500000001000000000000000000
   ```
+
+- The current standard BM300 import uses byte 7 selectors `01`, `02`, and
+  `03`, and `doc_fb12899` validated exact overlap of:
+  - `256` consecutive records for `01 -> 02`
+  - `512` consecutive records for `02 -> 03`
+- The current practical BM300 standard import depth is `769` rows, about
+  `25h 38m` at the current 2-minute cadence assumption.
 
 - `doc_fb12899` returned newest records that match live voltage, SoC, and
   temperature using the same record layout as BM200/BM6:
@@ -483,6 +512,25 @@ Open BM7 history items:
 - meaning of the final `p` nibble
 - whether cranking or charging-test records appear in the same stream or use
   another command
+
+## Falsification Targets For Next Work
+
+The next investigation rounds should try to break the current models on purpose.
+If a model survives those tests, treat it as stronger operational evidence, not
+as mathematically final proof.
+
+| Family | Current working model | Strongest practical disproof |
+| --- | --- | --- |
+| BM200/BM6 | `byte 7` is the cumulative current-window depth selector | Reproduce a non-empty deeper `byte 7` selector that does not preserve the shallower selector as a prefix, outside ordinary sample drift or documented saturation behavior. |
+| BM200/BM6 | `byte 4` selects a separate history window or bank | Repeated captures of the same `byte 4` selector fail to shift forward on the 2-minute cadence, or supposedly different `byte 4` groups collapse into the same sequence once overlap is aligned. |
+| BM200/BM6 | `byte 6` is not useful for history expansion | Find one reproducible `byte 6` value that changes the oldest reachable boundary or exposes a distinct long-overlap range beyond normal live-sample drift. |
+| BM300 Pro/BM7 | `byte 7` is the practical cumulative depth axis, at least for `01..03` | Reproduce a `01 -> 02` or `02 -> 03` capture where the deeper selector does not preserve a long exact prefix of the shallower selector. |
+| BM300 Pro/BM7 | `byte 6` is a separate bank or window axis | Show by bounded sweeps that changing `byte 6` never changes stable sequence boundaries, while deeper `byte 7` values alone reach all accessible history. |
+
+This is the best available "proof by contradiction" style for the protocol
+work: define what the model predicts, then look for a reproducible violation.
+Failure to find one after bounded tests means the model is strong enough to use
+carefully. It does not mean no alternative explanation exists.
 
 ## Dead Ends
 

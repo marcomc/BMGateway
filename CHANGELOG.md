@@ -19,6 +19,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added an offline `bm-gateway protocol analyze-history-captures` report for
   saved protocol-probe JSONL files, including decoded history-field profiling,
   marker counts, sequence overlap checks, and stitch recommendations.
+- Added an experimental `bm-gateway protocol bm300-multipage-import` command
+  for controlled BM300 Pro/BM7 byte-7 history validation and import. It fetches
+  selectors `b7=01`, `02`, and `03`, requires at least 128 consecutive
+  identical raw records between consecutive depths, fails explicitly without
+  writing when overlap is not strong enough, and writes only to an explicitly
+  supplied SQLite path instead of the normal runtime database.
 - Added BM200/BM6 archive-history import through
   `bm-gateway history sync-device`, including decoded voltage, SoC,
   temperature, raw record storage, and a `--page-count` option for cumulative
@@ -35,6 +41,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   separate opt-in setting and page cap for future 72-day retention validation.
 
 ### Changed
+
+- Switched the standard BM300 Pro/BM7 archive-history path from the older
+  byte-6 selector candidate to the validated byte-7 depth path. Standard
+  BM300 imports now request selectors `b7=01`, `02`, and `03`, require exact
+  raw-record overlap of 256 then 512 records on `doc_fb12899`, and import a
+  validated 769-record window of about 25 hours 38 minutes.
+- Enabled BM300 Pro/BM7 automatic archive sync by default for new configs and
+  service installs, with the standard path capped to the currently validated
+  depth-3 import window until deeper selectors are proven.
 
 - Aligned the History `Batteries` selector pagination with the Home Battery
   Overview responsive two-row pagination logic.

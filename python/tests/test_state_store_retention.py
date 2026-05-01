@@ -7,6 +7,7 @@ from typing import cast
 
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import (
+    delete_archive_history_profiles,
     fetch_archive_history,
     fetch_daily_history,
     fetch_degradation_report,
@@ -747,6 +748,53 @@ def test_import_archive_history_is_idempotent_and_queryable(tmp_path: Path) -> N
     assert archive_rows[0]["sample_source"] == "device_archive"
     assert summary_counts["device_archive_readings"] == 2
     assert summary_devices[0]["archive_samples"] == 2
+
+
+def test_delete_archive_history_profiles_removes_only_selected_profiles(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    readings = [
+        {
+            "ts": "2024-01-01T00:00:00+00:00",
+            "voltage": 12.61,
+            "min_crank_voltage": None,
+            "event_type": 0,
+        }
+    ]
+
+    import_archive_history(
+        database_path,
+        device_id="bm300_doc",
+        device_type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+        adapter="hci0",
+        driver="bm300pro",
+        profile="bm7_d15505_b6_v1",
+        readings=readings,
+    )
+    import_archive_history(
+        database_path,
+        device_id="bm300_doc",
+        device_type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+        adapter="hci0",
+        driver="bm300pro",
+        profile="bm7_d15505_b7_v1",
+        readings=readings,
+    )
+
+    deleted = delete_archive_history_profiles(
+        database_path,
+        device_id="bm300_doc",
+        profiles=("bm7_d15505_b6_v1",),
+    )
+
+    archive_rows = fetch_archive_history(database_path, device_id="bm300_doc", limit=10)
+
+    assert deleted == 1
+    assert len(archive_rows) == 1
+    assert archive_rows[0]["profile"] == "bm7_d15505_b7_v1"
 
 
 def test_fetch_recent_history_prefers_live_rows_over_archive_rows_with_same_timestamp(

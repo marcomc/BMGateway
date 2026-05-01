@@ -21,6 +21,7 @@ from bm_gateway.drivers.bm300 import (
     parse_bm300_plaintext_measurement,
     parse_bm300_voltage_notification,
     read_bm300_history,
+    read_bm300_history_selector,
     read_bm300_measurement,
 )
 
@@ -227,6 +228,44 @@ def test_read_bm300_history_uses_bm7_transport() -> None:
     )
 
     assert readings[0].raw_record == "53b620f0"
+
+
+def test_read_bm300_history_selector_uses_requested_selector_byte() -> None:
+    class FakeTransport:
+        async def read_history_request(
+            self,
+            *,
+            address: str,
+            adapter: str,
+            timeout_seconds: float,
+            scan_timeout_seconds: float,
+            reference_ts: datetime,
+            request: bytes,
+            page_selector: int,
+        ) -> list[BM300HistoryReading]:
+            assert address == "AA:BB:CC:DD:EE:FF"
+            assert adapter == "hci0"
+            assert timeout_seconds == 5.0
+            assert scan_timeout_seconds == 3.0
+            assert reference_ts == datetime(2026, 4, 26, 18, 54, tzinfo=timezone.utc)
+            assert request == bytes.fromhex("d1550500000000030000000000000000")
+            assert page_selector == 3
+            return []
+
+    readings = asyncio.run(
+        read_bm300_history_selector(
+            address="AA:BB:CC:DD:EE:FF",
+            adapter="hci0",
+            timeout_seconds=5.0,
+            scan_timeout_seconds=3.0,
+            selector_byte=7,
+            selector_value=3,
+            reference_ts=datetime(2026, 4, 26, 18, 54, tzinfo=timezone.utc),
+            transport=FakeTransport(),
+        )
+    )
+
+    assert readings == []
 
 
 def test_bleak_bm300_transport_uses_configured_bluez_adapter(

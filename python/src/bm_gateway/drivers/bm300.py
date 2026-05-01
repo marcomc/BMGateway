@@ -87,6 +87,20 @@ class BM300HistoryTransport(Protocol):
     ) -> list[BM300HistoryReading]: ...
 
 
+class BM300HistoryRequestTransport(Protocol):
+    async def read_history_request(
+        self,
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        reference_ts: datetime,
+        request: bytes,
+        page_selector: int,
+    ) -> list[BM300HistoryReading]: ...
+
+
 def _device_rssi(device: object) -> int | None:
     direct = getattr(device, "rssi", None)
     if isinstance(direct, (int, float)):
@@ -145,7 +159,18 @@ def decode_bm300_frame_payloads(encrypted: bytes | bytearray) -> list[bytes]:
 def encode_bm7_history_request(page_count: int) -> bytes:
     if page_count < 1 or page_count > 255:
         raise ValueError("page_count must be between 1 and 255")
-    return bytes([0xD1, 0x55, 0x05, 0, 0, 0, page_count, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+    return encode_bm7_history_request_for_byte(byte_index=6, selector_value=page_count)
+
+
+def encode_bm7_history_request_for_byte(*, byte_index: int, selector_value: int) -> bytes:
+    if byte_index < 0 or byte_index > 15:
+        raise ValueError("byte_index must be between 0 and 15")
+    if selector_value < 1 or selector_value > 255:
+        raise ValueError("selector_value must be between 1 and 255")
+    request = bytearray(16)
+    request[0:3] = bytes([0xD1, 0x55, 0x05])
+    request[byte_index] = selector_value
+    return bytes(request)
 
 
 def parse_bm300_plaintext_measurement(plaintext: bytes) -> BM300Measurement:
@@ -214,6 +239,32 @@ def default_bm7_history_reference_ts(now: datetime | None = None) -> datetime:
         active_now = active_now.astimezone()
     reference_ts = active_now.replace(second=0, microsecond=0)
     return reference_ts - timedelta(minutes=reference_ts.minute % 2)
+
+
+async def read_bm300_history_selector(
+    *,
+    address: str,
+    adapter: str,
+    timeout_seconds: float,
+    scan_timeout_seconds: float,
+    selector_byte: int,
+    selector_value: int,
+    reference_ts: datetime | None = None,
+    transport: BM300HistoryRequestTransport | None = None,
+) -> list[BM300HistoryReading]:
+    active_transport = transport or BleakBM7HistoryTransport()
+    return await active_transport.read_history_request(
+        address=address,
+        adapter=adapter,
+        timeout_seconds=timeout_seconds,
+        scan_timeout_seconds=scan_timeout_seconds,
+        reference_ts=reference_ts or default_bm7_history_reference_ts(),
+        request=encode_bm7_history_request_for_byte(
+            byte_index=selector_byte,
+            selector_value=selector_value,
+        ),
+        page_selector=selector_value,
+    )
 
 
 def _is_bm300_measurement_packet(encrypted: bytes) -> bool:
@@ -310,7 +361,7 @@ class BleakBM300Transport:
 
 
 class BleakBM7HistoryTransport:
-    async def read_history(
+    async def read_history_request(
         self,
         *,
         address: str,
@@ -318,7 +369,8 @@ class BleakBM7HistoryTransport:
         timeout_seconds: float,
         scan_timeout_seconds: float,
         reference_ts: datetime,
-        page_count: int = 1,
+        request: bytes,
+        page_selector: int,
     ) -> list[BM300HistoryReading]:
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
@@ -369,7 +421,7 @@ class BleakBM7HistoryTransport:
                         await _drain_bm7_wake_packets(packet_queue, deadline=deadline)
                         await client.write_gatt_char(
                             BM300_WRITE_CHARACTERISTIC,
-                            encrypt_bm300_payload(encode_bm7_history_request(page_count)),
+                            encrypt_bm300_payload(request),
                             response=True,
                         )
                         payload = await _collect_bm7_history_payload(
@@ -379,7 +431,7 @@ class BleakBM7HistoryTransport:
                         return parse_bm7_history_items(
                             payload,
                             reference_ts=reference_ts,
-                            page_selector=page_count,
+                            page_selector=page_selector,
                         )
                     finally:
                         await client.stop_notify(BM300_NOTIFY_CHARACTERISTIC)
@@ -389,6 +441,26 @@ class BleakBM7HistoryTransport:
                 last_error = exc
                 await asyncio.sleep(min(1.0, max(deadline - loop.time(), 0.0)))
                 continue
+
+    async def read_history(
+        self,
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        reference_ts: datetime,
+        page_count: int = 1,
+    ) -> list[BM300HistoryReading]:
+        return await self.read_history_request(
+            address=address,
+            adapter=adapter,
+            timeout_seconds=timeout_seconds,
+            scan_timeout_seconds=scan_timeout_seconds,
+            reference_ts=reference_ts,
+            request=encode_bm7_history_request(page_count),
+            page_selector=page_count,
+        )
 
 
 async def _collect_bm7_history_payload(

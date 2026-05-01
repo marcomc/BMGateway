@@ -7,7 +7,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import Sequence, cast
+from typing import Callable, Sequence, cast
 
 from . import __version__
 from .archive_sync import (
@@ -16,9 +16,16 @@ from .archive_sync import (
     sync_bm200_device_archive,
     sync_bm300_device_archive,
 )
+from .bm300_multipage import BM300MultipageValidationError, run_bm300_multipage_import
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
 from .device_registry import Device, device_driver_type, load_device_registry, validate_devices
+from .drivers.bm300 import (
+    BleakBM7HistoryTransport,
+    BM300HistoryReading,
+    default_bm7_history_reference_ts,
+    encode_bm7_history_request_for_byte,
+)
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
 from .protocol_analysis import analyze_history_captures
@@ -31,6 +38,7 @@ from .protocol_probe import (
     utc_timestamp,
 )
 from .runtime import (
+    _active_adapter,
     build_snapshot,
     database_file_path,
     iterations_from_flags,
@@ -325,6 +333,22 @@ def build_parser() -> argparse.ArgumentParser:
         "--sweep-end",
         default="ff",
         help="Inclusive hex end value for --bm200-b7-55-sweep-byte. Default: ff.",
+    )
+    protocol_bm300_import = protocol_subparsers.add_parser(
+        "bm300-multipage-import",
+        help="Experimentally import validated BM300 Pro/BM7 byte-7 history into a separate DB.",
+    )
+    protocol_bm300_import.add_argument("--device-id", required=True, help="Device identifier.")
+    protocol_bm300_import.add_argument(
+        "--output-db",
+        type=Path,
+        required=True,
+        help="SQLite path for the controlled import output. Must not be the normal runtime DB.",
+    )
+    protocol_bm300_import.add_argument(
+        "--json",
+        action="store_true",
+        help="Print structured JSON output.",
     )
 
     return parser
@@ -932,6 +956,116 @@ def _handle_protocol_analyze_history_captures(
     return 0
 
 
+def _bm300_selector_reader(
+    *,
+    device: Device,
+    adapter: str,
+    scan_timeout_seconds: float,
+    connect_timeout_seconds: float,
+) -> Callable[[int], list[BM300HistoryReading]]:
+    reference_ts = default_bm7_history_reference_ts()
+    history_timeout_seconds = max(float(connect_timeout_seconds) * 4.0, 180.0)
+    transport = BleakBM7HistoryTransport()
+
+    def read_selector(selector: int) -> list[BM300HistoryReading]:
+        return asyncio.run(
+            transport.read_history_request(
+                address=device.mac,
+                adapter=adapter,
+                timeout_seconds=history_timeout_seconds,
+                scan_timeout_seconds=float(scan_timeout_seconds),
+                reference_ts=reference_ts,
+                request=encode_bm7_history_request_for_byte(
+                    byte_index=7,
+                    selector_value=selector,
+                ),
+                page_selector=selector,
+            )
+        )
+
+    return read_selector
+
+
+def _handle_protocol_bm300_multipage_import(
+    path: Path,
+    *,
+    verbose: bool,
+    device_id: str,
+    output_db: Path,
+    as_json: bool,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, devices = runtime
+    device = next((item for item in devices if item.id == device_id), None)
+    if device is None:
+        print(f"Unknown device: {device_id}", file=sys.stderr)
+        return 2
+    if device_driver_type(device.type) != "bm300pro":
+        print(f"Device {device_id} is not a BM300 Pro/BM7 device.", file=sys.stderr)
+        return 2
+
+    runtime_db = database_file_path(config).resolve()
+    if output_db.resolve() == runtime_db:
+        print(
+            "Experimental BM300 multipage import refuses to write to the normal runtime "
+            "database. Use --output-db with a separate SQLite path.",
+            file=sys.stderr,
+        )
+        return 2
+
+    adapter = _active_adapter(config)
+    try:
+        payload = run_bm300_multipage_import(
+            device=device,
+            output_database_path=output_db,
+            adapter=adapter,
+            selector_reader=_bm300_selector_reader(
+                device=device,
+                adapter=adapter,
+                scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
+                connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
+            ),
+        )
+    except BM300MultipageValidationError as exc:
+        failure = {
+            "device_id": device_id,
+            "imported": False,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc) or exc.__class__.__name__,
+            **exc.report,
+        }
+        if as_json:
+            _print_json(failure)
+        else:
+            print(failure["error"], file=sys.stderr)
+        return 1
+    except Exception as exc:
+        failure = {
+            "device_id": device_id,
+            "imported": False,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc) or exc.__class__.__name__,
+        }
+        if as_json:
+            _print_json(failure)
+        else:
+            print(failure["error"], file=sys.stderr)
+        return 1
+
+    payload["imported"] = True
+    if as_json:
+        _print_json(payload)
+        return 0
+
+    print(
+        f"Imported experimental BM300 multipage history for {device_id}: "
+        f"inserted={payload['inserted']} validated_depth={payload['validated_depth']}"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv) if argv is not None else sys.argv[1:]
     if not args_list or args_list == ["--help"] or args_list == ["-h"]:
@@ -1036,6 +1170,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     if args.command == "protocol" and args.protocol_command == "analyze-history-captures":
         return _handle_protocol_analyze_history_captures(
             inputs=args.input,
+            as_json=bool(args.json),
+        )
+    if args.command == "protocol" and args.protocol_command == "bm300-multipage-import":
+        return _handle_protocol_bm300_multipage_import(
+            args.config,
+            verbose=bool(args.verbose),
+            device_id=args.device_id,
+            output_db=args.output_db,
             as_json=bool(args.json),
         )
 
