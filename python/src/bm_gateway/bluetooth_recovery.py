@@ -2,18 +2,19 @@
 
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 
 _FATAL_ERROR_SUBSTRINGS = (
     "Client tried to send a message other than Hello without being registered",
     "No Bluetooth adapters found.",
-    "adapter 'hci0' not found",
     "Bad file descriptor",
 )
 _FATAL_ERROR_CLASS_NAMES = {
     "BleakBluetoothNotAvailableError",
 }
+_ADAPTER_NOT_FOUND_PATTERN = re.compile(r"""adapter ['"][^'"]+['"] not found""")
 
 
 class BluetoothRecoveryRequiredError(RuntimeError):
@@ -50,6 +51,8 @@ def is_fatal_bluetooth_error(error: BaseException) -> bool:
         if item.__class__.__name__ in _FATAL_ERROR_CLASS_NAMES:
             return True
         message = str(item)
+        if _ADAPTER_NOT_FOUND_PATTERN.search(message):
+            return True
         if any(fragment in message for fragment in _FATAL_ERROR_SUBSTRINGS):
             return True
     return False
