@@ -1912,6 +1912,52 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
     assert config.usb_otg.fleet_trend_device_ids == ()
 
 
+def test_management_settings_respects_gzip_q_zero(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings",
+        headers={"Accept-Encoding": "gzip;q=0"},
+    )
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            break
+        except urllib.error.URLError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+    with response_handle as response:
+        body = response.read().decode("utf-8")
+        assert response.status == 200
+        assert response.headers.get("Content-Encoding") is None
+
+    assert "Gateway Settings" in body
+
+
 def test_settings_usb_otg_post_starts_export_without_waiting(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
@@ -3296,6 +3342,37 @@ def test_render_settings_html_edit_mode_shows_chart_default_options() -> None:
     assert '<option value="5"' in html
     assert '<option value="raw"' not in html
     assert '<option value="soc" selected>' in html
+
+
+def test_render_settings_html_preserves_configured_usb_otg_overview_count() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(config.usb_otg, overview_devices_per_image=5),
+    )
+
+    summary_html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
+    edit_html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=True,
+    )
+
+    assert (
+        '<div class="settings-label">Devices per overview image</div>'
+        '<div class="settings-value">5</div>'
+    ) in summary_html
+    assert '<option value="1">1</option>' in edit_html
+    assert '<option value="5" selected>5</option>' in edit_html
+    assert '<option value="10">10</option>' in edit_html
 
 
 def test_discover_bluetooth_adapters_reads_sysfs_entries(tmp_path: Path) -> None:

@@ -20,7 +20,6 @@ from .usb_otg import (
 from .usb_otg import (
     usb_otg_support_installed as detect_usb_otg_support_installed,
 )
-from .web_pages_frame import FRAME_OVERVIEW_DEVICES_PER_PAGE
 from .web_ui import (
     api_chip,
     app_document,
@@ -458,7 +457,10 @@ def render_settings_html(
         + settings_row("Output format", config.usb_otg.image_format.upper())
         + settings_row("Frame appearance", config.usb_otg.appearance.title())
         + settings_row("Export interval", _usb_otg_refresh_interval_label(config))
-        + settings_row("Devices per overview image", str(FRAME_OVERVIEW_DEVICES_PER_PAGE))
+        + settings_row(
+            "Devices per overview image",
+            str(config.usb_otg.overview_devices_per_image),
+        )
         + settings_row(
             "Exported images",
             ", ".join(
@@ -606,10 +608,13 @@ def render_settings_html(
             _option_html(value, label, config.usb_otg.appearance)
             for value, label in (("light", "Light"), ("dark", "Dark"))
         )
-        usb_otg_devices_per_image_options = _option_html(
-            str(FRAME_OVERVIEW_DEVICES_PER_PAGE),
-            str(FRAME_OVERVIEW_DEVICES_PER_PAGE),
-            str(FRAME_OVERVIEW_DEVICES_PER_PAGE),
+        usb_otg_devices_per_image_options = "".join(
+            _option_html(
+                str(value),
+                str(value),
+                str(config.usb_otg.overview_devices_per_image),
+            )
+            for value in range(1, 11)
         )
         usb_otg_fleet_range_options = "".join(
             _option_html(
