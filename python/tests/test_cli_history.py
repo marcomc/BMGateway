@@ -381,6 +381,74 @@ def test_history_sync_device_routes_bm300pro_to_bm7_archive_sync(
     assert payload["inserted"] == 30
 
 
+def test_history_sync_device_rejects_bm300_when_archive_sync_is_disabled(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm300_doc"',
+                'type = "bm300pro"',
+                'name = "BM300 DOC"',
+                'mac = "AA:BB:CC:DD:EE:30"',
+                "enabled = true",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[archive_sync]\n"
+        + "enabled = true\n"
+        + "periodic_interval_seconds = 64800\n"
+        + "reconnect_min_gap_seconds = 28800\n"
+        + "safety_margin_seconds = 7200\n"
+        + "bm200_max_pages_per_sync = 3\n"
+        + "bm300_enabled = false\n"
+        + "bm300_max_pages_per_sync = 3\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+
+    def fail_if_called(**_kwargs: object) -> dict[str, object]:
+        raise AssertionError("sync_bm300_device_archive should not be called when disabled")
+
+    monkeypatch.setattr(cli, "sync_bm300_device_archive", fail_if_called, raising=False)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "history",
+            "sync-device",
+            "--device-id",
+            "bm300_doc",
+            "--state-dir",
+            str(state_dir),
+            "--page-count",
+            "2",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 1
+    payload = json.loads(captured.out)
+    assert payload == {
+        "device_id": "bm300_doc",
+        "synced": False,
+        "error_type": "ValueError",
+        "error": "BM300 archive sync is disabled in settings.",
+    }
+
+
 def test_plan_archive_backfill_flags_connected_devices_with_real_history_gap(
     tmp_path: Path,
 ) -> None:
