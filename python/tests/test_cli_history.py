@@ -12,6 +12,7 @@ from bm_gateway import cli
 from bm_gateway.archive_sync import (
     BM300_ARCHIVE_PROFILE,
     plan_archive_backfill,
+    plan_archive_backfill_details,
     sync_archive_backfill_candidates,
     sync_bm200_device_archive,
     sync_bm300_device_archive,
@@ -625,6 +626,124 @@ def test_plan_archive_backfill_uses_periodic_history_age_to_size_pages(
     assert candidates == {"bm200_house": 3}
 
 
+def test_plan_archive_backfill_details_distinguishes_periodic_and_reconnect(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            periodic_interval_seconds=64800,
+            reconnect_min_gap_seconds=28800,
+            safety_margin_seconds=7200,
+            bm200_max_pages_per_sync=3,
+        ),
+    )
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="bm6_d15505_b7_v1",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.7,
+                "min_crank_voltage": None,
+                "event_type": 0,
+                "soc": 80,
+                "temperature": 22.0,
+                "raw_record": "4f614160",
+                "page_selector": 3,
+                "record_index": 0,
+                "timestamp_quality": "estimated",
+            }
+        ],
+    )
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T12:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=1,
+            poll_interval_seconds=600,
+            devices=[
+                DeviceReading(
+                    id="bm200_house",
+                    type="bm200",
+                    name="BM200 House",
+                    mac="AA:BB:CC:DD:EE:01",
+                    enabled=True,
+                    connected=True,
+                    voltage=12.75,
+                    soc=60,
+                    temperature=None,
+                    rssi=-60,
+                    state="normal",
+                    error_code=None,
+                    error_detail=None,
+                    last_seen="2024-01-01T12:00:00+00:00",
+                    adapter="hci0",
+                    driver="bm200",
+                )
+            ],
+        ),
+    )
+    snapshot = GatewaySnapshot(
+        generated_at="2024-01-01T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=600,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=True,
+                voltage=12.81,
+                soc=61,
+                temperature=None,
+                rssi=-60,
+                state="normal",
+                error_code=None,
+                error_detail=None,
+                last_seen="2024-01-01T20:00:00+00:00",
+                adapter="hci0",
+                driver="bm200",
+            )
+        ],
+    )
+
+    details = plan_archive_backfill_details(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+    )
+
+    assert details == {
+        "bm200_house": {
+            "page_count": 3,
+            "reasons": ["periodic", "reconnect"],
+        }
+    }
+
+
 def test_plan_archive_backfill_skips_when_archive_and_live_history_are_recent(
     tmp_path: Path,
 ) -> None:
@@ -1107,7 +1226,9 @@ def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
         devices: object,
         database_path: Path,
         device_pages: dict[str, int],
+        device_reasons: dict[str, list[str]],
     ) -> list[dict[str, object]]:
+        _ = (config, devices, device_reasons)
         assert database_path == state_dir / "runtime" / "gateway.db"
         calls.append(dict(device_pages))
         return []
@@ -1253,6 +1374,7 @@ def test_run_cycle_writes_machine_audit_log(tmp_path: Path) -> None:
     assert payloads[-2]["details"]["device_id"] == "bm200_house"
     assert payloads[-1]["action"] == "run_cycle_completed"
     assert payloads[-1]["details"]["devices_online"] == 1
+    assert payloads[-1]["details"]["archive_backfill_reasons"] == {}
 
 
 def test_history_prune_uses_configured_retention(

@@ -12,7 +12,7 @@ from typing import Callable, Sequence, cast
 
 from . import __version__
 from .archive_sync import (
-    plan_archive_backfill,
+    plan_archive_backfill_details,
     sync_archive_backfill_candidates,
     sync_bm200_device_archive,
     sync_bm300_device_archive,
@@ -537,8 +537,8 @@ def _run_cycle(
     snapshot = build_snapshot(config, devices, state_dir=state_dir)
     audit_now = datetime.fromisoformat(snapshot.generated_at)
     database_path = database_file_path(config, state_dir=state_dir)
-    archive_backfill_candidates = (
-        plan_archive_backfill(
+    archive_backfill_details = (
+        plan_archive_backfill_details(
             config=config,
             database_path=database_path,
             snapshot=snapshot,
@@ -546,6 +546,14 @@ def _run_cycle(
         if config.gateway.reader_mode == "live"
         else {}
     )
+    archive_backfill_candidates = {
+        device_id: cast(int, candidate["page_count"])
+        for device_id, candidate in archive_backfill_details.items()
+    }
+    archive_backfill_reasons = {
+        device_id: cast(list[str], candidate["reasons"])
+        for device_id, candidate in archive_backfill_details.items()
+    }
     try:
         mqtt_connected = publisher.publish_runtime(
             config=config,
@@ -574,6 +582,7 @@ def _run_cycle(
             devices=devices,
             database_path=database_path,
             device_pages=archive_backfill_candidates,
+            device_reasons=archive_backfill_reasons,
         )
     prune_history(
         database_path,
@@ -615,6 +624,7 @@ def _run_cycle(
             "devices_online": snapshot.devices_online,
             "mqtt_connected": snapshot.mqtt_connected,
             "archive_backfill_candidates": archive_backfill_candidates,
+            "archive_backfill_reasons": archive_backfill_reasons,
         },
     )
     return snapshot

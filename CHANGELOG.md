@@ -12,6 +12,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   automatic polling, per-device poll outcomes, archive sync activity, manual
   history sync requests, and key web-managed configuration or device changes,
   with automatic 90-day retention pruning for Raspberry Pi diagnostics.
+- Added explicit archive-backfill trigger reasons (`periodic`, `reconnect`, or
+  both) to runtime and archive-sync audit events so gateway diagnostics can
+  show why a supported-device history import was or was not scheduled.
 - Added a bounded `bm-gateway protocol probe-history` diagnostic command for
   safe BM6/BM7 live, version, and `d15505` history-candidate BLE probes with
   JSONL output.

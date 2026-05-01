@@ -201,18 +201,18 @@ def _archive_sync_pages_for_coverage_seconds(
     return bm200_history_pages_for_coverage_seconds(coverage_seconds, max_pages=max_pages)
 
 
-def plan_archive_backfill(
+def plan_archive_backfill_details(
     *,
     config: AppConfig,
     database_path: Path,
     snapshot: GatewaySnapshot,
     poll_interval_seconds: int | None = None,
-) -> dict[str, int]:
+) -> dict[str, dict[str, object]]:
     _ = poll_interval_seconds
     if not config.archive_sync.enabled:
         return {}
 
-    candidates: dict[str, int] = {}
+    candidates: dict[str, dict[str, object]] = {}
     for reading in snapshot.devices:
         profile = _archive_sync_profile_for_reading(
             reading.type,
@@ -256,16 +256,44 @@ def plan_archive_backfill(
             if seconds is not None and seconds > 0
         ]
         if not coverage_candidates:
-            candidates[reading.id] = max_pages
-            continue
+            page_count = max_pages
+        else:
+            coverage_seconds = max(coverage_candidates) + config.archive_sync.safety_margin_seconds
+            page_count = _archive_sync_pages_for_coverage_seconds(
+                coverage_seconds,
+                max_pages=max_pages,
+                device_type=reading.type,
+            )
 
-        coverage_seconds = max(coverage_candidates) + config.archive_sync.safety_margin_seconds
-        candidates[reading.id] = _archive_sync_pages_for_coverage_seconds(
-            coverage_seconds,
-            max_pages=max_pages,
-            device_type=reading.type,
-        )
+        reasons: list[str] = []
+        if periodic_due:
+            reasons.append("periodic")
+        if reconnect_due:
+            reasons.append("reconnect")
+        candidates[reading.id] = {
+            "page_count": page_count,
+            "reasons": reasons,
+        }
     return candidates
+
+
+def plan_archive_backfill(
+    *,
+    config: AppConfig,
+    database_path: Path,
+    snapshot: GatewaySnapshot,
+    poll_interval_seconds: int | None = None,
+) -> dict[str, int]:
+    details = plan_archive_backfill_details(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+        poll_interval_seconds=poll_interval_seconds,
+    )
+    return {
+        device_id: int(cast(int, candidate["page_count"]))
+        for device_id, candidate in details.items()
+    }
 
 
 def sync_archive_backfill_candidates(
@@ -276,6 +304,7 @@ def sync_archive_backfill_candidates(
     device_pages: Mapping[str, int],
     source: str = "runtime",
     trigger: str = "automatic",
+    device_reasons: Mapping[str, list[str]] | None = None,
 ) -> list[dict[str, object]]:
     devices_by_id = {device.id: device for device in devices}
     results: list[dict[str, object]] = []
@@ -295,6 +324,9 @@ def sync_archive_backfill_candidates(
                 "device_id": device_id,
                 "device_type": device.type,
                 "page_count": device_pages[device_id],
+                "reasons": list(device_reasons.get(device_id, []))
+                if device_reasons is not None
+                else [],
             },
         )
         try:
@@ -329,6 +361,9 @@ def sync_archive_backfill_candidates(
                         "error_type": exc.__class__.__name__,
                         "error": str(exc) or exc.__class__.__name__,
                         "fatal_bluetooth_error": True,
+                        "reasons": list(device_reasons.get(device_id, []))
+                        if device_reasons is not None
+                        else [],
                     },
                 )
                 require_bluetooth_recovery(exc)
@@ -337,6 +372,9 @@ def sync_archive_backfill_candidates(
                 "synced": False,
                 "error_type": exc.__class__.__name__,
                 "error": str(exc) or exc.__class__.__name__,
+                "reasons": list(device_reasons.get(device_id, []))
+                if device_reasons is not None
+                else [],
             }
             append_audit_event(
                 config=config,
