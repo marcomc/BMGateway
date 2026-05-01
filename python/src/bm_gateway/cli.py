@@ -18,6 +18,7 @@ from .archive_sync import (
     sync_bm300_device_archive,
 )
 from .audit_log import append_audit_event
+from .bluetooth_lock import exclusive_bluetooth_operation
 from .bluetooth_recovery import BluetoothRecoveryRequiredError
 from .bm300_multipage import BM300MultipageValidationError, run_bm300_multipage_import
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
@@ -939,6 +940,7 @@ def _handle_protocol_probe_history(
     if runtime is None:
         return 2
     config, devices = runtime
+    state_dir = database_file_path(config).parent.parent
     known_ids = {device.id for device in devices}
     unknown_ids = sorted(set(device_ids) - known_ids)
     if unknown_ids:
@@ -970,19 +972,24 @@ def _handle_protocol_probe_history(
         print(json.dumps(event, sort_keys=True), flush=True)
 
     try:
-        asyncio.run(
-            run_protocol_probe(
-                devices=devices,
-                device_ids=device_ids,
-                adapter=config.bluetooth.adapter,
-                scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
-                connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
-                command_timeout_seconds=command_timeout_seconds,
-                history_page_limit=history_page_limit,
-                commands=commands,
-                emit=emit,
+        with exclusive_bluetooth_operation(
+            config,
+            state_dir=state_dir,
+            operation=f"protocol_probe:{','.join(device_ids) or 'all'}",
+        ):
+            asyncio.run(
+                run_protocol_probe(
+                    devices=devices,
+                    device_ids=device_ids,
+                    adapter=config.bluetooth.adapter,
+                    scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
+                    connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
+                    command_timeout_seconds=command_timeout_seconds,
+                    history_page_limit=history_page_limit,
+                    commands=commands,
+                    emit=emit,
+                )
             )
-        )
     except KeyboardInterrupt:
         print("Protocol probe interrupted.", file=sys.stderr)
         return 130
@@ -1091,17 +1098,22 @@ def _handle_protocol_bm300_multipage_import(
 
     adapter = _active_adapter(config)
     try:
-        payload = run_bm300_multipage_import(
-            device=device,
-            output_database_path=output_db,
-            adapter=adapter,
-            selector_reader=_bm300_selector_reader(
+        with exclusive_bluetooth_operation(
+            config,
+            state_dir=runtime_db.parent.parent,
+            operation=f"protocol_bm300_multipage_import:{device.id}",
+        ):
+            payload = run_bm300_multipage_import(
                 device=device,
+                output_database_path=output_db,
                 adapter=adapter,
-                scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
-                connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
-            ),
-        )
+                selector_reader=_bm300_selector_reader(
+                    device=device,
+                    adapter=adapter,
+                    scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
+                    connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
+                ),
+            )
     except BM300MultipageValidationError as exc:
         failure = {
             "device_id": device_id,

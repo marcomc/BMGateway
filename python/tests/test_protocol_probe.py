@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -513,6 +514,79 @@ def test_cli_protocol_probe_rejects_invalid_bm200_sweep_hex(
     captured = capsys.readouterr()
     assert result == 2
     assert "--sweep-start must be a hex byte between 00 and ff" in captured.err
+
+
+def test_cli_protocol_probe_history_serializes_bluetooth_access(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    devices_path = tmp_path / "devices.toml"
+    devices_path.write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "known"',
+                'type = "bm200"',
+                'name = "Known"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[gateway]",
+                'device_registry = "devices.toml"',
+                "",
+                "[bluetooth]",
+                'adapter = "auto"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runtime_db = tmp_path / "state" / "runtime" / "gateway.db"
+    calls: list[tuple[Path | None, str]] = []
+    captured: dict[str, object] = {}
+
+    @contextmanager
+    def fake_lock(
+        _config: object,
+        *,
+        operation: str,
+        state_dir: Path | None = None,
+        timeout_seconds: float = 600.0,
+        retry_interval_seconds: float = 0.25,
+    ) -> Iterator[dict[str, object]]:
+        _ = (timeout_seconds, retry_interval_seconds)
+        calls.append((state_dir, operation))
+        yield {}
+
+    async def fake_run_protocol_probe(**kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(cli, "database_file_path", lambda _config: runtime_db, raising=False)
+    monkeypatch.setattr(cli, "exclusive_bluetooth_operation", fake_lock, raising=False)
+    monkeypatch.setattr(cli, "run_protocol_probe", fake_run_protocol_probe, raising=False)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "protocol",
+            "probe-history",
+            "--device-id",
+            "known",
+        ]
+    )
+
+    assert result == 0
+    assert calls == [(tmp_path / "state", "protocol_probe:known")]
+    assert captured["device_ids"] == ["known"]
 
 
 def test_cli_protocol_analyze_history_captures_outputs_json_report(

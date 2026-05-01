@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import cast
+from typing import Iterator, cast
 
 import pytest
 from bm_gateway import cli
@@ -312,7 +313,22 @@ def test_cli_bm300_multipage_import_emits_json(
 ) -> None:
     config_path = _write_bm300_example_files(tmp_path)
     output_db = tmp_path / "protocol-import.db"
+    runtime_db = tmp_path / "state" / "runtime" / "gateway.db"
     calls: list[dict[str, object]] = []
+    lock_calls: list[tuple[Path | None, str]] = []
+
+    @contextmanager
+    def fake_lock(
+        _config: object,
+        *,
+        operation: str,
+        state_dir: Path | None = None,
+        timeout_seconds: float = 600.0,
+        retry_interval_seconds: float = 0.25,
+    ) -> Iterator[dict[str, object]]:
+        _ = (timeout_seconds, retry_interval_seconds)
+        lock_calls.append((state_dir, operation))
+        yield {}
 
     def fake_run(
         *,
@@ -341,6 +357,8 @@ def test_cli_bm300_multipage_import_emits_json(
             "overlaps": [],
         }
 
+    monkeypatch.setattr(cli, "database_file_path", lambda _config: runtime_db, raising=False)
+    monkeypatch.setattr(cli, "exclusive_bluetooth_operation", fake_lock, raising=False)
     monkeypatch.setattr(cli, "run_bm300_multipage_import", fake_run, raising=False)
 
     result = cli.main(
@@ -365,5 +383,6 @@ def test_cli_bm300_multipage_import_emits_json(
     assert cast(str, calls[0]["device_id"]) == "bm300_doc"
     assert cast(Path, calls[0]["output_database_path"]) == output_db
     assert cast(str, calls[0]["adapter"]) == "hci0"
+    assert lock_calls == [(tmp_path / "state", "protocol_bm300_multipage_import:bm300_doc")]
     assert payload["device_id"] == "bm300_doc"
     assert payload["output_db"] == str(output_db)
