@@ -44,8 +44,10 @@ def sync_bm200_device_archive(
     page_count: int = 3,
     progress: ArchiveSyncProgress | None = None,
 ) -> dict[str, object]:
-    if device.type != "bm200":
-        raise ValueError(f"archive sync is only implemented for bm200 devices, got {device.type}")
+    if device_driver_type(device.type) != "bm200":
+        raise ValueError(
+            f"archive sync is only implemented for bm200-family devices, got {device.type}"
+        )
 
     adapter = _active_adapter(config)
     history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)

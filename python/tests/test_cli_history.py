@@ -1034,6 +1034,69 @@ def test_sync_bm200_device_archive_imports_bm6_history_fields(
     assert archive[0]["raw_record"] == "52b4c170"
 
 
+def test_sync_bm200_device_archive_accepts_bm200_family_alias(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    device = Device(
+        id="bm6_doc",
+        type="bm6",
+        name="BM6 DOC",
+        mac="AA:BB:CC:DD:EE:06",
+    )
+    database_path = tmp_path / "gateway.db"
+
+    async def fake_read_history(
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        page_count: int,
+        reference_ts: object = None,
+        transport: object = None,
+    ) -> list[BM200HistoryReading]:
+        _ = (
+            address,
+            adapter,
+            timeout_seconds,
+            scan_timeout_seconds,
+            page_count,
+            reference_ts,
+            transport,
+        )
+        return [
+            BM200HistoryReading(
+                ts="2026-04-26T18:00:00+00:00",
+                voltage=13.23,
+                min_crank_voltage=None,
+                event_type=0,
+                soc=76,
+                temperature=23.0,
+                raw_record="52b4c170",
+                page_selector=3,
+                record_index=0,
+                timestamp_quality="estimated",
+            )
+        ]
+
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm200_history", fake_read_history)
+
+    payload = sync_bm200_device_archive(
+        config=config,
+        device=device,
+        database_path=database_path,
+    )
+
+    assert payload["inserted"] == 1
+    archive = fetch_archive_history(database_path, device_id="bm6_doc", limit=1)
+    assert payload["device_id"] == "bm6_doc"
+    assert len(archive) == 1
+    assert archive[0]["raw_record"] == "52b4c170"
+
+
 def test_sync_bm300_device_archive_imports_bm7_history_fields(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
