@@ -82,6 +82,23 @@ def test_install_service_script_preserves_web_language_preference() -> None:
     assert 'f\'language = {string_to_toml(web.get("language", "auto"))}\'' in payload
 
 
+def test_install_service_script_preserves_archive_sync_preferences() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert 'archive_sync = dict(data.get("archive_sync", {}))' in payload
+    assert "[archive_sync]" in payload
+    assert 'archive_sync.get("enabled", True)' in payload
+    assert 'archive_sync.get("periodic_interval_seconds", 64800)' in payload
+    assert 'archive_sync.get("reconnect_min_gap_seconds", 28800)' in payload
+    assert 'archive_sync.get("safety_margin_seconds", 7200)' in payload
+    assert 'archive_sync.get("bm200_max_pages_per_sync", 3)' in payload
+    assert 'archive_sync.get("bm300_enabled", True)' in payload
+    assert 'archive_sync.get("bm300_max_pages_per_sync", 3)' in payload
+
+
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"

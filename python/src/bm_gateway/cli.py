@@ -3,23 +3,46 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
-from typing import Sequence, cast
+from typing import Callable, Sequence, cast
 
 from . import __version__
 from .archive_sync import (
-    plan_archive_backfill,
+    plan_archive_backfill_details,
     sync_archive_backfill_candidates,
     sync_bm200_device_archive,
+    sync_bm300_device_archive,
 )
+from .audit_log import append_audit_event
+from .bluetooth_lock import exclusive_bluetooth_operation
+from .bluetooth_recovery import BluetoothRecoveryRequiredError
+from .bm300_multipage import BM300MultipageValidationError, run_bm300_multipage_import
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
-from .device_registry import Device, load_device_registry, validate_devices
+from .device_registry import Device, device_driver_type, load_device_registry, validate_devices
+from .drivers.bm300 import (
+    BleakBM7HistoryTransport,
+    BM300HistoryReading,
+    default_bm7_history_reference_ts,
+    encode_bm7_history_request_for_byte,
+)
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
+from .protocol_analysis import analyze_history_captures
+from .protocol_probe import (
+    ProtocolProbeCommand,
+    build_bm200_b7_55_deepen_commands,
+    build_bm200_b7_55_matrix_commands,
+    build_bm200_b7_55_sweep_commands,
+    run_protocol_probe,
+    utc_timestamp,
+)
 from .runtime import (
+    _active_adapter,
     build_snapshot,
     database_file_path,
     iterations_from_flags,
@@ -53,6 +76,7 @@ def format_main_help() -> str:
             "  devices  Inspect the configured device registry",
             "  ha       Render the Home Assistant MQTT contract",
             "  history  Inspect persisted and imported device history",
+            "  protocol Probe bounded read-only BM6/BM7 BLE protocol commands",
             "  run      Execute the gateway runtime and persist snapshots",
             "",
             "Run `bm-gateway <command> --help` for command-specific help.",
@@ -132,7 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     history_sync = history_subparsers.add_parser(
         "sync-device",
-        help="Download archive history from a BM200-class device into local storage.",
+        help="Download archive history from a supported device into local storage.",
     )
     history_stats = history_subparsers.add_parser(
         "stats", help="Show storage counts and per-device history ranges."
@@ -170,6 +194,15 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=None,
         help="Override the base directory used for runtime state files.",
+    )
+    history_sync.add_argument(
+        "--page-count",
+        type=int,
+        default=3,
+        help=(
+            "Cumulative history pages to request. BM200/BM6 uses d15505 byte-7; "
+            "BM300 Pro/BM7 uses the validated d15505 byte-7 depth path."
+        ),
     )
     history_compare.add_argument("--device-id", required=True, help="Device identifier.")
     history_compare.add_argument(
@@ -223,11 +256,121 @@ def build_parser() -> argparse.ArgumentParser:
         help="Force a USB OTG frame-image export during this run.",
     )
 
+    protocol_parser = subparsers.add_parser(
+        "protocol", help="Run bounded BM6/BM7 BLE protocol probes."
+    )
+    protocol_subparsers = protocol_parser.add_subparsers(dest="protocol_command")
+    protocol_analyze = protocol_subparsers.add_parser(
+        "analyze-history-captures",
+        help="Analyze saved protocol probe JSONL history captures offline.",
+    )
+    protocol_analyze.add_argument(
+        "--input",
+        action="append",
+        type=Path,
+        default=[],
+        required=True,
+        help="Protocol probe JSONL capture path. May be repeated in chronological order.",
+    )
+    protocol_analyze.add_argument(
+        "--json",
+        action="store_true",
+        help="Print structured JSON output.",
+    )
+    protocol_probe = protocol_subparsers.add_parser(
+        "probe-history",
+        help="Probe known safe live/version/history-candidate commands and print JSONL.",
+    )
+    protocol_probe.add_argument(
+        "--device-id",
+        action="append",
+        default=[],
+        help="Limit the probe to a configured device ID. May be repeated.",
+    )
+    protocol_probe.add_argument(
+        "--command-timeout-seconds",
+        type=float,
+        default=3.5,
+        help="Seconds to wait for notifications after each command.",
+    )
+    protocol_probe.add_argument(
+        "--history-page-limit",
+        type=int,
+        default=1,
+        help="Probe BM200/BM6 d15505 byte-7 history selectors from 01 up to this value.",
+    )
+    bm200_matrix_group = protocol_probe.add_mutually_exclusive_group()
+    bm200_matrix_group.add_argument(
+        "--bm200-b7-55-matrix",
+        action="store_true",
+        help=(
+            "Run the controlled BM200/BM6 d15505 b7=55 matrix, mutating one byte "
+            "from index 3 through 15 except index 7 to 01."
+        ),
+    )
+    bm200_matrix_group.add_argument(
+        "--bm200-b7-55-deepen-byte",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help=(
+            "Run the BM200/BM6 b7=55 baseline plus values "
+            "02,03,04,10,20,40,80,ff for one byte index from 3 through 15 except 7."
+        ),
+    )
+    bm200_matrix_group.add_argument(
+        "--bm200-b7-55-sweep-byte",
+        type=int,
+        default=None,
+        metavar="INDEX",
+        help=(
+            "Run a BM200/BM6 b7=55 sweep for one byte index from 3 through 15. "
+            "Use --sweep-start and --sweep-end to bound the hex value range."
+        ),
+    )
+    protocol_probe.add_argument(
+        "--sweep-start",
+        default="00",
+        help="Inclusive hex start value for --bm200-b7-55-sweep-byte. Default: 00.",
+    )
+    protocol_probe.add_argument(
+        "--sweep-end",
+        default="ff",
+        help="Inclusive hex end value for --bm200-b7-55-sweep-byte. Default: ff.",
+    )
+    protocol_bm300_import = protocol_subparsers.add_parser(
+        "bm300-multipage-import",
+        help="Experimentally import validated BM300 Pro/BM7 byte-7 history into a separate DB.",
+    )
+    protocol_bm300_import.add_argument("--device-id", required=True, help="Device identifier.")
+    protocol_bm300_import.add_argument(
+        "--output-db",
+        type=Path,
+        required=True,
+        help="SQLite path for the controlled import output. Must not be the normal runtime DB.",
+    )
+    protocol_bm300_import.add_argument(
+        "--json",
+        action="store_true",
+        help="Print structured JSON output.",
+    )
+
     return parser
 
 
 def _print_json(payload: object) -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
+
+
+def _parse_hex_byte(value: str, *, option: str) -> int:
+    normalized = value.lower().removeprefix("0x")
+    try:
+        parsed = int(normalized, 16)
+    except ValueError as exc:
+        raise ValueError(f"{option} must be a hex byte between 00 and ff") from exc
+    if parsed < 0 or parsed > 0xFF:
+        raise ValueError(f"{option} must be a hex byte between 00 and ff")
+    return parsed
 
 
 def _load_runtime(
@@ -392,17 +535,26 @@ def _run_cycle(
     publish_discovery: bool,
     state_dir: Path | None,
 ) -> GatewaySnapshot:
-    snapshot = build_snapshot(config, devices)
+    snapshot = build_snapshot(config, devices, state_dir=state_dir)
+    audit_now = datetime.fromisoformat(snapshot.generated_at)
     database_path = database_file_path(config, state_dir=state_dir)
-    archive_backfill_candidates = (
-        plan_archive_backfill(
+    archive_backfill_details = (
+        plan_archive_backfill_details(
+            config=config,
             database_path=database_path,
             snapshot=snapshot,
-            poll_interval_seconds=config.gateway.poll_interval_seconds,
         )
         if config.gateway.reader_mode == "live"
-        else set()
+        else {}
     )
+    archive_backfill_candidates = {
+        device_id: cast(int, candidate["page_count"])
+        for device_id, candidate in archive_backfill_details.items()
+    }
+    archive_backfill_reasons = {
+        device_id: cast(list[str], candidate["reasons"])
+        for device_id, candidate in archive_backfill_details.items()
+    }
     try:
         mqtt_connected = publisher.publish_runtime(
             config=config,
@@ -430,12 +582,51 @@ def _run_cycle(
             config=config,
             devices=devices,
             database_path=database_path,
-            device_ids=archive_backfill_candidates,
+            device_pages=archive_backfill_candidates,
+            device_reasons=archive_backfill_reasons,
         )
     prune_history(
         database_path,
         raw_retention_days=config.retention.raw_retention_days,
         daily_retention_days=config.retention.daily_retention_days,
+    )
+    for reading in snapshot.devices:
+        append_audit_event(
+            config=config,
+            state_dir=state_dir,
+            source="runtime",
+            trigger="automatic",
+            action="device_poll_completed",
+            status="completed" if reading.error_code is None else "failed",
+            now=audit_now,
+            details={
+                "device_id": reading.id,
+                "device_type": reading.type,
+                "connected": reading.connected,
+                "state": reading.state,
+                "error_code": reading.error_code,
+                "error_detail": reading.error_detail,
+                "voltage": reading.voltage,
+                "soc": reading.soc,
+                "rssi": reading.rssi,
+            },
+        )
+    append_audit_event(
+        config=config,
+        state_dir=state_dir,
+        source="runtime",
+        trigger="automatic",
+        action="run_cycle_completed",
+        status="completed",
+        now=audit_now,
+        details={
+            "generated_at": snapshot.generated_at,
+            "devices_total": snapshot.devices_total,
+            "devices_online": snapshot.devices_online,
+            "mqtt_connected": snapshot.mqtt_connected,
+            "archive_backfill_candidates": archive_backfill_candidates,
+            "archive_backfill_reasons": archive_backfill_reasons,
+        },
     )
     return snapshot
 
@@ -465,13 +656,36 @@ def _handle_run(
         runtime = _load_runtime_or_print_errors(path, verbose=verbose)
         if runtime is not None:
             config, devices = runtime
-        last_snapshot = _run_cycle(
-            config=config,
-            devices=devices,
-            publisher=publisher,
-            publish_discovery=publish_discovery,
-            state_dir=state_dir,
-        )
+        try:
+            last_snapshot = _run_cycle(
+                config=config,
+                devices=devices,
+                publisher=publisher,
+                publish_discovery=publish_discovery,
+                state_dir=state_dir,
+            )
+        except BluetoothRecoveryRequiredError as exc:
+            append_audit_event(
+                config=config,
+                state_dir=state_dir,
+                source="runtime",
+                trigger="automatic",
+                action="bluetooth_recovery_requested",
+                status="failed",
+                details={
+                    "error_type": exc.error.__class__.__name__,
+                    "error": str(exc.error) or exc.error.__class__.__name__,
+                    "recovery_attempted": exc.recovery_attempted,
+                    "recovery_detail": exc.recovery_detail,
+                },
+            )
+            message = (
+                "Bluetooth transport entered a fatal state; requested bluetooth.service restart"
+            )
+            if exc.recovery_detail:
+                message += f": {exc.recovery_detail}"
+            print(message, file=sys.stderr)
+            return 1
         if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
             from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive
 
@@ -550,6 +764,7 @@ def _handle_history_sync_device(
     device_id: str,
     as_json: bool,
     state_dir: Path | None,
+    page_count: int,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -562,11 +777,22 @@ def _handle_history_sync_device(
 
     database_path = database_file_path(config, state_dir=state_dir)
     try:
-        payload = sync_bm200_device_archive(
-            config=config,
-            device=device,
-            database_path=database_path,
-        )
+        if device_driver_type(device.type) == "bm300pro":
+            if not config.archive_sync.bm300_enabled:
+                raise ValueError("BM300 archive sync is disabled in settings.")
+            payload = sync_bm300_device_archive(
+                config=config,
+                device=device,
+                database_path=database_path,
+                page_count=page_count,
+            )
+        else:
+            payload = sync_bm200_device_archive(
+                config=config,
+                device=device,
+                database_path=database_path,
+                page_count=page_count,
+            )
     except Exception as exc:
         failure = {
             "device_id": device_id,
@@ -699,6 +925,238 @@ def _handle_history_prune(
     return 0
 
 
+def _handle_protocol_probe_history(
+    path: Path,
+    *,
+    verbose: bool,
+    device_ids: Sequence[str],
+    command_timeout_seconds: float,
+    history_page_limit: int,
+    bm200_b7_55_matrix: bool,
+    bm200_b7_55_deepen_byte: int | None,
+    bm200_b7_55_sweep_byte: int | None,
+    sweep_start: str,
+    sweep_end: str,
+) -> int:
+    if history_page_limit < 1 or history_page_limit > 255:
+        print("--history-page-limit must be between 1 and 255.", file=sys.stderr)
+        return 2
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, devices = runtime
+    state_dir = database_file_path(config).parent.parent
+    known_ids = {device.id for device in devices}
+    unknown_ids = sorted(set(device_ids) - known_ids)
+    if unknown_ids:
+        for device_id in unknown_ids:
+            print(f"Unknown device: {device_id}", file=sys.stderr)
+        return 2
+    commands: tuple[ProtocolProbeCommand, ...] | None = None
+    if bm200_b7_55_matrix:
+        commands = build_bm200_b7_55_matrix_commands()
+    elif bm200_b7_55_deepen_byte is not None:
+        try:
+            commands = build_bm200_b7_55_deepen_commands(byte_index=bm200_b7_55_deepen_byte)
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    elif bm200_b7_55_sweep_byte is not None:
+        try:
+            commands = build_bm200_b7_55_sweep_commands(
+                byte_index=bm200_b7_55_sweep_byte,
+                start=_parse_hex_byte(sweep_start, option="--sweep-start"),
+                end=_parse_hex_byte(sweep_end, option="--sweep-end"),
+            )
+        except ValueError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+
+    def emit(event: dict[str, object]) -> None:
+        event.setdefault("ts", utc_timestamp())
+        print(json.dumps(event, sort_keys=True), flush=True)
+
+    try:
+        with exclusive_bluetooth_operation(
+            config,
+            state_dir=state_dir,
+            operation=f"protocol_probe:{','.join(device_ids) or 'all'}",
+        ):
+            asyncio.run(
+                run_protocol_probe(
+                    devices=devices,
+                    device_ids=device_ids,
+                    adapter=config.bluetooth.adapter,
+                    scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
+                    connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
+                    command_timeout_seconds=command_timeout_seconds,
+                    history_page_limit=history_page_limit,
+                    commands=commands,
+                    emit=emit,
+                )
+            )
+    except KeyboardInterrupt:
+        print("Protocol probe interrupted.", file=sys.stderr)
+        return 130
+    return 0
+
+
+def _handle_protocol_analyze_history_captures(
+    *,
+    inputs: Sequence[Path],
+    as_json: bool,
+) -> int:
+    missing = [path for path in inputs if not path.exists()]
+    if missing:
+        for path in missing:
+            print(f"Capture not found: {path}", file=sys.stderr)
+        return 2
+    report = analyze_history_captures(list(inputs))
+    if as_json:
+        _print_json(report)
+        return 0
+    print(f"Analyzed {len(report['captures'])} capture file(s).")
+    for command in report["commands"]:
+        print(
+            f"{command['selector']}: records={command['record_count']} "
+            f"plausible={command['plausible_count']} markers={command['marker_count']} "
+            f"events={command['event_counts']}"
+        )
+    if report["overlaps"]:
+        print("Overlaps:")
+        for overlap in report["overlaps"]:
+            print(
+                f"{overlap['selector']}: {overlap['classification']} "
+                f"old_in_new={overlap['old_in_new_offset']} "
+                f"best_run={overlap['best_run_length']} "
+                f"old_offset={overlap['best_run_old_offset']} "
+                f"new_offset={overlap['best_run_new_offset']}"
+            )
+    if report["selector_recommendations"]:
+        print("Stitch recommendations:")
+        for recommendation in report["selector_recommendations"]:
+            print(
+                f"{recommendation['selector']}: {recommendation['status']} "
+                f"({recommendation['reason']})"
+            )
+    return 0
+
+
+def _bm300_selector_reader(
+    *,
+    device: Device,
+    adapter: str,
+    scan_timeout_seconds: float,
+    connect_timeout_seconds: float,
+) -> Callable[[int], list[BM300HistoryReading]]:
+    reference_ts = default_bm7_history_reference_ts()
+    history_timeout_seconds = max(float(connect_timeout_seconds) * 4.0, 180.0)
+    transport = BleakBM7HistoryTransport()
+
+    def read_selector(selector: int) -> list[BM300HistoryReading]:
+        return asyncio.run(
+            transport.read_history_request(
+                address=device.mac,
+                adapter=adapter,
+                timeout_seconds=history_timeout_seconds,
+                scan_timeout_seconds=float(scan_timeout_seconds),
+                reference_ts=reference_ts,
+                request=encode_bm7_history_request_for_byte(
+                    byte_index=7,
+                    selector_value=selector,
+                ),
+                page_selector=selector,
+            )
+        )
+
+    return read_selector
+
+
+def _handle_protocol_bm300_multipage_import(
+    path: Path,
+    *,
+    verbose: bool,
+    device_id: str,
+    output_db: Path,
+    as_json: bool,
+) -> int:
+    runtime = _load_runtime_or_print_errors(path, verbose=verbose)
+    if runtime is None:
+        return 2
+    config, devices = runtime
+    device = next((item for item in devices if item.id == device_id), None)
+    if device is None:
+        print(f"Unknown device: {device_id}", file=sys.stderr)
+        return 2
+    if device_driver_type(device.type) != "bm300pro":
+        print(f"Device {device_id} is not a BM300 Pro/BM7 device.", file=sys.stderr)
+        return 2
+
+    runtime_db = database_file_path(config).resolve()
+    if output_db.resolve() == runtime_db:
+        print(
+            "Experimental BM300 multipage import refuses to write to the normal runtime "
+            "database. Use --output-db with a separate SQLite path.",
+            file=sys.stderr,
+        )
+        return 2
+
+    adapter = _active_adapter(config)
+    try:
+        with exclusive_bluetooth_operation(
+            config,
+            state_dir=runtime_db.parent.parent,
+            operation=f"protocol_bm300_multipage_import:{device.id}",
+        ):
+            payload = run_bm300_multipage_import(
+                device=device,
+                output_database_path=output_db,
+                adapter=adapter,
+                selector_reader=_bm300_selector_reader(
+                    device=device,
+                    adapter=adapter,
+                    scan_timeout_seconds=config.bluetooth.scan_timeout_seconds,
+                    connect_timeout_seconds=config.bluetooth.connect_timeout_seconds,
+                ),
+            )
+    except BM300MultipageValidationError as exc:
+        failure = {
+            "device_id": device_id,
+            "imported": False,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc) or exc.__class__.__name__,
+            **exc.report,
+        }
+        if as_json:
+            _print_json(failure)
+        else:
+            print(failure["error"], file=sys.stderr)
+        return 1
+    except Exception as exc:
+        failure = {
+            "device_id": device_id,
+            "imported": False,
+            "error_type": exc.__class__.__name__,
+            "error": str(exc) or exc.__class__.__name__,
+        }
+        if as_json:
+            _print_json(failure)
+        else:
+            print(failure["error"], file=sys.stderr)
+        return 1
+
+    payload["imported"] = True
+    if as_json:
+        _print_json(payload)
+        return 0
+
+    print(
+        f"Imported experimental BM300 multipage history for {device_id}: "
+        f"inserted={payload['inserted']} validated_depth={payload['validated_depth']}"
+    )
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args_list = list(argv) if argv is not None else sys.argv[1:]
     if not args_list or args_list == ["--help"] or args_list == ["-h"]:
@@ -770,6 +1228,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             device_id=args.device_id,
             as_json=bool(args.json),
             state_dir=args.state_dir,
+            page_count=args.page_count,
         )
     if args.command == "history" and args.history_command == "stats":
         return _handle_history_stats(
@@ -784,6 +1243,33 @@ def main(argv: Sequence[str] | None = None) -> int:
             verbose=bool(args.verbose),
             as_json=bool(args.json),
             state_dir=args.state_dir,
+        )
+
+    if args.command == "protocol" and args.protocol_command == "probe-history":
+        return _handle_protocol_probe_history(
+            args.config,
+            verbose=bool(args.verbose),
+            device_ids=args.device_id,
+            command_timeout_seconds=args.command_timeout_seconds,
+            history_page_limit=args.history_page_limit,
+            bm200_b7_55_matrix=bool(args.bm200_b7_55_matrix),
+            bm200_b7_55_deepen_byte=args.bm200_b7_55_deepen_byte,
+            bm200_b7_55_sweep_byte=args.bm200_b7_55_sweep_byte,
+            sweep_start=args.sweep_start,
+            sweep_end=args.sweep_end,
+        )
+    if args.command == "protocol" and args.protocol_command == "analyze-history-captures":
+        return _handle_protocol_analyze_history_captures(
+            inputs=args.input,
+            as_json=bool(args.json),
+        )
+    if args.command == "protocol" and args.protocol_command == "bm300-multipage-import":
+        return _handle_protocol_bm300_multipage_import(
+            args.config,
+            verbose=bool(args.verbose),
+            device_id=args.device_id,
+            output_db=args.output_db,
+            as_json=bool(args.json),
         )
 
     if args.command == "run":

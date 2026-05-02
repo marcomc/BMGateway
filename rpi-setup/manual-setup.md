@@ -64,12 +64,50 @@ Wi-Fi or Bluetooth, so USB radios are required on that host.
 
 ## System Packages
 
-Install the packages needed for Python development and Bluetooth tooling:
+The reproducible setup command is the bootstrap script in the next section.
+It installs the system packages needed by the runtime, web UI, service helper,
+and USB OTG helper path. If you are installing packages manually before running
+individual lower-level scripts, install the same baseline:
 
 ```bash
 sudo apt update
-sudo apt install -y bluetooth bluez curl git make
+sudo apt install -y \
+  bluetooth \
+  bluez \
+  ca-certificates \
+  chromium \
+  curl \
+  dosfstools \
+  git \
+  kmod \
+  libjpeg-dev \
+  make \
+  python3 \
+  python3-dev \
+  python3-venv \
+  util-linux \
+  zlib1g-dev
 ```
+
+Package purpose:
+
+| Package | Used for |
+| --- | --- |
+| `bluetooth`, `bluez` | Bluetooth service, `bluetoothctl`, and BLE polling |
+| `ca-certificates`, `curl` | Downloading the `uv` installer over HTTPS |
+| `git`, `make`, `python3`, `python3-venv` | Checkout and packaged Python runtime installation |
+| `chromium` | USB OTG frame-image screenshots and Diagnostics frame previews |
+| `dosfstools` | `mkfs.vfat` for USB OTG backing images |
+| `kmod` | `modprobe libcomposite` for USB gadget setup |
+| `libjpeg-dev`, `python3-dev`, `zlib1g-dev` | Native build headers for optional image dependencies |
+| `util-linux` | `findmnt`, `mount`, and `umount` used by USB OTG helpers |
+
+Optional integrations install their own extra packages when enabled:
+
+| Option | Extra package |
+| --- | --- |
+| `--enable-glances` | `glances` |
+| `--enable-cockpit` | `cockpit` |
 
 Verify the Bluetooth adapter is visible:
 
@@ -119,6 +157,10 @@ curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/boot
 
 The bootstrap script intentionally installs the standalone runtime through
 `make install`, not `make install-dev`.
+
+Do not use `--skip-apt` for a fresh Raspberry Pi. That option is only for
+controlled rebuilds where the packages listed in [System Packages](#system-packages)
+are already installed by another provisioning layer.
 
 By default it also:
 
@@ -174,6 +216,22 @@ This creates:
 - a user-facing web command at `~/.local/bin/bm-gateway-web`
 - a config template at `~/.config/bm-gateway/config.toml` if missing
 - a devices registry at `~/.config/bm-gateway/devices.toml` if missing
+
+## Structured Audit Logs
+
+The runtime keeps machine-readable audit logs under the state directory:
+
+```text
+/var/lib/bm-gateway/runtime/audit/YYYY-MM-DD.jsonl
+```
+
+These logs are newline-delimited JSON and are intended for diagnosing gateway
+behavior over time, including automatic polling, per-device BLE poll outcomes,
+archive sync activity, manual history sync requests, and key web-managed
+configuration or device changes.
+
+Retention is enforced automatically by the application: files older than
+90 days are pruned as new audit events are written.
 
 ## Optional: Install Glances for Home Assistant
 
@@ -376,8 +434,11 @@ the bootstrap installer without that skip option, or run
 `sudo rpi-setup/scripts/install-service.sh` from the checkout without
 `--skip-usb-otg-tools`, to install:
 
+- `chromium`
 - `dosfstools`
+- `kmod`
 - `libjpeg-dev`, `python3-dev`, and `zlib1g-dev`
+- `util-linux`
 - `/usr/local/bin/bm-gateway-usb-otg-boot-mode`
 - `/usr/local/bin/bm-gateway-usb-otg-frame-test`
 - the scoped sudoers entries used by the web actions and runtime exporter

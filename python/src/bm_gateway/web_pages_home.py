@@ -98,6 +98,11 @@ def home_overview_scroller_html(
         color_key = shared._device_color_key(device, fallback_index=index)
         device_accent = shared._device_accent_color(device, fallback_index=index)
         device_id = str(device.get("id", ""))
+        state = str(device.get("state", "unknown"))
+        error_code = str(device.get("error_code") or "").strip() or None
+        connected = bool(device.get("connected", True))
+        status_kind = shared._status_kind(state, error_code=error_code, connected=connected)
+        status_class = f"status-{status_kind}"
         voltage_value = shared._format_number(device.get("voltage"), digits=2, suffix="V")
         voltage_text = html.escape(voltage_value)
         temperature_text = html.escape(
@@ -128,7 +133,7 @@ def home_overview_scroller_html(
             "</div>"
             f"{badge_stack_markup}"
             "</div>"
-            '<div class="home-orb-center">'
+            f'<div class="home-orb-center {status_class}">'
             f'<div class="battery-card-gauge-value">{gauge_value}</div>'
             f"{circle_status}"
             f'<div class="battery-card-gauge-label">{temperature_text}</div>'
@@ -145,7 +150,8 @@ def home_overview_scroller_html(
         device_href = f"/device?device_id={quote(device_id)}"
         device_cards.append(
             f"<article class='home-overview-card home-overview-orb-shell'>"
-            f"<a class='home-overview-card-link home-overview-orb tone-card {color_key}' "
+            f"<a class='home-overview-card-link home-overview-orb tone-card {color_key} "
+            f"{status_class}' "
             f"href='{device_href}' aria-label='Open details for {device_name_text}' "
             f"style='{shared._tone_card_style_for_device(device, fallback_index=index)}'>"
             f"{gauge_markup}"

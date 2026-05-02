@@ -43,6 +43,7 @@ Main runtime CLI for:
 - Home Assistant contract and discovery export
 - runtime execution
 - history inspection and pruning
+- bounded BM6/BM7 protocol probes for live debugging
 
 ### `bm-gateway-web`
 
@@ -71,6 +72,7 @@ Runtime persistence uses:
 
 - `runtime/latest_snapshot.json`
 - `runtime/gateway.db`
+- `runtime/audit/YYYY-MM-DD.jsonl`
 
 History surfaces include:
 
@@ -81,6 +83,11 @@ History surfaces include:
 
 Archive-history merge/backfill plumbing exists, but BM6-family onboard archive
 retrieval is still incomplete on real hardware.
+
+The audit log is newline-delimited JSON intended for machine correlation during
+operations debugging. It records automatic polling cycles, per-device poll
+results, archive-sync activity, and key manual web-managed actions, and prunes
+files older than 90 days automatically.
 
 ## Device Registry Coverage
 
@@ -102,6 +109,8 @@ Use these as the canonical references instead of repeating the same guidance:
   [../docs/2026-04-19-bm6-bm200-integration-notes.md](../docs/2026-04-19-bm6-bm200-integration-notes.md)
 - BM300 Pro/BM7 notes:
   [../docs/2026-04-25-bm300-bm7-integration-notes.md](../docs/2026-04-25-bm300-bm7-integration-notes.md)
+- Protocol probe tools:
+  [../docs/protocol-probe-tools.md](../docs/protocol-probe-tools.md)
 - Raspberry Pi installation:
   [../rpi-setup/manual-setup.md](../rpi-setup/manual-setup.md)
 - Home Assistant setup:

@@ -163,7 +163,7 @@ def test_live_mode_run_uses_simulated_bm200_reader(
             voltage=12.91,
             soc=77,
             status_code=2,
-            state="normal",
+            state="charging",
         )
 
     monkeypatch.setattr("bm_gateway.runtime._read_live_bm200", fake_live_reader)
@@ -190,4 +190,4 @@ def test_live_mode_run_uses_simulated_bm200_reader(
     finally:
         connection.close()
 
-    assert row == (12.91, 77, "normal")
+    assert row == (12.91, 77, "charging")

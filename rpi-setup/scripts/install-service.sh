@@ -134,8 +134,17 @@ chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
-  apt-get update
-  apt-get install -y chromium dosfstools libjpeg-dev python3-dev zlib1g-dev
+  usb_otg_packages=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
+  missing_usb_otg_packages=()
+  for package in "${usb_otg_packages[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -Fxq 'install ok installed'; then
+      missing_usb_otg_packages+=("${package}")
+    fi
+  done
+  if [[ "${#missing_usb_otg_packages[@]}" -gt 0 ]]; then
+    apt-get update
+    apt-get install -y "${missing_usb_otg_packages[@]}"
+  fi
   install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-boot-mode.sh" \
     "${usb_otg_boot_mode_path}"
   install -m 0755 "${project_root}/rpi-setup/scripts/usb-otg-frame-test.sh" \
@@ -196,6 +205,7 @@ mqtt = dict(data.get("mqtt", {}))
 home_assistant = dict(data.get("home_assistant", {}))
 web = dict(data.get("web", {}))
 usb_otg = dict(data.get("usb_otg", {}))
+archive_sync = dict(data.get("archive_sync", {}))
 retention = dict(data.get("retention", {}))
 
 if str(gateway.get("name", "")).startswith("__"):
@@ -261,12 +271,21 @@ payload = "\n".join(
         f'image_format = {string_to_toml(usb_otg.get("image_format", "jpeg"))}',
         f'appearance = {string_to_toml(usb_otg.get("appearance", "light"))}',
         f'refresh_interval_seconds = {int(usb_otg.get("refresh_interval_seconds", 0))}',
-        f'overview_devices_per_image = {int(usb_otg.get("overview_devices_per_image", 5))}',
+        f'overview_devices_per_image = {int(usb_otg.get("overview_devices_per_image", 3))}',
         f'export_battery_overview = {bool_to_toml(bool(usb_otg.get("export_battery_overview", True)))}',
         f'export_fleet_trend = {bool_to_toml(bool(usb_otg.get("export_fleet_trend", True)))}',
         f'fleet_trend_metrics = {string_sequence_to_toml(usb_otg.get("fleet_trend_metrics", ["soc"]))}',
         f'fleet_trend_range = {string_to_toml(usb_otg.get("fleet_trend_range", "7"))}',
         f'fleet_trend_device_ids = {string_sequence_to_toml(usb_otg.get("fleet_trend_device_ids", []))}',
+        "",
+        "[archive_sync]",
+        f'enabled = {bool_to_toml(bool(archive_sync.get("enabled", True)))}',
+        f'periodic_interval_seconds = {int(archive_sync.get("periodic_interval_seconds", 64800))}',
+        f'reconnect_min_gap_seconds = {int(archive_sync.get("reconnect_min_gap_seconds", 28800))}',
+        f'safety_margin_seconds = {int(archive_sync.get("safety_margin_seconds", 7200))}',
+        f'bm200_max_pages_per_sync = {int(archive_sync.get("bm200_max_pages_per_sync", 3))}',
+        f'bm300_enabled = {bool_to_toml(bool(archive_sync.get("bm300_enabled", True)))}',
+        f'bm300_max_pages_per_sync = {int(archive_sync.get("bm300_max_pages_per_sync", 3))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',

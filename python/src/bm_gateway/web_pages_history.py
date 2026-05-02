@@ -8,7 +8,136 @@ from urllib.parse import quote
 
 from . import display_version
 from . import web_pages as shared
-from .web_ui import app_document, chart_card, chart_script, section_card, summary_card, top_header
+from .web_ui import (
+    app_document,
+    banner_strip,
+    button,
+    chart_card,
+    chart_script,
+    section_card,
+    summary_card,
+    top_header,
+)
+
+
+def render_history_sync_pending_html(
+    *, theme_preference: str = "system", language: str = "en"
+) -> str:
+    polling_script = """
+<script>
+(() => {
+  const bar = document.getElementById("history-sync-progress-bar");
+  const percentValue = document.getElementById("history-sync-percent");
+  const statusValue = document.getElementById("history-sync-status-text");
+  const detailValue = document.getElementById("history-sync-detail-text");
+  const completedValue = document.getElementById("history-sync-completed");
+  const totalValue = document.getElementById("history-sync-total");
+  const update = (payload) => {
+    const total = Number(payload.total || 0);
+    const completed = Number(payload.completed || 0);
+    const percent = total > 0 ? Math.max(0, Math.min(100, Number(payload.percent || 0))) : 0;
+    if (bar) {
+      bar.style.width = `${percent}%`;
+      bar.setAttribute("aria-valuenow", String(Math.round(percent)));
+    }
+    if (percentValue) {
+      percentValue.textContent = total > 0 ? `${Math.round(percent)}%` : "0%";
+    }
+    if (statusValue && payload.message) {
+      statusValue.textContent = payload.message;
+    }
+    if (detailValue && payload.detail) {
+      detailValue.textContent = payload.detail;
+    }
+    if (completedValue) {
+      completedValue.textContent = String(completed);
+    }
+    if (totalValue) {
+      totalValue.textContent = String(total);
+    }
+  };
+  const poll = async () => {
+    try {
+      const response = await fetch("/api/history-sync/status", { cache: "no-store" });
+      if (response.ok) {
+        const payload = await response.json();
+        update(payload);
+        if (payload.status === "completed" || payload.status === "failed") {
+          const params = new URLSearchParams();
+          if (payload.device_id) {
+            params.set("device_id", payload.device_id);
+          }
+          params.set("message", payload.redirect_message || payload.message || "");
+          window.setTimeout(() => {
+            window.location.replace("/history?" + params.toString());
+          }, 900);
+          return;
+        }
+      }
+    } catch (_error) {
+    }
+    window.setTimeout(poll, 900);
+  };
+  poll();
+})();
+</script>
+"""
+    progress_bar = (
+        '<div class="soc-progress" style="margin-top:1rem">'
+        '<div class="soc-progress-header">'
+        '<span class="settings-label">Progress</span>'
+        '<span class="soc-progress-value" id="history-sync-percent">0%</span>'
+        "</div>"
+        '<div class="soc-progress-track" role="progressbar" aria-valuemin="0" '
+        'aria-valuemax="100" aria-valuenow="0">'
+        '<div class="soc-progress-fill" id="history-sync-progress-bar" '
+        'style="width:0%; background:var(--accent-green)"></div>'
+        "</div>"
+        "</div>"
+    )
+    body = top_header(title="History Sync") + section_card(
+        title="History import",
+        body=(
+            '<div class="metrics-grid compact-overview-grid">'
+            + summary_card(
+                "Status",
+                "Preparing history download",
+                subvalue="History records are being downloaded from the selected monitor.",
+                classes="compact-summary",
+            )
+            + (
+                '<div class="summary-card compact-summary">'
+                '<div class="label">Records</div>'
+                '<div class="value"><span id="history-sync-completed">0</span> / '
+                '<span id="history-sync-total">0</span></div>'
+                '<div class="subvalue">Updated automatically while waiting.</div>'
+                "</div>"
+            )
+            + "</div>"
+            + progress_bar
+            + (
+                '<div class="settings-row" style="margin-top:1rem">'
+                '<div class="settings-label">History import status</div>'
+                '<div class="settings-value" id="history-sync-status-text">'
+                "Preparing history download"
+                "</div>"
+                "</div>"
+            )
+            + '<div class="section-subtitle" id="history-sync-detail-text" '
+            'style="margin-top:0.75rem">'
+            + "This page updates automatically and returns to history when the import finishes."
+            + "</div>"
+        ),
+    )
+    return app_document(
+        title="History Sync",
+        body=body,
+        active_nav="history",
+        version_label=display_version(),
+        theme_preference=theme_preference,
+        language=language,
+        script=polling_script,
+    )
 
 
 def render_device_html(
@@ -175,6 +304,7 @@ def render_history_html(
     default_chart_range: str = "7",
     default_chart_metric: str = "soc",
     language: str = "en",
+    message: str = "",
 ) -> str:
     version_label = display_version()
     resolved_default_chart_range = shared._sanitize_default_chart_range(default_chart_range)
@@ -195,11 +325,22 @@ def render_history_html(
     )
     history_color = shared._device_accent_color(selected_device)
     history_series = str(selected_device.get("name") or device_id)
+    escaped_device_id_value = html.escape(device_id, quote=True)
+    history_sync_action = (
+        '<form method="post" action="/actions/sync-device-history">'
+        f'<input type="hidden" name="device_id" value="{escaped_device_id_value}">'
+        f"{button('Download History', kind='secondary')}"
+        "</form>"
+        if device_id
+        else ""
+    )
+    banner = banner_strip(html.escape(message), kind="warning") if message else ""
     body = (
         top_header(
             title="History",
             eyebrow="History",
         )
+        + banner
         + shared._history_device_selector_html(
             configured_devices=configured_devices,
             selected_device_id=device_id,
@@ -230,6 +371,7 @@ def render_history_html(
             default_metric=default_chart_metric,
             legend=[(history_series, history_color)],
             show_markers=show_chart_markers,
+            actions_html=history_sync_action,
         )
         + sections
     )
@@ -251,6 +393,7 @@ def _render_history_sections(
     daily_history: list[dict[str, object]],
     monthly_history: list[dict[str, object]],
 ) -> str:
+    visible_raw_history = raw_history[:300]
     raw_rows = "\n".join(
         "<tr>"
         f"<td>{shared._escape_cell(row['ts'])}</td>"
@@ -260,7 +403,7 @@ def _render_history_sections(
         f"<td>{shared._escape_cell(row['state'])}</td>"
         f"<td>{_error_cell(row)}</td>"
         "</tr>"
-        for row in raw_history
+        for row in visible_raw_history
     )
     daily_rows = "\n".join(
         "<tr>"

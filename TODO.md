@@ -2,16 +2,63 @@
 
 ## Next Steps
 
-- Complete BM6-family onboard-history retrieval.
-  The current devices advertise and poll as BM6-family monitors, but live
-  archive probes do not yet answer the existing BM200 history-count/download
-  commands. Finish the device-memory fetch path before treating reconnect
-  backfill as shipped on real hardware.
+- Expand BM6-family archive-history recovery beyond the verified bounded sync.
+  BM200/BM6 archive import now reads cumulative `d15505` page counts, stores
+  voltage, SoC, temperature, raw record, page selector, record index, and
+  timestamp quality, and runs through periodic/reconnect backfill plus a
+  per-device History page action. Manual BM200/BM6 sync now requests 85
+  cumulative pages, matching the 30-day retention estimate, but the latest
+  `battery_alpha` byte-7 sweep saturated around 1511-1522 records, or about
+  50 hours. The controlled `d15505` matrix and full sweeps found byte index
+  `4` as the only strong BM200/BM6 segment or range selector candidate:
+  `b4=09..28`, `2f..40`, and `47..54` returned distinct non-empty groups,
+  with `b4=09` returning 7998 records and older raw boundaries. Byte `6`
+  returned the same current window for every value and is not useful on BM200.
+  Byte `7` remains the cumulative page-count selector: `01..05` returned
+  256-record increments, `06..76` saturated on the current window, and higher
+  values mostly alternated empty odd selectors with saturated even selectors
+  before `98..ff` saturated again. The first raw-overlap pass showed `b4=02`
+  is only a suffix of the current byte-7 window, while representative groups
+  `b4=09`, `b4=2f`, and `b4=47` do not overlap the current window or each
+  other with long exact record runs. A later shift comparison showed `b7=55`
+  moved by 93 records, `b4=0a` and `b4=10` moved by 90 records, `b4=47`
+  moved by 91 records, and `b4=2f` had a long 4490-record overlap aligned to
+  the same cadence but with an ambiguous old prefix. Next work is implementing
+  overlap-based stitching and timestamp anchoring for byte-4 windows, starting
+  from the clean rolling selectors. The byte-4 payload decodes as meaningful
+  BM6/BM900-style and BM7/BM300-style `vvv ss tt p` readings, but raw values
+  are not unique enough for deduplication by equality alone; stable batteries
+  repeat identical records, and zero-like event markers still need to remain
+  raw. Focused byte-4/byte-7 matrix probing supports the model that byte `4`
+  selects a history window or bank and byte `7` selects cumulative depth inside
+  that window for at least `b4=0a` and `b4=10`, but some selectors returned
+  empty transiently. Pause byte-4 import work until the gateway has collected a
+  few weeks of local samples. During the pause, keep importing only the
+  already-supported byte-7 current-window BM200/BM6 history into the main DB.
+  After enough samples exist, use `bm-gateway protocol analyze-history-captures`
+  and the byte-4 profiling proposal as the offline gate before importing byte-4
+  ranges. Also add richer archive-sync status reporting beyond the manual
+  progress page. Keep the final `p` nibble raw until cranking or charging-test
+  events explain it.
+  Reference:
+  [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
+  [docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md](docs/architecture/2026-04-27-bm200-byte4-profiling-and-stitch-proposal.md)
 - Complete BM300 Pro/BM7 feature parity beyond live current-state polling.
-  Live voltage, SoC, temperature, RSSI, and device state now use a dedicated
-  BM300 Pro driver. Onboard history, firmware version reads, cranking/charging
-  event records, and rapid acceleration/deceleration persistence still need
-  protocol capture or live verification before they should ship.
+  Live voltage, SoC, temperature, RSSI, device state, and bounded archive
+  import now use a dedicated BM300 Pro driver. Automatic BM7 archive import is
+  now uses the validated byte-7 depth path in both the standard sync command
+  and automatic backfill. Live validation on `bm300_alpha` proved cumulative
+  overlap across `b7=01`, `02`, and `03` with exact 256-record then 512-record
+  overlap, and the standard BM300 import now covers 769 records, about
+  25 hours 38 minutes, on that device. Remaining work is extending beyond the
+  current depth-3 validated window, proving whether selectors above `03` stay
+  cumulative, and profiling whether `byte 6` is a bank/window selector needed
+  to approach the claimed 72-day retention.
+  Remaining work also includes semantic parsing of raw `d15501` version
+  payloads, cranking/charging event records, the final archive `p` nibble, and
+  rapid acceleration/deceleration persistence.
+  Reference:
+  [docs/architecture/2026-04-30-bm300-byte7-multipage-investigation-plan.md](docs/architecture/2026-04-30-bm300-byte7-multipage-investigation-plan.md)
 - Add richer degradation analytics beyond the current yearly summaries and
   rolling comparison windows.
 - Add MQTT birth/LWT republish handling beyond the current availability and
@@ -149,20 +196,51 @@
 
 - [ ] Add optional live BLE monitoring sessions for battery monitors.
   Keep periodic Raspberry Pi polling as the default appliance behavior, but add
-  an explicit user-controlled live mode that holds a BLE connection open and
-  streams voltage, temperature, and other readings at roughly the cadence used
-  by the original mobile app.
+  an explicit user-controlled live mode that holds a BLE connection open when
+  the user presses a web UI live toggle. This should mimic the original mobile
+  app's in-range behavior only on demand: while active, BMGateway owns the BLE
+  link and may prevent the phone app or another BLE client from connecting.
   Reference:
   - [docs/architecture/2026-04-24-optional-live-ble-monitoring-proposal.md](docs/architecture/2026-04-24-optional-live-ble-monitoring-proposal.md)
   Actions:
-  - identify the BLE read or notification path used by the original app for
-    near-real-time updates
+  - reuse the current scan/connect/notify/write procedure: scan configured MAC,
+    connect with `BleakClient`, subscribe to `FFF4`, write encrypted `d15507`
+    poll requests to `FFF3`, parse valid `d15507` notifications, then stop
+    notify and disconnect on session end
+  - keep BM6 and BM7 protocol differences explicit: BM6 key
+    `leagend\xff\xfe0100009` with write-without-response, BM7 key
+    `leagend\xff\xfe010000@` with write-with-response
   - add a bounded live-session service with start, stop, timeout, and
     cancellation behavior
+  - add ownership locking so scheduled polling skips a device while a live
+    session is holding its BLE connection
   - expose live readings to the web UI without refreshing the whole page
-  - warn users that live mode may block the original phone app or other BLE
-    clients while BMGateway holds the connection
+  - add a per-device web button to start or stop live mode and warn users that
+    the original phone app or other BLE clients may be blocked while BMGateway
+    holds the connection
   - keep normal unattended monitoring on the slower periodic polling loop
     unless live mode is explicitly enabled
   - decide whether live samples remain transient, update latest state, or are
     downsampled before persistence and MQTT publishing
+  - validate on real BM200 and BM300 Pro devices that the live session blocks
+    or releases the original app as expected
+
+- [ ] Expand archive-history backfill beyond the verified bounded BM200 path.
+  BM200/BM6 automatic periodic and reconnect-triggered import uses a
+  conservative configured page cap, while manual per-device sync on the History
+  page requests the full 85-page 30-day retention estimate. BM300 Pro/BM7
+  archive import is also implemented behind a separate opt-in gate using byte-6
+  selector `01`. Validate the full BM200/BM6 page-count result before claiming
+  complete 30-day recovery, and validate BM300 Pro/BM7 byte-6 selectors beyond
+  `01` before claiming full 72-day recovery.
+  Reference:
+  - [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
+  Actions:
+  - add stronger raw-sequence overlap timestamp alignment for long absences and
+    imports that cross service restarts
+  - report last archive-sync time, duplicate count, and failure reason in
+    persistent per-device status output
+  - validate higher BM200/BM6 cumulative `d15505` page counts toward the
+    advertised 30-day retention
+  - validate higher BM300 Pro/BM7 byte-6 `d15505` selector counts toward the
+    advertised 72-day retention

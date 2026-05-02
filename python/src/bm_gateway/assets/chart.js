@@ -187,6 +187,71 @@
       : Math.max((maxValue - minValue) * 0.18, 1.5);
     return {{ min: minValue - padding, max: maxValue + padding }};
   }}
+  function displayPointLimit(rangeValue) {{
+    if (rangeValue === "raw" || rangeValue === "1") {{
+      return 1200;
+    }}
+    if (rangeValue === "3") {{
+      return 900;
+    }}
+    if (rangeValue === "5" || rangeValue === "7") {{
+      return 720;
+    }}
+    return 420;
+  }}
+  function compactPointsForDisplay(points, metric, rangeValue) {{
+    const usable = points.filter((point) => typeof point[metric] === "number");
+    const limit = displayPointLimit(rangeValue);
+    if (usable.length <= limit) {{
+      return points;
+    }}
+    const sorted = [...points].sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
+    const timed = sorted
+      .map((point) => ({{ point, time: parseTime(point.ts) }}))
+      .filter((entry) => entry.time !== null && typeof entry.point[metric] === "number");
+    if (timed.length <= limit) {{
+      return sorted;
+    }}
+    const start = timed[0].time;
+    const end = timed[timed.length - 1].time;
+    const span = Math.max(end - start, 1);
+    const bucketCount = Math.max(1, Math.floor(limit / 2));
+    const buckets = Array.from({{ length: bucketCount }}, () => []);
+    for (const entry of timed) {{
+      const bucketIndex = Math.min(
+        bucketCount - 1,
+        Math.max(0, Math.floor(((entry.time - start) / span) * bucketCount)),
+      );
+      buckets[bucketIndex].push(entry);
+    }}
+    const selected = new Map();
+    const addEntry = (entry) => {{
+      if (!entry) {{
+        return;
+      }}
+      selected.set(`${{entry.point.series || "Series"}}|${{entry.point.ts}}|${{entry.point.kind || "raw"}}`, entry.point);
+    }};
+    for (const bucket of buckets) {{
+      if (bucket.length === 0) {{
+        continue;
+      }}
+      let minEntry = bucket[0];
+      let maxEntry = bucket[0];
+      for (const entry of bucket) {{
+        if (entry.point[metric] < minEntry.point[metric]) {{
+          minEntry = entry;
+        }}
+        if (entry.point[metric] > maxEntry.point[metric]) {{
+          maxEntry = entry;
+        }}
+      }}
+      addEntry(bucket[0]);
+      addEntry(minEntry);
+      addEntry(maxEntry);
+      addEntry(bucket[bucket.length - 1]);
+    }}
+    return Array.from(selected.values()).sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
+  }}
   function buildSvg(points, metric, chartId, showMarkers, windowLabel) {{
     const chartSurface = themeValue("--chart-svg-surface", "#f7f9fc");
     const chartGrid = themeValue("--chart-grid", "rgba(196, 207, 220, 0.88)");
@@ -473,7 +538,8 @@
     if (!canvas) {{
       return;
     }}
-    const allPoints = JSON.parse(frame.dataset.chartPoints || "[]");
+    const dataScript = document.getElementById(id + "-data");
+    const allPoints = JSON.parse(dataScript?.textContent || frame.dataset.chartPoints || "[]");
     const card = frame.closest(".chart-card");
     if (!card) {{
       return;
@@ -545,7 +611,8 @@
       const activeRangeButton = rangeButtons.find((button) => button.dataset.range === currentRange);
       const rangeLabel = activeRangeButton?.dataset.rangeLabel || currentRange;
       const windowLabel = describeWindow(currentRange, rangeLabel);
-      const chart = buildSvg(points, currentMetric, id, showMarkers, windowLabel);
+      const displayPoints = compactPointsForDisplay(points, currentMetric, currentRange);
+      const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);
       currentChart = chart;
       canvas.innerHTML = chart.svg;
       updateNavigationState();

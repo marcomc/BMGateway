@@ -57,13 +57,29 @@ image_format = "jpeg"
 appearance = "light"
 # Use 0 to export after each gateway polling cycle.
 refresh_interval_seconds = 0
-overview_devices_per_image = 5
+overview_devices_per_image = 3
 export_battery_overview = true
 export_fleet_trend = true
 fleet_trend_metrics = ["soc"]
 fleet_trend_range = "7"
 # Empty means all configured devices. Selecting a subset writes explicit IDs.
 fleet_trend_device_ids = []
+
+[archive_sync]
+enabled = true
+# Automatically import supported onboard history when the archive is stale.
+periodic_interval_seconds = 64800
+# Backfill after a device returns from at least this many seconds offline.
+reconnect_min_gap_seconds = 28800
+# Request overlap around page boundaries to avoid small timestamp gaps.
+safety_margin_seconds = 7200
+# One BM200/BM6 page is 256 records at 2-minute spacing, about 8h32m.
+bm200_max_pages_per_sync = 3
+# BM300 Pro/BM7 uses the validated byte-7 depth path. The current standard
+# import requests selectors 01, 02, and 03, which reached 769 records in live
+# validation, about 25h38m at 2-minute cadence.
+bm300_enabled = true
+bm300_max_pages_per_sync = 3
 
 [retention]
 raw_retention_days = 180

@@ -7,7 +7,7 @@ from pathlib import Path
 
 __all__ = ["__build_timestamp__", "__version__", "display_version"]
 
-__version__ = "0.2.0"
+__version__ = "0.2.1"
 __build_timestamp__ = datetime.fromtimestamp(Path(__file__).stat().st_mtime).astimezone()
 
 

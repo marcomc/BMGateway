@@ -26,13 +26,11 @@ cd "${REPO_DIR}"
 if [ -n "${BMGATEWAY_HOSTNAME}" ]; then
     ./scripts/bootstrap-install.sh \
         --repo-dir "${REPO_DIR}" \
-        --skip-apt \
         --service-user "${SERVICE_USER}" \
         --hostname "${BMGATEWAY_HOSTNAME}"
 else
     ./scripts/bootstrap-install.sh \
         --repo-dir "${REPO_DIR}" \
-        --skip-apt \
         --service-user "${SERVICE_USER}"
 fi
 

@@ -4,6 +4,94 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2026-05-01
+
+### Added
+
+- Added structured JSONL audit logs under the runtime state directory for
+  automatic polling, per-device poll outcomes, archive sync activity, manual
+  history sync requests, and key web-managed configuration or device changes,
+  with automatic 90-day retention pruning for Raspberry Pi diagnostics.
+- Added explicit archive-backfill trigger reasons (`periodic`, `reconnect`, or
+  both) to runtime and archive-sync audit events so gateway diagnostics can
+  show why a supported-device history import was or was not scheduled.
+- Added a bounded `bm-gateway protocol probe-history` diagnostic command for
+  safe BM6/BM7 live, version, and `d15505` history-candidate BLE probes with
+  JSONL output.
+- Added a controlled BM200/BM6 `d15505` byte-matrix probe mode around the
+  verified byte-7 selector, including per-command history summaries for JSONL
+  triage without importing data into SQLite.
+- Added a BM200/BM6 `d15505` sweep mode for controlled full-range byte-value
+  probes when matrix or deepen results identify a candidate selector byte.
+- Added an offline `bm-gateway protocol analyze-history-captures` report for
+  saved protocol-probe JSONL files, including decoded history-field profiling,
+  marker counts, sequence overlap checks, and stitch recommendations.
+- Added an experimental `bm-gateway protocol bm300-multipage-import` command
+  for controlled BM300 Pro/BM7 byte-7 history validation and import. It fetches
+  selectors `b7=01`, `02`, and `03`, requires at least 128 consecutive
+  identical raw records between consecutive depths, fails explicitly without
+  writing when overlap is not strong enough, and writes only to an explicitly
+  supplied SQLite path instead of the normal runtime database.
+- Added BM200/BM6 archive-history import through
+  `bm-gateway history sync-device`, including decoded voltage, SoC,
+  temperature, raw record storage, and a `--page-count` option for cumulative
+  `d15505` history pages.
+- Added automatic BM200/BM6 archive-history backfill for visible devices,
+  driven by configurable periodic and reconnect thresholds, plus a per-device
+  History page action that requests the full 30-day BM200 retention window on
+  demand.
+- Added a History sync progress page for manual archive imports, with live
+  status, fetched-record totals, imported-record progress, and automatic return
+  to the selected History page.
+- Added gated BM300 Pro/BM7 archive-history import using the verified
+  `d15505` byte-6 selector and the shared `vvv ss tt p` record layout, with a
+  separate opt-in setting and page cap for future 72-day retention validation.
+
+### Changed
+
+- Switched the standard BM300 Pro/BM7 archive-history path from the older
+  byte-6 selector candidate to the validated byte-7 depth path. Standard
+  BM300 imports now request selectors `b7=01`, `02`, and `03`, require exact
+  raw-record overlap of 256 then 512 records on `bm300_alpha`, and import a
+  validated 769-record window of about 25 hours 38 minutes.
+- Enabled BM300 Pro/BM7 automatic archive sync by default for new configs and
+  service installs, with the standard path capped to the currently validated
+  depth-3 import window until deeper selectors are proven.
+
+- Aligned the History `Batteries` selector pagination with the Home Battery
+  Overview responsive two-row pagination logic.
+- Reduced initial layout shifts in the Home Battery Overview and History
+  `Batteries` pagers, and made small History battery sets render as one row
+  when the available width supports it without browser-specific row stretching.
+
+### Fixed
+
+- Isolated BM300 live polls and non-interactive BM300 archive imports in
+  child processes with hard timeouts, so a stuck BlueZ/DBus `bleak` call can
+  no longer hold the gateway loop or periodic sync scheduler indefinitely
+  after the configured BLE timeout has already elapsed.
+- Serialized BLE access across runtime polling, web-triggered run-once polls,
+  and BM200/BM300 archive imports with a shared cross-process lock so
+  concurrent gateway operations no longer collide and leave BlueZ or `bleak`
+  in `NotReady`-style failure states.
+- Fixed fatal BLE/D-Bus runtime failures so the gateway no longer stays alive in
+  a broken state after `bleak` or `dbus_fast` transport errors. The runtime now
+  treats those failures as unrecoverable, requests Bluetooth service recovery,
+  and exits so `systemd` can restart a clean polling process.
+- Hardened Raspberry Pi bootstrap dependency installation so fresh installs,
+  Raspberry Pi Imager first-run setup, direct service refreshes, and Ansible
+  provisioning install the documented runtime, web, Bluetooth, and USB OTG
+  system packages consistently.
+- Fixed Home Battery Overview status rendering so monitor-reported `low`
+  battery states show red status, percentage, and battery-badge accents instead
+  of `Battery OK`.
+- Reduced History, Fleet Trend, Device Detail, and frame-chart render cost by
+  compressing management responses, moving chart datasets out of heavy HTML
+  attributes, compacting dense chart ranges before SVG rendering, limiting the
+  History diagnostic raw table, and adding chronological history indexes.
+- Corrected BM6-family live state code `2` to display as `charging`, matching
+  public BM6 integration code, official-app behavior, and local BM200 probes.
+
 ## [0.2.0] - 2026-04-25
 
 ### Added
@@ -79,12 +167,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   concurrent drive-update workers.
 - Fixed Settings status text so repeated saves do not claim a new USB OTG frame
   export started while an existing export is already running.
-- Fixed BM6-family current-state parsing so device status code `2` displays as
-  `charging` instead of being forced to `normal`.
 - Fixed USB OTG frame device selection so Battery Overview frame images honor
   the selected frame devices instead of only Fleet Trend charts.
 - Fixed USB OTG Battery Overview frame layout so three selected devices render
   in one row and larger selections paginate into balanced frame pages.
+- Fixed USB OTG Battery Overview frame pagination so frame preview and export
+  pages always contain at most three devices, even when older configs request a
+  larger per-image count.
 - Fixed Diagnostics frame preview links so every generated Battery Overview
   frame page is available when selected devices span multiple pages.
 - Fixed USB OTG Battery Overview frame status rendering so battery state,

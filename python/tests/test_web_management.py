@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway import __version__
 from bm_gateway.config import load_config
@@ -35,10 +36,12 @@ from bm_gateway.web import (
     render_frame_battery_overview_html,
     render_frame_fleet_trend_html,
     render_history_html,
+    render_history_sync_pending_html,
     render_home_html,
     render_management_html,
     render_settings_html,
     render_usb_otg_export_pending_html,
+    update_archive_sync_preferences,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -59,7 +62,10 @@ from bm_gateway.web_actions import (
     restart_system_service,
     restore_usb_otg_boot_mode,
     schedule_host_shutdown,
+    sync_device_history_now,
+    sync_history_now,
 )
+from bm_gateway.web_pages_frame import frame_battery_overview_page_count
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import app_document, base_css, chart_script
 
@@ -170,7 +176,7 @@ def test_chart_points_prefer_daily_last_seen_timestamp_for_right_edge_alignment(
                 "last_seen": "2026-04-22T01:33:56+02:00",
             }
         ],
-        series="Spare NLP20",
+        series="Battery Beta",
     )
 
     daily_points = [point for point in points if point["kind"] == "daily"]
@@ -197,6 +203,23 @@ def test_chart_script_supports_range_paging_and_drag_panning() -> None:
     assert 'frame.addEventListener("pointermove", (event) => {' in script
     assert "currentWindowEnd = dragStartEnd - deltaMs;" in script
     assert 'frame.classList.add("is-panning");' in script
+
+
+def test_chart_script_compacts_dense_ranges_before_svg_rendering() -> None:
+    script = chart_script("history-chart")
+
+    assert "function displayPointLimit(rangeValue)" in script
+    assert "function compactPointsForDisplay(points, metric, rangeValue)" in script
+    assert 'const dataScript = document.getElementById(id + "-data");' in script
+    assert 'JSON.parse(dataScript?.textContent || frame.dataset.chartPoints || "[]");' in script
+    assert (
+        "const displayPoints = compactPointsForDisplay(points, currentMetric, currentRange);"
+        in script
+    )
+    assert (
+        "const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);"
+        in script
+    )
 
 
 def test_chart_script_renders_multi_series_tooltip_rows() -> None:
@@ -242,6 +265,8 @@ def test_chart_card_markup_includes_side_navigation_buttons() -> None:
     assert 'class="chart-nav-arrow previous"' in html
     assert 'class="chart-nav-arrow next"' in html
     assert 'class="chart-canvas"' in html
+    assert 'type="application/json" id="home-overview-chart-data"' in html
+    assert "data-chart-points=" not in html
     assert 'class="legend-item active"' in html
     assert 'data-series-label="No devices"' in html
     assert 'aria-pressed="true"' in html
@@ -363,9 +388,9 @@ def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
         "\n".join(
             [
                 "[[devices]]",
-                'id = "spare_nlp5"',
+                'id = "battery_alpha"',
                 'type = "bm200"',
-                'name = "Spare NLP5"',
+                'name = "Battery Alpha"',
                 'mac = "A1:B2:C3:D4:E5:F6"',
                 "",
             ]
@@ -392,9 +417,9 @@ def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
                 "poll_interval_seconds": 300,
                 "devices": [
                     {
-                        "id": "spare_nlp5",
+                        "id": "battery_alpha",
                         "type": "bm200",
-                        "name": "Spare NLP5",
+                        "name": "Battery Alpha",
                         "mac": "A1:B2:C3:D4:E5:F6",
                         "enabled": True,
                         "connected": True,
@@ -430,7 +455,7 @@ def test_export_usb_otg_images_now_uses_last_snapshot_without_polling(
     assert len(calls) == 1
     snapshot = calls[0]["snapshot"]
     assert isinstance(snapshot, GatewaySnapshot)
-    assert snapshot.devices[0].id == "spare_nlp5"
+    assert snapshot.devices[0].id == "battery_alpha"
     assert calls[0]["force"] is True
 
 
@@ -491,6 +516,17 @@ def test_render_usb_otg_export_pending_html_contains_progress_status_page() -> N
     assert 'fetch("/api/usb-otg-export/status", { cache: "no-store" })' in html
     assert 'window.location.replace("/settings?message=" + message)' in html
     assert 'window.location.replace("/settings?edit=1&message=" + message)' not in html
+
+
+def test_render_history_sync_pending_html_contains_progress_status_page() -> None:
+    html = render_history_sync_pending_html(theme_preference="dark")
+
+    assert "History Sync" in html
+    assert 'id="history-sync-progress-bar"' in html
+    assert 'id="history-sync-percent"' in html
+    assert 'id="history-sync-status-text"' in html
+    assert 'fetch("/api/history-sync/status", { cache: "no-store" })' in html
+    assert 'window.location.replace("/history?" + params.toString())' in html
 
 
 def test_update_gateway_preferences_persists_runtime_and_integration_settings(
@@ -1052,7 +1088,7 @@ def test_update_device_icon_persists_registry_change(tmp_path: Path) -> None:
                 'id = "ancell_bm200"',
                 'type = "bm200"',
                 'name = "Ancell BM200"',
-                'mac = "3C:AB:72:82:86:EA"',
+                'mac = "00:00:5E:00:53:01"',
                 "enabled = true",
                 'icon_key = "lead_acid_battery"',
                 "[devices.battery]",
@@ -1409,7 +1445,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
         export_fleet_trend=False,
         fleet_trend_metrics=("voltage", "temperature"),
         fleet_trend_range="30",
-        fleet_trend_device_ids=("spare_nlp5", "spare_nlp20"),
+        fleet_trend_device_ids=("battery_alpha", "battery_beta"),
     )
 
     assert errors == []
@@ -1425,7 +1461,225 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.export_fleet_trend is False
     assert config.usb_otg.fleet_trend_metrics == ("voltage", "temperature")
     assert config.usb_otg.fleet_trend_range == "30"
-    assert config.usb_otg.fleet_trend_device_ids == ("spare_nlp5", "spare_nlp20")
+    assert config.usb_otg.fleet_trend_device_ids == ("battery_alpha", "battery_beta")
+
+
+def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_archive_sync_preferences(
+        config_path=config_path,
+        enabled=False,
+        periodic_interval_seconds=43200,
+        reconnect_min_gap_seconds=14400,
+        safety_margin_seconds=1800,
+        bm200_max_pages_per_sync=6,
+        bm300_enabled=True,
+        bm300_max_pages_per_sync=9,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.archive_sync.enabled is False
+    assert config.archive_sync.periodic_interval_seconds == 43200
+    assert config.archive_sync.reconnect_min_gap_seconds == 14400
+    assert config.archive_sync.safety_margin_seconds == 1800
+    assert config.archive_sync.bm200_max_pages_per_sync == 6
+    assert config.archive_sync.bm300_enabled is True
+    assert config.archive_sync.bm300_max_pages_per_sync == 9
+
+
+def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+                "",
+                "[[devices]]",
+                'id = "bm300_doc"',
+                'type = "bm300pro"',
+                'name = "BM300 DOC"',
+                'mac = "AA:BB:CC:DD:EE:30"',
+                "enabled = true",
+                "",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    errors = update_archive_sync_preferences(
+        config_path=config_path,
+        enabled=True,
+        periodic_interval_seconds=43200,
+        reconnect_min_gap_seconds=14400,
+        safety_margin_seconds=1800,
+        bm200_max_pages_per_sync=2,
+        bm300_enabled=True,
+        bm300_max_pages_per_sync=5,
+    )
+    assert errors == []
+    captured_pages: dict[str, int] = {}
+
+    def fake_sync_candidates(
+        *,
+        config: object,
+        devices: object,
+        database_path: Path,
+        device_pages: dict[str, int],
+        source: str,
+        trigger: str,
+    ) -> list[dict[str, object]]:
+        _ = (config, devices, database_path, source, trigger)
+        captured_pages.update(device_pages)
+        return [
+            {"device_id": device_id, "synced": True, "fetched": pages, "inserted": pages}
+            for device_id, pages in device_pages.items()
+        ]
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.sync_archive_backfill_candidates",
+        fake_sync_candidates,
+    )
+
+    payload = sync_history_now(config_path=config_path, state_dir=tmp_path / "state")
+
+    assert payload["requested"] == 2
+    assert payload["synced"] == 2
+    assert captured_pages == {"bm200_house": 2, "bm300_doc": 5}
+    audit_files = list((tmp_path / "state" / "runtime" / "audit").glob("*.jsonl"))
+    assert len(audit_files) == 1
+    payloads = [
+        json.loads(line) for line in audit_files[0].read_text(encoding="utf-8").splitlines()
+    ]
+    assert payloads[-1]["action"] == "history_sync_batch_completed"
+    assert payloads[-1]["trigger"] == "manual"
+    assert payloads[-1]["details"]["requested"] == 2
+
+
+def test_sync_device_history_now_requests_full_bm200_retention(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                "enabled = true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_sync_bm200_device_archive(
+        *,
+        config: object,
+        device: Any,
+        database_path: Path,
+        page_count: int,
+        progress: Any | None = None,
+    ) -> dict[str, object]:
+        _ = (config, database_path, progress)
+        captured["device_id"] = device.id
+        captured["page_count"] = page_count
+        return {
+            "device_id": device.id,
+            "fetched": 512,
+            "inserted": 64,
+            "page_count": page_count,
+        }
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.sync_bm200_device_archive",
+        fake_sync_bm200_device_archive,
+    )
+
+    payload = sync_device_history_now(
+        config_path=config_path,
+        device_id="bm200_house",
+        state_dir=tmp_path / "state",
+    )
+
+    assert payload["requested"] == 1
+    assert payload["synced"] is True
+    assert payload["fetched"] == 512
+    assert payload["inserted"] == 64
+    assert captured == {"device_id": "bm200_house", "page_count": 85}
+
+
+def test_sync_device_history_now_rejects_bm300_when_archive_sync_is_disabled(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm300_doc"',
+                'type = "bm300pro"',
+                'name = "BM300 Doc"',
+                'mac = "AA:BB:CC:DD:EE:02"',
+                "enabled = true",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example")
+        .read_text(encoding="utf-8")
+        .replace("bm300_enabled = true", "bm300_enabled = false"),
+        encoding="utf-8",
+    )
+    called = False
+
+    def fake_sync_bm300_device_archive(**_kwargs: object) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {}
+
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.sync_bm300_device_archive",
+        fake_sync_bm300_device_archive,
+    )
+
+    with pytest.raises(ValueError, match="BM300 archive sync is disabled in settings."):
+        sync_device_history_now(
+            config_path=config_path,
+            device_id="bm300_doc",
+            state_dir=tmp_path / "state",
+        )
+
+    assert called is False
 
 
 def test_settings_display_post_persists_appearance_and_chart_defaults(
@@ -1476,6 +1730,59 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
     assert config.web.appearance == "dark"
     assert config.web.default_chart_range == "90"
     assert config.web.default_chart_metric == "temperature"
+
+
+def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/archive-sync",
+        data=urllib.parse.urlencode(
+            {
+                "periodic_interval_seconds": "43200",
+                "reconnect_min_gap_seconds": "14400",
+                "safety_margin_seconds": "1800",
+                "bm200_max_pages_per_sync": "6",
+                "bm300_enabled": "on",
+                "bm300_max_pages_per_sync": "9",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+
+    with urllib.request.urlopen(request, timeout=5.0) as response:
+        assert response.status in {200, 303}
+
+    config = load_config(config_path)
+    assert config.archive_sync.enabled is False
+    assert config.archive_sync.periodic_interval_seconds == 43200
+    assert config.archive_sync.reconnect_min_gap_seconds == 14400
+    assert config.archive_sync.safety_margin_seconds == 1800
+    assert config.archive_sync.bm200_max_pages_per_sync == 6
+    assert config.archive_sync.bm300_enabled is True
+    assert config.archive_sync.bm300_max_pages_per_sync == 9
 
 
 def test_settings_usb_otg_post_persists_enabled_flag(
@@ -1548,15 +1855,15 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
         "\n".join(
             [
                 "[[devices]]",
-                'id = "spare_nlp5"',
+                'id = "battery_alpha"',
                 'type = "bm200"',
-                'name = "Spare NLP5"',
+                'name = "Battery Alpha"',
                 'mac = "A1:B2:C3:D4:E5:F6"',
                 "",
                 "[[devices]]",
-                'id = "spare_nlp20"',
+                'id = "battery_beta"',
                 'type = "bm200"',
-                'name = "Spare NLP20"',
+                'name = "Battery Beta"',
                 'mac = "A1:B2:C3:D4:E5:F7"',
                 "",
             ]
@@ -1591,8 +1898,8 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
         data=urllib.parse.urlencode(
             [
                 ("fleet_trend_device_ids", ""),
-                ("fleet_trend_device_ids", "spare_nlp5"),
-                ("fleet_trend_device_ids", "spare_nlp20"),
+                ("fleet_trend_device_ids", "battery_alpha"),
+                ("fleet_trend_device_ids", "battery_beta"),
             ]
         ).encode("utf-8"),
         method="POST",
@@ -1603,6 +1910,98 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
 
     config = load_config(config_path)
     assert config.usb_otg.fleet_trend_device_ids == ()
+
+
+def test_management_settings_respects_gzip_q_zero(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings",
+        headers={"Accept-Encoding": "gzip;q=0"},
+    )
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            break
+        except urllib.error.URLError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+    with response_handle as response:
+        body = response.read().decode("utf-8")
+        assert response.status == 200
+        assert response.headers.get("Content-Encoding") is None
+
+    assert "Gateway Settings" in body
+
+
+def test_management_settings_respects_explicit_gzip_opt_out_over_wildcard(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": None,
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings",
+        headers={"Accept-Encoding": "gzip;q=0, *;q=1"},
+    )
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            break
+        except urllib.error.URLError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+    with response_handle as response:
+        body = response.read().decode("utf-8")
+        assert response.status == 200
+        assert response.headers.get("Content-Encoding") is None
+
+    assert "Gateway Settings" in body
 
 
 def test_settings_usb_otg_post_starts_export_without_waiting(
@@ -1895,6 +2294,106 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
     assert payload["message"] == "Immagini cornice USB OTG esportate"
 
 
+def test_manual_device_history_sync_action_redirects_to_selected_history(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    history_finished = threading.Event()
+    calls: list[tuple[Path, str, Path | None]] = []
+
+    def _sync_device_history_now(
+        *,
+        config_path: Path,
+        device_id: str,
+        state_dir: Path | None = None,
+        progress: Any | None = None,
+    ) -> dict[str, object]:
+        calls.append((config_path, device_id, state_dir))
+        if callable(progress):
+            progress(0, 512, "Downloading history records")
+            progress(128, 512, "Importing history records")
+            progress(512, 512, "History sync completed")
+        history_finished.set()
+        return {
+            "device_id": device_id,
+            "requested": 1,
+            "synced": True,
+            "fetched": 512,
+            "inserted": 128,
+            "errors": [],
+            "page_count": 85,
+        }
+
+    monkeypatch.setattr("bm_gateway.web.sync_device_history_now", _sync_device_history_now)
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+
+    server_thread = threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path / "state",
+        },
+        daemon=True,
+    )
+    server_thread.start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/actions/sync-device-history",
+        data=urllib.parse.urlencode({"device_id": "bm200_house"}).encode("utf-8"),
+        method="POST",
+    )
+    deadline = time.monotonic() + 2.0
+    while True:
+        try:
+            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            break
+        except urllib.error.URLError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.02)
+    with response_handle as response:
+        html = response.read().decode("utf-8")
+        assert response.status == 200
+        parsed_response_url = urlparse(response.url)
+
+    assert parsed_response_url.path == "/history-sync/progress"
+    assert parse_qs(parsed_response_url.query)["device_id"] == ["bm200_house"]
+    assert "History Sync" in html
+    assert history_finished.wait(timeout=1.0)
+    assert calls == [(config_path, "bm200_house", tmp_path / "state")]
+
+    status_request = urllib.request.Request(
+        f"http://{host}:{port}/api/history-sync/status",
+        headers={"Accept-Language": "it"},
+    )
+    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    assert payload["status"] == "completed"
+    assert payload["device_id"] == "bm200_house"
+    assert payload["completed"] == 512
+    assert payload["total"] == 512
+    assert payload["fetched"] == 512
+    assert payload["inserted"] == 128
+    assert payload["message"] == "Sincronizzazione storico completata"
+    assert payload["redirect_message"] == (
+        "Sincronizzazione storico completata: bm200_house, inserted 128 of 512 records"
+    )
+
+
 def test_compact_mac_address_is_normalized() -> None:
     assert normalize_mac_address("A1B2C3D4E5F6") == "A1:B2:C3:D4:E5:F6"
 
@@ -1911,7 +2410,7 @@ def test_validate_devices_rejects_mqtt_unsafe_device_ids() -> None:
             Device(
                 id="spare/nlp5",
                 type="bm200",
-                name="Spare NLP5",
+                name="Battery Alpha",
                 mac="AA:BB:CC:DD:EE:01",
             )
         ]
@@ -2071,11 +2570,18 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Home Assistant status topic" in html
     assert "Web Service" in html
     assert "Display Settings" in html
+    assert "Archive History Import" in html
+    assert "Archive history import" in html
+    assert "Periodic sync interval" in html
+    assert "BM200 pages per sync" in html
+    assert "Sync History Now" not in html
+    assert 'action="/actions/sync-history-now"' not in html
     assert "Visible overview cards" not in html
     assert "Edit settings" in html
     assert 'href="/settings?edit=1"' in html
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
+    assert "Save archive sync settings" not in html
     assert "Run One Collection Cycle" in html
     assert "Republish Home Assistant Discovery" in html
     assert 'action="/actions/republish-discovery"' in html
@@ -2105,6 +2611,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Web Service'
+    )
+    assert html.index('section-title">Display Settings') < html.index(
+        'section-title">Archive History Import'
     )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
@@ -2144,9 +2653,9 @@ def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
                 "mac": "AA:BB:CC:DD:EE:01",
             },
             {
-                "id": "spare_nlp20",
+                "id": "battery_beta",
                 "type": "bm200",
-                "name": "Spare NLP20",
+                "name": "Battery Beta",
                 "mac": "AA:BB:CC:DD:EE:02",
             },
         ],
@@ -2162,13 +2671,13 @@ def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
                 {"device_id": "bm200_house", "raw_samples": 10},
                 {"device_id": "bm300_van", "raw_samples": 10},
                 {"device_id": "fake_serial_test", "raw_samples": 10},
-                {"device_id": "spare_nlp20", "raw_samples": 10},
+                {"device_id": "battery_beta", "raw_samples": 10},
             ],
         },
     )
 
     assert "ancell_bm200" in html
-    assert "spare_nlp20" in html
+    assert "battery_beta" in html
     assert "bm200_house" not in html
     assert "bm300_van" not in html
     assert "fake_serial_test" not in html
@@ -2310,7 +2819,7 @@ def test_render_diagnostics_html_lists_only_enabled_fleet_metric_previews() -> N
 def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
     html = render_frame_fleet_trend_html(
         chart_points=[],
-        legend=[("Spare NLP5", "#f0b429")],
+        legend=[("Battery Alpha", "#f0b429")],
         show_chart_markers=False,
         appearance="dark",
         default_chart_range="7",
@@ -2321,7 +2830,7 @@ def test_render_frame_fleet_trend_html_is_clean_screenshot_page() -> None:
 
     assert "<span>Fleet Trend</span> · <span>SoC</span> · <span>7 days</span>" in html
     assert "<span>Latest:</span> <span>No data</span>" in html
-    assert "Spare NLP5" in html
+    assert "Battery Alpha" in html
     assert 'id="frame-fleet-trend-chart"' in html
     assert 'class="bottom-nav"' not in html
     assert 'class="page-shell"' not in html
@@ -2351,14 +2860,14 @@ def test_render_frame_fleet_trend_html_localizes_latest_label_to_italian() -> No
         chart_points=[
             {
                 "ts": "2026-04-24T01:05:00+02:00",
-                "series": "Spare NLP20",
+                "series": "Battery Beta",
                 "series_color": "#ec5c86",
                 "soc": 91,
                 "voltage": 13.31,
                 "temperature": 24.0,
             },
         ],
-        legend=[("Spare NLP20", "#ec5c86")],
+        legend=[("Battery Beta", "#ec5c86")],
         show_chart_markers=False,
         appearance="dark",
         default_chart_range="30",
@@ -2380,7 +2889,7 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
         chart_points=[
             {
                 "ts": "2026-04-24T01:00:00+02:00",
-                "series": "Spare NLP5",
+                "series": "Battery Alpha",
                 "series_color": "#f0b429",
                 "soc": 88,
                 "voltage": 13.29,
@@ -2388,14 +2897,14 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
             },
             {
                 "ts": "2026-04-24T01:05:00+02:00",
-                "series": "Spare NLP20",
+                "series": "Battery Beta",
                 "series_color": "#ec5c86",
                 "soc": 91,
                 "voltage": 13.31,
                 "temperature": 24.0,
             },
         ],
-        legend=[("Spare NLP5", "#f0b429"), ("Spare NLP20", "#ec5c86")],
+        legend=[("Battery Alpha", "#f0b429"), ("Battery Beta", "#ec5c86")],
         show_chart_markers=False,
         appearance="dark",
         default_chart_range="30",
@@ -2406,8 +2915,8 @@ def test_render_frame_fleet_trend_html_uses_selected_metric_range_and_device_val
 
     assert "<span>Fleet Trend</span> · <span>Temperature</span> · <span>30 days</span>" in html
     assert "<span>Latest:</span> <span>2026-04-24 01:05</span>" in html
-    assert "Spare NLP5 23.0°C" in html
-    assert "Spare NLP20 24.0°C" in html
+    assert "Battery Alpha 23.0°C" in html
+    assert "Battery Beta 24.0°C" in html
     assert 'data-metric="temperature" class="active"' in html
     assert 'data-range="30" data-range-label="30 days" class="active"' in html
 
@@ -2418,7 +2927,7 @@ def test_render_frame_fleet_trend_html_keeps_duplicate_device_names_distinct() -
             {
                 "ts": "2026-04-24T01:00:00+02:00",
                 "series": "Spare",
-                "series_id": "spare_nlp5",
+                "series_id": "battery_alpha",
                 "series_color": "#f0b429",
                 "soc": 88,
                 "voltage": 13.29,
@@ -2427,7 +2936,7 @@ def test_render_frame_fleet_trend_html_keeps_duplicate_device_names_distinct() -
             {
                 "ts": "2026-04-24T01:05:00+02:00",
                 "series": "Spare",
-                "series_id": "spare_nlp20",
+                "series_id": "battery_beta",
                 "series_color": "#ec5c86",
                 "soc": 91,
                 "voltage": 13.31,
@@ -2452,8 +2961,8 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
         snapshot={
             "devices": [
                 {
-                    "id": "spare_nlp5",
-                    "name": "Spare NLP5",
+                    "id": "battery_alpha",
+                    "name": "Battery Alpha",
                     "soc": 91,
                     "voltage": 13.1,
                     "temperature": 22.5,
@@ -2465,8 +2974,8 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
         },
         devices=[
             {
-                "id": "spare_nlp5",
-                "name": "Spare NLP5",
+                "id": "battery_alpha",
+                "name": "Battery Alpha",
                 "color_key": "amber",
                 "icon_key": "lead_acid_battery",
             }
@@ -2480,7 +2989,7 @@ def test_render_frame_battery_overview_html_uses_fixed_frame_cards() -> None:
 
     assert "<span>Battery Overview</span> · <span>Latest:</span>" in html
     assert "<span>2026-04-24 03:12</span>" in html
-    assert "Spare NLP5" in html
+    assert "Battery Alpha" in html
     assert "frame-battery-card" in html
     assert "frame-battery-soc" in html
     assert "Battery OK" in html
@@ -2587,10 +3096,10 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
     html = render_frame_battery_overview_html(
         snapshot={
             "devices": [
-                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
+                {"id": "one", "name": "Battery Alpha", "soc": 86, "voltage": 13.29},
                 {
                     "id": "two",
-                    "name": "Spare NLP20",
+                    "name": "Battery Beta",
                     "soc": 88,
                     "voltage": 13.29,
                     "last_seen": "2026-04-24T03:20:00+02:00",
@@ -2598,8 +3107,8 @@ def test_render_frame_battery_overview_html_fits_cards_inside_frame() -> None:
             ]
         },
         devices=[
-            {"id": "one", "name": "Spare NLP5", "enabled": True},
-            {"id": "two", "name": "Spare NLP20", "enabled": True},
+            {"id": "one", "name": "Battery Alpha", "enabled": True},
+            {"id": "two", "name": "Battery Beta", "enabled": True},
         ],
         page=1,
         devices_per_page=5,
@@ -2624,14 +3133,14 @@ def test_render_frame_battery_overview_html_keeps_three_cards_in_one_row() -> No
     html = render_frame_battery_overview_html(
         snapshot={
             "devices": [
-                {"id": "one", "name": "Spare NLP5", "soc": 86, "voltage": 13.29},
-                {"id": "two", "name": "Spare NLP20", "soc": 88, "voltage": 13.29},
+                {"id": "one", "name": "Battery Alpha", "soc": 86, "voltage": 13.29},
+                {"id": "two", "name": "Battery Beta", "soc": 88, "voltage": 13.29},
                 {"id": "three", "name": "Liberty", "soc": 91, "voltage": 13.5},
             ]
         },
         devices=[
-            {"id": "one", "name": "Spare NLP5", "enabled": True},
-            {"id": "two", "name": "Spare NLP20", "enabled": True},
+            {"id": "one", "name": "Battery Alpha", "enabled": True},
+            {"id": "two", "name": "Battery Beta", "enabled": True},
             {"id": "three", "name": "Liberty", "enabled": True},
         ],
         page=1,
@@ -2650,6 +3159,49 @@ def test_render_frame_battery_overview_html_keeps_three_cards_in_one_row() -> No
     assert {top for _left, top, _width, _height in card_positions} == {"49.0"}
     assert all(width == height for _left, _top, width, height in card_positions)
     assert {width for _left, _top, width, _height in card_positions} == {"154"}
+
+
+def test_frame_battery_overview_pages_always_use_three_device_pages() -> None:
+    devices = [
+        {"id": f"battery_{index}", "name": f"Battery {index}", "enabled": True}
+        for index in range(1, 6)
+    ]
+
+    assert (
+        frame_battery_overview_page_count(
+            snapshot={},
+            devices=devices,
+            devices_per_page=5,
+        )
+        == 2
+    )
+
+    page_one = render_frame_battery_overview_html(
+        snapshot={},
+        devices=devices,
+        page=1,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+    page_two = render_frame_battery_overview_html(
+        snapshot={},
+        devices=devices,
+        page=2,
+        devices_per_page=5,
+        appearance="dark",
+        width=480,
+        height=234,
+    )
+
+    assert "Battery 1" in page_one
+    assert "Battery 2" in page_one
+    assert "Battery 3" in page_one
+    assert "Battery 4" not in page_one
+    assert "Battery 5" not in page_one
+    assert "Battery 4" in page_two
+    assert "Battery 5" in page_two
 
 
 def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() -> None:
@@ -2741,11 +3293,13 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert "Web Service" in html
     assert "Display Settings" in html
     assert "USB OTG Image Export" in html
+    assert "Archive History Import" in html
     assert "Save gateway settings" in html
     assert "Save MQTT settings" in html
     assert "Save Home Assistant settings" in html
     assert "Save web service settings" in html
     assert "Save display settings" in html
+    assert "Save archive sync settings" in html
     assert "Save USB OTG settings" in html
     assert 'name="gateway_name"' in html
     assert 'name="timezone"' in html
@@ -2777,6 +3331,13 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
     assert 'name="fleet_trend_range"' in html
     assert 'name="fleet_trend_device_ids"' in html
     assert 'name="web_enabled"' in html
+    assert 'name="archive_sync_enabled"' in html
+    assert 'name="periodic_interval_seconds"' in html
+    assert 'name="reconnect_min_gap_seconds"' in html
+    assert 'name="safety_margin_seconds"' in html
+    assert 'name="bm200_max_pages_per_sync"' in html
+    assert 'name="bm300_enabled"' in html
+    assert 'name="bm300_max_pages_per_sync"' in html
     assert 'name="visible_device_limit"' not in html
     assert 'name="bluetooth_adapter"' in html
     assert 'name="scan_timeout_seconds"' in html
@@ -2827,6 +3388,37 @@ def test_render_settings_html_edit_mode_shows_chart_default_options() -> None:
     assert '<option value="5"' in html
     assert '<option value="raw"' not in html
     assert '<option value="soc" selected>' in html
+
+
+def test_render_settings_html_preserves_configured_usb_otg_overview_count() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(config.usb_otg, overview_devices_per_image=5),
+    )
+
+    summary_html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        usb_otg_support_installed=True,
+    )
+    edit_html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=True,
+    )
+
+    assert (
+        '<div class="settings-label">Devices per overview image</div>'
+        '<div class="settings-value">5</div>'
+    ) in summary_html
+    assert '<option value="1">1</option>' in edit_html
+    assert '<option value="5" selected>5</option>' in edit_html
+    assert '<option value="10">10</option>' in edit_html
 
 
 def test_discover_bluetooth_adapters_reads_sysfs_entries(tmp_path: Path) -> None:
@@ -2899,7 +3491,7 @@ def test_render_home_html_renders_device_icon() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "installed_in_vehicle": True,
                 "vehicle_type": "motorcycle",
@@ -2936,6 +3528,44 @@ def test_render_home_html_renders_device_icon() -> None:
         '<div class="hero-actions"><a class="secondary-button" href="/settings">Settings</a>'
         not in html
     )
+
+
+def test_render_home_html_shows_low_state_as_red_status() -> None:
+    from bm_gateway.web import render_home_html
+
+    html = render_home_html(
+        snapshot={
+            "devices": [
+                {
+                    "id": "battery_beta",
+                    "name": "Battery Beta",
+                    "type": "bm200",
+                    "soc": 28,
+                    "voltage": 12.95,
+                    "temperature": 22.0,
+                    "state": "low",
+                    "connected": True,
+                    "error_code": None,
+                }
+            ]
+        },
+        devices=[
+            {
+                "id": "battery_beta",
+                "name": "Battery Beta",
+                "type": "bm200",
+                "enabled": True,
+            }
+        ],
+        chart_points=[],
+        legend=[],
+    )
+
+    assert "Battery OK" not in html
+    assert "<span>Low</span>" in html
+    assert "home-overview-orb tone-card green status-low" in html
+    assert "home-orb-center status-low" in html
+    assert "battery-card-status battery-card-status-inline low" in html
 
 
 def test_render_home_html_threads_appearance_to_document_root() -> None:
@@ -3010,7 +3640,7 @@ def test_render_home_html_uses_shared_icon_badge_markup() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "installed_in_vehicle": True,
                 "vehicle_type": "motorcycle",
@@ -3048,7 +3678,7 @@ def test_render_home_html_prefers_registry_name_over_stale_snapshot_name() -> No
                 "id": "ancell_bm200",
                 "name": "NLP5",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
             }
         ],
@@ -3085,7 +3715,7 @@ def test_render_home_html_places_identity_and_badges_inside_home_orb() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "installed_in_vehicle": True,
                 "vehicle_type": "motorcycle",
@@ -3117,8 +3747,8 @@ def test_render_home_html_uses_compact_home_metadata_line_with_nominal_voltage()
         snapshot={
             "devices": [
                 {
-                    "id": "spare_nlp5",
-                    "name": "Spare NLP5",
+                    "id": "battery_alpha",
+                    "name": "Battery Alpha",
                     "type": "bm200",
                     "soc": 88,
                     "voltage": 13.30,
@@ -3137,10 +3767,10 @@ def test_render_home_html_uses_compact_home_metadata_line_with_nominal_voltage()
         },
         devices=[
             {
-                "id": "spare_nlp5",
-                "name": "Spare NLP5",
+                "id": "battery_alpha",
+                "name": "Battery Alpha",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "battery": {
                     "brand": "NOCO",
@@ -3181,6 +3811,21 @@ def test_base_css_stacks_battery_badges_next_to_identity_copy() -> None:
     assert ".device-icon-frame.device-list-badge .device-icon-svg {" in css
 
 
+def test_base_css_renders_low_home_status_in_error_red() -> None:
+    css = base_css()
+
+    assert ".home-orb-center.status-low .battery-card-gauge-value {" in css
+    assert "color: var(--state-error);" in css
+    assert ".home-overview-orb.status-low .battery-card-badge .stroke-accent {" in css
+    assert ".home-overview-orb.status-low .battery-card-badge .fill-accent {" in css
+    assert ".battery-card-status.low { color: var(--state-error); }" in css
+    assert (
+        ".status-badge.low { background: rgba(239, 68, 68, 0.12); color: var(--state-error); }"
+        in css
+    )
+    assert ".status-scale-active-segment.tone-low {" in css
+
+
 def test_base_css_highlights_selected_history_device_with_device_accent() -> None:
     css = base_css()
 
@@ -3207,13 +3852,139 @@ def test_base_css_uses_wrapping_flex_layout_for_history_device_selector() -> Non
     assert ".history-device-stage {" in css
     assert "margin-top: 1.15rem;" in css
     assert ".history-device-scroller {" in css
+    assert "--history-device-card-max:" in css
+    assert "--history-device-card-size: min(var(--history-device-card-max), 100%);" in css
     assert "--history-device-page-padding: calc(var(--history-device-gap) / 2);" in css
     assert ".history-device-page {" in css
     assert "display: flex;" in css
     assert "scroll-padding-inline: var(--history-device-page-padding);" in css
+    assert "justify-items: center;" in css
     assert "grid-template-columns: repeat(var(--history-device-columns), minmax(0, 1fr));" in css
+    assert "grid-template-rows: repeat(var(--history-device-rows), auto);" in css
     assert "gap: 1rem;" in css
     assert ".history-device-page .history-device-card {" in css
+    assert "width: var(--history-device-card-size);" in css
+    assert (
+        "height: 100%;"
+        not in css[
+            css.index(".history-device-page .history-device-card {") : css.index(
+                ".device-list-rows {"
+            )
+        ]
+    )
+
+
+def test_base_css_compacts_history_device_selector_card_bounds_on_mobile() -> None:
+    css = base_css()
+    mobile_css = css[css.index("@media (max-width: 640px)") :]
+
+    assert ".history-device-scroller {" in mobile_css
+    assert "--history-device-card-min: 132px;" in mobile_css
+    assert "--history-device-card-max: 164px;" in mobile_css
+    assert "--history-device-gap: 0.25rem;" in mobile_css
+
+
+def test_history_device_selector_uses_home_overview_pagination_sizing() -> None:
+    html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 10)
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert 'styles.getPropertyValue("--history-device-card-max")' in html
+    assert "track.clientWidth - (pagePadding * 2)" in html
+    assert "const columnBasis = minCard;" in html
+    assert "Math.min(cards.length || 1, rawColumns)" in html
+    assert "const capacity = Math.max(1, columns * 2);" in html
+    assert 'page.style.setProperty("--history-device-card-size"' in html
+    assert 'window.visualViewport.addEventListener("resize", scheduleBuild' in html
+    assert "Math.min(4" not in html
+
+
+def test_history_device_selector_initial_layout_uses_one_row_for_four_devices() -> None:
+    html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 5)
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert (
+        'class="history-device-page is-single-page page-multi-cards" '
+        'style="--history-device-columns: 4; --history-device-rows: 1"'
+    ) in html
+
+
+def test_home_and_history_pagers_skip_unchanged_layout_rebuilds() -> None:
+    home_html = render_home_html(
+        snapshot={"devices": [{"id": "battery_1", "name": "Battery 1"}]},
+        devices=[{"id": "battery_1", "name": "Battery 1", "enabled": True}],
+        chart_points=[],
+        legend=[],
+    )
+    history_html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[{"id": "battery_1", "name": "Battery 1"}],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert 'let lastLayoutKey = "";' in home_html
+    home_guard = home_html[
+        home_html.index("if (layoutKey === lastLayoutKey && pages.length > 0)") : home_html.index(
+            "return;", home_html.index("if (layoutKey === lastLayoutKey")
+        )
+    ]
+    assert "if (controls) controls.hidden = pages.length <= 1;" in home_guard
+    assert "syncButtons();" in home_guard
+    assert 'let lastLayoutKey = "";' in history_html
+    history_guard = history_html[
+        history_html.index(
+            "if (layoutKey === lastLayoutKey && pages.length > 0)"
+        ) : history_html.index("return;", history_html.index("if (layoutKey === lastLayoutKey"))
+    ]
+    assert "if (controls) controls.hidden = pages.length <= 1;" in history_guard
+    assert "syncButtons();" in history_guard
+
+
+def test_home_and_history_pagers_scroll_inside_their_tracks() -> None:
+    home_html = render_home_html(
+        snapshot={
+            "devices": [
+                {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 6)
+            ]
+        },
+        devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}", "enabled": True}
+            for index in range(1, 6)
+        ],
+        chart_points=[],
+        legend=[],
+    )
+    history_html = render_history_html(
+        device_id="battery_1",
+        configured_devices=[
+            {"id": f"battery_{index}", "name": f"Battery {index}"} for index in range(1, 6)
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "track.scrollTo({" in home_html
+    assert "left: pages[currentPage].offsetLeft - track.offsetLeft," in home_html
+    assert ".scrollIntoView(" not in home_html
+    assert "track.scrollTo({" in history_html
+    assert "left: pages[currentPage].offsetLeft - track.offsetLeft," in history_html
+    assert ".scrollIntoView(" not in history_html
 
 
 def test_base_css_compacts_raw_history_table() -> None:
@@ -3352,7 +4123,7 @@ def test_render_devices_html_wraps_single_device_in_grid_layout_hook() -> None:
                 "id": "ancell_bm200",
                 "type": "bm200",
                 "name": "Ancell BM200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
             }
         ],
@@ -3375,7 +4146,7 @@ def test_render_devices_html_reserves_second_badge_slot_for_non_vehicle_devices(
                 "id": "bench_battery",
                 "type": "bm200",
                 "name": "Bench Battery",
-                "mac": "3C:AB:72:00:00:01",
+                "mac": "00:00:5E:00:53:11",
                 "enabled": True,
                 "installed_in_vehicle": False,
                 "battery": {
@@ -3448,6 +4219,80 @@ def test_render_history_html_reserves_second_badge_slot_for_non_vehicle_devices(
 
     assert "history-device-badge" in html
     assert "badge-placeholder" in html
+
+
+def test_render_history_html_shows_per_device_history_download_action() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+                "type": "bm200",
+            }
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert 'action="/actions/sync-device-history"' in html
+    assert 'name="device_id" value="bm200_house"' in html
+    assert "Download History" in html
+    assert html.index("History Chart") < html.index("Download History")
+
+
+def test_render_history_html_shows_history_action_message() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+                "type": "bm200",
+            }
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+        message="History sync completed: bm200_house, inserted 128 of 512 records",
+    )
+
+    assert "History sync completed: bm200_house, inserted 128 of 512 records" in html
+
+
+def test_render_history_html_limits_diagnostic_raw_table_rows() -> None:
+    raw_history: list[dict[str, object]] = [
+        {
+            "ts": f"2026-04-27T12:{index % 60:02d}:00+02:00",
+            "voltage": 13.2,
+            "soc": 84,
+            "temperature": 20.0,
+            "state": "normal",
+            "error_code": None,
+            "error_detail": None,
+        }
+        for index in range(350)
+    ]
+
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[
+            {
+                "id": "bm200_house",
+                "name": "BM200 House",
+                "type": "bm200",
+                "enabled": True,
+            }
+        ],
+        raw_history=raw_history,
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "Valid samples" in html
+    assert ">350<" in html
+    assert html.count("<td>normal</td>") == 300
 
 
 def test_render_settings_html_threads_appearance_to_document_root() -> None:
@@ -3538,7 +4383,7 @@ def test_render_home_html_marks_single_page_card_count() -> None:
                 "id": "ancell_bm200",
                 "name": "Ancell BM200",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "icon_key": "lithium_battery",
             }
@@ -3660,7 +4505,7 @@ def test_render_home_html_shows_charging_status_with_explicit_icon() -> None:
                 "id": "bm_charging",
                 "name": "Charging Battery",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "icon_key": "lithium_battery",
             }
@@ -3699,7 +4544,7 @@ def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
                 "id": "bm_offline",
                 "name": "Offline Battery",
                 "type": "bm200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "icon_key": "lithium_battery",
             }
@@ -3907,7 +4752,7 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
     assert "hero-shell" in html
     assert "chart-tooltip" in html
     assert "chart-overlay" in html
-    assert "&quot;series&quot;:&quot;BM200 House&quot;" in html
+    assert '"series":"BM200 House"' in html
 
 
 def test_redirect_message_query_round_trips_special_characters() -> None:
@@ -3976,7 +4821,7 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert '<a class="secondary-button" href="/">Battery</a>' not in html
     assert "Device Detail" not in html
     assert 'aria-current="page"' in html
-    assert "&quot;series&quot;:&quot;bm200_house" in html
+    assert '"series":"bm200_house' in html
 
 
 def test_render_history_html_shows_device_selector_and_quick_switch_links() -> None:
@@ -4000,7 +4845,7 @@ def test_render_history_html_shows_device_selector_and_quick_switch_links() -> N
     assert "Batteries" in html
     assert "History Device" not in html
     assert 'action="/history"' not in html
-    assert 'name="device_id"' not in html
+    assert '<form method="get" action="/history"' not in html
     assert 'href="/history?device_id=bm200_house"' in html
     assert 'href="/history?device_id=starter_battery"' in html
     assert 'aria-current="page"' in html
@@ -4163,7 +5008,7 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
                 "id": "ancell_bm200",
                 "type": "bm200",
                 "name": "Ancell BM200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
             }
         ],
@@ -4172,7 +5017,7 @@ def test_render_devices_html_explains_offline_device_not_found_state() -> None:
     assert "/devices/edit?device_id=ancell_bm200" in html
     assert 'href="/devices/new"' in html
     assert "Register new BM devices directly from the device registry." not in html
-    assert "Serial / MAC: 3C:AB:72:82:86:EA" in html
+    assert "Serial / MAC: 00:00:5E:00:53:01" in html
     assert "Touch a device card to edit it." in html
     assert "device-list-row tone-card green" in html
     assert "Edit device" not in html
@@ -4187,7 +5032,7 @@ def test_render_devices_html_uses_device_battery_profile_labels() -> None:
                 "id": "ancell_bm200",
                 "type": "bm200",
                 "name": "Ancell BM200",
-                "mac": "3C:AB:72:82:86:EA",
+                "mac": "00:00:5E:00:53:01",
                 "enabled": True,
                 "battery": {
                     "family": "lead_acid",
@@ -4265,7 +5110,7 @@ def test_render_edit_device_html_prefills_device_fields() -> None:
             "id": "ancell_bm200",
             "type": "bm200",
             "name": "Ancell BM200",
-            "mac": "3C:AB:72:82:86:EA",
+            "mac": "00:00:5E:00:53:01",
             "enabled": True,
             "icon_key": "motorcycle_12v",
             "installed_in_vehicle": True,
@@ -4315,7 +5160,7 @@ def test_render_edit_device_html_preserves_original_id_after_validation_error() 
             "id": "duplicate_id",
             "type": "bm200",
             "name": "Ancell BM200",
-            "mac": "3C:AB:72:82:86:EA",
+            "mac": "00:00:5E:00:53:01",
             "enabled": True,
             "battery": {
                 "family": "lead_acid",
@@ -4354,9 +5199,9 @@ def _write_edit_device_config(tmp_path: Path) -> Path:
                 'color_key = "green"',
                 "",
                 "[[devices]]",
-                'id = "spare_nlp20"',
+                'id = "battery_beta"',
                 'type = "bm200"',
-                'name = "Spare NLP20"',
+                'name = "Battery Beta"',
                 'mac = "AA:BB:CC:DD:EE:02"',
                 'color_key = "blue"',
                 "",
@@ -4433,7 +5278,7 @@ def test_update_device_from_form_renames_device_id_and_history(tmp_path: Path) -
     assert errors == []
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
-    assert [device.id for device in devices] == ["starter_battery", "spare_nlp20"]
+    assert [device.id for device in devices] == ["starter_battery", "battery_beta"]
     assert fetch_recent_history(database_path, device_id="bm200_house", limit=10) == []
     assert fetch_recent_history(database_path, device_id="starter_battery", limit=10)
 
@@ -4522,7 +5367,7 @@ def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> 
     errors = update_device_from_form(
         config_path=config_path,
         device_id="bm200_house",
-        new_device_id="spare_nlp20",
+        new_device_id="battery_beta",
         device_type="bm200",
         device_name="Starter Battery",
         device_mac="AA:BB:CC:DD:EE:01",
@@ -4540,10 +5385,10 @@ def test_update_device_from_form_rejects_duplicate_device_id(tmp_path: Path) -> 
         battery_production_year=None,
     )
 
-    assert errors == ["duplicate device id: spare_nlp20"]
+    assert errors == ["duplicate device id: battery_beta"]
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
-    assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+    assert [device.id for device in devices] == ["bm200_house", "battery_beta"]
 
 
 def test_devices_update_redirect_uses_normalized_renamed_device_id(tmp_path: Path) -> None:
@@ -4622,7 +5467,7 @@ def test_update_device_from_form_rejects_history_collision(tmp_path: Path) -> No
     assert errors == ["device id spare_history already has stored history; choose a different id"]
     config = load_config(config_path)
     devices = load_device_registry(config.device_registry_path)
-    assert [device.id for device in devices] == ["bm200_house", "spare_nlp20"]
+    assert [device.id for device in devices] == ["bm200_house", "battery_beta"]
 
 
 def test_bottom_nav_renders_generated_icons() -> None:

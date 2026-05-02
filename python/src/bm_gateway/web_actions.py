@@ -7,14 +7,22 @@ import sys
 import tempfile
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
-from .config import load_config, write_config
+from .archive_sync import (
+    sync_archive_backfill_candidates,
+    sync_bm200_device_archive,
+    sync_bm300_device_archive,
+)
+from .audit_log import append_audit_event
+from .config import AppConfig, load_config, write_config
 from .device_registry import (
     Device,
     default_battery_family,
     default_battery_profile,
     default_color_key,
     default_icon_key,
+    device_driver_type,
     generate_device_id,
     load_device_registry,
     normalize_mac_address,
@@ -30,6 +38,28 @@ from .state_store import (
 )
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
+
+BM200_FULL_HISTORY_PAGE_COUNT = 85
+HistorySyncProgress = Callable[[int, int, str], None]
+
+
+def _audit_manual_web_action(
+    config: AppConfig,
+    *,
+    action: str,
+    status: str,
+    details: dict[str, object],
+    state_dir: Path | None = None,
+) -> None:
+    append_audit_event(
+        config=config,
+        state_dir=state_dir,
+        source="web",
+        trigger="manual",
+        action=action,
+        status=status,
+        details=details,
+    )
 
 
 def _config_and_registry_texts(config_path: Path) -> tuple[str, str]:
@@ -104,6 +134,11 @@ def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapsh
 
 def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml: str) -> list[str]:
     config_path.parent.mkdir(parents=True, exist_ok=True)
+    current_config: AppConfig | None = None
+    try:
+        current_config = load_config(config_path)
+    except Exception:
+        current_config = None
     with tempfile.TemporaryDirectory() as temp_dir_name:
         temp_dir = Path(temp_dir_name)
         temp_config_path = temp_dir / config_path.name
@@ -120,6 +155,13 @@ def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml
         device_errors = validate_devices(devices)
         errors = [*config_errors, *device_errors]
         if errors:
+            if current_config is not None:
+                _audit_manual_web_action(
+                    current_config,
+                    action="config_text_update",
+                    status="failed",
+                    details={"errors": errors},
+                )
             return errors
 
         declared_registry_path = Path(config.gateway.device_registry)
@@ -137,6 +179,12 @@ def update_config_from_text(*, config_path: Path, config_toml: str, devices_toml
             ),
         )
         write_device_registry(target_registry_path, devices)
+        _audit_manual_web_action(
+            load_config(config_path),
+            action="config_text_update",
+            status="completed",
+            details={"device_count": len(devices)},
+        )
         return []
 
 
@@ -207,6 +255,12 @@ def add_device_from_form(
     )
     errors = validate_devices(devices)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="device_add",
+            status="failed",
+            details={"device_id": resolved_device_id, "errors": errors},
+        )
         return errors
 
     write_device_registry(config.device_registry_path, devices)
@@ -218,6 +272,12 @@ def add_device_from_form(
                 gateway=replace(config.gateway, reader_mode="live"),
             ),
         )
+    _audit_manual_web_action(
+        config,
+        action="device_add",
+        status="completed",
+        details={"device_id": resolved_device_id, "device_type": device_type.strip()},
+    )
     return []
 
 
@@ -290,15 +350,42 @@ def update_device_from_form(
         else:
             updated_devices.append(device)
     if original_device is None:
+        _audit_manual_web_action(
+            config,
+            action="device_update",
+            status="failed",
+            details={
+                "device_id": resolved_device_id,
+                "errors": [f"device {resolved_device_id} was not found"],
+            },
+        )
         return [f"device {resolved_device_id} was not found"]
     errors = validate_devices(updated_devices)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="device_update",
+            status="failed",
+            details={"device_id": resolved_device_id, "errors": errors},
+        )
         return errors
     if (
         database_path is not None
         and resolved_new_device_id != resolved_device_id
         and history_device_id_exists(database_path, resolved_new_device_id)
     ):
+        _audit_manual_web_action(
+            config,
+            action="device_update",
+            status="failed",
+            details={
+                "device_id": resolved_device_id,
+                "errors": [
+                    "device id "
+                    f"{resolved_new_device_id} already has stored history; choose a different id"
+                ],
+            },
+        )
         return [
             f"device id {resolved_new_device_id} already has stored history; choose a different id"
         ]
@@ -318,6 +405,17 @@ def update_device_from_form(
             mac=resolved_device_mac,
         )
     write_device_registry(config.device_registry_path, updated_devices)
+    _audit_manual_web_action(
+        config,
+        action="device_update",
+        status="completed",
+        details={
+            "device_id": resolved_device_id,
+            "new_device_id": resolved_new_device_id,
+            "device_type": resolved_device_type,
+        },
+        state_dir=database_path.parent.parent if database_path is not None else None,
+    )
     return []
 
 
@@ -394,8 +492,20 @@ def update_web_preferences(
 
     errors = validate_config(updated)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="web_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
         return errors
     write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="web_preferences_update",
+        status="completed",
+        details={"host": resolved_host, "port": resolved_port, "enabled": resolved_enabled},
+    )
     return []
 
 
@@ -468,8 +578,71 @@ def update_usb_otg_preferences(
 
     errors = validate_config(updated)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="usb_otg_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
         return errors
     write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="usb_otg_preferences_update",
+        status="completed",
+        details={"enabled": enabled},
+    )
+    return []
+
+
+def update_archive_sync_preferences(
+    *,
+    config_path: Path,
+    enabled: bool,
+    periodic_interval_seconds: int,
+    reconnect_min_gap_seconds: int,
+    safety_margin_seconds: int,
+    bm200_max_pages_per_sync: int,
+    bm300_enabled: bool,
+    bm300_max_pages_per_sync: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            enabled=enabled,
+            periodic_interval_seconds=periodic_interval_seconds,
+            reconnect_min_gap_seconds=reconnect_min_gap_seconds,
+            safety_margin_seconds=safety_margin_seconds,
+            bm200_max_pages_per_sync=bm200_max_pages_per_sync,
+            bm300_enabled=bm300_enabled,
+            bm300_max_pages_per_sync=bm300_max_pages_per_sync,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        _audit_manual_web_action(
+            config,
+            action="archive_sync_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
+        return errors
+    write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="archive_sync_preferences_update",
+        status="completed",
+        details={
+            "enabled": enabled,
+            "bm200_max_pages_per_sync": bm200_max_pages_per_sync,
+            "bm300_enabled": bm300_enabled,
+            "bm300_max_pages_per_sync": bm300_max_pages_per_sync,
+        },
+    )
     return []
 
 
@@ -503,8 +676,24 @@ def update_gateway_preferences(
 
     errors = validate_config(updated)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="gateway_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
         return errors
     write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="gateway_preferences_update",
+        status="completed",
+        details={
+            "gateway_name": gateway_name,
+            "reader_mode": reader_mode,
+            "poll_interval_seconds": poll_interval_seconds,
+        },
+    )
     return []
 
 
@@ -541,8 +730,20 @@ def update_mqtt_preferences(
 
     errors = validate_config(updated)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="mqtt_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
         return errors
     write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="mqtt_preferences_update",
+        status="completed",
+        details={"enabled": mqtt_enabled, "host": mqtt_host, "port": mqtt_port},
+    )
     return []
 
 
@@ -567,8 +768,20 @@ def update_home_assistant_preferences(
 
     errors = validate_config(updated)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="home_assistant_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
         return errors
     write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="home_assistant_preferences_update",
+        status="completed",
+        details={"enabled": home_assistant_enabled},
+    )
     return []
 
 
@@ -593,8 +806,24 @@ def update_bluetooth_preferences(
 
     errors = validate_config(updated)
     if errors:
+        _audit_manual_web_action(
+            config,
+            action="bluetooth_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
         return errors
     write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="bluetooth_preferences_update",
+        status="completed",
+        details={
+            "adapter": adapter,
+            "scan_timeout_seconds": scan_timeout_seconds,
+            "connect_timeout_seconds": connect_timeout_seconds,
+        },
+    )
     return []
 
 
@@ -626,7 +855,8 @@ def run_once_via_cli(
     state_dir: Path | None = None,
     publish_discovery: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    config = load_config(config_path)
+    completed = subprocess.run(
         build_run_once_command(
             config_path,
             state_dir=state_dir,
@@ -636,6 +866,165 @@ def run_once_via_cli(
         capture_output=True,
         text=True,
     )
+    _audit_manual_web_action(
+        config,
+        action="run_once_via_cli",
+        status="completed" if completed.returncode == 0 else "failed",
+        details={"publish_discovery": publish_discovery, "returncode": completed.returncode},
+        state_dir=state_dir,
+    )
+    return completed
+
+
+def sync_history_now(
+    *,
+    config_path: Path,
+    state_dir: Path | None = None,
+) -> dict[str, object]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    device_pages = {
+        device.id: (
+            config.archive_sync.bm300_max_pages_per_sync
+            if device_driver_type(device.type) == "bm300pro"
+            else config.archive_sync.bm200_max_pages_per_sync
+        )
+        for device in devices
+        if device.enabled
+        and (
+            device_driver_type(device.type) == "bm200"
+            or (device_driver_type(device.type) == "bm300pro" and config.archive_sync.bm300_enabled)
+        )
+    }
+    results = sync_archive_backfill_candidates(
+        config=config,
+        devices=devices,
+        database_path=database_file_path(config, state_dir=state_dir),
+        device_pages=device_pages,
+        source="web",
+        trigger="manual",
+    )
+    errors = [result for result in results if result.get("synced") is not True]
+    payload = {
+        "requested": len(device_pages),
+        "synced": sum(1 for result in results if result.get("synced") is True),
+        "fetched": _sum_result_int(results, "fetched"),
+        "inserted": _sum_result_int(results, "inserted"),
+        "errors": errors,
+        "results": results,
+    }
+    append_audit_event(
+        config=config,
+        state_dir=state_dir,
+        source="web",
+        trigger="manual",
+        action="history_sync_batch_completed",
+        status="completed" if not errors else "failed",
+        details={
+            "requested": payload["requested"],
+            "synced": payload["synced"],
+            "fetched": payload["fetched"],
+            "inserted": payload["inserted"],
+            "error_count": len(errors),
+            "device_pages": device_pages,
+        },
+    )
+    return payload
+
+
+def sync_device_history_now(
+    *,
+    config_path: Path,
+    device_id: str,
+    state_dir: Path | None = None,
+    progress: HistorySyncProgress | None = None,
+) -> dict[str, object]:
+    config = load_config(config_path)
+    devices = load_device_registry(config.device_registry_path)
+    device = next((item for item in devices if item.id == device_id), None)
+    if device is None:
+        _audit_manual_web_action(
+            config,
+            action="history_sync_device_completed",
+            status="failed",
+            details={"device_id": device_id, "error": f"Unknown device: {device_id}"},
+            state_dir=state_dir,
+        )
+        raise ValueError(f"Unknown device: {device_id}")
+    if not device.enabled:
+        _audit_manual_web_action(
+            config,
+            action="history_sync_device_completed",
+            status="failed",
+            details={"device_id": device_id, "error": f"Device is disabled: {device_id}"},
+            state_dir=state_dir,
+        )
+        raise ValueError(f"Device is disabled: {device_id}")
+
+    driver_type = device_driver_type(device.type)
+    database_path = database_file_path(config, state_dir=state_dir)
+    try:
+        if driver_type == "bm200":
+            payload = sync_bm200_device_archive(
+                config=config,
+                device=device,
+                database_path=database_path,
+                page_count=BM200_FULL_HISTORY_PAGE_COUNT,
+                progress=progress,
+            )
+        elif driver_type == "bm300pro":
+            if not config.archive_sync.bm300_enabled:
+                raise ValueError("BM300 archive sync is disabled in settings.")
+            payload = sync_bm300_device_archive(
+                config=config,
+                device=device,
+                database_path=database_path,
+                page_count=max(1, config.archive_sync.bm300_max_pages_per_sync),
+                progress=progress,
+            )
+        else:
+            raise ValueError(f"History sync is not implemented for device type: {device.type}")
+    except Exception as exc:
+        _audit_manual_web_action(
+            config,
+            action="history_sync_device_completed",
+            status="failed",
+            details={"device_id": device_id, "error": str(exc) or exc.__class__.__name__},
+            state_dir=state_dir,
+        )
+        raise
+
+    payload["requested"] = 1
+    payload["synced"] = True
+    append_audit_event(
+        config=config,
+        state_dir=state_dir,
+        source="web",
+        trigger="manual",
+        action="history_sync_device_completed",
+        status="completed",
+        details={
+            "device_id": device.id,
+            "device_type": device.type,
+            "fetched": payload.get("fetched", 0),
+            "inserted": payload.get("inserted", 0),
+            "page_count": payload.get("page_count", 0),
+            "profile": payload.get("profile", ""),
+        },
+    )
+    return payload
+
+
+def _sum_result_int(results: list[dict[str, object]], key: str) -> int:
+    total = 0
+    for result in results:
+        value = result.get(key, 0)
+        if isinstance(value, str | int | float):
+            try:
+                total += int(value)
+            except ValueError:
+                continue
+    return total
 
 
 def start_run_once_via_cli(
@@ -644,7 +1033,8 @@ def start_run_once_via_cli(
     state_dir: Path | None = None,
     publish_discovery: bool = False,
 ) -> subprocess.Popen[str]:
-    return subprocess.Popen(
+    config = load_config(config_path)
+    process = subprocess.Popen(
         build_run_once_command(
             config_path,
             state_dir=state_dir,
@@ -655,6 +1045,14 @@ def start_run_once_via_cli(
         text=True,
         start_new_session=True,
     )
+    _audit_manual_web_action(
+        config,
+        action="run_once_via_cli_started",
+        status="completed",
+        details={"publish_discovery": publish_discovery, "pid": process.pid},
+        state_dir=state_dir,
+    )
+    return process
 
 
 def _privileged_systemctl_command(*args: str) -> list[str]:

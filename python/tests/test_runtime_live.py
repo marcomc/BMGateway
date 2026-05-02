@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any, Iterator
 
 import pytest
+from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.config import (
     AppConfig,
     BluetoothConfig,
@@ -61,7 +64,7 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
             voltage=12.73,
             soc=58,
             status_code=2,
-            state="normal",
+            state="charging",
             temperature=23.0,
         )
 
@@ -71,7 +74,7 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
     assert snapshot.devices_online == 1
     assert snapshot.devices[0].voltage == 12.73
     assert snapshot.devices[0].soc == 58
-    assert snapshot.devices[0].state == "normal"
+    assert snapshot.devices[0].state == "charging"
     assert snapshot.devices[0].temperature == 23.0
     assert snapshot.devices[1].connected is False
     assert snapshot.devices[1].state == "disabled"
@@ -153,6 +156,68 @@ def test_build_snapshot_classifies_device_not_found_as_offline() -> None:
     assert snapshot.devices[0].error_detail == "No BLE advertisement seen during the scan window."
 
 
+def test_build_snapshot_requests_bluetooth_recovery_for_fatal_dbus_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+    calls: list[list[str]] = []
+
+    class Completed:
+        def __init__(self) -> None:
+            self.returncode = 0
+            self.stderr = ""
+
+    def fake_run(command: list[str], **_kwargs: object) -> Completed:
+        calls.append(command)
+        return Completed()
+
+    def failing_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM200Measurement:
+        _ = (device, adapter, timeout_seconds, scan_timeout_seconds)
+        raise RuntimeError(
+            "[org.freedesktop.DBus.Error.AccessDenied] Client tried to send a message "
+            "other than Hello without being registered"
+        )
+
+    monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
+    monkeypatch.setattr(
+        "bm_gateway.bluetooth_recovery.shutil.which",
+        lambda _name: f"/usr/bin/{_name}",
+    )
+    monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("bm_gateway.bluetooth_recovery.subprocess.run", fake_run)
+
+    with pytest.raises(BluetoothRecoveryRequiredError):
+        build_snapshot(config, devices, bm200_reader=failing_reader)
+
+    assert calls == [
+        ["bluetoothctl", "power", "on"],
+        ["sudo", "-n", "systemctl", "restart", "bluetooth.service"],
+    ]
+
+
 def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None:
     config = AppConfig(
         source_path=tmp_path / "gateway.toml",
@@ -186,7 +251,7 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
             voltage=12.73,
             soc=58,
             status_code=2,
-            state="normal",
+            state="charging",
             temperature=18.5,
         )
 
@@ -232,7 +297,7 @@ def test_build_snapshot_preserves_live_reader_rssi() -> None:
             voltage=12.73,
             soc=58,
             status_code=2,
-            state="normal",
+            state="charging",
             temperature=18.5,
             rssi=-67,
         )
@@ -292,6 +357,129 @@ def test_build_snapshot_uses_live_bm300_reader_when_enabled() -> None:
     assert snapshot.devices[0].state == "normal"
     assert snapshot.devices[0].temperature == 24.0
     assert snapshot.devices[0].rssi == -61
+
+
+def test_build_snapshot_uses_hard_timeout_runner_for_default_bm300_reader(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm300_van",
+            type="bm300pro",
+            name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+    captured: dict[str, Any] = {}
+
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: object,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: object,
+    ) -> BM300Measurement:
+        _ = timeout_error
+        captured["function"] = function
+        captured["args"] = args
+        captured["timeout_seconds"] = timeout_seconds
+        return BM300Measurement(
+            voltage=25.42,
+            soc=83,
+            status_code=0,
+            state="normal",
+            temperature=24.0,
+            rssi=-61,
+        )
+
+    monkeypatch.setattr(
+        "bm_gateway.runtime.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
+
+    snapshot = build_snapshot(config, devices)
+
+    assert snapshot.devices_online == 1
+    assert captured["function"].__name__ == "_read_live_bm300"
+    assert captured["args"] == (devices[0], "hci0", 45.0, 15.0)
+    assert captured["timeout_seconds"] == 67.5
+
+
+def test_build_snapshot_serializes_live_reads_with_cross_process_lock(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    config = AppConfig(
+        source_path=tmp_path / "gateway.toml",
+        device_registry_path=tmp_path / "devices.toml",
+        gateway=GatewayConfig(reader_mode="live"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm300_van",
+            type="bm300pro",
+            name="BM300 Van",
+            mac="AA:BB:CC:DD:EE:02",
+            enabled=True,
+        )
+    ]
+    state_dir = tmp_path / "state"
+    calls: list[tuple[Path | None, str]] = []
+
+    @contextmanager
+    def fake_lock(
+        _config: AppConfig,
+        *,
+        operation: str,
+        state_dir: Path | None = None,
+        timeout_seconds: float = 600.0,
+        retry_interval_seconds: float = 0.25,
+    ) -> Iterator[dict[str, object]]:
+        _ = (timeout_seconds, retry_interval_seconds)
+        calls.append((state_dir, operation))
+        yield {}
+
+    def fake_reader(
+        device: Device,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+    ) -> BM300Measurement:
+        assert device.id == "bm300_van"
+        assert adapter == "hci0"
+        assert timeout_seconds == 45.0
+        assert scan_timeout_seconds == 15.0
+        return BM300Measurement(
+            voltage=25.42,
+            soc=83,
+            status_code=0,
+            state="normal",
+            temperature=24.0,
+            rssi=-61,
+        )
+
+    monkeypatch.setattr("bm_gateway.runtime.exclusive_bluetooth_operation", fake_lock)
+
+    snapshot = build_snapshot(config, devices, bm300_reader=fake_reader, state_dir=state_dir)
+
+    assert snapshot.devices_online == 1
+    assert calls == [(state_dir, "live_poll:bm300_van")]
 
 
 def test_build_snapshot_uses_bm200_driver_for_commercial_aliases() -> None:
@@ -354,7 +542,7 @@ def test_build_snapshot_uses_bm300_driver_for_commercial_aliases() -> None:
             id="bm7_bench",
             type="bm7",
             name="BM7 Bench",
-            mac="E0:4E:7A:AF:9B:E8",
+            mac="00:00:5E:00:53:03",
             enabled=True,
         )
     ]
@@ -487,7 +675,7 @@ def test_build_snapshot_powers_on_adapter_before_live_polling(
         assert adapter == "hci0"
         assert timeout_seconds == 45.0
         assert scan_timeout_seconds == 15.0
-        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
+        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="charging")
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
@@ -538,7 +726,7 @@ def test_build_snapshot_retries_after_device_not_found(
         assert scan_timeout_seconds == 15.0
         if attempts["count"] == 1:
             raise BleakDeviceNotFoundError(device.mac)
-        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="normal")
+        return BM200Measurement(voltage=12.73, soc=58, status_code=2, state="charging")
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)

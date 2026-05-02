@@ -173,9 +173,18 @@ fi
 
 if [[ "${skip_apt}" -eq 0 ]]; then
   sudo apt-get update
-  apt_packages=(bluetooth bluez curl git make python3 python3-venv)
+  apt_packages=(
+    bluetooth
+    bluez
+    ca-certificates
+    curl
+    git
+    make
+    python3
+    python3-venv
+  )
   if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
-    apt_packages+=(dosfstools libjpeg-dev python3-dev zlib1g-dev)
+    apt_packages+=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
   fi
   if [[ "${enable_glances}" -eq 1 ]]; then
     apt_packages+=(glances)

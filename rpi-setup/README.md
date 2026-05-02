@@ -37,6 +37,8 @@ The install helper now places:
 
 The one-line bootstrap now installs the full appliance by default:
 
+- documented Raspberry Pi OS system packages for runtime, web, Bluetooth, and
+  USB OTG helper paths
 - standalone CLI runtime
 - runtime service
 - management web service

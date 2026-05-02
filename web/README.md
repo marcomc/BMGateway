@@ -40,6 +40,44 @@ The implementation lives in the shared Python package:
 - localization layer: `python/src/bm_gateway/localization.py`
 - packaged locale catalogs: `python/src/bm_gateway/locales/`
 
+## Chart Performance
+
+Home Fleet Trend, History charts, Device Detail charts, and USB OTG Fleet Trend
+frame routes share the same chart primitive and chart asset:
+
+- `python/src/bm_gateway/web_ui.py::chart_card`
+- `python/src/bm_gateway/assets/chart.js`
+
+This means chart payload and rendering optimizations apply to normal web pages
+and to the hidden picture-frame screenshot routes. The shared behavior is:
+
+- chart datasets are embedded as `application/json` script payloads instead of
+  large escaped HTML attributes;
+- management responses are gzip-compressed when the client sends
+  `Accept-Encoding: gzip`;
+- dense visible ranges are compacted before SVG generation so broad ranges do
+  not draw every retained sample;
+- the compact picture-frame chart still sets `data-chart-compact="true"` and
+  uses the same downsampling path before Chromium screenshots it.
+
+The History page has one extra page-specific optimization: its diagnostic raw
+table renders only the latest 300 rows. Summary cards and chart data still use
+the full history payload fetched for the page.
+
+Validation on `bmgateway.local` for `battery_alpha` after dense archive import:
+
+| Request | Result |
+| --- | --- |
+| Uncompressed History HTML | about `645 KB` |
+| Gzip History HTML | about `50 KB` |
+| Gateway-local gzip response | about `0.4 s` |
+| Mac-to-gateway IPv4 gzip response | about `0.8-1.1 s` |
+
+Plain `bmgateway.local` requests from macOS were still slower in one test,
+around 8 seconds with gzip, while forced IPv4 was fast. Treat that residual
+delay as network name-resolution or IPv6/mDNS behavior unless reproduced over
+the gateway-local path.
+
 ## Configuration Knobs
 
 Web-facing config under `[web]` currently includes:
@@ -130,7 +168,7 @@ To add another language:
 
    ```bash
    uv run pytest python/tests/test_localization.py -q
-   markdownlint --config /Users/mmassari/.markdownlint.json web/README.md
+   markdownlint --config .markdownlint.json web/README.md
    ```
 
 7. Run `make check` before shipping.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -38,6 +39,8 @@ from .web_actions import (
     schedule_host_reboot,
     schedule_host_shutdown,
     start_run_once_via_cli,
+    sync_device_history_now,
+    update_archive_sync_preferences,
     update_bluetooth_preferences,
     update_config_from_text,
     update_device_from_form,
@@ -76,6 +79,7 @@ from .web_pages import (
     render_frame_battery_overview_html,
     render_frame_fleet_trend_html,
     render_history_html,
+    render_history_sync_pending_html,
     render_home_html,
     render_management_html,
     render_reboot_pending_html,
@@ -84,7 +88,7 @@ from .web_pages import (
     render_snapshot_html,
     render_usb_otg_export_pending_html,
 )
-from .web_pages_frame import frame_battery_overview_page_count
+from .web_pages_frame import FRAME_OVERVIEW_DEVICES_PER_PAGE, frame_battery_overview_page_count
 from .web_support import read_text
 
 __all__ = [
@@ -100,6 +104,7 @@ __all__ = [
     "render_frame_battery_overview_html",
     "render_frame_fleet_trend_html",
     "render_history_html",
+    "render_history_sync_pending_html",
     "render_management_html",
     "render_reboot_pending_html",
     "render_settings_html",
@@ -112,6 +117,8 @@ __all__ = [
     "refresh_usb_otg_drive",
     "restore_usb_otg_boot_mode",
     "start_run_once_via_cli",
+    "sync_device_history_now",
+    "update_archive_sync_preferences",
     "update_bluetooth_preferences",
     "update_config_from_text",
     "update_device_from_form",
@@ -136,6 +143,18 @@ _USB_OTG_EXPORT_STATUS: dict[str, object] = {
     "detail": "",
     "redirect_message": "",
 }
+_HISTORY_SYNC_LOCK = threading.Lock()
+_HISTORY_SYNC_STATUS: dict[str, object] = {
+    "status": "idle",
+    "device_id": "",
+    "completed": 0,
+    "total": 0,
+    "fetched": 0,
+    "inserted": 0,
+    "message": "Preparing history download",
+    "detail": "",
+    "redirect_message": "",
+}
 _RUN_ONCE_LOCK = threading.Lock()
 _RUN_ONCE_PROCESS: object | None = None
 
@@ -152,6 +171,93 @@ def _usb_otg_export_status_snapshot() -> dict[str, object]:
     total = _int_from_mapping(snapshot, "total")
     snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
     return snapshot
+
+
+def _set_history_sync_status(**updates: object) -> None:
+    with _HISTORY_SYNC_LOCK:
+        _HISTORY_SYNC_STATUS.update(updates)
+
+
+def _history_sync_status_snapshot() -> dict[str, object]:
+    with _HISTORY_SYNC_LOCK:
+        snapshot = dict(_HISTORY_SYNC_STATUS)
+    completed = _int_from_mapping(snapshot, "completed")
+    total = _int_from_mapping(snapshot, "total")
+    snapshot["percent"] = 0 if total <= 0 else round((completed / total) * 100, 1)
+    return snapshot
+
+
+def _start_tracked_history_sync(
+    *,
+    config_path: Path,
+    device_id: str,
+    state_dir: Path | None = None,
+) -> threading.Thread | None:
+    with _HISTORY_SYNC_LOCK:
+        if _HISTORY_SYNC_STATUS.get("status") == "running":
+            return None
+        _HISTORY_SYNC_STATUS.update(
+            {
+                "status": "running",
+                "device_id": device_id,
+                "completed": 0,
+                "total": 0,
+                "fetched": 0,
+                "inserted": 0,
+                "message": "Preparing history download",
+                "detail": "",
+                "redirect_message": "",
+            }
+        )
+
+    def _progress(completed: int, total: int, message: str) -> None:
+        _set_history_sync_status(
+            status="running",
+            completed=completed,
+            total=total,
+            message=message,
+        )
+
+    def _worker() -> None:
+        try:
+            payload = sync_device_history_now(
+                config_path=config_path,
+                device_id=device_id,
+                state_dir=state_dir,
+                progress=_progress,
+            )
+            fetched = _int_from_mapping(payload, "fetched")
+            inserted = _int_from_mapping(payload, "inserted")
+            resolved_device_id = str(payload.get("device_id") or device_id)
+            message = (
+                f"History sync completed: {resolved_device_id}, "
+                f"inserted {inserted} of {fetched} records"
+            )
+            _set_history_sync_status(
+                status="completed",
+                device_id=resolved_device_id,
+                completed=fetched,
+                total=fetched,
+                fetched=fetched,
+                inserted=inserted,
+                message="History sync completed",
+                detail=f"Inserted {inserted} of {fetched} records.",
+                redirect_message=message,
+            )
+        except Exception as exc:  # pragma: no cover - defensive web boundary
+            detail = str(exc) or exc.__class__.__name__
+            sync_status = _history_sync_status_snapshot()
+            _set_history_sync_status(
+                status="failed",
+                completed=_int_from_mapping(sync_status, "total"),
+                message="History sync failed",
+                detail=detail,
+                redirect_message=f"History sync failed: {detail}",
+            )
+
+    thread = threading.Thread(target=_worker, daemon=True, name="history-sync")
+    thread.start()
+    return thread
 
 
 def _start_tracked_run_once_via_cli(
@@ -389,28 +495,71 @@ def serve_management(
     state_dir: Path | None = None,
 ) -> None:
     class Handler(BaseHTTPRequestHandler):
-        def _send_html(self, html: str, status: int = 200) -> None:
-            payload = html.encode("utf-8")
+        def _client_accepts_gzip(self) -> bool:
+            accept_encoding = self.headers.get("Accept-Encoding", "")
+            gzip_quality: float | None = None
+            wildcard_quality: float | None = None
+            for item in accept_encoding.split(","):
+                token, *params = (part.strip() for part in item.split(";"))
+                lowered_token = token.lower()
+                if lowered_token not in {"gzip", "*"}:
+                    continue
+                quality = 1.0
+                for param in params:
+                    name, _, value = param.partition("=")
+                    if name.strip().lower() != "q":
+                        continue
+                    try:
+                        quality = float(value.strip())
+                    except ValueError:
+                        quality = 0.0
+                    break
+                if lowered_token == "gzip":
+                    gzip_quality = quality
+                else:
+                    wildcard_quality = quality
+            if gzip_quality is not None:
+                return gzip_quality > 0
+            return (wildcard_quality or 0.0) > 0
+
+        def _send_payload(
+            self,
+            payload: bytes,
+            *,
+            content_type: str,
+            status: int = 200,
+            compressible: bool = True,
+        ) -> None:
             self.send_response(status)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Type", content_type)
+            if compressible and len(payload) >= 1024 and self._client_accepts_gzip():
+                payload = gzip.compress(payload, compresslevel=6)
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Vary", "Accept-Encoding")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
+
+        def _send_html(self, html: str, status: int = 200) -> None:
+            payload = html.encode("utf-8")
+            self._send_payload(payload, content_type="text/html; charset=utf-8", status=status)
 
         def _send_json(self, payload_obj: object, status: int = 200) -> None:
             payload = json.dumps(payload_obj, indent=2, sort_keys=True).encode("utf-8")
-            self.send_response(status)
-            self.send_header("Content-Type", "application/json; charset=utf-8")
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            self._send_payload(
+                payload,
+                content_type="application/json; charset=utf-8",
+                status=status,
+            )
 
         def _send_bytes(self, payload: bytes, *, content_type: str, status: int = 200) -> None:
-            self.send_response(status)
-            self.send_header("Content-Type", content_type)
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            compressible = content_type.startswith(("text/", "application/json", "image/svg+xml"))
+            self._send_payload(
+                payload,
+                content_type=content_type,
+                status=status,
+                compressible=compressible,
+            )
 
         def _load_current(self) -> tuple[AppConfig, dict[str, object], Path]:
             config = load_config(config_path)
@@ -474,6 +623,20 @@ def serve_management(
                         status["redirect_message"] = translation.gettext(redirect_message)
                 self._send_json(status)
                 return
+            if parsed.path == "/api/history-sync/status":
+                status = _history_sync_status_snapshot()
+                translation = translation_for(request_language)
+                message = str(status.get("message", ""))
+                redirect_message = str(status.get("redirect_message", ""))
+                status["message"] = translation.gettext(message)
+                if redirect_message:
+                    if ": " in redirect_message:
+                        prefix, detail = redirect_message.split(": ", 1)
+                        status["redirect_message"] = f"{translation.gettext(prefix)}: {detail}"
+                    else:
+                        status["redirect_message"] = translation.gettext(redirect_message)
+                self._send_json(status)
+                return
             if parsed.path == "/api/devices":
                 self._send_json({"devices": serialized_devices})
                 return
@@ -522,6 +685,15 @@ def serve_management(
             if parsed.path == "/usb-otg-export/progress":
                 self._send_html(
                     render_usb_otg_export_pending_html(
+                        theme_preference=config.web.appearance,
+                        language=request_language,
+                    )
+                )
+                return
+
+            if parsed.path == "/history-sync/progress":
+                self._send_html(
+                    render_history_sync_pending_html(
                         theme_preference=config.web.appearance,
                         language=request_language,
                     )
@@ -589,6 +761,7 @@ def serve_management(
             if parsed.path == "/history":
                 params = parse_qs(parsed.query)
                 requested_device_id = params.get("device_id", [""])[0]
+                message = params.get("message", [""])[0]
                 available_device_ids = [
                     str(item.get("id", ""))
                     for item in serialized_devices
@@ -634,6 +807,7 @@ def serve_management(
                     default_chart_range=config.web.default_chart_range,
                     default_chart_metric=config.web.default_chart_metric,
                     language=request_language,
+                    message=message,
                 )
                 self._send_html(html)
                 return
@@ -1232,6 +1406,73 @@ def serve_management(
                 self.end_headers()
                 return
 
+            if parsed.path == "/settings/archive-sync":
+                config, snapshot, current_database_path = self._load_current()
+                try:
+                    periodic_interval_seconds = int(
+                        form.get("periodic_interval_seconds", ["64800"])[0]
+                    )
+                    reconnect_min_gap_seconds = int(
+                        form.get("reconnect_min_gap_seconds", ["28800"])[0]
+                    )
+                    safety_margin_seconds = int(form.get("safety_margin_seconds", ["7200"])[0])
+                    bm200_max_pages_per_sync = int(form.get("bm200_max_pages_per_sync", ["3"])[0])
+                    bm300_max_pages_per_sync = int(form.get("bm300_max_pages_per_sync", ["1"])[0])
+                except ValueError:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: archive sync values must be numeric",
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_archive_sync_preferences(
+                    config_path=config_path,
+                    enabled=_bool_from_form(form, "archive_sync_enabled"),
+                    periodic_interval_seconds=periodic_interval_seconds,
+                    reconnect_min_gap_seconds=reconnect_min_gap_seconds,
+                    safety_margin_seconds=safety_margin_seconds,
+                    bm200_max_pages_per_sync=bm200_max_pages_per_sync,
+                    bm300_enabled=_bool_from_form(form, "bm300_enabled"),
+                    bm300_max_pages_per_sync=bm300_max_pages_per_sync,
+                )
+                if errors:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
             if parsed.path == "/settings/bluetooth":
                 try:
                     scan_timeout_seconds = int(form.get("scan_timeout_seconds", ["15"])[0])
@@ -1394,7 +1635,10 @@ def serve_management(
                     image_height_px = int(form.get("image_height_px", ["234"])[0])
                     refresh_interval_seconds = int(form.get("refresh_interval_seconds", ["0"])[0])
                     overview_devices_per_image = int(
-                        form.get("overview_devices_per_image", ["5"])[0]
+                        form.get(
+                            "overview_devices_per_image",
+                            [str(FRAME_OVERVIEW_DEVICES_PER_PAGE)],
+                        )[0]
                     )
                 except ValueError:
                     configured_devices = load_device_registry(config.device_registry_path)
@@ -1482,6 +1726,27 @@ def serve_management(
                 )
                 self.send_response(303)
                 self.send_header("Location", "/usb-otg-export/progress")
+                self.end_headers()
+                return
+
+            if parsed.path == "/actions/sync-device-history":
+                device_id = form.get("device_id", [""])[0]
+                sync_thread = _start_tracked_history_sync(
+                    config_path=config_path,
+                    device_id=device_id,
+                    state_dir=state_dir,
+                )
+                redirect_params: dict[str, str] = {}
+                if device_id:
+                    redirect_params["device_id"] = device_id
+                if sync_thread is None:
+                    redirect_params["message"] = "History sync already running"
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/history-sync/progress"
+                    + (("?" + urlencode(redirect_params)) if redirect_params else ""),
+                )
                 self.end_headers()
                 return
 

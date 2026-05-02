@@ -548,8 +548,9 @@ def chart_card(
     default_metric: str,
     legend: list[tuple[str, str]],
     show_markers: bool = False,
+    actions_html: str = "",
 ) -> str:
-    points_json = html.escape(json.dumps(points, separators=(",", ":")))
+    points_json = json.dumps(points, separators=(",", ":")).replace("</", "<\\/")
     legend_html = "".join(
         '<button type="button" class="legend-item active" '
         f'data-series-label="{html.escape(label)}" aria-pressed="true">'
@@ -583,6 +584,11 @@ def chart_card(
     subtitle_html = (
         f'<div class="section-subtitle">{html.escape(subtitle)}</div>' if subtitle else ""
     )
+    actions_block = (
+        f'<div class="inline-actions chart-card-actions">{actions_html}</div>'
+        if actions_html
+        else ""
+    )
     return (
         '<section class="chart-card">'
         '<div class="chart-card-header">'
@@ -591,6 +597,7 @@ def chart_card(
         f'<h2 class="section-title">{html.escape(title)}</h2>'
         f"{subtitle_html}"
         "</div>"
+        f"{actions_block}"
         '<div class="control-rail chart-metric-rail">'
         f'<div class="control-segment tab-strip">{metric_buttons}</div>'
         "</div>"
@@ -605,11 +612,11 @@ def chart_card(
         f'data-chart-nav="previous" data-chart-id="{html.escape(chart_id)}" '
         'aria-label="Show previous range">‹</button>'
         f'<div class="chart-frame" id="{html.escape(chart_id)}" '
-        f'data-chart-points="{points_json}" '
         f'data-show-markers="{str(show_markers).lower()}">'
         '<div class="chart-canvas"></div>'
         '<div class="chart-tooltip" aria-hidden="true"></div>'
         "</div>"
+        f'<script type="application/json" id="{html.escape(chart_id)}-data">{points_json}</script>'
         f'<button type="button" class="chart-nav-arrow next" '
         f'data-chart-nav="next" data-chart-id="{html.escape(chart_id)}" '
         'aria-label="Show next range">›</button>'
