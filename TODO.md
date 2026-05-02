@@ -194,6 +194,58 @@
   - add tests for parsing Raspberry Pi model, memory, CPU, storage, and network
     diagnostics from representative Linux command output
 
+- [ ] Add appliance backup and restore for configuration and optional history.
+  A standard Raspberry Pi reinstall should not require manual BMGateway
+  reconfiguration. The appliance should be able to export and later import a
+  restorable backup that brings back configured devices, gateway settings, and
+  optionally historical data after a clean reinstall.
+  Actions:
+  - define two backup artifacts instead of one combined archive:
+    configuration or system backup and historical-data backup
+  - include gateway config, device registry, relevant runtime metadata, and any
+    other user-managed appliance settings in the configuration backup
+  - keep history backup optional during both export and restore so operators can
+    restore configuration only without repopulating SQLite history
+  - add a restore flow that runs after a standard install and can import a
+    selected local archive instead of requiring manual reconfiguration
+  - add UI and or CLI affordances for `Import backup`, including validation,
+    preview, overwrite rules, and operator confirmation
+  - support cloud-adjacent restore sources by accepting archives that the user
+    has already uploaded manually and by integrating with `pCloud`, especially
+    `pcloudcc` and mounted filesystem workflows
+  - decide whether `pCloud` support should remain file-oriented only or also
+    include first-class backup listing, selection, and restore flows in the web
+    UI
+  - define a stable backup format and versioning policy so future releases can
+    import older backup archives safely
+  - document which files and databases are authoritative for backup and which
+    transient runtime artifacts should be excluded
+  - decide how restore handles service stop or start sequencing, schema
+    migration, partial failures, and rollback safety
+  - add tests that verify export, configuration-only restore, full restore with
+    history, and version-compatibility behavior
+
+- [ ] Add first-class 64-bit Raspberry Pi build and validation coverage.
+  The project should support a clean Raspberry Pi OS 64-bit installation path
+  on compatible boards such as Zero 2 W, while keeping explicit validation on
+  relevant 32-bit-oriented hardware in the supported matrix.
+  Actions:
+  - validate the standalone install flow, packaged runtime, and service units
+    on Raspberry Pi OS 64-bit
+  - check Python dependency and native-build behavior on `arm64`, including
+    `bleak`, `pycryptodome`, image-related dependencies, and Chromium-backed
+    USB OTG rendering paths
+  - decide whether documentation and install scripts should distinguish between
+    recommended `32-bit` and `64-bit` targets by board model and use case
+  - define whether releases need explicit multi-architecture test gates for
+    `armhf` and `arm64`
+  - add hardware validation coverage on Raspberry Pi `Zero W` `1.1`
+  - record any feature limits or recommended-role differences between
+    `Zero W` and `Zero 2 W`, especially for web UI, BLE polling density, and
+    USB OTG export workloads
+  - add regression checks or documented smoke tests for install, runtime, web,
+    and backup or restore behavior across the validated hardware matrix
+
 - [ ] Add optional live BLE monitoring sessions for battery monitors.
   Keep periodic Raspberry Pi polling as the default appliance behavior, but add
   an explicit user-controlled live mode that holds a BLE connection open when
