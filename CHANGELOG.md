@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 
 ### Changed
 
@@ -20,7 +20,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   page banner that points operators toward the Raspberry Pi troubleshooting
   runbooks.
 
-## [0.2.1] - 2026-05-01
+## [0.2.1] - 2026-05-01 - probe-history, archive sync, and BM300 Pro/BM7 import improvements
 
 ### Added
 
