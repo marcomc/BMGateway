@@ -27,6 +27,8 @@ class BluetoothConfig:
     adapter: str = "auto"
     scan_timeout_seconds: int = 15
     connect_timeout_seconds: int = 45
+    bm200_live_hard_timeout_seconds: int = 0
+    bm300_live_hard_timeout_seconds: int = 0
 
 
 @dataclass(frozen=True)
@@ -144,6 +146,8 @@ class AppConfig:
                 "adapter": self.bluetooth.adapter,
                 "scan_timeout_seconds": self.bluetooth.scan_timeout_seconds,
                 "connect_timeout_seconds": self.bluetooth.connect_timeout_seconds,
+                "bm200_live_hard_timeout_seconds": self.bluetooth.bm200_live_hard_timeout_seconds,
+                "bm300_live_hard_timeout_seconds": self.bluetooth.bm300_live_hard_timeout_seconds,
             },
             "mqtt": {
                 "enabled": self.mqtt.enabled,
@@ -272,6 +276,14 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"adapter = {_string_to_toml(config.bluetooth.adapter)}",
             f"scan_timeout_seconds = {config.bluetooth.scan_timeout_seconds}",
             f"connect_timeout_seconds = {config.bluetooth.connect_timeout_seconds}",
+            (
+                "bm200_live_hard_timeout_seconds = "
+                f"{config.bluetooth.bm200_live_hard_timeout_seconds}"
+            ),
+            (
+                "bm300_live_hard_timeout_seconds = "
+                f"{config.bluetooth.bm300_live_hard_timeout_seconds}"
+            ),
             "",
             "[mqtt]",
             f"enabled = {_bool_to_toml(config.mqtt.enabled)}",
@@ -360,6 +372,12 @@ def load_config(path: Path) -> AppConfig:
         adapter=str(bluetooth_table.get("adapter", "auto")),
         scan_timeout_seconds=int(bluetooth_table.get("scan_timeout_seconds", 15)),
         connect_timeout_seconds=int(bluetooth_table.get("connect_timeout_seconds", 45)),
+        bm200_live_hard_timeout_seconds=int(
+            bluetooth_table.get("bm200_live_hard_timeout_seconds", 0)
+        ),
+        bm300_live_hard_timeout_seconds=int(
+            bluetooth_table.get("bm300_live_hard_timeout_seconds", 0)
+        ),
     )
     mqtt = MQTTConfig(
         enabled=bool(mqtt_table.get("enabled", True)),
@@ -454,6 +472,10 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("bluetooth.scan_timeout_seconds must be greater than zero")
     if config.bluetooth.connect_timeout_seconds <= 0:
         errors.append("bluetooth.connect_timeout_seconds must be greater than zero")
+    if config.bluetooth.bm200_live_hard_timeout_seconds < 0:
+        errors.append("bluetooth.bm200_live_hard_timeout_seconds must be zero or greater")
+    if config.bluetooth.bm300_live_hard_timeout_seconds < 0:
+        errors.append("bluetooth.bm300_live_hard_timeout_seconds must be zero or greater")
     if not config.mqtt.host.strip():
         errors.append("mqtt.host must not be empty")
     if config.mqtt.port <= 0:

@@ -192,8 +192,38 @@ def _read_live_bm300(
     )
 
 
-def _bm300_live_hard_timeout_seconds(timeout_seconds: float) -> float:
+def _live_hard_timeout_seconds(timeout_seconds: float) -> float:
     return max(timeout_seconds + 15.0, timeout_seconds * 1.5)
+
+
+def _effective_live_hard_timeout_seconds(
+    *, timeout_seconds: float, configured_hard_timeout_seconds: float
+) -> float:
+    if configured_hard_timeout_seconds > 0:
+        return configured_hard_timeout_seconds
+    return _live_hard_timeout_seconds(timeout_seconds)
+
+
+def _read_live_bm200_isolated(
+    device: Device,
+    adapter: str,
+    timeout_seconds: float,
+    scan_timeout_seconds: float,
+    *,
+    configured_hard_timeout_seconds: float = 0.0,
+) -> BM200Measurement:
+    hard_timeout_seconds = _effective_live_hard_timeout_seconds(
+        timeout_seconds=timeout_seconds,
+        configured_hard_timeout_seconds=configured_hard_timeout_seconds,
+    )
+    return run_in_subprocess_with_timeout(
+        function=_read_live_bm200,
+        args=(device, adapter, timeout_seconds, scan_timeout_seconds),
+        timeout_seconds=hard_timeout_seconds,
+        timeout_error=lambda: BM200TimeoutError(
+            f"{device.mac} exceeded the {hard_timeout_seconds:.1f}s hard timeout."
+        ),
+    )
 
 
 def _read_live_bm300_isolated(
@@ -201,8 +231,13 @@ def _read_live_bm300_isolated(
     adapter: str,
     timeout_seconds: float,
     scan_timeout_seconds: float,
+    *,
+    configured_hard_timeout_seconds: float = 0.0,
 ) -> BM300Measurement:
-    hard_timeout_seconds = _bm300_live_hard_timeout_seconds(timeout_seconds)
+    hard_timeout_seconds = _effective_live_hard_timeout_seconds(
+        timeout_seconds=timeout_seconds,
+        configured_hard_timeout_seconds=configured_hard_timeout_seconds,
+    )
     return run_in_subprocess_with_timeout(
         function=_read_live_bm300,
         args=(device, adapter, timeout_seconds, scan_timeout_seconds),
@@ -256,8 +291,50 @@ def build_snapshot(
     generated_at = _generated_at()
     adapter = _active_adapter(config)
     readings: list[DeviceReading] = []
-    bm200_live_reader = bm200_reader or _read_live_bm200
-    bm300_live_reader = bm300_reader or _read_live_bm300_isolated
+    bm200_live_reader: BM200Reader
+    if bm200_reader is None:
+        configured_bm200_hard_timeout_seconds = float(
+            config.bluetooth.bm200_live_hard_timeout_seconds
+        )
+
+        def bm200_live_reader(
+            device: Device,
+            adapter: str,
+            timeout_seconds: float,
+            scan_timeout_seconds: float,
+        ) -> BM200Measurement:
+            return _read_live_bm200_isolated(
+                device,
+                adapter,
+                timeout_seconds,
+                scan_timeout_seconds,
+                configured_hard_timeout_seconds=configured_bm200_hard_timeout_seconds,
+            )
+
+    else:
+        bm200_live_reader = bm200_reader
+    bm300_live_reader: BM300Reader
+    if bm300_reader is None:
+        configured_bm300_hard_timeout_seconds = float(
+            config.bluetooth.bm300_live_hard_timeout_seconds
+        )
+
+        def bm300_live_reader(
+            device: Device,
+            adapter: str,
+            timeout_seconds: float,
+            scan_timeout_seconds: float,
+        ) -> BM300Measurement:
+            return _read_live_bm300_isolated(
+                device,
+                adapter,
+                timeout_seconds,
+                scan_timeout_seconds,
+                configured_hard_timeout_seconds=configured_bm300_hard_timeout_seconds,
+            )
+
+    else:
+        bm300_live_reader = bm300_reader
     if config.gateway.reader_mode == "live" and any(
         device.enabled and device_driver_type(device.type) in LIVE_DEVICE_TYPES
         for device in devices

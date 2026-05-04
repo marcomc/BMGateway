@@ -23,7 +23,9 @@
       "properties": {
         "adapter": { "type": "string" },
         "scan_timeout_seconds": { "type": "integer", "minimum": 1 },
-        "connect_timeout_seconds": { "type": "integer", "minimum": 1 }
+        "connect_timeout_seconds": { "type": "integer", "minimum": 1 },
+        "bm200_live_hard_timeout_seconds": { "type": "integer", "minimum": 0 },
+        "bm300_live_hard_timeout_seconds": { "type": "integer", "minimum": 0 }
       }
     },
     "mqtt": {

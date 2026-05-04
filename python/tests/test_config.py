@@ -84,6 +84,8 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.archive_sync.bm200_max_pages_per_sync == 3
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 3
+    assert config.bluetooth.bm200_live_hard_timeout_seconds == 0
+    assert config.bluetooth.bm300_live_hard_timeout_seconds == 0
 
 
 def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path) -> None:
@@ -120,6 +122,8 @@ def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path
     assert config.archive_sync.bm200_max_pages_per_sync == 3
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 3
+    assert config.bluetooth.bm200_live_hard_timeout_seconds == 0
+    assert config.bluetooth.bm300_live_hard_timeout_seconds == 0
 
 
 def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
@@ -128,6 +132,7 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     web_properties = schema["properties"]["web"]["properties"]
     usb_otg_properties = schema["properties"]["usb_otg"]["properties"]
     archive_sync_properties = schema["properties"]["archive_sync"]["properties"]
+    bluetooth_properties = schema["properties"]["bluetooth"]["properties"]
 
     assert web_properties["port"]["maximum"] == 65535
     assert "auto" in web_properties["language"]["enum"]
@@ -140,6 +145,8 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     assert archive_sync_properties["periodic_interval_seconds"]["minimum"] == 1
     assert archive_sync_properties["bm200_max_pages_per_sync"]["maximum"] == 85
     assert archive_sync_properties["bm300_max_pages_per_sync"]["maximum"] == 59
+    assert bluetooth_properties["bm200_live_hard_timeout_seconds"]["minimum"] == 0
+    assert bluetooth_properties["bm300_live_hard_timeout_seconds"]["minimum"] == 0
 
 
 def test_validate_config_caps_usb_otg_image_size_to_helper_limit() -> None:
@@ -168,6 +175,11 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
             bm300_enabled=True,
             bm300_max_pages_per_sync=9,
         ),
+        bluetooth=replace(
+            config.bluetooth,
+            bm200_live_hard_timeout_seconds=90,
+            bm300_live_hard_timeout_seconds=120,
+        ),
     )
 
     write_config(target, updated)
@@ -180,6 +192,8 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
     assert loaded.archive_sync.bm200_max_pages_per_sync == 6
     assert loaded.archive_sync.bm300_enabled is True
     assert loaded.archive_sync.bm300_max_pages_per_sync == 9
+    assert loaded.bluetooth.bm200_live_hard_timeout_seconds == 90
+    assert loaded.bluetooth.bm300_live_hard_timeout_seconds == 120
 
 
 def test_validate_config_bounds_archive_sync_page_count() -> None:
@@ -200,4 +214,23 @@ def test_validate_config_bounds_archive_sync_page_count() -> None:
 
     assert "archive_sync.bm300_max_pages_per_sync must be between 1 and 59" in validate_config(
         too_many_bm300
+    )
+
+
+def test_validate_config_rejects_negative_bm300_live_hard_timeout() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    negative_bm200_hard_timeout = replace(
+        config,
+        bluetooth=replace(config.bluetooth, bm200_live_hard_timeout_seconds=-1),
+    )
+    negative_bm300_hard_timeout = replace(
+        config,
+        bluetooth=replace(config.bluetooth, bm300_live_hard_timeout_seconds=-1),
+    )
+
+    assert "bluetooth.bm200_live_hard_timeout_seconds must be zero or greater" in validate_config(
+        negative_bm200_hard_timeout
+    )
+    assert "bluetooth.bm300_live_hard_timeout_seconds must be zero or greater" in validate_config(
+        negative_bm300_hard_timeout
     )
