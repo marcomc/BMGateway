@@ -63,8 +63,10 @@ Optional web executable for:
 - service-friendly Raspberry Pi deployment shape
 - modular web UI localization selected through `web.language`
 
-BM300 Pro live support is implemented through a separate driver selected by the
-configured device type.
+BM200/BM6-family and BM300 Pro/BM7-family live polling now share the same BLE
+scan, connect, notify, retry, and cleanup control flow. The protocol-specific
+drivers still own the request payloads, packet validation, and measurement
+parsing selected by the configured device type.
 
 ## History and Persistence
 

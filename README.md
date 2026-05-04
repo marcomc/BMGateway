@@ -162,7 +162,7 @@ software and protocol research that should be credited explicitly.
   [slydiman/bm7-battery-monitor](https://github.com/slydiman/bm7-battery-monitor)
   and [derekpurdy/BM7](https://github.com/derekpurdy/BM7).
   These provided the BM7 AES key, current-state poll command, payload offsets,
-  and model naming used for the isolated BM300 Pro driver. Thanks to those
+  and model naming used for the BM300 Pro protocol driver. Thanks to those
   project maintainers and contributors for publishing their findings.
 - BM2/BM6 community discussion:
   [OpenMQTTGateway BM2 thread](https://community.openmqttgateway.com/t/omg-1-8-0-no-longer-gets-bm2-messages/3578).

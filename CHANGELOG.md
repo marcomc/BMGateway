@@ -19,13 +19,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   Bonjour or mDNS host advertising, including runtime log output and a red Home
   page banner that points operators toward the Raspberry Pi troubleshooting
   runbooks.
-- Added a configurable `bluetooth.bm300_live_hard_timeout_seconds` setting so
-  operators can lower or raise the subprocess kill budget used to protect BM300
-  live polls from stuck BlueZ or `bleak` calls without changing the underlying
-  BLE connect timeout.
-- Added the same child-process isolation pattern to BM200 live polling, plus a
-  configurable `bluetooth.bm200_live_hard_timeout_seconds` setting for tuning
-  the hard timeout budget separately from the BLE connect timeout.
+- Added a configurable `bluetooth.live_hard_timeout_seconds` setting so
+  operators can lower or raise the subprocess kill budget used to protect live
+  polls from stuck BlueZ or `bleak` calls without changing the underlying BLE
+  connect timeout.
+- Refactored BM200/BM6 and BM300 Pro/BM7 live polling to share the same BLE
+  scan, connect, notify, retry, and cleanup control flow while keeping the
+  protocol-specific request payloads and packet parsing in their respective
+  drivers.
 
 ## [0.2.1] - 2026-05-01 - probe-history, archive sync, and BM300 Pro/BM7 import improvements
 

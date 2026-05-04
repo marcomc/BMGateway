@@ -65,8 +65,9 @@ The state codes documented by the BM7 Home Assistant fork are:
 
 ## BMGateway Implementation
 
-`BMGateway` now keeps BM300 Pro live polling in
-`python/src/bm_gateway/drivers/bm300.py`.
+`BMGateway` keeps the BM300 Pro protocol-specific live polling code in
+`python/src/bm_gateway/drivers/bm300.py`, but the BLE scan, connect, notify,
+retry, and cleanup loop is now shared with the BM200/BM6 live polling path.
 
 The runtime dispatch is model-based:
 
@@ -75,9 +76,10 @@ The runtime dispatch is model-based:
 - `bm300`, `bm300pro`, and `bm7` use the new `bm300.py` driver family
 - any unknown device type remains unsupported
 
-The BM200/BM6 driver was not changed to understand BM300 payloads. This keeps
-the two protocol paths isolated even though they use the same BLE
-characteristics and request plaintext.
+The BM200/BM6 driver was not changed to understand BM300 payloads. The
+protocol-specific request handling and payload parsing remain isolated even
+though both drivers now use the same shared BLE live-polling control flow and
+the same BLE characteristics and request plaintext.
 
 Supported BM300 Pro live fields now match the fields currently persisted for
 BM200/BM6-family live polling:

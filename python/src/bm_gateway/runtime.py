@@ -293,9 +293,7 @@ def build_snapshot(
     readings: list[DeviceReading] = []
     bm200_live_reader: BM200Reader
     if bm200_reader is None:
-        configured_bm200_hard_timeout_seconds = float(
-            config.bluetooth.bm200_live_hard_timeout_seconds
-        )
+        configured_live_hard_timeout_seconds = float(config.bluetooth.live_hard_timeout_seconds)
 
         def bm200_live_reader(
             device: Device,
@@ -308,16 +306,14 @@ def build_snapshot(
                 adapter,
                 timeout_seconds,
                 scan_timeout_seconds,
-                configured_hard_timeout_seconds=configured_bm200_hard_timeout_seconds,
+                configured_hard_timeout_seconds=configured_live_hard_timeout_seconds,
             )
 
     else:
         bm200_live_reader = bm200_reader
     bm300_live_reader: BM300Reader
     if bm300_reader is None:
-        configured_bm300_hard_timeout_seconds = float(
-            config.bluetooth.bm300_live_hard_timeout_seconds
-        )
+        configured_live_hard_timeout_seconds = float(config.bluetooth.live_hard_timeout_seconds)
 
         def bm300_live_reader(
             device: Device,
@@ -330,7 +326,7 @@ def build_snapshot(
                 adapter,
                 timeout_seconds,
                 scan_timeout_seconds,
-                configured_hard_timeout_seconds=configured_bm300_hard_timeout_seconds,
+                configured_hard_timeout_seconds=configured_live_hard_timeout_seconds,
             )
 
     else:
