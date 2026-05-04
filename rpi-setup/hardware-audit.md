@@ -189,27 +189,11 @@ Conclusion:
 
 ## Bluetooth Unblock and Bring-Up Commands
 
-Use this exact sequence when the Bluetooth USB controller exists but is blocked
-or down:
-
-```bash
-sudo rfkill unblock bluetooth
-sudo sh -c 'for f in /var/lib/systemd/rfkill/*bluetooth; do printf 0 > "$f"; done'
-sudo systemctl restart bluetooth.service
-sudo hciconfig hci0 up
-sudo bluetoothctl power on
-sudo rfkill list
-sudo hciconfig -a
-sudo bluetoothctl show
-```
-
-What this does:
-
-- removes the current soft block
-- clears persisted rfkill state so the block does not come back after reboot
-- restarts the Bluetooth daemon
-- brings the HCI device up
-- powers the controller on through BlueZ
+Use the canonical recovery sequence in
+[troubleshooting-bluetooth.md](troubleshooting-bluetooth.md) when the
+controller exists but is blocked or down. That runbook is the maintained
+copy-paste path for clearing persisted Bluetooth `rfkill` state after moving an
+SD card between Raspberry Pi boards.
 
 ## Ethernet and Wi-Fi Priority
 

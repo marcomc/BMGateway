@@ -32,6 +32,7 @@ from .drivers.bm300 import (
 )
 from .models import DeviceReading, GatewaySnapshot
 from .subprocess_runner import run_in_subprocess_with_timeout
+from .system_alerts import collect_gateway_alerts
 
 BM200Reader = Callable[[Device, str, float, float], BM200Measurement]
 BM300Reader = Callable[[Device, str, float, float], BM300Measurement]
@@ -356,6 +357,7 @@ def build_snapshot(
         devices_online=sum(1 for device in readings if device.connected),
         poll_interval_seconds=config.gateway.poll_interval_seconds,
         devices=readings,
+        alerts=collect_gateway_alerts(),
     )
 
 

@@ -72,6 +72,7 @@ individual lower-level scripts, install the same baseline:
 ```bash
 sudo apt update
 sudo apt install -y \
+  avahi-daemon \
   bluetooth \
   bluez \
   ca-certificates \
@@ -85,6 +86,7 @@ sudo apt install -y \
   python3 \
   python3-dev \
   python3-venv \
+  rfkill \
   util-linux \
   zlib1g-dev
 ```
@@ -93,9 +95,11 @@ Package purpose:
 
 | Package | Used for |
 | --- | --- |
+| `avahi-daemon` | Bonjour/mDNS hostname advertising such as `bmgateway.local` |
 | `bluetooth`, `bluez` | Bluetooth service, `bluetoothctl`, and BLE polling |
 | `ca-certificates`, `curl` | Downloading the `uv` installer over HTTPS |
 | `git`, `make`, `python3`, `python3-venv` | Checkout and packaged Python runtime installation |
+| `rfkill` | Inspecting and clearing persisted radio soft-block state |
 | `chromium` | USB OTG frame-image screenshots and Diagnostics frame previews |
 | `dosfstools` | `mkfs.vfat` for USB OTG backing images |
 | `kmod` | `modprobe libcomposite` for USB gadget setup |
@@ -157,6 +161,18 @@ curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/boot
 
 The bootstrap script intentionally installs the standalone runtime through
 `make install`, not `make install-dev`.
+
+It also performs two hardware-move safety steps before the runtime services are
+started:
+
+- clears persisted Bluetooth `rfkill` soft blocks and powers controllers back on
+- refreshes Avahi so the configured hostname is advertised again on mDNS
+
+If you move an existing SD card to different Raspberry Pi hardware and still
+need manual recovery, use the dedicated runbooks:
+
+- [troubleshooting-mdns-hostname.md](troubleshooting-mdns-hostname.md)
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md)
 
 Do not use `--skip-apt` for a fresh Raspberry Pi. That option is only for
 controlled rebuilds where the packages listed in [System Packages](#system-packages)
@@ -354,16 +370,7 @@ sudo ip route
 
 If the Bluetooth dongle appears but is blocked or down, run:
 
-```bash
-sudo rfkill unblock bluetooth
-sudo sh -c 'for f in /var/lib/systemd/rfkill/*bluetooth; do printf 0 > "$f"; done'
-sudo systemctl restart bluetooth.service
-sudo hciconfig hci0 up
-sudo bluetoothctl power on
-sudo rfkill list
-sudo hciconfig -a
-sudo bluetoothctl show
-```
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md)
 
 The intended steady state is:
 
@@ -375,6 +382,15 @@ For BM200 support, powered on is not enough. The Bluetooth adapter must also
 support BLE central mode. The currently audited CSR USB dongle identified as
 `0a12:0001` exposes BR/EDR only and does not provide the BLE central role
 required by `bleak`, so it cannot monitor BM200 devices.
+
+## Troubleshooting Runbooks
+
+Use these canonical copy-paste runbooks for appliance recovery:
+
+- [troubleshooting-mdns-hostname.md](troubleshooting-mdns-hostname.md) when the
+  Pi is reachable by IP or SSH but does not resolve as `<hostname>.local`
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md) when `hci0` is
+  blocked, down, or the runtime reports no powered Bluetooth adapter
 
 ## Configure the Gateway
 

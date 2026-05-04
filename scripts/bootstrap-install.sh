@@ -43,6 +43,65 @@ web_port="80"
 glances_port="61208"
 hostname_override=""
 
+clear_persisted_bluetooth_blocks() {
+  sudo python3 - <<'PY'
+from pathlib import Path
+
+for rfkill_dir in Path("/sys/class/rfkill").glob("rfkill*"):
+    type_path = rfkill_dir / "type"
+    soft_path = rfkill_dir / "soft"
+    try:
+        adapter_type = type_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        continue
+    if adapter_type != "bluetooth" or not soft_path.exists():
+        continue
+    try:
+        soft_path.write_text("0", encoding="utf-8")
+    except OSError:
+        continue
+
+for state_path in Path("/var/lib/systemd/rfkill").glob("*bluetooth"):
+    try:
+        state_path.write_text("0", encoding="utf-8")
+    except OSError:
+        continue
+PY
+}
+
+refresh_mdns_advertising() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  sudo systemctl enable avahi-daemon.service >/dev/null 2>&1 || true
+  sudo systemctl restart avahi-daemon.service >/dev/null 2>&1 || true
+}
+
+prepare_bluetooth_controller() {
+  local controller_path
+  local controller_name
+
+  clear_persisted_bluetooth_blocks
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable bluetooth.service >/dev/null 2>&1 || true
+    sudo systemctl restart bluetooth.service >/dev/null 2>&1 || true
+  fi
+
+  if command -v hciconfig >/dev/null 2>&1; then
+    for controller_path in /sys/class/bluetooth/*; do
+      [[ -e "${controller_path}" ]] || break
+      controller_name="$(basename "${controller_path}")"
+      sudo hciconfig "${controller_name}" up >/dev/null 2>&1 || true
+    done
+  fi
+
+  if command -v bluetoothctl >/dev/null 2>&1; then
+    sudo bluetoothctl power on >/dev/null 2>&1 || true
+  fi
+}
+
 set_system_hostname() {
   local requested_hostname="$1"
   local current_hostname
@@ -174,6 +233,7 @@ fi
 if [[ "${skip_apt}" -eq 0 ]]; then
   sudo apt-get update
   apt_packages=(
+    avahi-daemon
     bluetooth
     bluez
     ca-certificates
@@ -181,6 +241,7 @@ if [[ "${skip_apt}" -eq 0 ]]; then
     git
     make
     python3
+    rfkill
     python3-venv
   )
   if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
@@ -196,6 +257,8 @@ if [[ "${skip_apt}" -eq 0 ]]; then
 fi
 
 set_system_hostname "${hostname_override}"
+refresh_mdns_advertising
+prepare_bluetooth_controller
 
 if [[ "${skip_uv}" -eq 0 ]] && ! command -v uv >/dev/null 2>&1; then
   installer_dir="$(mktemp -d)"

@@ -20,6 +20,7 @@ from bm_gateway.drivers.bm200 import BleakDeviceNotFoundError, BM200Measurement,
 from bm_gateway.drivers.bm300 import BM300Measurement, BM300TimeoutError
 from bm_gateway.runtime import build_snapshot, database_file_path, recover_adapter
 from bm_gateway.state_store import fetch_counts, persist_snapshot
+from bm_gateway.system_alerts import GatewayAlert
 
 
 def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
@@ -78,6 +79,43 @@ def test_build_snapshot_uses_live_bm200_reader_when_enabled() -> None:
     assert snapshot.devices[0].temperature == 23.0
     assert snapshot.devices[1].connected is False
     assert snapshot.devices[1].state == "disabled"
+
+
+def test_build_snapshot_includes_gateway_alerts(monkeypatch: pytest.MonkeyPatch) -> None:
+    config = AppConfig(
+        source_path=Path("/tmp/gateway.toml"),
+        device_registry_path=Path("/tmp/devices.toml"),
+        gateway=GatewayConfig(reader_mode="fake"),
+        bluetooth=BluetoothConfig(adapter="hci0"),
+        mqtt=MQTTConfig(),
+        home_assistant=HomeAssistantConfig(),
+        web=WebConfig(),
+        retention=RetentionConfig(),
+    )
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            enabled=True,
+        )
+    ]
+    monkeypatch.setattr(
+        "bm_gateway.runtime.collect_gateway_alerts",
+        lambda: [
+            GatewayAlert(
+                code="bluetooth_soft_blocked",
+                severity="error",
+                runbook="troubleshooting-bluetooth.md",
+                context={"controller": "hci0"},
+            )
+        ],
+    )
+
+    snapshot = build_snapshot(config, devices)
+
+    assert [alert.code for alert in snapshot.alerts] == ["bluetooth_soft_blocked"]
 
 
 def test_build_snapshot_classifies_live_reader_errors() -> None:
@@ -679,6 +717,7 @@ def test_build_snapshot_powers_on_adapter_before_live_polling(
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
+    monkeypatch.setattr("bm_gateway.runtime.collect_gateway_alerts", lambda: [])
 
     snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
 
@@ -731,6 +770,7 @@ def test_build_snapshot_retries_after_device_not_found(
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
     monkeypatch.setattr("bm_gateway.runtime.sleep", lambda _seconds: None)
+    monkeypatch.setattr("bm_gateway.runtime.collect_gateway_alerts", lambda: [])
 
     snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
 

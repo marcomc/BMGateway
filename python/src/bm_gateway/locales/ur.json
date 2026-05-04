@@ -438,5 +438,13 @@
   "Importing history records": "ہسٹری ریکارڈز درآمد ہو رہے ہیں",
   "Preparing history download": "ہسٹری ڈاؤن لوڈ تیار ہو رہا ہے",
   "Records": "ریکارڈز",
-  "This page updates automatically and returns to history when the import finishes.": "درآمد مکمل ہونے پر یہ صفحہ خود بخود اپ ڈیٹ ہو کر ہسٹری پر واپس جاتا ہے۔"
+  "This page updates automatically and returns to history when the import finishes.": "درآمد مکمل ہونے پر یہ صفحہ خود بخود اپ ڈیٹ ہو کر ہسٹری پر واپس جاتا ہے۔",
+  "Gateway attention needed": "گیٹ وے کو توجہ درکار ہے",
+  "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "Bluetooth انٹرفیس دستیاب نہیں ہے کیونکہ کوئی کنٹرولر نہیں ملا۔ Raspberry Pi ہارڈویئر آڈٹ یا Bluetooth ریکوری رن بک دیکھیں۔",
+  "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth انٹرفیس {controller} پر ہارڈ بلاک ہے۔ Raspberry Pi Bluetooth ریکوری رن بک دیکھیں۔",
+  "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth انٹرفیس {controller} پر سوفٹ بلاک ہے۔ Raspberry Pi Bluetooth ریکوری رن بک دیکھیں۔",
+  "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth سروس فعال نہیں ہے۔ Raspberry Pi Bluetooth ریکوری رن بک دیکھیں۔",
+  "Bluetooth interface is powered off on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth انٹرفیس {controller} پر بند ہے۔ Raspberry Pi Bluetooth ریکوری رن بک دیکھیں۔",
+  "Bonjour/mDNS advertising is inactive. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS اشتہار فعال نہیں ہے۔ Raspberry Pi mDNS میزبان نام ریکوری رن بک دیکھیں۔",
+  "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. This usually means another device is already using the expected name. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS {expected_hostname} کے بجائے {advertised_hostname} کی تشہیر کر رہا ہے۔ اس کا عام مطلب یہ ہے کہ کوئی دوسرا آلہ پہلے ہی متوقع نام استعمال کر رہا ہے۔ Raspberry Pi mDNS میزبان نام ریکوری رن بک دیکھیں۔"
 }

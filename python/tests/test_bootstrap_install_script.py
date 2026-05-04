@@ -66,6 +66,18 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
         fake_bin / "hostnamectl",
         "#!/bin/sh\n" + logger + "exit 0\n",
     )
+    _write_executable(
+        fake_bin / "systemctl",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
+    _write_executable(
+        fake_bin / "bluetoothctl",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
+    _write_executable(
+        fake_bin / "hciconfig",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
 
     return fake_bin, command_log
 
@@ -99,11 +111,16 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     commands = command_log.read_text(encoding="utf-8")
     assert "apt-get update" in commands
     assert (
-        "apt-get install -y bluetooth bluez ca-certificates curl git make python3 "
-        "python3-venv chromium dosfstools kmod libjpeg-dev python3-dev util-linux "
-        "zlib1g-dev" in commands
+        "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
+        "make python3 rfkill python3-venv chromium dosfstools kmod libjpeg-dev "
+        "python3-dev util-linux zlib1g-dev" in commands
     )
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
+    assert "systemctl enable avahi-daemon.service" in commands
+    assert "systemctl restart avahi-daemon.service" in commands
+    assert "systemctl enable bluetooth.service" in commands
+    assert "systemctl restart bluetooth.service" in commands
+    assert "bluetoothctl power on" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
     assert f"bash {repo_dir}/rpi-setup/scripts/install-service.sh --user" in commands
@@ -140,8 +157,8 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text(encoding="utf-8")
     assert (
-        "apt-get install -y bluetooth bluez ca-certificates curl git make python3 "
-        "python3-venv" in commands
+        "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
+        "make python3 rfkill python3-venv" in commands
     )
     assert "chromium" not in commands
     assert "dosfstools" not in commands

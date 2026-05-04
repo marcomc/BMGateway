@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
+### Changed
+
+- Hardened Raspberry Pi bootstrap installs so they now include `avahi-daemon`
+  and `rfkill`, clear persisted Bluetooth soft-block state, power the detected
+  controller back on, and restart Avahi before the gateway services start after
+  a hardware move or SD-card transplant.
+- Added dedicated Raspberry Pi troubleshooting runbooks for restoring the
+  expected Bonjour or mDNS hostname and for recovering blocked Bluetooth
+  controllers with copy-paste commands.
+- Added gateway health alerts for blocked or inactive Bluetooth and incorrect
+  Bonjour or mDNS host advertising, including runtime log output and a red Home
+  page banner that points operators toward the Raspberry Pi troubleshooting
+  runbooks.
+
 ## [0.2.1] - 2026-05-01
 
 ### Added

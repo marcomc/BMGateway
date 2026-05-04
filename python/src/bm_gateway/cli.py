@@ -62,6 +62,7 @@ from .state_store import (
     prune_history,
     write_snapshot,
 )
+from .system_alerts import collect_gateway_alerts, describe_gateway_alert
 
 
 def format_main_help() -> str:
@@ -574,6 +575,7 @@ def _run_cycle(
         devices_online=snapshot.devices_online,
         poll_interval_seconds=snapshot.poll_interval_seconds,
         devices=snapshot.devices,
+        alerts=snapshot.alerts,
     )
     write_snapshot(state_file_path(config, state_dir=state_dir), snapshot)
     persist_snapshot(database_path, snapshot)
@@ -609,6 +611,25 @@ def _run_cycle(
                 "voltage": reading.voltage,
                 "soc": reading.soc,
                 "rssi": reading.rssi,
+            },
+        )
+    for alert in snapshot.alerts:
+        message = describe_gateway_alert(alert)
+        print(f"Gateway alert: {message}", file=sys.stderr)
+        append_audit_event(
+            config=config,
+            state_dir=state_dir,
+            source="runtime",
+            trigger="automatic",
+            action="gateway_alert_detected",
+            status="failed" if alert.severity == "error" else "completed",
+            now=audit_now,
+            details={
+                "code": alert.code,
+                "severity": alert.severity,
+                "runbook": alert.runbook,
+                "message": message,
+                "context": alert.context,
             },
         )
     append_audit_event(
@@ -665,6 +686,7 @@ def _handle_run(
                 state_dir=state_dir,
             )
         except BluetoothRecoveryRequiredError as exc:
+            runtime_alerts = collect_gateway_alerts()
             append_audit_event(
                 config=config,
                 state_dir=state_dir,
@@ -677,6 +699,7 @@ def _handle_run(
                     "error": str(exc.error) or exc.error.__class__.__name__,
                     "recovery_attempted": exc.recovery_attempted,
                     "recovery_detail": exc.recovery_detail,
+                    "gateway_alerts": [alert.to_dict() for alert in runtime_alerts],
                 },
             )
             message = (
@@ -685,6 +708,9 @@ def _handle_run(
             if exc.recovery_detail:
                 message += f": {exc.recovery_detail}"
             print(message, file=sys.stderr)
+            for alert in runtime_alerts:
+                alert_message = describe_gateway_alert(alert)
+                print(f"Gateway alert: {alert_message}", file=sys.stderr)
             return 1
         if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
             from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive

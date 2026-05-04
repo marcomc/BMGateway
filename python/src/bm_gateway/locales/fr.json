@@ -446,5 +446,13 @@
   "Importing history records": "Import des enregistrements d'historique",
   "Preparing history download": "Preparation du telechargement de l'historique",
   "Records": "Enregistrements",
-  "This page updates automatically and returns to history when the import finishes.": "Cette page se met a jour automatiquement et retourne a l'historique a la fin de l'import."
+  "This page updates automatically and returns to history when the import finishes.": "Cette page se met a jour automatiquement et retourne a l'historique a la fin de l'import.",
+  "Gateway attention needed": "La passerelle nécessite une attention",
+  "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "L’interface Bluetooth n’est pas disponible car aucun contrôleur n’a été détecté. Consultez le runbook Raspberry Pi d’audit matériel ou de récupération Bluetooth.",
+  "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "L’interface Bluetooth est bloquée matériellement sur {controller}. Consultez le runbook Raspberry Pi de récupération Bluetooth.",
+  "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "L’interface Bluetooth est bloquée logiciellement sur {controller}. Consultez le runbook Raspberry Pi de récupération Bluetooth.",
+  "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "Le service Bluetooth n’est pas actif. Consultez le runbook Raspberry Pi de récupération Bluetooth.",
+  "Bluetooth interface is powered off on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "L’interface Bluetooth est hors tension sur {controller}. Consultez le runbook Raspberry Pi de récupération Bluetooth.",
+  "Bonjour/mDNS advertising is inactive. See the Raspberry Pi mDNS hostname recovery runbook.": "La publication Bonjour/mDNS n’est pas active. Consultez le runbook Raspberry Pi de récupération du nom d’hôte mDNS.",
+  "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. This usually means another device is already using the expected name. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS publie {advertised_hostname} au lieu de {expected_hostname}. Cela signifie généralement qu’un autre appareil utilise déjà le nom attendu. Consultez le runbook Raspberry Pi de récupération du nom d’hôte mDNS."
 }
