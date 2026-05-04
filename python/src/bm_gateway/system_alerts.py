@@ -6,12 +6,15 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
 CommandRunner = Callable[[list[str], float], subprocess.CompletedProcess[str] | None]
 _AVAHI_HOSTNAME_PATTERN = re.compile(r"Host name is ([A-Za-z0-9._-]+\.local)")
+_DEFAULT_BLUETOOTH_SYSFS_ROOT = Path("/sys/class/bluetooth")
+_DEFAULT_RFKILL_ROOT = Path("/sys/class/rfkill")
 
 
 @dataclass(frozen=True)
@@ -238,10 +241,16 @@ def _collect_mdns_alerts(
 def collect_gateway_alerts(
     *,
     expected_hostname: str | None = None,
-    bluetooth_sysfs_root: Path = Path("/sys/class/bluetooth"),
-    rfkill_root: Path = Path("/sys/class/rfkill"),
+    bluetooth_sysfs_root: Path = _DEFAULT_BLUETOOTH_SYSFS_ROOT,
+    rfkill_root: Path = _DEFAULT_RFKILL_ROOT,
     run_command: CommandRunner = _run_command,
 ) -> list[GatewayAlert]:
+    if (
+        not sys.platform.startswith("linux")
+        and bluetooth_sysfs_root == _DEFAULT_BLUETOOTH_SYSFS_ROOT
+        and rfkill_root == _DEFAULT_RFKILL_ROOT
+    ):
+        return []
     hostname = (expected_hostname or socket.gethostname()).strip()
     expected_mdns_name = f"{hostname}.local" if hostname else ""
     alerts = _collect_bluetooth_alerts(

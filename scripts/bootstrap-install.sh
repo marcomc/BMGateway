@@ -43,6 +43,17 @@ web_port="80"
 glances_port="61208"
 hostname_override=""
 
+looks_like_checkout() {
+  local candidate="$1"
+  if [[ -f "${candidate}/pyproject.toml" ]] \
+    && [[ -f "${candidate}/scripts/bootstrap-install.sh" ]] \
+    && [[ -f "${candidate}/rpi-setup/scripts/install-service.sh" ]]; then
+    printf '1\n'
+  else
+    printf '0\n'
+  fi
+}
+
 clear_persisted_bluetooth_blocks() {
   sudo python3 - <<'PY'
 from pathlib import Path
@@ -220,11 +231,15 @@ done
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
-if [[ -e "${script_repo_dir}/.git" ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
+script_repo_dir_is_checkout="$(looks_like_checkout "${script_repo_dir}")"
+repo_dir_is_checkout="$(looks_like_checkout "${repo_dir}")"
+
+if [[ "${script_repo_dir_is_checkout}" -eq 1 ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
   repo_dir="${script_repo_dir}"
+  repo_dir_is_checkout=1
 fi
 
-if [[ -z "${repo_url}" ]] && [[ ! -e "${repo_dir}/.git" ]]; then
+if [[ -z "${repo_url}" ]] && [[ ! -e "${repo_dir}/.git" ]] && [[ "${repo_dir_is_checkout}" -eq 0 ]]; then
   printf 'Missing required --repo-url argument\n' >&2
   usage >&2
   exit 1
@@ -275,6 +290,8 @@ if [[ -e "${repo_dir}/.git" ]]; then
     git -C "${repo_dir}" fetch --all --tags --prune
     git -C "${repo_dir}" pull --ff-only
   fi
+elif [[ "${repo_dir_is_checkout}" -eq 1 ]]; then
+  :
 else
   git clone "${repo_url}" "${repo_dir}"
 fi

@@ -3,7 +3,18 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
+import pytest
 from bm_gateway.system_alerts import collect_gateway_alerts
+
+
+def test_collect_gateway_alerts_skips_default_host_checks_on_non_linux(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("bm_gateway.system_alerts.sys.platform", "darwin")
+
+    alerts = collect_gateway_alerts(expected_hostname="bmgateway")
+
+    assert alerts == []
 
 
 def test_collect_gateway_alerts_detects_soft_blocked_bluetooth(tmp_path: Path) -> None:

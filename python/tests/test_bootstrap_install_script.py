@@ -266,6 +266,48 @@ def test_bootstrap_install_script_uses_current_checkout_without_repo_url(
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
 
 
+def test_bootstrap_install_script_uses_non_git_synced_checkout_without_repo_url(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "BMGateway-dev"
+    (checkout / "scripts").mkdir(parents=True)
+    (checkout / "rpi-setup" / "scripts").mkdir(parents=True)
+    (checkout / "pyproject.toml").write_text("[project]\nname='bm-gateway'\n", encoding="utf-8")
+    bootstrap_copy = checkout / "scripts" / "bootstrap-install.sh"
+    bootstrap_copy.write_text(
+        Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    bootstrap_copy.chmod(bootstrap_copy.stat().st_mode | stat.S_IXUSR)
+    _write_executable(
+        checkout / "rpi-setup" / "scripts" / "install-service.sh",
+        "#!/bin/sh\nexit 0\n",
+    )
+
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        [str(bootstrap_copy), "--skip-apt", "--skip-uv"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = command_log.read_text(encoding="utf-8")
+    assert "git clone" not in commands
+    assert "fetch --all --tags --prune" not in commands
+    assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
+    assert f"bash {checkout / 'rpi-setup' / 'scripts' / 'install-service.sh'} --user" in commands
+
+
 def test_bootstrap_install_script_uses_uv_from_local_bin_when_skip_uv_is_set(
     tmp_path: Path,
 ) -> None:
