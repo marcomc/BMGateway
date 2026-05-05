@@ -615,7 +615,7 @@ def _run_cycle(
         )
     for alert in snapshot.alerts:
         message = describe_gateway_alert(alert)
-        print(f"Gateway alert: {message}", file=sys.stderr)
+        sys.stderr.write(f"Gateway alert: {message}\n")
         append_audit_event(
             config=config,
             state_dir=state_dir,
@@ -707,10 +707,10 @@ def _handle_run(
             )
             if exc.recovery_detail:
                 message += f": {exc.recovery_detail}"
-            print(message, file=sys.stderr)
+            sys.stderr.write(message + "\n")
             for alert in runtime_alerts:
                 alert_message = describe_gateway_alert(alert)
-                print(f"Gateway alert: {alert_message}", file=sys.stderr)
+                sys.stderr.write(f"Gateway alert: {alert_message}\n")
             return 1
         if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
             from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive

@@ -99,6 +99,17 @@ Expected checks:
   information in the most appropriate canonical document, maintain sensible
   grouping and section hierarchy, and move or reshape content when the current
   location or structure is no longer the best fit.
+- Treat `bmgateway.local` as acceptable public documentation because it is the
+  project's default hostname and Bonjour or mDNS service name. When relevant,
+  remind users that they can override it with the documented hostname settings,
+  such as `--hostname <name>` during bootstrap.
+- For replaceable private-LAN examples in user-facing docs, prefer forms such
+  as `192.168.1.x` over RFC example IPs when the intent is "replace this with
+  your actual host address."
+- Do not commit user-specific network profile names, SSIDs, or similar local
+  identifiers. When documentation needs a concrete command path for those
+  values, prefer shell variables such as `${WIFI_CONNECTION_NAME}` plus a
+  documented discovery command that sets the variable from the user's machine.
 
 ## Release Hygiene
 

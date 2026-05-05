@@ -214,7 +214,12 @@ To inspect the final invocation without writing media:
 Boot the Raspberry Pi 3B and then verify:
 
 ```bash
-ssh <user>@<hostname-or-ip>
+export GATEWAY_USER="admin"
+export GATEWAY_HOST="bmgateway.local"
+# If mDNS is not working yet, replace the host with the Pi's actual LAN address.
+# Example:
+# export GATEWAY_HOST="192.168.1.x"
+ssh "${GATEWAY_USER}@${GATEWAY_HOST}"
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
 bm-gateway config validate

@@ -18,6 +18,11 @@ If you just moved the SD card, make sure the old Raspberry Pi is powered off or
 disconnected from the network first. Avahi will keep adding `-2`, `-3`, and so
 on while another device is still advertising the same hostname.
 
+If you intentionally want a different `.local` name, use the documented
+bootstrap hostname override, for example
+`./scripts/bootstrap-install.sh --hostname garage-gateway`, as described in
+[manual-setup.md](manual-setup.md).
+
 ## Copy-Paste Recovery
 
 Run this exact block on the Raspberry Pi over SSH:

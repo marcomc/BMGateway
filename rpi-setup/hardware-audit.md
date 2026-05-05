@@ -116,12 +116,17 @@ only when Ethernet is unavailable.
 With NetworkManager:
 
 ```bash
+export WIFI_CONNECTION_NAME="$(
+  nmcli -t -f NAME,DEVICE connection show --active \
+    | awk -F: '$2 == "wlan0" {print $1; exit}'
+)"
+printf 'Using Wi-Fi connection: %s\n' "${WIFI_CONNECTION_NAME}"
 sudo nmcli connection modify netplan-eth0 ipv4.route-metric 100 ipv6.route-metric 100
-sudo nmcli connection modify <wifi-connection-name> ipv4.route-metric 600 ipv6.route-metric 600
+sudo nmcli connection modify "${WIFI_CONNECTION_NAME}" ipv4.route-metric 600 ipv6.route-metric 600
 sudo nmcli connection modify netplan-eth0 connection.autoconnect-priority 100
-sudo nmcli connection modify <wifi-connection-name> connection.autoconnect-priority 10
+sudo nmcli connection modify "${WIFI_CONNECTION_NAME}" connection.autoconnect-priority 10
 sudo nmcli connection up netplan-eth0
-sudo nmcli connection up <wifi-connection-name>
+sudo nmcli connection up "${WIFI_CONNECTION_NAME}"
 ```
 
 Interpretation:
@@ -210,12 +215,17 @@ On the current host, the intended NetworkManager metrics are:
 Apply that policy with:
 
 ```bash
+export WIFI_CONNECTION_NAME="$(
+  nmcli -t -f NAME,DEVICE connection show --active \
+    | awk -F: '$2 == "wlan0" {print $1; exit}'
+)"
+printf 'Using Wi-Fi connection: %s\n' "${WIFI_CONNECTION_NAME}"
 sudo nmcli connection modify netplan-eth0 ipv4.route-metric 100 ipv6.route-metric 100
-sudo nmcli connection modify netplan-wlan0-HAL9000 ipv4.route-metric 600 ipv6.route-metric 600
+sudo nmcli connection modify "${WIFI_CONNECTION_NAME}" ipv4.route-metric 600 ipv6.route-metric 600
 sudo nmcli connection modify netplan-eth0 connection.autoconnect-priority 100
-sudo nmcli connection modify netplan-wlan0-HAL9000 connection.autoconnect-priority 10
+sudo nmcli connection modify "${WIFI_CONNECTION_NAME}" connection.autoconnect-priority 10
 sudo nmcli connection up netplan-eth0
-sudo nmcli connection up netplan-wlan0-HAL9000
+sudo nmcli connection up "${WIFI_CONNECTION_NAME}"
 ```
 
 ## Performance and Boot Audit

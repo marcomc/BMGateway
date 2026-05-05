@@ -225,7 +225,8 @@ surface.
 
 ### Phase 4: Live validation
 
-- Run the protocol command against `bm300_alpha` on `admin@<gateway-host>.local`.
+- Run the protocol command against `bm300_alpha` on `admin@bmgateway.local`
+  unless the appliance hostname was changed during bootstrap.
 - Save JSONL or equivalent structured captures.
 - Verify whether `b7=01 -> 02` and `02 -> 03` meet the `128`-record gate.
 - Only after the gate passes, test controlled import into a disposable SQLite
@@ -305,7 +306,7 @@ Also:
 - run markdownlint on any edited Markdown files
 
 If live validation is needed, the real gateway is reachable at:
-- ssh admin@<gateway-host>.local
+- ssh admin@bmgateway.local
 
 Use non-destructive live probes first. Do not write to the gateway runtime DB.
 ```
