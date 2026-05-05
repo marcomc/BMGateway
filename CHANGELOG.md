@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 
 ### Changed
@@ -27,6 +29,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   scan, connect, notify, retry, and cleanup control flow while keeping the
   protocol-specific request payloads and packet parsing in their respective
   drivers.
+- Added a local release-version preflight check and wired it into `make check`
+  and `make dev-deploy` so version drift is blocked before tagging or pushing a
+  test build onto the gateway.
+
+### Fixed
+
+- Fixed release metadata drift by aligning the packaged runtime version with
+  `0.2.2` and adding regression coverage that checks `pyproject.toml`,
+  `bm_gateway.__version__`, the latest concrete changelog release, and the
+  documented current release stay in sync.
 
 ## [0.2.1] - 2026-05-01 - probe-history, archive sync, and BM300 Pro/BM7 import improvements
 

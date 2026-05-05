@@ -30,7 +30,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-deps install-deps sync install install-dev install-link install-config uninstall lint test check run ha-export web-render dev-deploy clean
+.PHONY: help check-deps install-deps sync install install-dev install-link install-config uninstall lint test check release-preflight run ha-export web-render dev-deploy clean
 
 help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##" } /^[a-zA-Z_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -117,10 +117,13 @@ lint: sync ## Run Python, Markdown, and shell quality checks
 	markdownlint --config .markdownlint.json $(MARKDOWN_FILES)
 	shellcheck --enable=all scripts/*.sh rpi-setup/scripts/*.sh
 
+release-preflight: sync ## Verify release/version consistency for local deploy and tagging
+	@"$(UV)" run python -m bm_gateway.release_preflight
+
 test: sync ## Run the test suite
 	@"$(UV)" run pytest -q
 
-check: lint test ## Run the full maintainer quality gate
+check: release-preflight lint test ## Run the full maintainer quality gate
 
 run: sync ## Show the CLI help from the dev environment
 	@"$(UV)" run "$(CLI_NAME)" --help

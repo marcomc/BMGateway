@@ -30,6 +30,10 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
         fake_bin / "rsync",
         "#!/bin/sh\n" + logger + "exit 0\n",
     )
+    _write_executable(
+        fake_bin / "uv",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
 
     return fake_bin, command_log
 
@@ -74,6 +78,7 @@ def test_dev_deploy_script_syncs_checkout_and_refreshes_services(tmp_path: Path)
 
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text(encoding="utf-8")
+    assert "uv run python -m bm_gateway.release_preflight" in commands
     assert "bash -s -- /home/admin/BMGateway-dev" in commands
     assert "rsync -az --delete" in commands
     assert "--exclude .git" in commands
@@ -111,5 +116,6 @@ def test_dev_deploy_script_accepts_remote_dir_override(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text(encoding="utf-8")
+    assert "uv run python -m bm_gateway.release_preflight" in commands
     assert "admin@example.com:/srv/bm-gateway-dev/" in commands
     assert 'cd "${remote_dir}"' in commands

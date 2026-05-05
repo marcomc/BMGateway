@@ -57,6 +57,13 @@ if ! command -v rsync >/dev/null 2>&1; then
   exit 1
 fi
 
+if ! command -v uv >/dev/null 2>&1; then
+  printf 'uv not found\n' >&2
+  exit 1
+fi
+
+uv run python -m bm_gateway.release_preflight --root "${project_root}" --quiet
+
 remote_user="${target%@*}"
 if [[ "${remote_user}" = "${target}" ]]; then
   printf 'Target must include a user, for example admin@host\n' >&2
