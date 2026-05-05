@@ -579,6 +579,101 @@ sudo systemctl status glances-web.service
 sudo systemctl status cockpit.socket
 ```
 
+## Live Validation on the Real Gateway Host
+
+For appliance-affecting changes, validate on the real gateway host after local
+checks pass.
+
+The default hostname is `bmgateway.local`. If you changed it during bootstrap,
+replace that hostname with your chosen `<hostname>.local` or export a different
+value in the commands below.
+
+Deploy the current checkout:
+
+```bash
+export GATEWAY_HOST="${GATEWAY_HOST:-bmgateway.local}"
+make dev-deploy TARGET="admin@${GATEWAY_HOST}"
+```
+
+Validate service state, config loading, and the installed device registry:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  systemctl is-active bm-gateway.service bm-gateway-web.service bluetooth.service avahi-daemon.service
+  bm-gateway config validate --json
+  bm-gateway devices list --json
+"'
+```
+
+Validate the local web interface and exported status API on the host:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  curl -fsS http://127.0.0.1/api/status
+  printf \"\n---\n\"
+  curl -fsS http://127.0.0.1/ | grep -E \"BMGateway|Battery Overview|Gateway attention needed\" -n | head -n 20
+"'
+```
+
+Validate Bluetooth and Bonjour or mDNS health on the host:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  rfkill list || true
+  printf \"\n---\n\"
+  bluetoothctl show || true
+  printf \"\n---\n\"
+  journalctl -u avahi-daemon -n 20 --no-pager -o cat | grep -E \"Host name is|Host name conflict\" || true
+"'
+```
+
+Validate the external hostname path from your workstation:
+
+```bash
+ping -c 1 "${GATEWAY_HOST}"
+curl -fsS "http://${GATEWAY_HOST}/api/status"
+```
+
+For optional services, validate them only when they are enabled on that host:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  systemctl is-active glances-web.service cockpit.socket
+  curl -fsS http://127.0.0.1:61208/api/4/status
+  curl -k -I https://127.0.0.1:9090/
+"'
+```
+
+To validate the real CLI polling entrypoint without the background runtime
+contending for BLE access, stop the runtime briefly, run both dry-run and live
+once modes, and then restart the service:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  set -euo pipefail
+  sudo systemctl stop bm-gateway.service
+  trap \"sudo systemctl start bm-gateway.service\" EXIT
+  bm-gateway run --once --dry-run --json
+  bm-gateway run --once --json
+"'
+```
+
+Expected outcomes:
+
+- all required services report `active`
+- `bm-gateway config validate --json` reports `"valid": true`
+- `bm-gateway devices list --json` shows the installed registry
+- `/api/status` returns JSON and the Home page renders without a gateway alert
+  banner when Bluetooth and Bonjour or mDNS are healthy
+- `rfkill list` shows Bluetooth as not blocked
+- `bluetoothctl show` reports the controller as powered on
+- Avahi reports `Host name is bmgateway.local` unless you intentionally chose a
+  different hostname
+- `bm-gateway run --once --dry-run --json` completes with a snapshot and
+  `"mqtt_connected": false`
+- `bm-gateway run --once --json` completes with a snapshot and
+  `"mqtt_connected": true` when MQTT is configured and reachable
+
 ## Service and Module Policy for This Project
 
 Keep enabled:
