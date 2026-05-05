@@ -102,6 +102,19 @@ def _bluetooth_rfkill_state(rfkill_root: Path) -> dict[str, dict[str, str]]:
     return states
 
 
+def _bluetooth_controller_addresses(sysfs_root: Path) -> dict[str, str]:
+    addresses: dict[str, str] = {}
+    for controller in _bluetooth_controllers(sysfs_root):
+        address_path = sysfs_root / controller / "address"
+        try:
+            address = address_path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if address:
+            addresses[controller] = address
+    return addresses
+
+
 def _bluetoothctl_controller_state(
     *,
     controller: str | None = None,
@@ -194,7 +207,12 @@ def _collect_bluetooth_alerts(
             )
         ]
 
-    selected_controller = selected_controllers[0] if len(selected_controllers) == 1 else None
+    controller_addresses = _bluetooth_controller_addresses(bluetooth_sysfs_root)
+    selected_controller = (
+        controller_addresses.get(selected_controllers[0])
+        if len(selected_controllers) == 1
+        else None
+    )
     controller_state = _bluetoothctl_controller_state(
         controller=selected_controller,
         run_command=run_command,
@@ -277,7 +295,7 @@ def collect_gateway_alerts(
     ):
         return []
     hostname = (expected_hostname or socket.gethostname()).strip()
-    expected_mdns_name = f"{hostname}.local" if hostname else ""
+    expected_mdns_name = hostname if "." in hostname else (f"{hostname}.local" if hostname else "")
     alerts = _collect_bluetooth_alerts(
         configured_adapter=configured_adapter,
         bluetooth_sysfs_root=bluetooth_sysfs_root,

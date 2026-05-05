@@ -58,7 +58,9 @@ def test_collect_gateway_alerts_detects_soft_blocked_bluetooth(tmp_path: Path) -
 def test_collect_gateway_alerts_detects_mdns_hostname_mismatch(tmp_path: Path) -> None:
     bluetooth_root = tmp_path / "bluetooth"
     bluetooth_root.mkdir()
-    (bluetooth_root / "hci0").mkdir()
+    hci0 = bluetooth_root / "hci0"
+    hci0.mkdir()
+    (hci0 / "address").write_text("B8:27:EB:4E:EC:55\n", encoding="utf-8")
 
     rfkill_root = tmp_path / "rfkill"
     rfkill_entry = rfkill_root / "rfkill0"
@@ -114,7 +116,9 @@ def test_collect_gateway_alerts_detects_mdns_hostname_mismatch(tmp_path: Path) -
 def test_collect_gateway_alerts_reports_bluetoothctl_controller_identifier(tmp_path: Path) -> None:
     bluetooth_root = tmp_path / "bluetooth"
     bluetooth_root.mkdir()
-    (bluetooth_root / "hci0").mkdir()
+    hci0 = bluetooth_root / "hci0"
+    hci0.mkdir()
+    (hci0 / "address").write_text("B8:27:EB:4E:EC:55\n", encoding="utf-8")
 
     rfkill_root = tmp_path / "rfkill"
     rfkill_entry = rfkill_root / "rfkill0"
@@ -242,8 +246,12 @@ def test_collect_gateway_alerts_reports_missing_configured_adapter(tmp_path: Pat
 def test_collect_gateway_alerts_queries_power_state_for_selected_adapter(tmp_path: Path) -> None:
     bluetooth_root = tmp_path / "bluetooth"
     bluetooth_root.mkdir()
-    (bluetooth_root / "hci0").mkdir()
-    (bluetooth_root / "hci1").mkdir()
+    hci0 = bluetooth_root / "hci0"
+    hci0.mkdir()
+    (hci0 / "address").write_text("AA:BB:CC:DD:EE:00\n", encoding="utf-8")
+    hci1 = bluetooth_root / "hci1"
+    hci1.mkdir()
+    (hci1 / "address").write_text("B8:27:EB:4E:EC:55\n", encoding="utf-8")
 
     rfkill_root = tmp_path / "rfkill"
     rfkill0 = rfkill_root / "rfkill0"
@@ -281,7 +289,7 @@ def test_collect_gateway_alerts_queries_power_state_for_selected_adapter(tmp_pat
                 stdout="Controller AA:BB:CC:DD:EE:00 (public)\nPowered: no\n",
                 stderr="",
             )
-        if command == ["bluetoothctl", "show", "hci1"]:
+        if command == ["bluetoothctl", "show", "B8:27:EB:4E:EC:55"]:
             return subprocess.CompletedProcess(
                 command,
                 0,
@@ -301,7 +309,7 @@ def test_collect_gateway_alerts_queries_power_state_for_selected_adapter(tmp_pat
     )
 
     assert alerts == []
-    assert ["bluetoothctl", "show", "hci1"] in seen_commands
+    assert ["bluetoothctl", "show", "B8:27:EB:4E:EC:55"] in seen_commands
     assert ["bluetoothctl", "show"] not in seen_commands
 
 
@@ -317,3 +325,59 @@ def test_describe_gateway_alert_reports_missing_configured_adapter() -> None:
         "Configured Bluetooth adapter hci0 is missing. "
         "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
     )
+
+
+def test_collect_gateway_alerts_does_not_append_local_to_qualified_hostname(
+    tmp_path: Path,
+) -> None:
+    bluetooth_root = tmp_path / "bluetooth"
+    bluetooth_root.mkdir()
+    hci0 = bluetooth_root / "hci0"
+    hci0.mkdir()
+    (hci0 / "address").write_text("B8:27:EB:4E:EC:55\n", encoding="utf-8")
+
+    rfkill_root = tmp_path / "rfkill"
+    rfkill_entry = rfkill_root / "rfkill0"
+    rfkill_entry.mkdir(parents=True)
+    (rfkill_entry / "type").write_text("bluetooth\n", encoding="utf-8")
+    (rfkill_entry / "name").write_text("hci0\n", encoding="utf-8")
+    (rfkill_entry / "soft").write_text("0\n", encoding="utf-8")
+    (rfkill_entry / "hard").write_text("0\n", encoding="utf-8")
+    (rfkill_entry / "state").write_text("1\n", encoding="utf-8")
+
+    def fake_run(
+        command: list[str],
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str] | None:
+        _ = timeout_seconds
+        if command == ["systemctl", "is-active", "bluetooth.service"]:
+            return subprocess.CompletedProcess(command, 0, stdout="active\n", stderr="")
+        if command == ["systemctl", "is-active", "avahi-daemon.service"]:
+            return subprocess.CompletedProcess(command, 0, stdout="active\n", stderr="")
+        if command[:2] == ["bluetoothctl", "show"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="Controller B8:27:EB:4E:EC:55 (public)\nPowered: yes\n",
+                stderr="",
+            )
+        if command[:2] == ["journalctl", "-u"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout=(
+                    "Server startup complete. Host name is bmgateway.local. "
+                    "Local service cookie is 12345.\n"
+                ),
+                stderr="",
+            )
+        return None
+
+    alerts = collect_gateway_alerts(
+        expected_hostname="bmgateway.local",
+        bluetooth_sysfs_root=bluetooth_root,
+        rfkill_root=rfkill_root,
+        run_command=fake_run,
+    )
+
+    assert alerts == []
