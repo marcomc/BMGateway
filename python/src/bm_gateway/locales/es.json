@@ -441,6 +441,7 @@
   "This page updates automatically and returns to history when the import finishes.": "Esta pagina se actualiza automaticamente y vuelve al historial cuando termina la importacion.",
   "Gateway attention needed": "El gateway necesita atención",
   "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "La interfaz Bluetooth no está disponible porque no se detectó ningún controlador. Consulta el runbook de auditoría de hardware o recuperación Bluetooth de Raspberry Pi.",
+  "Configured Bluetooth adapter {controller} is missing. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "Falta el adaptador Bluetooth configurado {controller}. Consulta el runbook de auditoría de hardware o recuperación Bluetooth de Raspberry Pi.",
   "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "La interfaz Bluetooth está bloqueada por hardware en {controller}. Consulta el runbook de recuperación Bluetooth de Raspberry Pi.",
   "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "La interfaz Bluetooth está bloqueada por software en {controller}. Consulta el runbook de recuperación Bluetooth de Raspberry Pi.",
   "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "El servicio Bluetooth no está activo. Consulta el runbook de recuperación Bluetooth de Raspberry Pi.",

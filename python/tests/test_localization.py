@@ -109,6 +109,10 @@ def test_gateway_alert_templates_are_translated_in_all_supported_locales() -> No
             "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
         ),
         (
+            "Configured Bluetooth adapter {controller} is missing. "
+            "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+        ),
+        (
             "Bluetooth interface is hard-blocked on {controller}. "
             "See the Raspberry Pi Bluetooth recovery runbook."
         ),

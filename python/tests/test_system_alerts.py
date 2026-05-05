@@ -4,7 +4,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from bm_gateway.system_alerts import collect_gateway_alerts
+from bm_gateway.system_alerts import GatewayAlert, collect_gateway_alerts, describe_gateway_alert
 
 
 def test_collect_gateway_alerts_skips_default_host_checks_on_non_linux(
@@ -237,3 +237,17 @@ def test_collect_gateway_alerts_reports_missing_configured_adapter(tmp_path: Pat
 
     assert [alert.code for alert in alerts] == ["bluetooth_controller_missing"]
     assert alerts[0].context == {"controller": "hci0"}
+
+
+def test_describe_gateway_alert_reports_missing_configured_adapter() -> None:
+    alert = GatewayAlert(
+        code="bluetooth_controller_missing",
+        severity="error",
+        runbook="troubleshooting-bluetooth.md",
+        context={"controller": "hci0"},
+    )
+
+    assert describe_gateway_alert(alert) == (
+        "Configured Bluetooth adapter hci0 is missing. "
+        "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+    )

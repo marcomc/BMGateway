@@ -441,6 +441,7 @@
   "This page updates automatically and returns to history when the import finishes.": "导入完成后，此页面会自动更新并返回历史页面。",
   "Gateway attention needed": "网关需要关注",
   "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "蓝牙接口不可用，因为未检测到控制器。请参阅 Raspberry Pi 硬件审计或蓝牙恢复 runbook。",
+  "Configured Bluetooth adapter {controller} is missing. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "已配置的蓝牙适配器 {controller} 缺失。请参阅 Raspberry Pi 硬件审计或蓝牙恢复 runbook。",
   "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "蓝牙接口在 {controller} 上被硬件阻止。请参阅 Raspberry Pi 蓝牙恢复 runbook。",
   "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "蓝牙接口在 {controller} 上被软件阻止。请参阅 Raspberry Pi 蓝牙恢复 runbook。",
   "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "蓝牙服务未处于活动状态。请参阅 Raspberry Pi 蓝牙恢复 runbook。",

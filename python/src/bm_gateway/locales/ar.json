@@ -449,6 +449,7 @@
   "This page updates automatically and returns to history when the import finishes.": "تتحدث هذه الصفحة تلقائيا وتعود إلى السجل عند انتهاء الاستيراد.",
   "Gateway attention needed": "تتطلب البوابة الانتباه",
   "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "واجهة Bluetooth غير متاحة لأنه لم يتم اكتشاف أي متحكم. راجع دليل تشغيل Raspberry Pi لتدقيق العتاد أو استعادة Bluetooth.",
+  "Configured Bluetooth adapter {controller} is missing. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "محول Bluetooth المُعدّ {controller} مفقود. راجع دليل تشغيل Raspberry Pi لتدقيق العتاد أو استعادة Bluetooth.",
   "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "واجهة Bluetooth محظورة على مستوى العتاد على {controller}. راجع دليل تشغيل Raspberry Pi لاستعادة Bluetooth.",
   "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "واجهة Bluetooth محظورة برمجياً على {controller}. راجع دليل تشغيل Raspberry Pi لاستعادة Bluetooth.",
   "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "خدمة Bluetooth غير نشطة. راجع دليل تشغيل Raspberry Pi لاستعادة Bluetooth.",

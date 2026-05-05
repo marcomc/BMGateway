@@ -285,6 +285,12 @@ def collect_gateway_alerts(
 
 def describe_gateway_alert(alert: GatewayAlert) -> str:
     if alert.code == "bluetooth_controller_missing":
+        controller = alert.context.get("controller", "").strip()
+        if controller:
+            return (
+                f"Configured Bluetooth adapter {controller} is missing. "
+                "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+            )
         return (
             "Bluetooth interface is unavailable because no controller is detected. "
             "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."

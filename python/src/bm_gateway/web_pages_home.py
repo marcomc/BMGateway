@@ -129,8 +129,15 @@ def _gateway_alert_message(alert: dict[str, object], *, language: str) -> str:
 
     templates = {
         "bluetooth_controller_missing": (
-            "Bluetooth interface is unavailable because no controller is detected. "
-            "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+            (
+                "Configured Bluetooth adapter {controller} is missing. "
+                "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+            )
+            if context_mapping.get("controller")
+            else (
+                "Bluetooth interface is unavailable because no controller is detected. "
+                "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+            )
         ),
         "bluetooth_hard_blocked": (
             "Bluetooth interface is hard-blocked on {controller}. "
