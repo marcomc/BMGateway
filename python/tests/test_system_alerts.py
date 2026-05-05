@@ -211,3 +211,29 @@ def test_collect_gateway_alerts_ignores_blocked_non_selected_adapter(tmp_path: P
     )
 
     assert alerts == []
+
+
+def test_collect_gateway_alerts_reports_missing_configured_adapter(tmp_path: Path) -> None:
+    bluetooth_root = tmp_path / "bluetooth"
+    bluetooth_root.mkdir()
+    (bluetooth_root / "hci1").mkdir()
+
+    rfkill_root = tmp_path / "rfkill"
+
+    def fake_run(
+        command: list[str],
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str] | None:
+        _ = (command, timeout_seconds)
+        return None
+
+    alerts = collect_gateway_alerts(
+        expected_hostname="bmgateway",
+        configured_adapter="hci0",
+        bluetooth_sysfs_root=bluetooth_root,
+        rfkill_root=rfkill_root,
+        run_command=fake_run,
+    )
+
+    assert [alert.code for alert in alerts] == ["bluetooth_controller_missing"]
+    assert alerts[0].context == {"controller": "hci0"}

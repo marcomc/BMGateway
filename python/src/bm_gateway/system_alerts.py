@@ -142,7 +142,16 @@ def _collect_bluetooth_alerts(
 
     selected_controllers = controllers
     if configured_adapter and configured_adapter != "auto":
-        selected_controllers = [configured_adapter] if configured_adapter in controllers else []
+        if configured_adapter not in controllers:
+            return [
+                GatewayAlert(
+                    code="bluetooth_controller_missing",
+                    severity="error",
+                    runbook="troubleshooting-bluetooth.md",
+                    context={"controller": configured_adapter},
+                )
+            ]
+        selected_controllers = [configured_adapter]
     controller_label = ",".join(selected_controllers or controllers)
     rfkill_states = _bluetooth_rfkill_state(rfkill_root)
     for controller in selected_controllers:
