@@ -10,6 +10,10 @@ Current contents:
   macOS with Raspberry Pi Imager CLI
 - [hardware-audit.md](hardware-audit.md) for hardware validation, boot tuning,
   and service/module trimming on a headless gateway
+- [troubleshooting-mdns-hostname.md](troubleshooting-mdns-hostname.md) for
+  recovering the expected Bonjour or mDNS hostname after a hardware move
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md) for recovering a
+  blocked or powered-off Bluetooth controller after a hardware move
 - `ansible/` for provisioning automation
 - `examples/imager/` for first-boot payload examples
 - `systemd/` for the runtime unit
@@ -52,6 +56,8 @@ Default hostname behavior:
 - the default Bonjour/mDNS address is `bmgateway.local`
 - if you want a different `.local` name, use the hostname override documented
   in [manual-setup.md](manual-setup.md)
+- after an SD-card move, rerun the bootstrap or use the troubleshooting
+  runbooks above to clear stale Bluetooth `rfkill` state and refresh Avahi
 
 For repeat development deploys to an already bootstrapped host, use:
 

@@ -438,5 +438,14 @@
   "Importing history records": "Импорт записей истории",
   "Preparing history download": "Подготовка загрузки истории",
   "Records": "Записи",
-  "This page updates automatically and returns to history when the import finishes.": "Эта страница обновляется автоматически и возвращается к истории после завершения импорта."
+  "This page updates automatically and returns to history when the import finishes.": "Эта страница обновляется автоматически и возвращается к истории после завершения импорта.",
+  "Gateway attention needed": "Шлюзу требуется внимание",
+  "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "Интерфейс Bluetooth недоступен, потому что не обнаружен ни один контроллер. См. runbook Raspberry Pi по аудиту оборудования или восстановлению Bluetooth.",
+  "Configured Bluetooth adapter {controller} is missing. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "Настроенный Bluetooth-адаптер {controller} отсутствует. См. runbook Raspberry Pi по аудиту оборудования или восстановлению Bluetooth.",
+  "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Интерфейс Bluetooth аппаратно заблокирован на {controller}. См. runbook Raspberry Pi по восстановлению Bluetooth.",
+  "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Интерфейс Bluetooth программно заблокирован на {controller}. См. runbook Raspberry Pi по восстановлению Bluetooth.",
+  "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "Служба Bluetooth не активна. См. runbook Raspberry Pi по восстановлению Bluetooth.",
+  "Bluetooth interface is powered off on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Интерфейс Bluetooth выключен на {controller}. См. runbook Raspberry Pi по восстановлению Bluetooth.",
+  "Bonjour/mDNS advertising is inactive. See the Raspberry Pi mDNS hostname recovery runbook.": "Публикация Bonjour/mDNS не активна. См. runbook Raspberry Pi по восстановлению имени хоста mDNS.",
+  "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. This usually means another device is already using the expected name. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS публикует {advertised_hostname} вместо {expected_hostname}. Обычно это означает, что другое устройство уже использует ожидаемое имя. См. runbook Raspberry Pi по восстановлению имени хоста mDNS."
 }

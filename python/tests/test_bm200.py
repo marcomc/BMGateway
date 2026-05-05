@@ -397,7 +397,7 @@ def test_bleak_transport_retries_after_initial_notification_timeout(
 
     async def fake_find_device_by_address(address: str, timeout: float) -> object:
         assert address == "AA:BB:CC:DD:EE:FF"
-        assert timeout == 3.0
+        assert 0 < timeout <= 3.0
         return scanned_device
 
     async def fake_sleep(delay: float) -> None:
@@ -424,6 +424,60 @@ def test_bleak_transport_retries_after_initial_notification_timeout(
     assert len(writes) == 2
     assert parse_voltage_notification(payload).voltage == 13.4
     assert rssi is None
+
+
+def test_bleak_transport_times_out_when_session_setup_hangs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scanned_device = object()
+
+    class FakeClient:
+        def __init__(self, device: object, timeout: float) -> None:
+            assert device is scanned_device
+            assert timeout > 0
+
+        async def __aenter__(self) -> "FakeClient":
+            return self
+
+        async def __aexit__(
+            self,
+            exc_type: object | None,
+            exc: object | None,
+            tb: object | None,
+        ) -> None:
+            return None
+
+        async def start_notify(
+            self,
+            _char: str,
+            callback: Callable[[object | None, bytearray], None],
+        ) -> None:
+            _ = callback
+            await asyncio.sleep(3600)
+
+        async def stop_notify(self, _char: str) -> None:
+            return None
+
+    async def fake_find_device_by_address(address: str, timeout: float) -> object:
+        assert address == "AA:BB:CC:DD:EE:FF"
+        assert timeout > 0
+        return scanned_device
+
+    monkeypatch.setattr(
+        "bm_gateway.drivers.bm200.BleakScanner.find_device_by_address",
+        fake_find_device_by_address,
+    )
+    monkeypatch.setattr("bm_gateway.drivers.bm200.BleakClient", FakeClient)
+
+    with pytest.raises(BM200TimeoutError, match="AA:BB:CC:DD:EE:FF"):
+        asyncio.run(
+            BleakBM200Transport().read_voltage_notification(
+                address="AA:BB:CC:DD:EE:FF",
+                adapter="hci0",
+                timeout_seconds=0.2,
+                scan_timeout_seconds=0.1,
+            )
+        )
 
 
 def test_parse_history_items_decodes_item_count() -> None:

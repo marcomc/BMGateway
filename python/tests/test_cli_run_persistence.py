@@ -154,11 +154,14 @@ def test_live_mode_run_uses_simulated_bm200_reader(
         adapter: object,
         timeout_seconds: object,
         scan_timeout_seconds: object,
+        *,
+        configured_hard_timeout_seconds: object = None,
     ) -> BM200Measurement:
         assert device_mac is not None
         assert adapter is not None
         assert timeout_seconds is not None
         assert scan_timeout_seconds is not None
+        assert configured_hard_timeout_seconds is not None
         return BM200Measurement(
             voltage=12.91,
             soc=77,
@@ -166,7 +169,7 @@ def test_live_mode_run_uses_simulated_bm200_reader(
             state="charging",
         )
 
-    monkeypatch.setattr("bm_gateway.runtime._read_live_bm200", fake_live_reader)
+    monkeypatch.setattr("bm_gateway.runtime._read_live_bm200_isolated", fake_live_reader)
 
     result = cli.main(
         [

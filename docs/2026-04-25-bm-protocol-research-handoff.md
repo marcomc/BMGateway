@@ -570,9 +570,10 @@ Configured live gateway devices:
 Stop the normal gateway service only during direct BLE probes:
 
 ```sh
-ssh admin@<gateway-host>.local 'sudo systemctl stop bm-gateway'
-ssh admin@<gateway-host>.local 'bm-gateway protocol probe-history --device-id battery_beta'
-ssh admin@<gateway-host>.local 'sudo systemctl start bm-gateway && systemctl is-active bm-gateway bm-gateway-web'
+export GATEWAY_HOST="bmgateway.local"
+ssh "admin@${GATEWAY_HOST}" 'sudo systemctl stop bm-gateway'
+ssh "admin@${GATEWAY_HOST}" 'bm-gateway protocol probe-history --device-id battery_beta'
+ssh "admin@${GATEWAY_HOST}" 'sudo systemctl start bm-gateway && systemctl is-active bm-gateway bm-gateway-web'
 ```
 
 Both services must be active after every probe.

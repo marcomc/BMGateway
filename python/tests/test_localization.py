@@ -101,6 +101,49 @@ def test_voltage_ui_terms_are_translated_in_all_supported_locales() -> None:
         assert missing == [], f"{locale.code} missing voltage UI translations: {missing}"
 
 
+def test_gateway_alert_templates_are_translated_in_all_supported_locales() -> None:
+    message_keys = (
+        "Gateway attention needed",
+        (
+            "Bluetooth interface is unavailable because no controller is detected. "
+            "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+        ),
+        (
+            "Configured Bluetooth adapter {controller} is missing. "
+            "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+        ),
+        (
+            "Bluetooth interface is hard-blocked on {controller}. "
+            "See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        (
+            "Bluetooth interface is soft-blocked on {controller}. "
+            "See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.",
+        (
+            "Bluetooth interface is powered off on {controller}. "
+            "See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        (
+            "Bonjour/mDNS advertising is inactive. "
+            "See the Raspberry Pi mDNS hostname recovery runbook."
+        ),
+        (
+            "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. "
+            "This usually means another device is already using the expected name. "
+            "See the Raspberry Pi mDNS hostname recovery runbook."
+        ),
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        translation = translation_for(locale.code)
+        missing = [key for key in message_keys if translation.gettext(key) == key]
+        assert missing == [], f"{locale.code} missing gateway alert translations: {missing}"
+
+
 def test_localize_html_sets_lang_dir_and_translates_text_nodes() -> None:
     localized = localize_html(
         '<!doctype html><html lang="en"><body><h1>Settings</h1>'
@@ -210,6 +253,34 @@ def test_dynamic_error_messages_localize_stable_prefixes() -> None:
     assert "sudo: unable to change to root gid" in localized
     assert "USB OTG frame image export failed" not in localized
     assert missing_translations_for_html(source_html, "it") == ()
+
+
+def test_home_gateway_alert_banner_uses_selected_language() -> None:
+    html = render_home_html(
+        snapshot={
+            "devices": [],
+            "alerts": [
+                {
+                    "code": "bluetooth_soft_blocked",
+                    "severity": "error",
+                    "runbook": "troubleshooting-bluetooth.md",
+                    "context": {"controller": "hci0"},
+                }
+            ],
+        },
+        devices=[],
+        chart_points=[],
+        legend=[],
+        show_chart_markers=False,
+        appearance="light",
+        default_chart_range="7",
+        default_chart_metric="soc",
+        language="it",
+    )
+
+    assert "Attenzione richiesta al gateway" in html
+    assert "interfaccia Bluetooth e bloccata via software su hci0" in html
+    assert "Gateway attention needed" not in html
 
 
 def test_common_web_action_messages_are_translated_in_all_supported_locales() -> None:

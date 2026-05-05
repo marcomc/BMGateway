@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from .system_alerts import GatewayAlert
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class GatewaySnapshot:
     devices_online: int
     poll_interval_seconds: int
     devices: list[DeviceReading]
+    alerts: list[GatewayAlert] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -68,4 +71,5 @@ class GatewaySnapshot:
             "devices_online": self.devices_online,
             "poll_interval_seconds": self.poll_interval_seconds,
             "devices": [device.to_dict() for device in self.devices],
+            "alerts": [alert.to_dict() for alert in self.alerts],
         }

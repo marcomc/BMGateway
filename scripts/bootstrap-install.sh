@@ -43,6 +43,76 @@ web_port="80"
 glances_port="61208"
 hostname_override=""
 
+looks_like_checkout() {
+  local candidate="$1"
+  if [[ -f "${candidate}/pyproject.toml" ]] \
+    && [[ -f "${candidate}/scripts/bootstrap-install.sh" ]] \
+    && [[ -f "${candidate}/rpi-setup/scripts/install-service.sh" ]]; then
+    printf '1\n'
+  else
+    printf '0\n'
+  fi
+}
+
+clear_persisted_bluetooth_blocks() {
+  sudo python3 - <<'PY'
+from pathlib import Path
+
+for rfkill_dir in Path("/sys/class/rfkill").glob("rfkill*"):
+    type_path = rfkill_dir / "type"
+    soft_path = rfkill_dir / "soft"
+    try:
+        adapter_type = type_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        continue
+    if adapter_type != "bluetooth" or not soft_path.exists():
+        continue
+    try:
+        soft_path.write_text("0", encoding="utf-8")
+    except OSError:
+        continue
+
+for state_path in Path("/var/lib/systemd/rfkill").glob("*bluetooth"):
+    try:
+        state_path.write_text("0", encoding="utf-8")
+    except OSError:
+        continue
+PY
+}
+
+refresh_mdns_advertising() {
+  if ! command -v systemctl >/dev/null 2>&1; then
+    return
+  fi
+
+  sudo systemctl enable avahi-daemon.service >/dev/null 2>&1 || true
+  sudo systemctl restart avahi-daemon.service >/dev/null 2>&1 || true
+}
+
+prepare_bluetooth_controller() {
+  local controller_path
+  local controller_name
+
+  clear_persisted_bluetooth_blocks
+
+  if command -v systemctl >/dev/null 2>&1; then
+    sudo systemctl enable bluetooth.service >/dev/null 2>&1 || true
+    sudo systemctl restart bluetooth.service >/dev/null 2>&1 || true
+  fi
+
+  if command -v hciconfig >/dev/null 2>&1; then
+    for controller_path in /sys/class/bluetooth/*; do
+      [[ -e "${controller_path}" ]] || break
+      controller_name="$(basename "${controller_path}")"
+      sudo hciconfig "${controller_name}" up >/dev/null 2>&1 || true
+    done
+  fi
+
+  if command -v bluetoothctl >/dev/null 2>&1; then
+    sudo bluetoothctl power on >/dev/null 2>&1 || true
+  fi
+}
+
 set_system_hostname() {
   local requested_hostname="$1"
   local current_hostname
@@ -161,11 +231,15 @@ done
 
 export PATH="${HOME}/.local/bin:${PATH}"
 
-if [[ -e "${script_repo_dir}/.git" ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
+script_repo_dir_is_checkout="$(looks_like_checkout "${script_repo_dir}")"
+repo_dir_is_checkout="$(looks_like_checkout "${repo_dir}")"
+
+if [[ "${script_repo_dir_is_checkout}" -eq 1 ]] && [[ "${repo_dir}" = "${HOME}/BMGateway" ]]; then
   repo_dir="${script_repo_dir}"
+  repo_dir_is_checkout=1
 fi
 
-if [[ -z "${repo_url}" ]] && [[ ! -e "${repo_dir}/.git" ]]; then
+if [[ -z "${repo_url}" ]] && [[ ! -e "${repo_dir}/.git" ]] && [[ "${repo_dir_is_checkout}" -eq 0 ]]; then
   printf 'Missing required --repo-url argument\n' >&2
   usage >&2
   exit 1
@@ -174,6 +248,7 @@ fi
 if [[ "${skip_apt}" -eq 0 ]]; then
   sudo apt-get update
   apt_packages=(
+    avahi-daemon
     bluetooth
     bluez
     ca-certificates
@@ -181,6 +256,7 @@ if [[ "${skip_apt}" -eq 0 ]]; then
     git
     make
     python3
+    rfkill
     python3-venv
   )
   if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
@@ -196,6 +272,8 @@ if [[ "${skip_apt}" -eq 0 ]]; then
 fi
 
 set_system_hostname "${hostname_override}"
+refresh_mdns_advertising
+prepare_bluetooth_controller
 
 if [[ "${skip_uv}" -eq 0 ]] && ! command -v uv >/dev/null 2>&1; then
   installer_dir="$(mktemp -d)"
@@ -212,6 +290,8 @@ if [[ -e "${repo_dir}/.git" ]]; then
     git -C "${repo_dir}" fetch --all --tags --prune
     git -C "${repo_dir}" pull --ff-only
   fi
+elif [[ "${repo_dir_is_checkout}" -eq 1 ]]; then
+  :
 else
   git clone "${repo_url}" "${repo_dir}"
 fi

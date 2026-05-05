@@ -4,7 +4,31 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.1] - 2026-05-01
+## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
+
+### Changed
+
+- Hardened Raspberry Pi bootstrap installs so they now include `avahi-daemon`
+  and `rfkill`, clear persisted Bluetooth soft-block state, power the detected
+  controller back on, and restart Avahi before the gateway services start after
+  a hardware move or SD-card transplant.
+- Added dedicated Raspberry Pi troubleshooting runbooks for restoring the
+  expected Bonjour or mDNS hostname and for recovering blocked Bluetooth
+  controllers with copy-paste commands.
+- Added gateway health alerts for blocked or inactive Bluetooth and incorrect
+  Bonjour or mDNS host advertising, including runtime log output and a red Home
+  page banner that points operators toward the Raspberry Pi troubleshooting
+  runbooks.
+- Added a configurable `bluetooth.live_hard_timeout_seconds` setting so
+  operators can lower or raise the subprocess kill budget used to protect live
+  polls from stuck BlueZ or `bleak` calls without changing the underlying BLE
+  connect timeout.
+- Refactored BM200/BM6 and BM300 Pro/BM7 live polling to share the same BLE
+  scan, connect, notify, retry, and cleanup control flow while keeping the
+  protocol-specific request payloads and packet parsing in their respective
+  drivers.
+
+## [0.2.1] - 2026-05-01 - probe-history, archive sync, and BM300 Pro/BM7 import improvements
 
 ### Added
 

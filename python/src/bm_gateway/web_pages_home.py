@@ -7,8 +7,10 @@ from urllib.parse import quote
 
 from . import display_version
 from . import web_pages as shared
+from .localization import translation_for
 from .web_ui import (
     app_document,
+    banner_strip,
     chart_card,
     chart_script,
     section_card,
@@ -39,6 +41,7 @@ def render_home_html(
         include_controls=True,
     )
     chart_id = "home-overview-chart"
+    alert_banner = _gateway_alert_banner(snapshot=snapshot, language=language)
     body = (
         top_header(
             title="BMGateway",
@@ -46,6 +49,7 @@ def render_home_html(
                 f'<div class="header-build-badge" translate="no">{html.escape(version_label)}</div>'
             ),
         )
+        + alert_banner
         + section_card(
             title="Battery Overview",
             subtitle="Touch the charge circle to open device details.",
@@ -80,6 +84,93 @@ def render_home_html(
         language=language,
         script=chart_script(chart_id, language=language)
         + shared._home_overview_script(overview_track_id),
+    )
+
+
+def _gateway_alert_banner(*, snapshot: dict[str, object], language: str) -> str:
+    translation = translation_for(language)
+    alert_items = snapshot.get("alerts", [])
+    if not isinstance(alert_items, list):
+        return ""
+
+    messages: list[str] = []
+    for item in alert_items:
+        if not isinstance(item, dict):
+            continue
+        message = _gateway_alert_message(item, language=language)
+        if message:
+            messages.append(message)
+    if not messages:
+        return ""
+
+    body = (
+        '<strong translate="no">'
+        f"{html.escape(translation.gettext('Gateway attention needed'))}"
+        "</strong>"
+        + "".join(f'<div translate="no">{html.escape(message)}</div>' for message in messages)
+    )
+    return banner_strip(body, kind="error")
+
+
+def _gateway_alert_message(alert: dict[str, object], *, language: str) -> str:
+    translation = translation_for(language)
+    code = str(alert.get("code", "")).strip()
+    context = alert.get("context", {})
+    context_mapping = context if isinstance(context, dict) else {}
+    controller = str(context_mapping.get("controller", "hci0")).strip() or "hci0"
+    expected_hostname = (
+        str(context_mapping.get("expected_hostname", "bmgateway.local")).strip()
+        or "bmgateway.local"
+    )
+    advertised_hostname = (
+        str(context_mapping.get("advertised_hostname", expected_hostname)).strip()
+        or expected_hostname
+    )
+
+    templates = {
+        "bluetooth_controller_missing": (
+            (
+                "Configured Bluetooth adapter {controller} is missing. "
+                "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+            )
+            if context_mapping.get("controller")
+            else (
+                "Bluetooth interface is unavailable because no controller is detected. "
+                "See the Raspberry Pi hardware audit or Bluetooth recovery runbook."
+            )
+        ),
+        "bluetooth_hard_blocked": (
+            "Bluetooth interface is hard-blocked on {controller}. "
+            "See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        "bluetooth_soft_blocked": (
+            "Bluetooth interface is soft-blocked on {controller}. "
+            "See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        "bluetooth_service_inactive": (
+            "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        "bluetooth_powered_off": (
+            "Bluetooth interface is powered off on {controller}. "
+            "See the Raspberry Pi Bluetooth recovery runbook."
+        ),
+        "mdns_service_inactive": (
+            "Bonjour/mDNS advertising is inactive. "
+            "See the Raspberry Pi mDNS hostname recovery runbook."
+        ),
+        "mdns_hostname_mismatch": (
+            "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. "
+            "This usually means another device is already using the expected name. "
+            "See the Raspberry Pi mDNS hostname recovery runbook."
+        ),
+    }
+    template = templates.get(code)
+    if template is None:
+        return ""
+    return translation.gettext(template).format(
+        controller=controller,
+        expected_hostname=expected_hostname,
+        advertised_hostname=advertised_hostname,
     )
 
 

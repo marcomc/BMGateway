@@ -24,6 +24,7 @@ from .state_store import (
     load_snapshot,
     prune_history,
 )
+from .system_alerts import collect_gateway_alerts
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_actions import (
     _config_and_registry_texts,
@@ -157,6 +158,18 @@ _HISTORY_SYNC_STATUS: dict[str, object] = {
 }
 _RUN_ONCE_LOCK = threading.Lock()
 _RUN_ONCE_PROCESS: object | None = None
+
+
+def _snapshot_with_current_alerts(
+    snapshot: dict[str, object],
+    *,
+    configured_adapter: str,
+) -> dict[str, object]:
+    payload = dict(snapshot)
+    payload["alerts"] = [
+        alert.to_dict() for alert in collect_gateway_alerts(configured_adapter=configured_adapter)
+    ]
+    return payload
 
 
 def _set_usb_otg_export_status(**updates: object) -> None:
@@ -565,6 +578,11 @@ def serve_management(
             config = load_config(config_path)
             snapshot_path = state_file_path(config, state_dir=state_dir)
             snapshot = load_snapshot(snapshot_path) if snapshot_path.exists() else {"devices": []}
+            configured_adapter = str(snapshot.get("active_adapter", config.bluetooth.adapter))
+            snapshot = _snapshot_with_current_alerts(
+                snapshot,
+                configured_adapter=configured_adapter,
+            )
             database_path = database_file_path(config, state_dir=state_dir)
             return config, snapshot, database_path
 

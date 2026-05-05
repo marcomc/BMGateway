@@ -66,6 +66,18 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
         fake_bin / "hostnamectl",
         "#!/bin/sh\n" + logger + "exit 0\n",
     )
+    _write_executable(
+        fake_bin / "systemctl",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
+    _write_executable(
+        fake_bin / "bluetoothctl",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
+    _write_executable(
+        fake_bin / "hciconfig",
+        "#!/bin/sh\n" + logger + "exit 0\n",
+    )
 
     return fake_bin, command_log
 
@@ -99,11 +111,16 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     commands = command_log.read_text(encoding="utf-8")
     assert "apt-get update" in commands
     assert (
-        "apt-get install -y bluetooth bluez ca-certificates curl git make python3 "
-        "python3-venv chromium dosfstools kmod libjpeg-dev python3-dev util-linux "
-        "zlib1g-dev" in commands
+        "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
+        "make python3 rfkill python3-venv chromium dosfstools kmod libjpeg-dev "
+        "python3-dev util-linux zlib1g-dev" in commands
     )
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
+    assert "systemctl enable avahi-daemon.service" in commands
+    assert "systemctl restart avahi-daemon.service" in commands
+    assert "systemctl enable bluetooth.service" in commands
+    assert "systemctl restart bluetooth.service" in commands
+    assert "bluetoothctl power on" in commands
     assert "git clone https://example.invalid/BMGateway.git" in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
     assert f"bash {repo_dir}/rpi-setup/scripts/install-service.sh --user" in commands
@@ -140,8 +157,8 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     assert result.returncode == 0, result.stderr
     commands = command_log.read_text(encoding="utf-8")
     assert (
-        "apt-get install -y bluetooth bluez ca-certificates curl git make python3 "
-        "python3-venv" in commands
+        "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
+        "make python3 rfkill python3-venv" in commands
     )
     assert "chromium" not in commands
     assert "dosfstools" not in commands
@@ -247,6 +264,48 @@ def test_bootstrap_install_script_uses_current_checkout_without_repo_url(
     assert "git clone" not in commands
     assert "fetch --all --tags --prune" not in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
+
+
+def test_bootstrap_install_script_uses_non_git_synced_checkout_without_repo_url(
+    tmp_path: Path,
+) -> None:
+    checkout = tmp_path / "BMGateway-dev"
+    (checkout / "scripts").mkdir(parents=True)
+    (checkout / "rpi-setup" / "scripts").mkdir(parents=True)
+    (checkout / "pyproject.toml").write_text("[project]\nname='bm-gateway'\n", encoding="utf-8")
+    bootstrap_copy = checkout / "scripts" / "bootstrap-install.sh"
+    bootstrap_copy.write_text(
+        Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    bootstrap_copy.chmod(bootstrap_copy.stat().st_mode | stat.S_IXUSR)
+    _write_executable(
+        checkout / "rpi-setup" / "scripts" / "install-service.sh",
+        "#!/bin/sh\nexit 0\n",
+    )
+
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        [str(bootstrap_copy), "--skip-apt", "--skip-uv"],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    commands = command_log.read_text(encoding="utf-8")
+    assert "git clone" not in commands
+    assert "fetch --all --tags --prune" not in commands
+    assert f"make install PYTHON_VERSION={fake_bin / 'python3'}" in commands
+    assert f"bash {checkout / 'rpi-setup' / 'scripts' / 'install-service.sh'} --user" in commands
 
 
 def test_bootstrap_install_script_uses_uv_from_local_bin_when_skip_uv_is_set(

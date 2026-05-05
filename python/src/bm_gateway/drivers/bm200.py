@@ -13,6 +13,8 @@ from typing import Any, Protocol
 from bleak import BleakClient, BleakScanner
 from Crypto.Cipher import AES
 
+from ..live_polling import read_live_notification
+
 BM200_NOTIFY_CHARACTERISTIC = "0000fff4-0000-1000-8000-00805f9b34fb"
 BM200_WRITE_CHARACTERISTIC = "0000fff3-0000-1000-8000-00805f9b34fb"
 BM200_AES_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 49, 56, 56, 50, 52, 54, 54])
@@ -91,20 +93,6 @@ class BM200HistoryTransport(Protocol):
         reference_ts: datetime,
         page_count: int = 1,
     ) -> list[BM200HistoryReading]: ...
-
-
-def _device_rssi(device: object) -> int | None:
-    direct = getattr(device, "rssi", None)
-    if isinstance(direct, (int, float)):
-        return int(direct)
-    details = getattr(device, "details", None)
-    if isinstance(details, dict):
-        props = details.get("props")
-        if isinstance(props, dict):
-            rssi = props.get("RSSI")
-            if isinstance(rssi, (int, float)):
-                return int(rssi)
-    return None
 
 
 def _create_cipher() -> Any:
@@ -303,6 +291,39 @@ def default_bm6_history_reference_ts(now: datetime | None = None) -> datetime:
 
 
 class BleakBM200Transport:
+    async def _read_voltage_notification_attempt(
+        self,
+        *,
+        client: BleakClient,
+        packet_queue: asyncio.Queue[bytes],
+        deadline: float,
+    ) -> bytes:
+        loop = asyncio.get_running_loop()
+        request_attempts = 0
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise BM200TimeoutError(str(getattr(client, "address", "bm200")))
+            try:
+                if request_attempts == 0:
+                    await asyncio.sleep(min(0.5, remaining))
+                await client.write_gatt_char(
+                    BM200_WRITE_CHARACTERISTIC,
+                    encrypt_bm6_payload(BM6_POLL_PLAINTEXT),
+                    response=False,
+                )
+                request_attempts += 1
+                encrypted = await asyncio.wait_for(
+                    packet_queue.get(),
+                    timeout=min(4.0, remaining),
+                )
+            except TimeoutError as exc:
+                if request_attempts >= 2:
+                    raise BM200TimeoutError(str(getattr(client, "address", "bm200"))) from exc
+                continue
+            if _is_bm200_measurement_packet(encrypted) or _is_bm6_measurement_packet(encrypted):
+                return encrypted
+
     async def read_voltage_notification(
         self,
         *,
@@ -312,80 +333,18 @@ class BleakBM200Transport:
         scan_timeout_seconds: float,
     ) -> tuple[bytes, int | None]:
         _ = adapter
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_seconds
-        last_error: Exception | None = None
-        scan_timeout = max(1.0, scan_timeout_seconds)
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                if last_error is not None:
-                    raise last_error
-                raise BleakDeviceNotFoundError(address)
-
-            queue: asyncio.Queue[bytes] = asyncio.Queue()
-
-            def notification_handler(
-                _: object,
-                data: bytearray,
-                *,
-                notification_queue: asyncio.Queue[bytes] = queue,
-            ) -> None:
-                notification_queue.put_nowait(bytes(data))
-
-            device = await BleakScanner.find_device_by_address(
-                address,
-                timeout=min(scan_timeout, remaining),
-            )
-            if device is None:
-                continue
-            rssi = _device_rssi(device)
-
-            client = BleakClient(device, timeout=min(scan_timeout, remaining))
-            try:
-                async with client:
-                    await client.start_notify(BM200_NOTIFY_CHARACTERISTIC, notification_handler)
-                    try:
-                        # BM6-family devices do not reliably stream passive
-                        # notifications. Arm notify first, then issue the poll
-                        # request immediately and retry once before giving up
-                        # on this connection window.
-                        request_attempts = 0
-                        while True:
-                            remaining = deadline - loop.time()
-                            if remaining <= 0:
-                                raise BM200TimeoutError(address)
-                            try:
-                                if request_attempts == 0:
-                                    await asyncio.sleep(min(0.5, remaining))
-                                await client.write_gatt_char(
-                                    BM200_WRITE_CHARACTERISTIC,
-                                    encrypt_bm6_payload(BM6_POLL_PLAINTEXT),
-                                    response=False,
-                                )
-                                request_attempts += 1
-                                encrypted = await asyncio.wait_for(
-                                    queue.get(),
-                                    timeout=min(4.0, remaining),
-                                )
-                            except TimeoutError as exc:
-                                if request_attempts >= 2:
-                                    raise BM200TimeoutError(address) from exc
-                                continue
-                            if _is_bm200_measurement_packet(
-                                encrypted
-                            ) or _is_bm6_measurement_packet(encrypted):
-                                return encrypted, rssi
-                    finally:
-                        await client.stop_notify(BM200_NOTIFY_CHARACTERISTIC)
-            except BM200TimeoutError:
-                raise
-            except Exception as exc:
-                # The device was seen but failed to connect cleanly in this
-                # window. Retry discovery until the overall deadline expires.
-                last_error = exc
-                await asyncio.sleep(min(1.0, max(deadline - loop.time(), 0.0)))
-                continue
+        return await read_live_notification(
+            address=address,
+            timeout_seconds=timeout_seconds,
+            scan_timeout_seconds=scan_timeout_seconds,
+            notify_characteristic=BM200_NOTIFY_CHARACTERISTIC,
+            find_device_by_address=BleakScanner.find_device_by_address,
+            client_factory=BleakClient,
+            read_attempt=self._read_voltage_notification_attempt,
+            device_not_found_error=BleakDeviceNotFoundError,
+            timeout_error=BM200TimeoutError,
+            timeout_exception_types=(BM200TimeoutError,),
+        )
 
 
 class BleakBM200HistoryTransport:

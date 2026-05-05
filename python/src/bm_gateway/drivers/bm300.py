@@ -11,6 +11,8 @@ from bleak import BleakClient, BleakScanner
 from bleak.args.bluez import BlueZClientArgs, BlueZScannerArgs
 from Crypto.Cipher import AES
 
+from ..live_polling import read_live_notification
+
 BM300_NOTIFY_CHARACTERISTIC = "0000fff4-0000-1000-8000-00805f9b34fb"
 BM300_WRITE_CHARACTERISTIC = "0000fff3-0000-1000-8000-00805f9b34fb"
 BM300_AES_KEY = bytes([108, 101, 97, 103, 101, 110, 100, 255, 254, 48, 49, 48, 48, 48, 48, 64])
@@ -99,20 +101,6 @@ class BM300HistoryRequestTransport(Protocol):
         request: bytes,
         page_selector: int,
     ) -> list[BM300HistoryReading]: ...
-
-
-def _device_rssi(device: object) -> int | None:
-    direct = getattr(device, "rssi", None)
-    if isinstance(direct, (int, float)):
-        return int(direct)
-    details = getattr(device, "details", None)
-    if isinstance(details, dict):
-        props = details.get("props")
-        if isinstance(props, dict):
-            rssi = props.get("RSSI")
-            if isinstance(rssi, (int, float)):
-                return int(rssi)
-    return None
 
 
 def _bluez_client_args(adapter: str) -> BlueZClientArgs:
@@ -281,50 +269,34 @@ class BleakBM300Transport:
         self,
         *,
         client: BleakClient,
+        packet_queue: asyncio.Queue[bytes],
         deadline: float,
     ) -> bytes:
         loop = asyncio.get_running_loop()
-        queue: asyncio.Queue[bytes] = asyncio.Queue()
-
-        def notification_handler(
-            _: object,
-            data: bytearray,
-            *,
-            notification_queue: asyncio.Queue[bytes] = queue,
-        ) -> None:
-            notification_queue.put_nowait(bytes(data))
-
-        async with client:
-            await client.start_notify(BM300_NOTIFY_CHARACTERISTIC, notification_handler)
+        request_attempts = 0
+        while True:
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                raise BM300TimeoutError(str(getattr(client, "address", "bm300")))
             try:
-                request_attempts = 0
-                while True:
-                    remaining = deadline - loop.time()
-                    if remaining <= 0:
-                        raise BM300TimeoutError(str(getattr(client, "address", "bm300")))
-                    try:
-                        if request_attempts == 0:
-                            await asyncio.sleep(min(0.5, remaining))
-                        await client.write_gatt_char(
-                            BM300_WRITE_CHARACTERISTIC,
-                            encrypt_bm300_payload(BM300_POLL_PLAINTEXT),
-                            response=True,
-                        )
-                        request_attempts += 1
-                        encrypted = await asyncio.wait_for(
-                            queue.get(),
-                            timeout=min(4.0, remaining),
-                        )
-                    except TimeoutError as exc:
-                        if request_attempts >= 2:
-                            raise BM300TimeoutError(
-                                str(getattr(client, "address", "bm300"))
-                            ) from exc
-                        continue
-                    if _is_bm300_measurement_packet(encrypted):
-                        return encrypted
-            finally:
-                await client.stop_notify(BM300_NOTIFY_CHARACTERISTIC)
+                if request_attempts == 0:
+                    await asyncio.sleep(min(0.5, remaining))
+                await client.write_gatt_char(
+                    BM300_WRITE_CHARACTERISTIC,
+                    encrypt_bm300_payload(BM300_POLL_PLAINTEXT),
+                    response=True,
+                )
+                request_attempts += 1
+                encrypted = await asyncio.wait_for(
+                    packet_queue.get(),
+                    timeout=min(4.0, remaining),
+                )
+            except TimeoutError as exc:
+                if request_attempts >= 2:
+                    raise BM300TimeoutError(str(getattr(client, "address", "bm300"))) from exc
+                continue
+            if _is_bm300_measurement_packet(encrypted):
+                return encrypted
 
     async def read_voltage_notification(
         self,
@@ -334,52 +306,20 @@ class BleakBM300Transport:
         timeout_seconds: float,
         scan_timeout_seconds: float,
     ) -> tuple[bytes, int | None]:
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + timeout_seconds
-        last_error: Exception | None = None
-        scan_timeout = max(1.0, scan_timeout_seconds)
-        bluez_scanner_args = _bluez_scanner_args(adapter)
-        bluez_client_args = _bluez_client_args(adapter)
-        while True:
-            remaining = deadline - loop.time()
-            if remaining <= 0:
-                if last_error is not None:
-                    raise last_error
-                raise BleakBM300DeviceNotFoundError(address)
-
-            device = await BleakScanner.find_device_by_address(
-                address,
-                timeout=min(scan_timeout, remaining),
-                bluez=bluez_scanner_args,
-            )
-            if device is None:
-                continue
-            rssi = _device_rssi(device)
-
-            client = BleakClient(
-                device,
-                timeout=min(scan_timeout, remaining),
-                bluez=bluez_client_args,
-            )
-            try:
-                encrypted = await asyncio.wait_for(
-                    self._read_voltage_notification_attempt(
-                        client=client,
-                        deadline=deadline,
-                    ),
-                    timeout=max(deadline - loop.time(), 0.0),
-                )
-                return encrypted, rssi
-            except TimeoutError as exc:
-                last_error = BM300TimeoutError(address)
-                if deadline - loop.time() <= 0:
-                    raise last_error from exc
-            except BM300TimeoutError:
-                raise
-            except Exception as exc:
-                last_error = exc
-                await asyncio.sleep(min(1.0, max(deadline - loop.time(), 0.0)))
-                continue
+        return await read_live_notification(
+            address=address,
+            timeout_seconds=timeout_seconds,
+            scan_timeout_seconds=scan_timeout_seconds,
+            notify_characteristic=BM300_NOTIFY_CHARACTERISTIC,
+            find_device_by_address=BleakScanner.find_device_by_address,
+            client_factory=BleakClient,
+            read_attempt=self._read_voltage_notification_attempt,
+            device_not_found_error=BleakBM300DeviceNotFoundError,
+            timeout_error=BM300TimeoutError,
+            timeout_exception_types=(BM300TimeoutError,),
+            scanner_kwargs={"bluez": _bluez_scanner_args(adapter)},
+            client_kwargs={"bluez": _bluez_client_args(adapter)},
+        )
 
 
 class BleakBM7HistoryTransport:

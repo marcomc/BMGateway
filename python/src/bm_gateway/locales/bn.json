@@ -438,5 +438,14 @@
   "Importing history records": "ইতিহাস রেকর্ড আমদানি হচ্ছে",
   "Preparing history download": "ইতিহাস ডাউনলোড প্রস্তুত হচ্ছে",
   "Records": "রেকর্ড",
-  "This page updates automatically and returns to history when the import finishes.": "আমদানি শেষ হলে এই পৃষ্ঠা স্বয়ংক্রিয়ভাবে আপডেট হয়ে ইতিহাসে ফিরে যাবে।"
+  "This page updates automatically and returns to history when the import finishes.": "আমদানি শেষ হলে এই পৃষ্ঠা স্বয়ংক্রিয়ভাবে আপডেট হয়ে ইতিহাসে ফিরে যাবে।",
+  "Gateway attention needed": "গেটওয়েতে মনোযোগ প্রয়োজন",
+  "Bluetooth interface is unavailable because no controller is detected. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "কোনও কন্ট্রোলার শনাক্ত না হওয়ায় Bluetooth ইন্টারফেস উপলভ্য নয়। Raspberry Pi হার্ডওয়্যার অডিট বা Bluetooth পুনরুদ্ধার রানবুক দেখুন।",
+  "Configured Bluetooth adapter {controller} is missing. See the Raspberry Pi hardware audit or Bluetooth recovery runbook.": "কনফিগার করা Bluetooth অ্যাডাপ্টার {controller} অনুপস্থিত। Raspberry Pi হার্ডওয়্যার অডিট বা Bluetooth পুনরুদ্ধার রানবুক দেখুন।",
+  "Bluetooth interface is hard-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth ইন্টারফেস {controller}-এ হার্ড-ব্লক হয়েছে। Raspberry Pi Bluetooth পুনরুদ্ধার রানবুক দেখুন।",
+  "Bluetooth interface is soft-blocked on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth ইন্টারফেস {controller}-এ সফট-ব্লক হয়েছে। Raspberry Pi Bluetooth পুনরুদ্ধার রানবুক দেখুন।",
+  "Bluetooth service is inactive. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth পরিষেবা সক্রিয় নয়। Raspberry Pi Bluetooth পুনরুদ্ধার রানবুক দেখুন।",
+  "Bluetooth interface is powered off on {controller}. See the Raspberry Pi Bluetooth recovery runbook.": "Bluetooth ইন্টারফেস {controller}-এ বন্ধ আছে। Raspberry Pi Bluetooth পুনরুদ্ধার রানবুক দেখুন।",
+  "Bonjour/mDNS advertising is inactive. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS বিজ্ঞাপন সক্রিয় নয়। Raspberry Pi mDNS হোস্টনেম পুনরুদ্ধার রানবুক দেখুন।",
+  "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. This usually means another device is already using the expected name. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS {expected_hostname}-এর বদলে {advertised_hostname} বিজ্ঞাপন দিচ্ছে। সাধারণত এর মানে অন্য কোনও ডিভাইস আগেই প্রত্যাশিত নামটি ব্যবহার করছে। Raspberry Pi mDNS হোস্টনেম পুনরুদ্ধার রানবুক দেখুন।"
 }

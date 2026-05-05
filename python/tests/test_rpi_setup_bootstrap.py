@@ -7,6 +7,7 @@ def test_bootstrap_installs_reproducible_raspberry_pi_dependencies() -> None:
     script = Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8")
 
     for package in (
+        "avahi-daemon",
         "ca-certificates",
         "bluetooth",
         "bluez",
@@ -14,6 +15,7 @@ def test_bootstrap_installs_reproducible_raspberry_pi_dependencies() -> None:
         "git",
         "make",
         "python3",
+        "rfkill",
         "python3-venv",
     ):
         assert package in script

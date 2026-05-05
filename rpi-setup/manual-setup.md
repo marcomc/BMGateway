@@ -72,6 +72,7 @@ individual lower-level scripts, install the same baseline:
 ```bash
 sudo apt update
 sudo apt install -y \
+  avahi-daemon \
   bluetooth \
   bluez \
   ca-certificates \
@@ -85,6 +86,7 @@ sudo apt install -y \
   python3 \
   python3-dev \
   python3-venv \
+  rfkill \
   util-linux \
   zlib1g-dev
 ```
@@ -93,9 +95,11 @@ Package purpose:
 
 | Package | Used for |
 | --- | --- |
+| `avahi-daemon` | Bonjour/mDNS hostname advertising such as `bmgateway.local` |
 | `bluetooth`, `bluez` | Bluetooth service, `bluetoothctl`, and BLE polling |
 | `ca-certificates`, `curl` | Downloading the `uv` installer over HTTPS |
 | `git`, `make`, `python3`, `python3-venv` | Checkout and packaged Python runtime installation |
+| `rfkill` | Inspecting and clearing persisted radio soft-block state |
 | `chromium` | USB OTG frame-image screenshots and Diagnostics frame previews |
 | `dosfstools` | `mkfs.vfat` for USB OTG backing images |
 | `kmod` | `modprobe libcomposite` for USB gadget setup |
@@ -157,6 +161,18 @@ curl -fsSL https://raw.githubusercontent.com/marcomc/BMGateway/main/scripts/boot
 
 The bootstrap script intentionally installs the standalone runtime through
 `make install`, not `make install-dev`.
+
+It also performs two hardware-move safety steps before the runtime services are
+started:
+
+- clears persisted Bluetooth `rfkill` soft blocks and powers controllers back on
+- refreshes Avahi so the configured hostname is advertised again on mDNS
+
+If you move an existing SD card to different Raspberry Pi hardware and still
+need manual recovery, use the dedicated runbooks:
+
+- [troubleshooting-mdns-hostname.md](troubleshooting-mdns-hostname.md)
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md)
 
 Do not use `--skip-apt` for a fresh Raspberry Pi. That option is only for
 controlled rebuilds where the packages listed in [System Packages](#system-packages)
@@ -354,16 +370,7 @@ sudo ip route
 
 If the Bluetooth dongle appears but is blocked or down, run:
 
-```bash
-sudo rfkill unblock bluetooth
-sudo sh -c 'for f in /var/lib/systemd/rfkill/*bluetooth; do printf 0 > "$f"; done'
-sudo systemctl restart bluetooth.service
-sudo hciconfig hci0 up
-sudo bluetoothctl power on
-sudo rfkill list
-sudo hciconfig -a
-sudo bluetoothctl show
-```
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md)
 
 The intended steady state is:
 
@@ -375,6 +382,15 @@ For BM200 support, powered on is not enough. The Bluetooth adapter must also
 support BLE central mode. The currently audited CSR USB dongle identified as
 `0a12:0001` exposes BR/EDR only and does not provide the BLE central role
 required by `bleak`, so it cannot monitor BM200 devices.
+
+## Troubleshooting Runbooks
+
+Use these canonical copy-paste runbooks for appliance recovery:
+
+- [troubleshooting-mdns-hostname.md](troubleshooting-mdns-hostname.md) when the
+  Pi is reachable by IP or SSH but does not resolve as `<hostname>.local`
+- [troubleshooting-bluetooth.md](troubleshooting-bluetooth.md) when `hci0` is
+  blocked, down, or the runtime reports no powered Bluetooth adapter
 
 ## Configure the Gateway
 
@@ -562,6 +578,101 @@ sudo systemctl status bm-gateway-web.service
 sudo systemctl status glances-web.service
 sudo systemctl status cockpit.socket
 ```
+
+## Live Validation on the Real Gateway Host
+
+For appliance-affecting changes, validate on the real gateway host after local
+checks pass.
+
+The default hostname is `bmgateway.local`. If you changed it during bootstrap,
+replace that hostname with your chosen `<hostname>.local` or export a different
+value in the commands below.
+
+Deploy the current checkout:
+
+```bash
+export GATEWAY_HOST="${GATEWAY_HOST:-bmgateway.local}"
+make dev-deploy TARGET="admin@${GATEWAY_HOST}"
+```
+
+Validate service state, config loading, and the installed device registry:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  systemctl is-active bm-gateway.service bm-gateway-web.service bluetooth.service avahi-daemon.service
+  bm-gateway config validate --json
+  bm-gateway devices list --json
+"'
+```
+
+Validate the local web interface and exported status API on the host:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  curl -fsS http://127.0.0.1/api/status
+  printf \"\n---\n\"
+  curl -fsS http://127.0.0.1/ | grep -E \"BMGateway|Battery Overview|Gateway attention needed\" -n | head -n 20
+"'
+```
+
+Validate Bluetooth and Bonjour or mDNS health on the host:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  rfkill list || true
+  printf \"\n---\n\"
+  bluetoothctl show || true
+  printf \"\n---\n\"
+  journalctl -u avahi-daemon -n 20 --no-pager -o cat | grep -E \"Host name is|Host name conflict\" || true
+"'
+```
+
+Validate the external hostname path from your workstation:
+
+```bash
+ping -c 1 "${GATEWAY_HOST}"
+curl -fsS "http://${GATEWAY_HOST}/api/status"
+```
+
+For optional services, validate them only when they are enabled on that host:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  systemctl is-active glances-web.service cockpit.socket
+  curl -fsS http://127.0.0.1:61208/api/4/status
+  curl -k -I https://127.0.0.1:9090/
+"'
+```
+
+To validate the real CLI polling entrypoint without the background runtime
+contending for BLE access, stop the runtime briefly, run both dry-run and live
+once modes, and then restart the service:
+
+```bash
+ssh "admin@${GATEWAY_HOST}" 'bash -lc "
+  set -euo pipefail
+  sudo systemctl stop bm-gateway.service
+  trap \"sudo systemctl start bm-gateway.service\" EXIT
+  bm-gateway run --once --dry-run --json
+  bm-gateway run --once --json
+"'
+```
+
+Expected outcomes:
+
+- all required services report `active`
+- `bm-gateway config validate --json` reports `"valid": true`
+- `bm-gateway devices list --json` shows the installed registry
+- `/api/status` returns JSON and the Home page renders without a gateway alert
+  banner when Bluetooth and Bonjour or mDNS are healthy
+- `rfkill list` shows Bluetooth as not blocked
+- `bluetoothctl show` reports the controller as powered on
+- Avahi reports `Host name is bmgateway.local` unless you intentionally chose a
+  different hostname
+- `bm-gateway run --once --dry-run --json` completes with a snapshot and
+  `"mqtt_connected": false`
+- `bm-gateway run --once --json` completes with a snapshot and
+  `"mqtt_connected": true` when MQTT is configured and reachable
 
 ## Service and Module Policy for This Project
 

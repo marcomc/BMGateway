@@ -19,6 +19,10 @@ adapter = "auto"
 # window and overall connect budget than generic BLE defaults.
 scan_timeout_seconds = 15
 connect_timeout_seconds = 45
+# Use 0 for the automatic safeguard budget. Set a positive value to cap how
+# long an isolated live poll child process may run before it is killed,
+# regardless of device type.
+live_hard_timeout_seconds = 0
 
 [mqtt]
 enabled = true

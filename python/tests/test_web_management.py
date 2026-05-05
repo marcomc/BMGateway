@@ -946,7 +946,20 @@ def test_devices_add_post_redirects_before_first_poll(
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    response_handle = None
+    last_error: urllib.error.URLError | None = None
+    for _ in range(20):
+        try:
+            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            break
+        except urllib.error.URLError as error:
+            last_error = error
+            time.sleep(0.05)
+    if response_handle is None:
+        assert last_error is not None
+        raise last_error
+
+    with response_handle as response:
         body = response.read().decode("utf-8")
         assert response.status == 200
         assert "/devices?message=Device+added.+First+poll+started." in response.url
