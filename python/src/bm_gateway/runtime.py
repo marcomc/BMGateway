@@ -430,7 +430,7 @@ def build_snapshot(
         devices_online=sum(1 for device in readings if device.connected),
         poll_interval_seconds=config.gateway.poll_interval_seconds,
         devices=readings,
-        alerts=collect_gateway_alerts(),
+        alerts=collect_gateway_alerts(configured_adapter=adapter),
     )
 
 

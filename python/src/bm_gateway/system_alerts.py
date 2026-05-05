@@ -125,6 +125,7 @@ def _bluetoothctl_controller_state(*, run_command: CommandRunner) -> dict[str, s
 
 def _collect_bluetooth_alerts(
     *,
+    configured_adapter: str | None,
     bluetooth_sysfs_root: Path,
     rfkill_root: Path,
     run_command: CommandRunner,
@@ -139,9 +140,12 @@ def _collect_bluetooth_alerts(
             )
         ]
 
-    controller_label = ",".join(controllers)
+    selected_controllers = controllers
+    if configured_adapter and configured_adapter != "auto":
+        selected_controllers = [configured_adapter] if configured_adapter in controllers else []
+    controller_label = ",".join(selected_controllers or controllers)
     rfkill_states = _bluetooth_rfkill_state(rfkill_root)
-    for controller in controllers:
+    for controller in selected_controllers:
         state = rfkill_states.get(controller)
         if state is None:
             continue
@@ -241,6 +245,7 @@ def _collect_mdns_alerts(
 def collect_gateway_alerts(
     *,
     expected_hostname: str | None = None,
+    configured_adapter: str | None = None,
     bluetooth_sysfs_root: Path = _DEFAULT_BLUETOOTH_SYSFS_ROOT,
     rfkill_root: Path = _DEFAULT_RFKILL_ROOT,
     run_command: CommandRunner = _run_command,
@@ -254,6 +259,7 @@ def collect_gateway_alerts(
     hostname = (expected_hostname or socket.gethostname()).strip()
     expected_mdns_name = f"{hostname}.local" if hostname else ""
     alerts = _collect_bluetooth_alerts(
+        configured_adapter=configured_adapter,
         bluetooth_sysfs_root=bluetooth_sysfs_root,
         rfkill_root=rfkill_root,
         run_command=run_command,

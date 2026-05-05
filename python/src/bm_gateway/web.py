@@ -160,9 +160,15 @@ _RUN_ONCE_LOCK = threading.Lock()
 _RUN_ONCE_PROCESS: object | None = None
 
 
-def _snapshot_with_current_alerts(snapshot: dict[str, object]) -> dict[str, object]:
+def _snapshot_with_current_alerts(
+    snapshot: dict[str, object],
+    *,
+    configured_adapter: str,
+) -> dict[str, object]:
     payload = dict(snapshot)
-    payload["alerts"] = [alert.to_dict() for alert in collect_gateway_alerts()]
+    payload["alerts"] = [
+        alert.to_dict() for alert in collect_gateway_alerts(configured_adapter=configured_adapter)
+    ]
     return payload
 
 
@@ -572,7 +578,11 @@ def serve_management(
             config = load_config(config_path)
             snapshot_path = state_file_path(config, state_dir=state_dir)
             snapshot = load_snapshot(snapshot_path) if snapshot_path.exists() else {"devices": []}
-            snapshot = _snapshot_with_current_alerts(snapshot)
+            configured_adapter = str(snapshot.get("active_adapter", config.bluetooth.adapter))
+            snapshot = _snapshot_with_current_alerts(
+                snapshot,
+                configured_adapter=configured_adapter,
+            )
             database_path = database_file_path(config, state_dir=state_dir)
             return config, snapshot, database_path
 

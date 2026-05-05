@@ -216,7 +216,7 @@ def test_build_snapshot_includes_gateway_alerts(monkeypatch: pytest.MonkeyPatch)
     ]
     monkeypatch.setattr(
         "bm_gateway.runtime.collect_gateway_alerts",
-        lambda: [
+        lambda **_kwargs: [
             GatewayAlert(
                 code="bluetooth_soft_blocked",
                 severity="error",
@@ -900,7 +900,7 @@ def test_build_snapshot_powers_on_adapter_before_live_polling(
 
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
-    monkeypatch.setattr("bm_gateway.runtime.collect_gateway_alerts", lambda: [])
+    monkeypatch.setattr("bm_gateway.runtime.collect_gateway_alerts", lambda **_kwargs: [])
 
     snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
 
@@ -953,7 +953,7 @@ def test_build_snapshot_retries_after_device_not_found(
     monkeypatch.setattr("bm_gateway.runtime.shutil.which", lambda _name: "/usr/bin/bluetoothctl")
     monkeypatch.setattr("bm_gateway.runtime.subprocess.run", fake_run)
     monkeypatch.setattr("bm_gateway.runtime.sleep", lambda _seconds: None)
-    monkeypatch.setattr("bm_gateway.runtime.collect_gateway_alerts", lambda: [])
+    monkeypatch.setattr("bm_gateway.runtime.collect_gateway_alerts", lambda **_kwargs: [])
 
     snapshot = build_snapshot(config, devices, bm200_reader=fake_reader)
 

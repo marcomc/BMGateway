@@ -686,7 +686,9 @@ def _handle_run(
                 state_dir=state_dir,
             )
         except BluetoothRecoveryRequiredError as exc:
-            runtime_alerts = collect_gateway_alerts()
+            runtime_alerts = collect_gateway_alerts(
+                configured_adapter=_active_adapter(config),
+            )
             append_audit_event(
                 config=config,
                 state_dir=state_dir,
