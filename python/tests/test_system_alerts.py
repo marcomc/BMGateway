@@ -239,6 +239,72 @@ def test_collect_gateway_alerts_reports_missing_configured_adapter(tmp_path: Pat
     assert alerts[0].context == {"controller": "hci0"}
 
 
+def test_collect_gateway_alerts_queries_power_state_for_selected_adapter(tmp_path: Path) -> None:
+    bluetooth_root = tmp_path / "bluetooth"
+    bluetooth_root.mkdir()
+    (bluetooth_root / "hci0").mkdir()
+    (bluetooth_root / "hci1").mkdir()
+
+    rfkill_root = tmp_path / "rfkill"
+    rfkill0 = rfkill_root / "rfkill0"
+    rfkill0.mkdir(parents=True)
+    (rfkill0 / "type").write_text("bluetooth\n", encoding="utf-8")
+    (rfkill0 / "name").write_text("hci0\n", encoding="utf-8")
+    (rfkill0 / "soft").write_text("0\n", encoding="utf-8")
+    (rfkill0 / "hard").write_text("0\n", encoding="utf-8")
+    (rfkill0 / "state").write_text("1\n", encoding="utf-8")
+
+    rfkill1 = rfkill_root / "rfkill1"
+    rfkill1.mkdir(parents=True)
+    (rfkill1 / "type").write_text("bluetooth\n", encoding="utf-8")
+    (rfkill1 / "name").write_text("hci1\n", encoding="utf-8")
+    (rfkill1 / "soft").write_text("0\n", encoding="utf-8")
+    (rfkill1 / "hard").write_text("0\n", encoding="utf-8")
+    (rfkill1 / "state").write_text("1\n", encoding="utf-8")
+
+    seen_commands: list[list[str]] = []
+
+    def fake_run(
+        command: list[str],
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str] | None:
+        _ = timeout_seconds
+        seen_commands.append(command)
+        if command == ["systemctl", "is-active", "bluetooth.service"]:
+            return subprocess.CompletedProcess(command, 0, stdout="active\n", stderr="")
+        if command == ["systemctl", "is-active", "avahi-daemon.service"]:
+            return subprocess.CompletedProcess(command, 0, stdout="active\n", stderr="")
+        if command == ["bluetoothctl", "show"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="Controller AA:BB:CC:DD:EE:00 (public)\nPowered: no\n",
+                stderr="",
+            )
+        if command == ["bluetoothctl", "show", "hci1"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="Controller B8:27:EB:4E:EC:55 (public)\nPowered: yes\n",
+                stderr="",
+            )
+        if command[:2] == ["journalctl", "-u"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return None
+
+    alerts = collect_gateway_alerts(
+        expected_hostname="bmgateway",
+        configured_adapter="hci1",
+        bluetooth_sysfs_root=bluetooth_root,
+        rfkill_root=rfkill_root,
+        run_command=fake_run,
+    )
+
+    assert alerts == []
+    assert ["bluetoothctl", "show", "hci1"] in seen_commands
+    assert ["bluetoothctl", "show"] not in seen_commands
+
+
 def test_describe_gateway_alert_reports_missing_configured_adapter() -> None:
     alert = GatewayAlert(
         code="bluetooth_controller_missing",

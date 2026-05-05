@@ -102,8 +102,15 @@ def _bluetooth_rfkill_state(rfkill_root: Path) -> dict[str, dict[str, str]]:
     return states
 
 
-def _bluetoothctl_controller_state(*, run_command: CommandRunner) -> dict[str, str]:
-    result = run_command(["bluetoothctl", "show"], 5.0)
+def _bluetoothctl_controller_state(
+    *,
+    controller: str | None = None,
+    run_command: CommandRunner,
+) -> dict[str, str]:
+    command = ["bluetoothctl", "show"]
+    if controller:
+        command.append(controller)
+    result = run_command(command, 5.0)
     if result is None:
         return {}
     output = result.stdout
@@ -187,7 +194,11 @@ def _collect_bluetooth_alerts(
             )
         ]
 
-    controller_state = _bluetoothctl_controller_state(run_command=run_command)
+    selected_controller = selected_controllers[0] if len(selected_controllers) == 1 else None
+    controller_state = _bluetoothctl_controller_state(
+        controller=selected_controller,
+        run_command=run_command,
+    )
     powered = controller_state.get("powered")
     power_state = controller_state.get("power_state", "")
     if powered == "no" or power_state == "off-blocked":
