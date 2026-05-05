@@ -109,3 +109,51 @@ def test_collect_gateway_alerts_detects_mdns_hostname_mismatch(tmp_path: Path) -
         "expected_hostname": "bmgateway.local",
         "advertised_hostname": "bmgateway-2.local",
     }
+
+
+def test_collect_gateway_alerts_reports_bluetoothctl_controller_identifier(tmp_path: Path) -> None:
+    bluetooth_root = tmp_path / "bluetooth"
+    bluetooth_root.mkdir()
+    (bluetooth_root / "hci0").mkdir()
+
+    rfkill_root = tmp_path / "rfkill"
+    rfkill_entry = rfkill_root / "rfkill0"
+    rfkill_entry.mkdir(parents=True)
+    (rfkill_entry / "type").write_text("bluetooth\n", encoding="utf-8")
+    (rfkill_entry / "name").write_text("hci0\n", encoding="utf-8")
+    (rfkill_entry / "soft").write_text("0\n", encoding="utf-8")
+    (rfkill_entry / "hard").write_text("0\n", encoding="utf-8")
+    (rfkill_entry / "state").write_text("1\n", encoding="utf-8")
+
+    def fake_run(
+        command: list[str],
+        timeout_seconds: float,
+    ) -> subprocess.CompletedProcess[str] | None:
+        _ = timeout_seconds
+        if command == ["systemctl", "is-active", "bluetooth.service"]:
+            return subprocess.CompletedProcess(command, 0, stdout="active\n", stderr="")
+        if command == ["systemctl", "is-active", "avahi-daemon.service"]:
+            return subprocess.CompletedProcess(command, 0, stdout="active\n", stderr="")
+        if command[:2] == ["bluetoothctl", "show"]:
+            return subprocess.CompletedProcess(
+                command,
+                0,
+                stdout="Controller B8:27:EB:4E:EC:55 (public)\nPowered: no\n",
+                stderr="",
+            )
+        if command[:2] == ["journalctl", "-u"]:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return None
+
+    alerts = collect_gateway_alerts(
+        expected_hostname="bmgateway",
+        bluetooth_sysfs_root=bluetooth_root,
+        rfkill_root=rfkill_root,
+        run_command=fake_run,
+    )
+
+    assert [alert.code for alert in alerts] == ["bluetooth_powered_off"]
+    assert alerts[0].context == {
+        "controller": "B8:27:EB:4E:EC:55",
+        "power_state": "",
+    }

@@ -111,9 +111,9 @@ def _bluetoothctl_controller_state(*, run_command: CommandRunner) -> dict[str, s
     for line in output.splitlines():
         stripped = line.strip()
         if stripped.startswith("Controller "):
-            parts = stripped.split()
-            if len(parts) >= 3:
-                state["controller"] = parts[2]
+            controller_summary = stripped.removeprefix("Controller ").strip()
+            if controller_summary:
+                state["controller"] = controller_summary.split()[0]
         elif stripped.startswith("Powered: "):
             state["powered"] = stripped.removeprefix("Powered: ").strip().lower()
         elif stripped.startswith("PowerState: "):
