@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+
+- Documented Raspberry Pi model compatibility for normal gateway operation,
+  USB gadget picture-frame export, and ARM NEON support, including the
+  ARMv6/BCM2835 boards that cannot run the local Chromium-based frame image
+  exporter.
+
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 
 ### Changed
