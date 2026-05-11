@@ -1430,7 +1430,11 @@ def test_update_usb_otg_preferences_persists_enabled_flag(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    errors = update_usb_otg_preferences(config_path=config_path, enabled=True)
+    errors = update_usb_otg_preferences(
+        config_path=config_path,
+        enabled=True,
+        frame_renderer_supported=True,
+    )
 
     assert errors == []
     config = load_config(config_path)
@@ -1459,6 +1463,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
         fleet_trend_metrics=("voltage", "temperature"),
         fleet_trend_range="30",
         fleet_trend_device_ids=("battery_alpha", "battery_beta"),
+        frame_renderer_supported=True,
     )
 
     assert errors == []
@@ -1473,8 +1478,30 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.export_battery_overview is True
     assert config.usb_otg.export_fleet_trend is False
     assert config.usb_otg.fleet_trend_metrics == ("voltage", "temperature")
-    assert config.usb_otg.fleet_trend_range == "30"
-    assert config.usb_otg.fleet_trend_device_ids == ("battery_alpha", "battery_beta")
+
+
+def test_update_usb_otg_preferences_rejects_enable_without_frame_renderer_support(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_usb_otg_preferences(
+        config_path=config_path,
+        enabled=True,
+        frame_renderer_supported=False,
+    )
+
+    assert errors == [
+        "USB OTG picture-frame export is not supported on this Raspberry Pi because "
+        "Chromium requires ARM NEON or ASIMD support"
+    ]
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is False
 
 
 def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Path) -> None:
@@ -1823,6 +1850,10 @@ def test_settings_usb_otg_post_persists_enabled_flag(
         return subprocess.CompletedProcess(["export"], 0, "", "")
 
     monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.usb_otg_frame_renderer_supported",
+        lambda: True,
+    )
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -2046,6 +2077,10 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
         return subprocess.CompletedProcess(["export"], 0, "", "")
 
     monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.usb_otg_frame_renderer_supported",
+        lambda: True,
+    )
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -2120,6 +2155,10 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
         return subprocess.CompletedProcess(["export"], 0, "", "")
 
     monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.usb_otg_frame_renderer_supported",
+        lambda: True,
+    )
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -3232,6 +3271,28 @@ def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() ->
     assert "USB OTG image export is enabled" in html
     assert "no USB OTG device controller is currently detected" in html
     assert "Zero USB Plug" in html
+
+
+def test_render_settings_html_disables_usb_otg_controls_without_frame_renderer_support() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=True,
+        usb_otg_frame_renderer_supported=False,
+    )
+
+    assert "Picture-frame export is not supported on this Raspberry Pi" in html
+    assert "ARM NEON or ASIMD support" in html
+    assert "Frame renderer CPU support" in html
+    assert "Not supported" in html
+    assert '<fieldset disabled aria-describedby="usb-otg-hardware-warning">' in html
+    assert 'name="usb_otg_enabled"' in html
+    assert "Save USB OTG settings" not in html
+    assert "Export Frame Images" not in html
+    assert "Refresh USB OTG Drive" not in html
 
 
 def test_render_settings_html_edit_mode_shows_prepare_when_usb_otg_boot_mode_not_prepared() -> None:

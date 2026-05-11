@@ -17,6 +17,10 @@ from .config import AppConfig
 from .device_registry import Device
 from .localization import resolve_locale_preference
 from .models import GatewaySnapshot
+from .usb_otg import (
+    USB_OTG_FRAME_RENDERER_UNSUPPORTED_REASON,
+    usb_otg_frame_renderer_supported,
+)
 from .web_pages import _fleet_chart_points
 from .web_pages_frame import (
     frame_battery_overview_page_count,
@@ -489,9 +493,14 @@ def update_usb_otg_drive(
     page_renderer: FramePageRenderer = _render_frame_page_with_chromium,
     progress: ProgressReporter | None = None,
     force: bool = False,
+    frame_renderer_supported: bool | None = None,
 ) -> USBOTGExportResult:
     if not config.usb_otg.enabled and not force:
         return USBOTGExportResult(exported=False, reason="disabled")
+    if frame_renderer_supported is None:
+        frame_renderer_supported = usb_otg_frame_renderer_supported()
+    if not frame_renderer_supported:
+        return USBOTGExportResult(exported=False, reason=USB_OTG_FRAME_RENDERER_UNSUPPORTED_REASON)
     if not config.usb_otg.export_battery_overview and not config.usb_otg.export_fleet_trend:
         return USBOTGExportResult(exported=False, reason="no images enabled")
     total_steps = expected_usb_otg_export_steps(config, devices)

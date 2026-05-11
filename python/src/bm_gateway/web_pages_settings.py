@@ -18,6 +18,9 @@ from .usb_otg import (
     usb_otg_device_controller_detected as detect_usb_otg_device_controller,
 )
 from .usb_otg import (
+    usb_otg_frame_renderer_supported as detect_usb_otg_frame_renderer_supported,
+)
+from .usb_otg import (
     usb_otg_support_installed as detect_usb_otg_support_installed,
 )
 from .web_ui import (
@@ -162,6 +165,7 @@ def render_settings_html(
     usb_otg_device_controller_detected: bool | None = None,
     usb_otg_boot_mode_prepared: bool | None = None,
     usb_otg_support_installed: bool | None = None,
+    usb_otg_frame_renderer_supported: bool | None = None,
     theme_preference: str = "system",
     language: str | None = None,
 ) -> str:
@@ -198,6 +202,11 @@ def render_settings_html(
         detect_usb_otg_support_installed()
         if usb_otg_support_installed is None
         else usb_otg_support_installed
+    )
+    supported_usb_otg_frame_renderer = (
+        detect_usb_otg_frame_renderer_supported()
+        if usb_otg_frame_renderer_supported is None
+        else usb_otg_frame_renderer_supported
     )
     device_tabs = (
         "".join(
@@ -245,6 +254,23 @@ def render_settings_html(
         if mqtt_connected
         else '<span class="status-badge error">Disconnected</span>'
     )
+    usb_otg_hardware_warning = (
+        banner_strip(
+            html.escape(
+                "Picture-frame export is not supported on this Raspberry Pi because this "
+                "ARM CPU does not report ARM NEON or ASIMD support. Current Chromium frame "
+                "rendering requires NEON; use a Raspberry Pi Zero 2 W or another ARMv7 or "
+                "ARMv8 board for local picture-frame generation."
+            ),
+            kind="error",
+        ).replace(
+            'class="banner-strip error"',
+            'id="usb-otg-hardware-warning" class="banner-strip error"',
+        )
+        if not supported_usb_otg_frame_renderer
+        else ""
+    )
+    usb_otg_actions_available = installed_usb_otg_support and supported_usb_otg_frame_renderer
     detected_adapter_summary = ", ".join(detected_adapter_names) or "No adapters detected"
     api_chips = "".join(
         api_chip(endpoint)
@@ -299,7 +325,7 @@ def render_settings_html(
             '<form method="post" action="/actions/export-usb-otg-images">'
             f"{button('Export Frame Images', kind='secondary')}"
             "</form>"
-            if installed_usb_otg_support
+            if usb_otg_actions_available
             else ""
         )
         + '<form method="post" action="/actions/restart-runtime">'
@@ -440,16 +466,27 @@ def render_settings_html(
         if installed_usb_otg_support
         else '<span class="status-badge error">Not installed</span>'
     )
+    usb_otg_frame_renderer_badge = (
+        '<span class="status-badge ok">Supported</span>'
+        if supported_usb_otg_frame_renderer
+        else '<span class="status-badge error">Not supported</span>'
+    )
     usb_otg_section_body = (
         usb_otg_install_warning
         + usb_otg_warning
+        + usb_otg_hardware_warning
         + _usb_otg_refresh_interval_warning(config)
         + settings_row(
             "USB OTG image export",
-            "Enabled" if config.usb_otg.enabled else "Disabled",
+            (
+                "Enabled"
+                if config.usb_otg.enabled and supported_usb_otg_frame_renderer
+                else ("Unsupported" if config.usb_otg.enabled else "Disabled")
+            ),
         )
         + _settings_markup_row("USB OTG support", usb_otg_support_badge)
         + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
+        + _settings_markup_row("Frame renderer CPU support", usb_otg_frame_renderer_badge)
         + settings_row(
             "Output size",
             f"{config.usb_otg.image_width_px} x {config.usb_otg.image_height_px} px",
@@ -1088,7 +1125,13 @@ def render_settings_html(
             '<form method="post" action="/settings/usb-otg">'
             + usb_otg_install_warning
             + usb_otg_warning
+            + usb_otg_hardware_warning
             + _usb_otg_refresh_interval_warning(config)
+            + (
+                '<fieldset disabled aria-describedby="usb-otg-hardware-warning">'
+                if not supported_usb_otg_frame_renderer
+                else ""
+            )
             + settings_control_row(
                 "USB OTG image export",
                 (
@@ -1106,6 +1149,7 @@ def render_settings_html(
             )
             + _settings_markup_row("USB OTG support", usb_otg_support_badge)
             + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
+            + _settings_markup_row("Frame renderer CPU support", usb_otg_frame_renderer_badge)
             + settings_control_row(
                 "Image width",
                 (
@@ -1203,27 +1247,34 @@ def render_settings_html(
             + settings_row("Backing disk image", config.usb_otg.image_path)
             + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
             + settings_row("Gadget name", config.usb_otg.gadget_name)
-            + '<div style="margin-top:1rem">'
-            + f"{button('Save USB OTG settings', kind='primary')}"
-            + "</div>"
+            + ("</fieldset>" if not supported_usb_otg_frame_renderer else "")
+            + (
+                '<div style="margin-top:1rem">'
+                + f"{button('Save USB OTG settings', kind='primary')}"
+                + "</div>"
+                if supported_usb_otg_frame_renderer
+                else ""
+            )
             + "</form>"
             + '<div class="inline-actions" style="margin-top:1rem">'
             + (
-                '<form method="post" action="/actions/restore-usb-host-mode" '
-                "onsubmit=\"return confirm('Restore Raspberry Pi USB host boot mode? "
-                "A reboot will be required.')\">"
-                f"{button('Restore USB Host Mode', kind='secondary')}"
-                "</form>"
-                if prepared_usb_otg_boot_mode
-                else (
-                    '<form method="post" action="/actions/prepare-usb-otg-mode" '
-                    "onsubmit=\"return confirm('Prepare Raspberry Pi USB OTG peripheral "
-                    "boot mode? A reboot will be required.')\">"
-                    f"{button('Prepare USB OTG Mode', kind='secondary')}"
+                (
+                    '<form method="post" action="/actions/restore-usb-host-mode" '
+                    "onsubmit=\"return confirm('Restore Raspberry Pi USB host boot mode? "
+                    "A reboot will be required.')\">"
+                    f"{button('Restore USB Host Mode', kind='secondary')}"
                     "</form>"
-                    if installed_usb_otg_support
-                    else ""
+                    if prepared_usb_otg_boot_mode
+                    else (
+                        '<form method="post" action="/actions/prepare-usb-otg-mode" '
+                        "onsubmit=\"return confirm('Prepare Raspberry Pi USB OTG peripheral "
+                        "boot mode? A reboot will be required.')\">"
+                        f"{button('Prepare USB OTG Mode', kind='secondary')}"
+                        "</form>"
+                    )
                 )
+                if usb_otg_actions_available
+                else ""
             )
             + "</div>"
         )

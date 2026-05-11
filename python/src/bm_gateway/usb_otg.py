@@ -6,6 +6,14 @@ import shutil
 from pathlib import Path
 
 USB_OTG_DRIVE_HELPER_PATH = Path("/usr/local/bin/bm-gateway-usb-otg-frame-test")
+USB_OTG_FRAME_RENDERER_UNSUPPORTED_REASON = (
+    "USB OTG frame image export is not supported on this hardware because "
+    "Chromium requires ARM NEON or ASIMD support."
+)
+USB_OTG_FRAME_RENDERER_ENABLE_ERROR = (
+    "USB OTG picture-frame export is not supported on this Raspberry Pi because "
+    "Chromium requires ARM NEON or ASIMD support"
+)
 
 
 def usb_otg_support_installed(
@@ -22,6 +30,23 @@ def usb_otg_device_controller_detected(sys_class_udc: Path = Path("/sys/class/ud
     if not sys_class_udc.is_dir():
         return False
     return any(path.name for path in sys_class_udc.iterdir())
+
+
+def usb_otg_frame_renderer_supported(cpuinfo_path: Path = Path("/proc/cpuinfo")) -> bool:
+    try:
+        text = cpuinfo_path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return True
+    lower_text = text.lower()
+    is_arm = any(marker in lower_text for marker in ("arm", "aarch64", "bcm2835", "raspberry pi"))
+    if not is_arm:
+        return True
+    feature_tokens: set[str] = set()
+    for line in lower_text.splitlines():
+        key, separator, value = line.partition(":")
+        if separator and key.strip() in {"features", "flags"}:
+            feature_tokens.update(value.strip().split())
+    return bool({"neon", "asimd"} & feature_tokens)
 
 
 def usb_otg_boot_mode_prepared(config_path: Path = Path("/boot/firmware/config.txt")) -> bool:

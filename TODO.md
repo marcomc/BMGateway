@@ -78,6 +78,24 @@
 
 ## Propositions
 
+- [ ] Add a non-Chromium USB OTG frame export renderer for ARMv6 boards.
+  Raspberry Pi `Zero` and `Zero W` can expose USB OTG mass-storage devices but
+  cannot run current ARM Chromium builds because their ARMv6/BCM2835 CPUs lack
+  NEON. A lightweight renderer would let those boards generate picture-frame
+  images locally instead of requiring Raspberry Pi `Zero 2 W` or newer
+  hardware.
+  Actions:
+  - define the visual parity target between browser screenshots and the
+    fallback renderer
+  - choose an ARMv6-compatible rendering stack, such as Pillow plus direct
+    chart drawing or another maintained non-browser renderer
+  - add renderer selection that prefers Chromium when NEON or ASIMD is present
+    and falls back only on unsupported hardware
+  - add regression images or layout assertions for battery overview and Fleet
+    Trend exports
+  - document any visual differences and performance limits for Raspberry Pi
+    `Zero` and `Zero W`
+
 - [ ] Implement a dedicated `bm-gateway` service account and privilege-hardening plan.
   Rework the appliance runtime so it no longer depends on a human user account
   and so host-admin operations are exposed through a narrower privileged

@@ -1969,6 +1969,7 @@ def render_settings_html(
     usb_otg_device_controller_detected: bool | None = None,
     usb_otg_boot_mode_prepared: bool | None = None,
     usb_otg_support_installed: bool | None = None,
+    usb_otg_frame_renderer_supported: bool | None = None,
     theme_preference: str = "system",
     language: str | None = None,
 ) -> str:
@@ -1988,6 +1989,7 @@ def render_settings_html(
         usb_otg_device_controller_detected=usb_otg_device_controller_detected,
         usb_otg_boot_mode_prepared=usb_otg_boot_mode_prepared,
         usb_otg_support_installed=usb_otg_support_installed,
+        usb_otg_frame_renderer_supported=usb_otg_frame_renderer_supported,
         theme_preference=theme_preference,
         language=language,
     )

@@ -36,6 +36,7 @@ from .state_store import (
     load_snapshot,
     rename_history_device_id,
 )
+from .usb_otg import USB_OTG_FRAME_RENDERER_ENABLE_ERROR, usb_otg_frame_renderer_supported
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
 
@@ -524,8 +525,20 @@ def update_usb_otg_preferences(
     fleet_trend_metrics: tuple[str, ...] | None = None,
     fleet_trend_range: str | None = None,
     fleet_trend_device_ids: tuple[str, ...] | None = None,
+    frame_renderer_supported: bool | None = None,
 ) -> list[str]:
     config = load_config(config_path)
+    if frame_renderer_supported is None:
+        frame_renderer_supported = usb_otg_frame_renderer_supported()
+    if enabled and not frame_renderer_supported:
+        errors = [USB_OTG_FRAME_RENDERER_ENABLE_ERROR]
+        _audit_manual_web_action(
+            config,
+            action="usb_otg_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
+        return errors
     updated = replace(
         config,
         usb_otg=replace(

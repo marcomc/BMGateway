@@ -12,6 +12,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   USB gadget picture-frame export, and ARM NEON support, including the
   ARMv6/BCM2835 boards that cannot run the local Chromium-based frame image
   exporter.
+- Added Raspberry Pi NEON or ASIMD detection for USB OTG picture-frame export
+  so unsupported boards show a red Settings warning, disable the frame export
+  controls, and skip Chromium-based frame rendering before repeated export
+  failures occur.
 
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 

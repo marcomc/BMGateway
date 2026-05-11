@@ -287,6 +287,8 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
     message_keys = (
         "Validation failed",
         "Validation failed: USB OTG settings values must be numeric",
+        "USB OTG picture-frame export is not supported on this Raspberry Pi because "
+        "Chromium requires ARM NEON or ASIMD support",
         "Device added. First poll started.",
         "Run completed",
         "Run failed",
@@ -311,6 +313,8 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
         "Settings saved; USB OTG frame image export started",
         "USB OTG frame images exported",
         "USB OTG frame image export failed",
+        "USB OTG frame image export is not supported on this hardware because "
+        "Chromium requires ARM NEON or ASIMD support.",
         "Preparing USB OTG frame image export",
         "Rendered frame image",
         "Writing images to USB OTG drive",
@@ -673,6 +677,7 @@ def _representative_english_pages() -> list[str]:
             usb_otg_device_controller_detected=True,
             usb_otg_boot_mode_prepared=True,
             usb_otg_support_installed=True,
+            usb_otg_frame_renderer_supported=True,
         ),
         render_settings_html(
             config=config,
@@ -685,6 +690,7 @@ def _representative_english_pages() -> list[str]:
             usb_otg_device_controller_detected=True,
             usb_otg_boot_mode_prepared=True,
             usb_otg_support_installed=True,
+            usb_otg_frame_renderer_supported=True,
         ),
         render_history_html(
             device_id="battery_alpha",
