@@ -1166,7 +1166,7 @@ def test_rebuild_daily_rollups_repairs_error_polluted_rollups(tmp_path: Path) ->
     ]
 
 
-def test_history_readers_do_not_migrate_legacy_raw_rows(tmp_path: Path) -> None:
+def test_history_readers_migrate_legacy_rows_before_canonical_reads(tmp_path: Path) -> None:
     database_path = tmp_path / "gateway.db"
     connection = sqlite3.connect(database_path)
     try:
@@ -1238,6 +1238,57 @@ def test_history_readers_do_not_migrate_legacy_raw_rows(tmp_path: Path) -> None:
         )
         connection.execute(
             """
+            CREATE TABLE device_archive_readings (
+                device_id TEXT NOT NULL,
+                device_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                mac TEXT NOT NULL,
+                ts TEXT NOT NULL,
+                voltage REAL NOT NULL,
+                min_crank_voltage REAL,
+                event_type INTEGER,
+                imported_at TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                driver TEXT NOT NULL,
+                profile TEXT NOT NULL,
+                PRIMARY KEY (device_id, ts, profile)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO device_archive_readings (
+                device_id,
+                device_type,
+                name,
+                mac,
+                ts,
+                voltage,
+                min_crank_voltage,
+                event_type,
+                imported_at,
+                adapter,
+                driver,
+                profile
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "bm200_house",
+                "bm200",
+                "BM200 House",
+                "AA:BB:CC:DD:EE:01",
+                "2023-12-31T23:50:00+00:00",
+                12.61,
+                None,
+                None,
+                "2024-01-01T00:10:00+00:00",
+                "hci0",
+                "bm200",
+                "history",
+            ),
+        )
+        connection.execute(
+            """
             CREATE TABLE device_daily_rollups (
                 device_id TEXT NOT NULL,
                 day TEXT NOT NULL,
@@ -1291,7 +1342,9 @@ def test_history_readers_do_not_migrate_legacy_raw_rows(tmp_path: Path) -> None:
     finally:
         connection.close()
 
-    rows = fetch_daily_history(database_path, device_id="bm200_house", limit=5)
+    recent_rows = fetch_recent_history(database_path, device_id="bm200_house", limit=5)
+    archive_rows = fetch_archive_history(database_path, device_id="bm200_house", limit=5)
+    daily_rows = fetch_daily_history(database_path, device_id="bm200_house", limit=5)
 
     connection = sqlite3.connect(database_path)
     try:
@@ -1303,9 +1356,11 @@ def test_history_readers_do_not_migrate_legacy_raw_rows(tmp_path: Path) -> None:
     finally:
         connection.close()
 
-    assert rows[0]["samples"] == 1
-    assert sample_count == (0,)
-    assert migration_flag is None
+    assert [row["sample_source"] for row in recent_rows] == ["live", "device_archive"]
+    assert archive_rows[0]["profile"] == "history"
+    assert [row["day"] for row in daily_rows] == ["2024-01-01", "2023-12-31"]
+    assert sample_count == (2,)
+    assert migration_flag == ("1",)
 
     rebuild_daily_rollups(database_path)
 
@@ -1319,7 +1374,7 @@ def test_history_readers_do_not_migrate_legacy_raw_rows(tmp_path: Path) -> None:
     finally:
         connection.close()
 
-    assert sample_count == (1,)
+    assert sample_count == (2,)
     assert migration_flag == ("1",)
 
 

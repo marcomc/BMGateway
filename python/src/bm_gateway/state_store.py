@@ -32,7 +32,7 @@ def load_snapshot(path: Path) -> dict[str, object]:
 
 
 def fetch_latest_successful_seen(path: Path) -> dict[str, str]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
@@ -772,7 +772,7 @@ def prune_history(path: Path, *, raw_retention_days: int, daily_retention_days: 
 
 
 def fetch_counts(path: Path) -> dict[str, int]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         gateway_count = connection.execute("SELECT COUNT(*) FROM gateway_snapshots").fetchone()
         sample_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
@@ -799,7 +799,7 @@ def fetch_counts(path: Path) -> dict[str, int]:
 
 
 def fetch_storage_summary(path: Path) -> dict[str, object]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         raw_rows = connection.execute(
             """
@@ -905,7 +905,7 @@ def fetch_storage_summary(path: Path) -> dict[str, object]:
 
 
 def history_device_id_exists(path: Path, device_id: str) -> bool:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         for table_name in (
             "device_samples",
@@ -980,7 +980,7 @@ def fetch_recent_history(
     device_id: str,
     limit: int = 200,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         buffered_limit = max(limit * 4, limit + 64)
         sample_rows = cast(
@@ -1021,7 +1021,7 @@ def fetch_recent_history_since(
     device_id: str,
     since_ts: str,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         sample_rows = cast(
             list[tuple[Any, ...]],
@@ -1408,7 +1408,7 @@ def fetch_archive_history(
     device_id: str,
     limit: int = 2000,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
@@ -1460,7 +1460,7 @@ def fetch_archive_history(
 
 
 def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list[dict[str, object]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
@@ -1501,7 +1501,7 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
 
 
 def latest_history_timestamp(path: Path, *, device_id: str) -> str | None:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         row = connection.execute(
             """
@@ -1521,7 +1521,7 @@ def latest_history_timestamp(path: Path, *, device_id: str) -> str | None:
 
 
 def latest_live_history_timestamp(path: Path, *, device_id: str) -> str | None:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         row = connection.execute(
             """
@@ -1547,7 +1547,7 @@ def latest_archive_history_timestamp(
     device_id: str,
     profile: str | None = None,
 ) -> str | None:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         if profile is None:
             row = connection.execute(
@@ -1583,7 +1583,7 @@ def fetch_monthly_history(
     device_id: str,
     limit: int = 24,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
@@ -1640,7 +1640,7 @@ def fetch_yearly_history(
     device_id: str,
     limit: int = 10,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
@@ -1694,7 +1694,7 @@ def fetch_yearly_history(
 def _load_daily_rows_for_analytics(
     path: Path, *, device_id: str
 ) -> list[tuple[date, float, float | None, int, int]]:
-    connection = _connect_database(path, migrate_legacy=False)
+    connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
