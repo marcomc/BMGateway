@@ -144,6 +144,52 @@ def test_gateway_alert_templates_are_translated_in_all_supported_locales() -> No
         assert missing == [], f"{locale.code} missing gateway alert translations: {missing}"
 
 
+def test_self_healing_labels_are_translated_in_all_supported_locales() -> None:
+    message_keys = (
+        "After 15 minutes",
+        "After 5 minutes",
+        "After {minutes} minutes",
+        "Attempts NetworkManager reconnect before considering a reboot.",
+        "Connectivity check host",
+        "Enable Wi-Fi connectivity watchdog",
+        "Enable Wi-Fi connectivity watchdog to edit these recovery options.",
+        "Enable scheduled Raspberry Pi reboot",
+        "Every 24 hours",
+        "Every {hours} hours",
+        (
+            "Monitor a known host and trigger configured recovery actions only after a "
+            "continuous outage."
+        ),
+        "Periodic reboot",
+        "Reboot Raspberry Pi if Wi-Fi stays unavailable",
+        "Reboot delay",
+        "Reboot interval",
+        "Reconnect delay",
+        "Save self-healing settings",
+        "Self-Healing",
+        "Set the periodic reboot interval in hours, from 1 to 48.",
+        "Set the wireless interface to reconnect, usually wlan0.",
+        "Try reconnecting Wi-Fi after an outage",
+        "Use a router, Home Assistant host, or stable IP that proves Wi-Fi works.",
+        "Use only when reconnect attempts are not enough for this location.",
+        "Use this as a coarse recovery cadence for unattended appliances.",
+        "Wait this many outage minutes before rebooting the Raspberry Pi.",
+        "Wait this many outage minutes before trying Wi-Fi reconnect.",
+        "Wi-Fi interface",
+        "Wi-Fi reboot",
+        "Wi-Fi reconnect",
+        "Wi-Fi watchdog",
+        "self-healing values must be numeric",
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        translation = translation_for(locale.code)
+        missing = [key for key in message_keys if translation.gettext(key) == key]
+        assert missing == [], f"{locale.code} missing self-healing translations: {missing}"
+
+
 def test_localize_html_sets_lang_dir_and_translates_text_nodes() -> None:
     localized = localize_html(
         '<!doctype html><html lang="en"><body><h1>Settings</h1>'
