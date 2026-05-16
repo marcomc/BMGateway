@@ -1,6 +1,18 @@
 # Raspberry Pi Setup
 
+## Quick Index
+
+- [Purpose](#purpose)
+- [Current Contents](#current-contents)
+- [Installed Artifacts](#installed-artifacts)
+- [Default Hostname Behavior](#default-hostname-behavior)
+- [Development Deploys](#development-deploys)
+
+## Purpose
+
 This directory owns Raspberry Pi provisioning and operational guidance.
+
+## Current Contents
 
 Current contents:
 
@@ -23,12 +35,14 @@ Current contents:
 - `../scripts/dev-deploy.sh` for syncing the current checkout to an existing
   development host
 
-macOS helpers now include:
+macOS helpers:
 
 - `rpi-setup/scripts/macos-imager-cli.sh` for wrapping Raspberry Pi Imager CLI
 - `rpi-setup/examples/imager/bm-gateway-first-run.sh` as a first-boot example
 
-The install helper now places:
+## Installed Artifacts
+
+The install helper places these files:
 
 - `~/.config/bm-gateway/config.toml`
 - `~/.config/bm-gateway/devices.toml`
@@ -39,7 +53,7 @@ The install helper now places:
 - `/usr/local/bin/bm-gateway`
 - `/usr/local/bin/bm-gateway-web`
 
-The one-line bootstrap now installs the full appliance by default:
+The one-line bootstrap installs the full appliance by default:
 
 - documented Raspberry Pi OS system packages for runtime, web, Bluetooth, and
   USB OTG helper paths
@@ -50,7 +64,21 @@ The one-line bootstrap now installs the full appliance by default:
 - optional Cockpit HTTPS host administration on port `9090`
 - live-ready config with an empty device registry
 
-Default hostname behavior:
+```mermaid
+flowchart LR
+    Bootstrap["bootstrap-install.sh"]
+    Install["make install"]
+    Services["systemd services"]
+    Runtime["bm-gateway.service"]
+    Web["bm-gateway-web.service"]
+
+    Bootstrap --> Install
+    Bootstrap --> Services
+    Services --> Runtime
+    Services --> Web
+```
+
+## Default Hostname Behavior
 
 - the documented default Raspberry Pi hostname is `bmgateway`
 - the default Bonjour/mDNS address is `bmgateway.local`
@@ -58,6 +86,8 @@ Default hostname behavior:
   in [manual-setup.md](manual-setup.md)
 - after an SD-card move, rerun the bootstrap or use the troubleshooting
   runbooks above to clear stale Bluetooth `rfkill` state and refresh Avahi
+
+## Development Deploys
 
 For repeat development deploys to an already bootstrapped host, use:
 

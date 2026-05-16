@@ -1,10 +1,34 @@
 # Raspberry Pi Gateway Manual Setup
 
+## Contents
+
+- [Scope](#scope)
+- [Base System](#base-system)
+- [System Packages](#system-packages)
+- [One-Liner Bootstrap](#one-liner-bootstrap)
+- [Install uv](#install-uv)
+- [Clone the Repository](#clone-the-repository)
+- [Install the Executables](#install-the-executables)
+- [Structured Audit Logs](#structured-audit-logs)
+- [Optional: Install Glances for Home Assistant](#optional-install-glances-for-home-assistant)
+- [Optional: Install Cockpit](#optional-install-cockpit)
+- [Optional: Make admin Passwordless for sudo](#optional-make-admin-passwordless-for-sudo)
+- [Radio Bring-Up on the Current Host](#radio-bring-up-on-the-current-host)
+- [Troubleshooting Runbooks](#troubleshooting-runbooks)
+- [Configure the Gateway](#configure-the-gateway)
+- [Optional: Enable Self-Healing](#optional-enable-self-healing)
+- [Optional: Prepare USB OTG Image Export](#optional-prepare-usb-otg-image-export)
+- [Validate the Setup](#validate-the-setup)
+- [Install the Service Assets](#install-the-service-assets)
+- [Live Validation on the Real Gateway Host](#live-validation-on-the-real-gateway-host)
+- [Service and Module Policy for This Project](#service-and-module-policy-for-this-project)
+- [Repository Areas](#repository-areas)
+
 ## Scope
 
 This guide bootstraps the currently used Raspberry Pi gateway hardware to the
 point where the `BMGateway` CLI can validate config, inspect the device
-registry, and render the Home Assistant contract.
+registry, and inspect Home Assistant MQTT discovery details.
 
 The actual audited host in this project is:
 
@@ -137,6 +161,20 @@ full appliance installation in one step:
 
 ```bash
 ./scripts/bootstrap-install.sh
+```
+
+```mermaid
+flowchart LR
+    Packages["system packages"]
+    Runtime["standalone runtime"]
+    Config["config and device registry"]
+    Services["runtime and web services"]
+    URLs["management URLs"]
+
+    Packages --> Runtime
+    Runtime --> Config
+    Config --> Services
+    Services --> URLs
 ```
 
 That is the recommended command once the repository is already present on the
@@ -753,8 +791,8 @@ Blacklist only:
 
 ## Repository Areas
 
-- `python/` contains the packaged CLI and future runtime code
-- `home-assistant/` contains the MQTT/Home Assistant contract docs and assets
+- `python/` contains the packaged CLI, runtime, shared core, and web executable
+- `home-assistant/` contains the MQTT/Home Assistant docs and assets
 - `rpi-setup/ansible/` contains the first provisioning playbook
 - `rpi-setup/systemd/` contains the service unit
 - `rpi-setup/scripts/` contains install and update helpers

@@ -1,10 +1,11 @@
 # BMGateway
 
-## Table of Contents
+## Quick Index
 
 - [Overview](#overview)
 - [Choose Your Path](#choose-your-path)
 - [What Is Included](#what-is-included)
+- [System Flow](#system-flow)
 - [Repository Structure](#repository-structure)
 - [Documentation Map](#documentation-map)
 - [Development](#development)
@@ -30,6 +31,9 @@ The project is intentionally battery-first:
 - Home Assistant integration through MQTT discovery
 - a mobile-friendly local web UI for Home, History, Devices, and Settings
 
+For the runtime, command-line, web UI, and Home Assistant boundaries, use
+[Application surfaces](docs/application-surfaces.md#application-surfaces).
+
 ## Choose Your Path
 
 ### I Want To Install It On A Raspberry Pi
@@ -48,7 +52,7 @@ Start here:
 
 - [home-assistant/setup.md](home-assistant/setup.md)
 
-Reference contract:
+Developer reference:
 
 - [home-assistant/contract.md](home-assistant/contract.md)
 
@@ -56,6 +60,7 @@ Reference contract:
 
 Start here:
 
+- [docs/application-surfaces.md](docs/application-surfaces.md)
 - [python/README.md](python/README.md)
 - [docs/README.md](docs/README.md)
 
@@ -79,6 +84,25 @@ Start here:
 - Optional Raspberry Pi self-healing for scheduled reboots and Wi-Fi recovery
 
 For the first release summary, use [CHANGELOG.md](CHANGELOG.md).
+
+## System Flow
+
+```mermaid
+flowchart LR
+    Devices["BM200/BM6 and BM300 Pro/BM7 devices"]
+    Runtime["bm-gateway"]
+    State["runtime state"]
+    Web["bm-gateway-web"]
+    HomeAssistant["Home Assistant"]
+
+    Devices --> Runtime
+    Runtime --> State
+    Runtime --> HomeAssistant
+    State --> Web
+```
+
+The full surface map lives in
+[docs/application-surfaces.md](docs/application-surfaces.md#application-surfaces).
 
 ## Repository Structure
 
@@ -108,8 +132,10 @@ Use one canonical source per topic:
 | --- | --- |
 | First-release summary | [CHANGELOG.md](CHANGELOG.md) |
 | Active backlog | [TODO.md](TODO.md) |
+| Runtime, CLI, web UI, and integration surfaces | [docs/application-surfaces.md](docs/application-surfaces.md) |
 | Python package and contributor entry point | [python/README.md](python/README.md) |
 | Developer notes and architecture index | [docs/README.md](docs/README.md) |
+| Documentation maintenance rules | [docs/documentation-maintenance.md](docs/documentation-maintenance.md) |
 | Home Assistant setup | [home-assistant/setup.md](home-assistant/setup.md) |
 | Home Assistant MQTT contract | [home-assistant/contract.md](home-assistant/contract.md) |
 | Raspberry Pi installation | [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md) |

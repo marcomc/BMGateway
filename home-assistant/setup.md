@@ -1,5 +1,17 @@
 # Home Assistant Setup
 
+## Contents
+
+- [Overview](#overview)
+- [Prerequisites](#prerequisites)
+- [How Auto-Discovery Works](#how-auto-discovery-works)
+- [1. Configure MQTT in Home Assistant](#1-configure-mqtt-in-home-assistant)
+- [2. Configure BMGateway MQTT and Home Assistant settings](#2-configure-bmgateway-mqtt-and-home-assistant-settings)
+- [3. Publish discovery payloads](#3-publish-discovery-payloads)
+- [4. Confirm entities in Home Assistant](#4-confirm-entities-in-home-assistant)
+- [5. Optional package and dashboard](#5-optional-package-and-dashboard)
+- [Troubleshooting](#troubleshooting)
+
 ## Overview
 
 `BMGateway` integrates with Home Assistant through MQTT discovery.
@@ -47,8 +59,14 @@ Home Assistant auto-discovers `BMGateway` only when all of these are true:
 
 The practical message flow is:
 
-```text
-BMGateway -> MQTT broker -> Home Assistant
+```mermaid
+flowchart LR
+    Gateway["BMGateway"]
+    Broker["MQTT broker"]
+    HomeAssistant["Home Assistant"]
+
+    Gateway --> Broker
+    Broker --> HomeAssistant
 ```
 
 In configuration terms:

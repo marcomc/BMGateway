@@ -1,6 +1,6 @@
 # Python Component
 
-## Table of Contents
+## Contents
 
 - [Purpose](#purpose)
 - [Layout](#layout)
@@ -16,7 +16,9 @@ This directory contains the packaged Python implementation for `BMGateway`.
 
 This is the contributor entry point for the application code. For the project
 overview, use the root [README.md](../README.md). For architectural context,
-use [../docs/README.md](../docs/README.md).
+use [../docs/README.md](../docs/README.md). For the runtime, CLI, web UI, and
+Home Assistant surface map, use
+[../docs/application-surfaces.md](../docs/application-surfaces.md).
 
 ## Layout
 
@@ -40,10 +42,13 @@ Main runtime CLI for:
 
 - config validation and inspection
 - device listing
-- Home Assistant contract and discovery export
+- Home Assistant MQTT contract and discovery export
 - runtime execution
 - history inspection and pruning
 - bounded BM6/BM7 protocol probes for live debugging
+
+The command reference is maintained in
+[Application surfaces](../docs/application-surfaces.md#command-line).
 
 ### `bm-gateway-web`
 
@@ -52,6 +57,9 @@ Optional web executable for:
 - full management UI
 - standalone snapshot serving
 - snapshot HTML rendering
+
+The web UI route and API reference is maintained in
+[Application surfaces](../docs/application-surfaces.md#web-ui).
 
 ## Key Runtime Capabilities
 
@@ -111,6 +119,8 @@ Use these as the canonical references instead of repeating the same guidance:
 
 - Architecture:
   [../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)
+- Application surfaces:
+  [../docs/application-surfaces.md](../docs/application-surfaces.md)
 - Verified BM6/BM200 notes:
   [../docs/2026-04-19-bm6-bm200-integration-notes.md](../docs/2026-04-19-bm6-bm200-integration-notes.md)
 - BM300 Pro/BM7 notes:

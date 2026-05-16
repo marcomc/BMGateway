@@ -1,6 +1,6 @@
 # Home Assistant Integration
 
-## Table of Contents
+## Quick Index
 
 - [Purpose](#purpose)
 - [Start Here](#start-here)
@@ -44,6 +44,9 @@ The Python CLI mirrors the Home Assistant surface through:
 
 - `bm-gateway ha contract`
 - `bm-gateway ha discovery --output-dir home-assistant/discovery`
+
+The MQTT data flow and CLI surface are summarized in
+[Application surfaces](../docs/application-surfaces.md#home-assistant-and-mqtt).
 
 For the main project entry point, go back to the root
 [README.md](../README.md).

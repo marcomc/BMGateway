@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- Added a documentation maintenance guide, a canonical application-surface map
+  for runtime, CLI, web UI, Home Assistant, and Raspberry Pi services, and
+  horizontal Mermaid flow diagrams in the main documentation entry points.
 - Split unreachable device status into latest poll attempt and last successful
   sample time, so Home and History cards no longer make failed scans look like
   fresh successful readings.

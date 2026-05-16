@@ -13,7 +13,7 @@ contract, and a manual Raspberry Pi setup guide.
   top-level components.
 - Preserve the shared Python CLI template standards at the repository root.
 - Replace the placeholder Python CLI behavior with commands that validate the
-  gateway configuration and expose the Home Assistant contract.
+  gateway configuration and expose the Home Assistant MQTT contract.
 - Define a durable Home Assistant MQTT contract that future service code can
   implement without guessing.
 - Provide a manual Raspberry Pi setup guide that can later be translated into

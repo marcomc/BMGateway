@@ -1,5 +1,15 @@
 # Home Assistant MQTT Contract
 
+## Contents
+
+- [Purpose](#purpose)
+- [Discovery Strategy](#discovery-strategy)
+- [Topic Layout](#topic-layout)
+- [Gateway Entities](#gateway-entities)
+- [Device Entities](#device-entities)
+- [State Payload Shape](#state-payload-shape)
+- [Notes](#notes)
+
 ## Purpose
 
 This document defines the MQTT-facing contract that `BMGateway` exposes to

@@ -1,6 +1,6 @@
 # Service Account And Privilege Hardening Proposal
 
-## Table of Contents
+## Contents
 
 - [Summary](#summary)
 - [Current State](#current-state)
