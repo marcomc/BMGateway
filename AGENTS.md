@@ -89,6 +89,7 @@ Expected checks:
 - `uv run ruff check python/src python/tests`
 - `uv run ruff format --check python/src python/tests`
 - `uv run mypy python/src python/tests`
+- `node_modules/.bin/hint --formatters stylish python/src/bm_gateway/assets/web.css`
 - `markdownlint --config .markdownlint.json README.md CHANGELOG.md TODO.md AGENTS.md docs/*.md python/*.md home-assistant/*.md rpi-setup/*.md rpi-setup/ansible/*.md web/*.md`
 - `shellcheck --enable=all scripts/*.sh`
 

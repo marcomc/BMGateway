@@ -1,6 +1,7 @@
 SHELL := /bin/bash
 
 UV ?= uv
+NPM ?= npm
 PYTHON_VERSION ?= 3.11
 VENV ?= .venv
 PROJECT_NAME ?= BMGateway
@@ -22,7 +23,9 @@ DEVICES_PATH ?= $(CONFIG_DIR)/devices.toml
 PYTHON_SRC ?= python/src
 PYTHON_TESTS ?= python/tests
 PYTHON_CONFIG ?= python/config
+WEBHINT ?= node_modules/.bin/hint
 MARKDOWN_FILES := README.md CHANGELOG.md TODO.md AGENTS.md $(shell find docs python home-assistant rpi-setup web -type f -name '*.md' ! -path 'docs/qa/*' | sort)
+CSS_FILES := $(shell find python/src/bm_gateway/assets -type f -name '*.css' | sort)
 INSTALL_SPEC := .
 ifneq ($(strip $(INSTALL_EXTRAS)),)
 INSTALL_SPEC := .[$(INSTALL_EXTRAS)]
@@ -30,7 +33,7 @@ endif
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-deps install-deps sync install install-dev install-link install-config uninstall lint test check release-preflight run ha-export web-render dev-deploy clean
+.PHONY: help check-deps install-deps sync css-lint install install-dev install-link install-config uninstall lint test check release-preflight run ha-export web-render dev-deploy clean
 
 help: ## Show available targets
 	@awk 'BEGIN { FS = ":.*##" } /^[a-zA-Z_-]+:.*##/ { printf "  %-16s %s\n", $$1, $$2 }' $(MAKEFILE_LIST)
@@ -63,6 +66,13 @@ $(VENV)/bin/python: pyproject.toml
 	@"$(UV)" sync --extra dev
 
 sync: $(VENV)/bin/python ## Sync the project environment
+
+$(WEBHINT): package.json package-lock.json
+	@command -v "$(NPM)" >/dev/null 2>&1 || { echo "npm not found"; exit 1; }
+	@"$(NPM)" ci --audit=false --fund=false --loglevel=error
+
+css-lint: $(WEBHINT) ## Run CSS browser compatibility checks
+	@"$(WEBHINT)" --formatters stylish $(CSS_FILES)
 
 install: install-deps ## Install a standalone user-facing runtime
 	@mkdir -p "$(APP_HOME)"
@@ -110,7 +120,7 @@ uninstall: ## Remove the standalone runtime and user-facing symlink
 	@echo "Removed $(INSTALL_PATH)"
 	@echo "Removed $(APP_HOME)"
 
-lint: sync ## Run Python, Markdown, and shell quality checks
+lint: sync css-lint ## Run Python, CSS, Markdown, and shell quality checks
 	@"$(UV)" run ruff check "$(PYTHON_SRC)" "$(PYTHON_TESTS)"
 	@"$(UV)" run ruff format --check "$(PYTHON_SRC)" "$(PYTHON_TESTS)"
 	@"$(UV)" run mypy "$(PYTHON_SRC)" "$(PYTHON_TESTS)"
@@ -141,4 +151,4 @@ dev-deploy: ## Sync the current checkout to a remote host and refresh services
 	./scripts/dev-deploy.sh "$${args[@]}"
 
 clean: ## Remove local development artifacts
-	rm -rf "$(VENV)" .pytest_cache .mypy_cache .ruff_cache build dist "$(PYTHON_SRC)"/*.egg-info *.egg-info
+	rm -rf "$(VENV)" node_modules .pytest_cache .mypy_cache .ruff_cache build dist "$(PYTHON_SRC)"/*.egg-info *.egg-info
