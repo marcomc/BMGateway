@@ -4029,6 +4029,29 @@ def test_home_and_history_pagers_skip_unchanged_layout_rebuilds() -> None:
     assert "syncButtons();" in history_guard
 
 
+def test_render_history_html_shows_unreachable_card_last_seen_without_seconds() -> None:
+    html = render_history_html(
+        device_id="punto",
+        configured_devices=[
+            {
+                "id": "punto",
+                "name": "Punto",
+                "state": "offline",
+                "connected": False,
+                "error_code": "device_not_found",
+                "last_seen": "2026-05-10T20:22:09+02:00",
+            }
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "Last seen 2026-05-10 20:22" in html
+    assert "2026-05-10 20:22:09" not in html
+    assert "history-device-current unreachable" in html
+
+
 def test_home_and_history_pagers_scroll_inside_their_tracks() -> None:
     home_html = render_home_html(
         snapshot={
@@ -4610,6 +4633,7 @@ def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
                     "connected": False,
                     "error_code": "device_not_found",
                     "error_detail": "No BLE advertisement seen during the scan window.",
+                    "last_seen": "2026-04-22T16:30:00+02:00",
                 }
             ]
         },
@@ -4628,6 +4652,8 @@ def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
     )
 
     assert "Unable to connect" in html
+    assert "Last seen 2026-04-22 16:30" in html
+    assert "2026-04-22 16:30:00" not in html
     assert "battery-card-status battery-card-status-inline error" in html
     assert 'aria-label="Unable to connect"' in html
     assert "No recent sample" not in html

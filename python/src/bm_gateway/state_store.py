@@ -23,6 +23,29 @@ def load_snapshot(path: Path) -> dict[str, object]:
     return cast(dict[str, object], json.loads(path.read_text(encoding="utf-8")))
 
 
+def fetch_latest_successful_seen(path: Path) -> dict[str, str]:
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT device_id, last_seen
+            FROM device_readings
+            WHERE connected = 1
+              AND error_code IS NULL
+              AND last_seen <> ''
+            ORDER BY snapshot_generated_at DESC
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+    latest: dict[str, str] = {}
+    for device_id, last_seen in rows:
+        active_device_id = str(device_id)
+        if active_device_id not in latest:
+            latest[active_device_id] = str(last_seen)
+    return latest
+
+
 def _connect_database(path: Path) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     connection = sqlite3.connect(path)

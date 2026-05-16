@@ -118,6 +118,12 @@ def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapsh
                     last_seen=str(item.get("last_seen", snapshot.get("generated_at", ""))),
                     adapter=str(item.get("adapter", "")),
                     driver=str(item.get("driver", "")),
+                    last_attempt=str(
+                        item.get(
+                            "last_attempt",
+                            item.get("last_seen", snapshot.get("generated_at", "")),
+                        )
+                    ),
                 )
             )
     return GatewaySnapshot(

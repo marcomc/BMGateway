@@ -4,10 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.2.3] - Unreleased - Unreachable Device Status Split and Raspberry Pi Compatibility and NEON Detection Improvements
 
 ### Changed
 
+- Split unreachable device status into latest poll attempt and last successful
+  sample time, so Home and History cards no longer make failed scans look like
+  fresh successful readings.
 - Documented Raspberry Pi model compatibility for normal gateway operation,
   USB gadget picture-frame export, and ARM NEON support, including the
   ARMv6/BCM2835 boards that cannot run the local Chromium-based frame image

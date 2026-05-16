@@ -699,9 +699,15 @@ details summary::-webkit-details-marker { display: none; }
   font-weight: 600;
   color: var(--text-secondary);
 }
+.history-device-current.unreachable {
+  color: var(--accent-red);
+}
 .history-device-card.selected .history-device-current {
   color: var(--card-accent);
   font-weight: 800;
+}
+.history-device-card.selected .history-device-current.unreachable {
+  color: var(--accent-red);
 }
 .history-device-card.selected .meta-name {
   color: var(--text-primary);
@@ -1327,6 +1333,12 @@ details summary::-webkit-details-marker { display: none; }
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.home-overview-last-seen {
+  margin-top: 0.2rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--accent-red);
 }
 .battery-card-status {
   display: inline-flex;

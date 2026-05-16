@@ -66,6 +66,7 @@ from .web_pages import (
     _chart_points,
     _discover_bluetooth_adapters,
     _fleet_chart_points,
+    _merge_snapshot_devices,
     _optional_float_from_form,
     _optional_int_from_form,
     _parse_custom_curve_from_form,
@@ -792,7 +793,7 @@ def serve_management(
                     device_id = available_device_ids[0]
                 html = render_history_html(
                     device_id=device_id,
-                    configured_devices=serialized_devices,
+                    configured_devices=_merge_snapshot_devices(snapshot, serialized_devices),
                     raw_history=(
                         fetch_recent_history(
                             database_path,

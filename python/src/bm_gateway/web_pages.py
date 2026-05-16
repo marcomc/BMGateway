@@ -184,7 +184,10 @@ def _history_device_selector_html(
         is_selected = device_id == selected_device_id
         color_key = _device_color_key(device, fallback_index=index)
         identity_summary = _history_device_identity_summary(device)
-        current_text = "Current History View" if is_selected else "Open Device History"
+        current_text = _unreachable_last_seen_message(device)
+        if current_text is None:
+            current_text = "Current History View" if is_selected else "Open Device History"
+        current_class = " unreachable" if _device_is_unreachable(device) else ""
         aria_current = ' aria-current="page"' if is_selected else ""
         device_name = html.escape(str(device.get("name") or device_id))
         identity_summary_html = html.escape(identity_summary)
@@ -203,7 +206,7 @@ def _history_device_selector_html(
             "<div class='device-card-copy history-device-copy'>"
             f"<div class='meta meta-name'>{device_name}</div>"
             f"<div class='meta meta-context history-device-summary'>{identity_summary_html}</div>"
-            f"<div class='meta history-device-current'>{current_text_html}</div>"
+            f"<div class='meta history-device-current{current_class}'>{current_text_html}</div>"
             "</div>"
             "</div>"
             "</a>"
@@ -899,6 +902,22 @@ def _battery_card_status_markup(device: dict[str, object], *, inline: bool = Fal
         classes += " battery-card-status-inline"
     classes += f" {html.escape(status_class)}"
     return f'<div class="{classes}">{icon}<span>{html.escape(label)}</span></div>'
+
+
+def _device_is_unreachable(device: dict[str, object]) -> bool:
+    state = str(device.get("state", "unknown")).lower().strip()
+    error_code = str(device.get("error_code") or "").strip()
+    connected = bool(device.get("connected", True))
+    return error_code == "device_not_found" or (state == "offline" and not connected)
+
+
+def _unreachable_last_seen_message(device: dict[str, object]) -> str | None:
+    if not _device_is_unreachable(device):
+        return None
+    last_seen = _display_timestamp(device.get("last_seen", ""))
+    if last_seen == "unknown":
+        return "Last seen unavailable"
+    return f"Last seen {last_seen}"
 
 
 def _device_lookup_by_id(
@@ -1765,7 +1784,12 @@ def _coerce_float(value: object, default: float = 0.0) -> float:
 
 def _display_timestamp(value: object) -> str:
     raw = str(value) if value is not None else "unknown"
-    return raw.replace("T", " ").rsplit("+", maxsplit=1)[0]
+    if not raw.strip():
+        return "unknown"
+    timestamp = raw.replace("T", " ").rsplit("+", maxsplit=1)[0]
+    if len(timestamp) >= 16 and timestamp[4:5] == "-" and timestamp[13:14] == ":":
+        return timestamp[:16]
+    return timestamp
 
 
 def render_management_html(

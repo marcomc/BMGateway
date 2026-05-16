@@ -95,6 +95,7 @@ _DYNAMIC_TRANSLATION_PREFIXES: Final = (
     ("Battery Overview · Latest: ", "Battery Overview · Latest"),
     ("Fleet Trend · ", "Fleet Trend"),
     ("Latest sample ", "Latest sample"),
+    ("Last seen ", "Last seen"),
     ("Use gateway poll interval (", "Use gateway poll interval"),
     ("Temperature ", "Temperature"),
     ("Voltage ", "Voltage"),

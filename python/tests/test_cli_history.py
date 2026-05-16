@@ -1565,8 +1565,9 @@ def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
         _devices: object,
         *,
         state_dir: Path | None = None,
+        last_successful_seen: dict[str, str] | None = None,
     ) -> GatewaySnapshot:
-        _ = state_dir
+        _ = (state_dir, last_successful_seen)
         return second_snapshot
 
     def fake_sync(
@@ -1693,8 +1694,9 @@ def test_run_cycle_writes_machine_audit_log(tmp_path: Path) -> None:
         _devices: object,
         *,
         state_dir: Path | None = None,
+        last_successful_seen: dict[str, str] | None = None,
     ) -> GatewaySnapshot:
-        _ = state_dir
+        _ = (state_dir, last_successful_seen)
         return snapshot
 
     cli_module_any = cast(Any, cli)

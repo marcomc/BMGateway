@@ -25,6 +25,7 @@ class DeviceReading:
     last_seen: str
     adapter: str
     driver: str
+    last_attempt: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -42,6 +43,7 @@ class DeviceReading:
             "error_code": self.error_code,
             "error_detail": self.error_detail,
             "last_seen": self.last_seen,
+            "last_attempt": self.last_attempt or self.last_seen,
             "adapter": self.adapter,
             "driver": self.driver,
         }

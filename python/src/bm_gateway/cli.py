@@ -54,6 +54,7 @@ from .state_store import (
     fetch_counts,
     fetch_daily_history,
     fetch_degradation_report,
+    fetch_latest_successful_seen,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_storage_summary,
@@ -536,9 +537,15 @@ def _run_cycle(
     publish_discovery: bool,
     state_dir: Path | None,
 ) -> GatewaySnapshot:
-    snapshot = build_snapshot(config, devices, state_dir=state_dir)
-    audit_now = datetime.fromisoformat(snapshot.generated_at)
     database_path = database_file_path(config, state_dir=state_dir)
+    last_successful_seen = fetch_latest_successful_seen(database_path)
+    snapshot = build_snapshot(
+        config,
+        devices,
+        state_dir=state_dir,
+        last_successful_seen=last_successful_seen,
+    )
+    audit_now = datetime.fromisoformat(snapshot.generated_at)
     archive_backfill_details = (
         plan_archive_backfill_details(
             config=config,

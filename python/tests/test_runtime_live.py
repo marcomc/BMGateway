@@ -299,12 +299,20 @@ def test_build_snapshot_classifies_device_not_found_as_offline() -> None:
     ) -> BM200Measurement:
         raise BleakDeviceNotFoundError(device.mac)
 
-    snapshot = build_snapshot(config, devices, bm200_reader=failing_reader)
+    snapshot = build_snapshot(
+        config,
+        devices,
+        bm200_reader=failing_reader,
+        last_successful_seen={"bm200_house": "2026-05-10T20:22:09+02:00"},
+    )
 
     assert snapshot.devices_online == 0
     assert snapshot.devices[0].state == "offline"
     assert snapshot.devices[0].error_code == "device_not_found"
     assert snapshot.devices[0].error_detail == "No BLE advertisement seen during the scan window."
+    assert snapshot.devices[0].last_seen == "2026-05-10T20:22:09+02:00"
+    assert snapshot.devices[0].last_attempt
+    assert snapshot.devices[0].last_attempt != snapshot.devices[0].last_seen
 
 
 def test_build_snapshot_requests_bluetooth_recovery_for_fatal_dbus_errors(
