@@ -199,6 +199,15 @@
     }}
     return 420;
   }}
+  function pointPriority(point) {{
+    if (point?.kind === "raw") {{
+      return 3;
+    }}
+    if (point?.kind === "daily") {{
+      return 2;
+    }}
+    return 1;
+  }}
   function compactPointsForDisplay(points, metric, rangeValue) {{
     const usable = points.filter((point) => typeof point[metric] === "number");
     const limit = displayPointLimit(rangeValue);
@@ -212,43 +221,64 @@
     if (timed.length <= limit) {{
       return sorted;
     }}
-    const start = timed[0].time;
-    const end = timed[timed.length - 1].time;
-    const span = Math.max(end - start, 1);
-    const bucketCount = Math.max(1, Math.floor(limit / 2));
-    const buckets = Array.from({{ length: bucketCount }}, () => []);
-    for (const entry of timed) {{
-      const bucketIndex = Math.min(
-        bucketCount - 1,
-        Math.max(0, Math.floor(((entry.time - start) / span) * bucketCount)),
-      );
-      buckets[bucketIndex].push(entry);
-    }}
     const selected = new Map();
     const addEntry = (entry) => {{
       if (!entry) {{
         return;
       }}
-      selected.set(`${{entry.point.series || "Series"}}|${{entry.point.ts}}|${{entry.point.kind || "raw"}}`, entry.point);
+      const key = `${{entry.point.series || "Series"}}|${{entry.point.ts}}`;
+      const existing = selected.get(key);
+      if (!existing || pointPriority(entry.point) >= pointPriority(existing)) {{
+        selected.set(key, entry.point);
+      }}
     }};
-    for (const bucket of buckets) {{
-      if (bucket.length === 0) {{
-        continue;
+    const seriesGroups = new Map();
+    for (const entry of timed) {{
+      const seriesKey = entry.point.series || "Series";
+      const entries = seriesGroups.get(seriesKey) || [];
+      entries.push(entry);
+      seriesGroups.set(seriesKey, entries);
+    }}
+    const perSeriesLimit = Math.max(16, Math.floor(limit / Math.max(seriesGroups.size, 1)));
+    const compactEntries = (entries) => {{
+      if (entries.length <= perSeriesLimit) {{
+        entries.forEach(addEntry);
+        return;
       }}
-      let minEntry = bucket[0];
-      let maxEntry = bucket[0];
-      for (const entry of bucket) {{
-        if (entry.point[metric] < minEntry.point[metric]) {{
-          minEntry = entry;
-        }}
-        if (entry.point[metric] > maxEntry.point[metric]) {{
-          maxEntry = entry;
-        }}
+      const start = entries[0].time;
+      const end = entries[entries.length - 1].time;
+      const span = Math.max(end - start, 1);
+      const bucketCount = Math.max(1, Math.floor(perSeriesLimit / 2));
+      const buckets = Array.from({{ length: bucketCount }}, () => []);
+      for (const entry of entries) {{
+        const bucketIndex = Math.min(
+          bucketCount - 1,
+          Math.max(0, Math.floor(((entry.time - start) / span) * bucketCount)),
+        );
+        buckets[bucketIndex].push(entry);
       }}
-      addEntry(bucket[0]);
-      addEntry(minEntry);
-      addEntry(maxEntry);
-      addEntry(bucket[bucket.length - 1]);
+      for (const bucket of buckets) {{
+        if (bucket.length === 0) {{
+          continue;
+        }}
+        let minEntry = bucket[0];
+        let maxEntry = bucket[0];
+        for (const entry of bucket) {{
+          if (entry.point[metric] < minEntry.point[metric]) {{
+            minEntry = entry;
+          }}
+          if (entry.point[metric] > maxEntry.point[metric]) {{
+            maxEntry = entry;
+          }}
+        }}
+        addEntry(bucket[0]);
+        addEntry(minEntry);
+        addEntry(maxEntry);
+        addEntry(bucket[bucket.length - 1]);
+      }}
+    }};
+    for (const entries of seriesGroups.values()) {{
+      compactEntries(entries);
     }}
     return Array.from(selected.values()).sort((left, right) => (parseTime(left.ts) ?? 0) - (parseTime(right.ts) ?? 0));
   }}
@@ -329,7 +359,6 @@
       for (const point of points) {{
         const previous = current[current.length - 1];
         const shouldBreak = previous && (
-          point.kind !== previous.kind ||
           (point.time - previous.time) > gapThreshold
         );
         if (shouldBreak) {{
@@ -394,7 +423,10 @@
       let bestDistance = Infinity;
       for (const point of series.points) {{
         const distance = Math.abs(point.x - targetX);
-        if (distance < bestDistance) {{
+        if (
+          distance < bestDistance
+          || (distance === bestDistance && pointPriority(point) > pointPriority(bestPoint))
+        ) {{
           bestDistance = distance;
           bestPoint = point;
         }}

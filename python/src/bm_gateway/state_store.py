@@ -434,6 +434,10 @@ def prune_history(path: Path, *, raw_retention_days: int, daily_retention_days: 
             "DELETE FROM gateway_snapshots WHERE generated_at < ?",
             (raw_cutoff,),
         )
+        connection.execute(
+            "DELETE FROM device_archive_readings WHERE ts < ?",
+            (raw_cutoff,),
+        )
         if daily_retention_days > 0:
             daily_cutoff = _cutoff_iso(daily_retention_days)[:10]
             connection.execute(

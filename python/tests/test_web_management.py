@@ -49,6 +49,7 @@ from bm_gateway.web import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_self_healing_preferences,
     update_usb_otg_preferences,
     update_web_preferences,
 )
@@ -220,6 +221,33 @@ def test_chart_script_compacts_dense_ranges_before_svg_rendering() -> None:
         "const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);"
         in script
     )
+
+
+def test_chart_script_compacts_dense_ranges_per_series() -> None:
+    script = chart_script("history-chart")
+
+    assert "const seriesGroups = new Map();" in script
+    assert (
+        "const perSeriesLimit = Math.max(16, Math.floor(limit / Math.max(seriesGroups.size, 1)));"
+        in script
+    )
+    assert "for (const entries of seriesGroups.values()) {" in script
+
+
+def test_chart_script_prefers_raw_samples_over_daily_rollups_at_same_timestamp() -> None:
+    script = chart_script("history-chart")
+
+    assert "function pointPriority(point)" in script
+    assert 'const key = `${entry.point.series || "Series"}|${entry.point.ts}`;' in script
+    assert "pointPriority(entry.point) >= pointPriority(existing)" in script
+    assert "distance === bestDistance && pointPriority(point) > pointPriority(bestPoint)" in script
+
+
+def test_chart_script_does_not_split_contiguous_lines_by_sample_source() -> None:
+    script = chart_script("history-chart")
+
+    assert "point.kind !== previous.kind" not in script
+    assert "(point.time - previous.time) > gapThreshold" in script
 
 
 def test_chart_script_renders_multi_series_tooltip_rows() -> None:
@@ -616,6 +644,36 @@ def test_update_bluetooth_preferences_persists_adapter_and_timeouts(tmp_path: Pa
     assert config.bluetooth.adapter == "hci1"
     assert config.bluetooth.scan_timeout_seconds == 20
     assert config.bluetooth.connect_timeout_seconds == 60
+
+
+def test_update_self_healing_preferences_persists_recovery_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_self_healing_preferences(
+        config_path=config_path,
+        periodic_reboot_enabled=True,
+        periodic_reboot_hours=12,
+        wifi_watchdog_enabled=True,
+        wifi_interface="wlan1",
+        connectivity_check_host="192.168.1.1",
+        wifi_reconnect_enabled=True,
+        wifi_reconnect_after_minutes=6,
+        wifi_reboot_enabled=True,
+        wifi_reboot_after_minutes=18,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.self_healing.periodic_reboot_enabled is True
+    assert config.self_healing.periodic_reboot_hours == 12
+    assert config.self_healing.wifi_watchdog_enabled is True
+    assert config.self_healing.wifi_interface == "wlan1"
+    assert config.self_healing.connectivity_check_host == "192.168.1.1"
+    assert config.self_healing.wifi_reconnect_after_minutes == 6
+    assert config.self_healing.wifi_reboot_enabled is True
+    assert config.self_healing.wifi_reboot_after_minutes == 18
 
 
 def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Path) -> None:
@@ -2624,6 +2682,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Display Settings" in html
     assert "Archive History Import" in html
     assert "Archive history import" in html
+    assert "Self-Healing" in html
+    assert "Periodic reboot" in html
+    assert "Wi-Fi watchdog" in html
     assert "Periodic sync interval" in html
     assert "BM200 pages per sync" in html
     assert "Sync History Now" not in html
@@ -2634,6 +2695,7 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
     assert "Save archive sync settings" not in html
+    assert "Save self-healing settings" not in html
     assert "Run One Collection Cycle" in html
     assert "Republish Home Assistant Discovery" in html
     assert 'action="/actions/republish-discovery"' in html
@@ -2667,9 +2729,47 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert html.index('section-title">Display Settings') < html.index(
         'section-title">Archive History Import'
     )
+    assert html.index('section-title">Archive History Import') < html.index(
+        'section-title">Self-Healing'
+    )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
     )
+
+
+def test_render_settings_html_disables_wifi_recovery_when_watchdog_is_disabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert 'id="wifi-watchdog-enabled-input"' in html
+    assert 'id="wifi-watchdog-dependent-fields"' in html
+    assert "disabled>" in html
+    assert 'name="wifi_interface"' in html
+    assert 'name="connectivity_check_host"' in html
+    assert "Enable Wi-Fi connectivity watchdog to edit these recovery options." in html
+    assert "watchdogToggle.addEventListener" in html
+    assert "dependentFields.disabled = !watchdogToggle.checked" in html
+
+
+def test_render_settings_html_enables_wifi_recovery_when_watchdog_is_enabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_watchdog_enabled=True),
+    )
+
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert 'id="wifi-watchdog-dependent-fields"' in html
+    assert 'id="wifi-watchdog-dependent-fields" class="settings-dependent-fieldset"' in html
+    disabled_fieldset = (
+        'id="wifi-watchdog-dependent-fields" class="settings-dependent-fieldset" '
+        'aria-describedby="wifi-watchdog-disabled-help" disabled>'
+    )
+    assert disabled_fieldset not in html
+    assert 'id="wifi-watchdog-disabled-help" class="inline-field-help" hidden>' in html
+    assert 'name="wifi_interface"' in html
+    assert 'name="connectivity_check_host"' in html
 
 
 def test_render_settings_html_shows_connected_mqtt_status_in_green() -> None:

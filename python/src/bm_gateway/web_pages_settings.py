@@ -56,6 +56,29 @@ def _settings_markup_row(label: str, value_html: str) -> str:
     )
 
 
+def _self_healing_settings_script() -> str:
+    return """
+<script>
+(() => {
+  const watchdogToggle = document.getElementById("wifi-watchdog-enabled-input");
+  const dependentFields = document.getElementById("wifi-watchdog-dependent-fields");
+  const disabledHelp = document.getElementById("wifi-watchdog-disabled-help");
+  if (!watchdogToggle || !dependentFields) {
+    return;
+  }
+  const syncWatchdogFields = () => {
+    dependentFields.disabled = !watchdogToggle.checked;
+    if (disabledHelp) {
+      disabledHelp.hidden = watchdogToggle.checked;
+    }
+  };
+  watchdogToggle.addEventListener("change", syncWatchdogFields);
+  syncWatchdogFields();
+})();
+</script>
+"""
+
+
 def _usb_otg_fleet_device_checkbox(
     *,
     device: dict[str, object],
@@ -430,6 +453,38 @@ def render_settings_html(
         + settings_row(
             "BM300 pages per sync",
             str(config.archive_sync.bm300_max_pages_per_sync),
+        )
+    )
+    self_healing_section_body = (
+        settings_row(
+            "Periodic reboot",
+            (
+                f"Every {config.self_healing.periodic_reboot_hours} hours"
+                if config.self_healing.periodic_reboot_enabled
+                else "Disabled"
+            ),
+        )
+        + settings_row(
+            "Wi-Fi watchdog",
+            "Enabled" if config.self_healing.wifi_watchdog_enabled else "Disabled",
+        )
+        + settings_row("Wi-Fi interface", config.self_healing.wifi_interface)
+        + settings_row("Connectivity check host", config.self_healing.connectivity_check_host)
+        + settings_row(
+            "Wi-Fi reconnect",
+            (
+                f"After {config.self_healing.wifi_reconnect_after_minutes} minutes"
+                if config.self_healing.wifi_reconnect_enabled
+                else "Disabled"
+            ),
+        )
+        + settings_row(
+            "Wi-Fi reboot",
+            (
+                f"After {config.self_healing.wifi_reboot_after_minutes} minutes"
+                if config.self_healing.wifi_reboot_enabled
+                else "Disabled"
+            ),
         )
     )
     usb_otg_warning = (
@@ -1029,6 +1084,119 @@ def render_settings_html(
             + "</div>"
             + "</form>"
         )
+        self_healing_section_body = (
+            '<form method="post" action="/settings/self-healing">'
+            + settings_control_row(
+                "Periodic reboot",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="periodic_reboot_enabled"'
+                    f"{shared._checked_attr(config.self_healing.periodic_reboot_enabled)}>"
+                    "<span>Enable scheduled Raspberry Pi reboot</span></label>"
+                ),
+                help_text="Use this as a coarse recovery cadence for unattended appliances.",
+            )
+            + settings_control_row(
+                "Reboot interval",
+                (
+                    '<input id="periodic-reboot-hours-input" type="text" '
+                    'name="periodic_reboot_hours" '
+                    f'value="{config.self_healing.periodic_reboot_hours}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Set the periodic reboot interval in hours, from 1 to 48.",
+            )
+            + settings_control_row(
+                "Wi-Fi watchdog",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input id="wifi-watchdog-enabled-input" type="checkbox" '
+                    'name="wifi_watchdog_enabled"'
+                    f"{shared._checked_attr(config.self_healing.wifi_watchdog_enabled)}>"
+                    "<span>Enable Wi-Fi connectivity watchdog</span></label>"
+                ),
+                help_text=(
+                    "Monitor a known host and trigger configured recovery actions only after "
+                    "a continuous outage."
+                ),
+            )
+            + (
+                '<fieldset id="wifi-watchdog-dependent-fields" '
+                'class="settings-dependent-fieldset" '
+                'aria-describedby="wifi-watchdog-disabled-help"'
+                f"{' disabled' if not config.self_healing.wifi_watchdog_enabled else ''}>"
+                '<div id="wifi-watchdog-disabled-help" class="inline-field-help"'
+                f"{'' if not config.self_healing.wifi_watchdog_enabled else ' hidden'}>"
+                "Enable Wi-Fi connectivity watchdog to edit these recovery options."
+                "</div>"
+            )
+            + settings_control_row(
+                "Wi-Fi interface",
+                (
+                    '<input id="wifi-interface-input" type="text" name="wifi_interface" '
+                    f'value="{html.escape(config.self_healing.wifi_interface)}" '
+                    'autocomplete="off">'
+                ),
+                help_text="Set the wireless interface to reconnect, usually wlan0.",
+            )
+            + settings_control_row(
+                "Connectivity check host",
+                (
+                    '<input id="connectivity-check-host-input" type="text" '
+                    'name="connectivity_check_host" '
+                    f'value="{html.escape(config.self_healing.connectivity_check_host)}" '
+                    'autocomplete="off">'
+                ),
+                help_text=(
+                    "Use a router, Home Assistant host, or stable IP that proves Wi-Fi works."
+                ),
+            )
+            + settings_control_row(
+                "Wi-Fi reconnect",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="wifi_reconnect_enabled"'
+                    f"{shared._checked_attr(config.self_healing.wifi_reconnect_enabled)}>"
+                    "<span>Try reconnecting Wi-Fi after an outage</span></label>"
+                ),
+                help_text="Attempts NetworkManager reconnect before considering a reboot.",
+            )
+            + settings_control_row(
+                "Reconnect delay",
+                (
+                    '<input id="wifi-reconnect-minutes-input" type="text" '
+                    'name="wifi_reconnect_after_minutes" '
+                    f'value="{config.self_healing.wifi_reconnect_after_minutes}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Wait this many outage minutes before trying Wi-Fi reconnect.",
+            )
+            + settings_control_row(
+                "Wi-Fi reboot",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="wifi_reboot_enabled"'
+                    f"{shared._checked_attr(config.self_healing.wifi_reboot_enabled)}>"
+                    "<span>Reboot Raspberry Pi if Wi-Fi stays unavailable</span></label>"
+                ),
+                help_text="Use only when reconnect attempts are not enough for this location.",
+            )
+            + settings_control_row(
+                "Reboot delay",
+                (
+                    '<input id="wifi-reboot-minutes-input" type="text" '
+                    'name="wifi_reboot_after_minutes" '
+                    f'value="{config.self_healing.wifi_reboot_after_minutes}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Wait this many outage minutes before rebooting the Raspberry Pi.",
+            )
+            + "</fieldset>"
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save self-healing settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
         archive_sync_section_body = (
             '<form method="post" action="/settings/archive-sync">'
             + settings_control_row(
@@ -1397,6 +1565,10 @@ def render_settings_html(
             body=archive_sync_section_body,
         )
         + section_card(
+            title="Self-Healing",
+            body=self_healing_section_body,
+        )
+        + section_card(
             title="USB OTG Image Export",
             body=usb_otg_section_body,
         )
@@ -1450,6 +1622,7 @@ def render_settings_html(
         version_label=version_label,
         theme_preference=theme_preference,
         language=resolved_language,
+        script=_self_healing_settings_script() if edit_mode else "",
     )
 
 

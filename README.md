@@ -76,6 +76,7 @@ Start here:
 - Modular web localization with a Settings language selector
 - Per-device colors, badges, and battery metadata
 - Battery, fleet, history, and device charts
+- Optional Raspberry Pi self-healing for scheduled reboots and Wi-Fi recovery
 
 For the first release summary, use [CHANGELOG.md](CHANGELOG.md).
 
@@ -130,7 +131,7 @@ The default quality gate is `make check`.
 
 The current documented release is:
 
-- `0.2.2`
+- `0.3.0`
 
 Use [CHANGELOG.md](CHANGELOG.md) for release content and [TODO.md](TODO.md) for
 work that is not shipped yet.

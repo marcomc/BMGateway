@@ -665,6 +665,61 @@ def update_archive_sync_preferences(
     return []
 
 
+def update_self_healing_preferences(
+    *,
+    config_path: Path,
+    periodic_reboot_enabled: bool,
+    periodic_reboot_hours: int,
+    wifi_watchdog_enabled: bool,
+    wifi_interface: str,
+    connectivity_check_host: str,
+    wifi_reconnect_enabled: bool,
+    wifi_reconnect_after_minutes: int,
+    wifi_reboot_enabled: bool,
+    wifi_reboot_after_minutes: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=periodic_reboot_enabled,
+            periodic_reboot_hours=periodic_reboot_hours,
+            wifi_watchdog_enabled=wifi_watchdog_enabled,
+            wifi_interface=wifi_interface,
+            connectivity_check_host=connectivity_check_host,
+            wifi_reconnect_enabled=wifi_reconnect_enabled,
+            wifi_reconnect_after_minutes=wifi_reconnect_after_minutes,
+            wifi_reboot_enabled=wifi_reboot_enabled,
+            wifi_reboot_after_minutes=wifi_reboot_after_minutes,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        _audit_manual_web_action(
+            config,
+            action="self_healing_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
+        return errors
+    write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="self_healing_preferences_update",
+        status="completed",
+        details={
+            "periodic_reboot_enabled": periodic_reboot_enabled,
+            "wifi_watchdog_enabled": wifi_watchdog_enabled,
+            "wifi_reconnect_enabled": wifi_reconnect_enabled,
+            "wifi_reboot_enabled": wifi_reboot_enabled,
+        },
+    )
+    return []
+
+
 def update_gateway_preferences(
     *,
     config_path: Path,

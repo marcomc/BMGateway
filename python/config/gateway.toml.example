@@ -82,5 +82,5 @@ bm300_enabled = true
 bm300_max_pages_per_sync = 3
 
 [retention]
-raw_retention_days = 180
+raw_retention_days = 730
 daily_retention_days = 0

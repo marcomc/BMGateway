@@ -85,6 +85,15 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 3
     assert config.bluetooth.live_hard_timeout_seconds == 0
+    assert config.self_healing.periodic_reboot_enabled is False
+    assert config.self_healing.periodic_reboot_hours == 24
+    assert config.self_healing.wifi_watchdog_enabled is False
+    assert config.self_healing.wifi_interface == "wlan0"
+    assert config.self_healing.connectivity_check_host == "1.1.1.1"
+    assert config.self_healing.wifi_reconnect_enabled is True
+    assert config.self_healing.wifi_reconnect_after_minutes == 5
+    assert config.self_healing.wifi_reboot_enabled is False
+    assert config.self_healing.wifi_reboot_after_minutes == 15
 
 
 def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path) -> None:
@@ -121,7 +130,12 @@ def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path
     assert config.archive_sync.bm200_max_pages_per_sync == 3
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 3
+    assert config.retention.raw_retention_days == 730
+    assert config.retention.daily_retention_days == 0
     assert config.bluetooth.live_hard_timeout_seconds == 0
+    assert config.self_healing.periodic_reboot_enabled is False
+    assert config.self_healing.periodic_reboot_hours == 24
+    assert config.self_healing.wifi_watchdog_enabled is False
 
 
 def test_load_config_accepts_legacy_per_driver_live_hard_timeout_keys(tmp_path: Path) -> None:
@@ -162,6 +176,8 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     web_properties = schema["properties"]["web"]["properties"]
     usb_otg_properties = schema["properties"]["usb_otg"]["properties"]
     archive_sync_properties = schema["properties"]["archive_sync"]["properties"]
+    self_healing_properties = schema["properties"]["self_healing"]["properties"]
+    retention_properties = schema["properties"]["retention"]["properties"]
     bluetooth_properties = schema["properties"]["bluetooth"]["properties"]
 
     assert web_properties["port"]["maximum"] == 65535
@@ -175,6 +191,11 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     assert archive_sync_properties["periodic_interval_seconds"]["minimum"] == 1
     assert archive_sync_properties["bm200_max_pages_per_sync"]["maximum"] == 85
     assert archive_sync_properties["bm300_max_pages_per_sync"]["maximum"] == 59
+    assert self_healing_properties["periodic_reboot_hours"]["minimum"] == 1
+    assert self_healing_properties["periodic_reboot_hours"]["maximum"] == 48
+    assert self_healing_properties["wifi_reconnect_after_minutes"]["minimum"] == 1
+    assert retention_properties["raw_retention_days"]["default"] == 730
+    assert retention_properties["daily_retention_days"]["default"] == 0
     assert bluetooth_properties["live_hard_timeout_seconds"]["minimum"] == 0
 
 
@@ -208,6 +229,18 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
             config.bluetooth,
             live_hard_timeout_seconds=120,
         ),
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=True,
+            periodic_reboot_hours=12,
+            wifi_watchdog_enabled=True,
+            wifi_interface="wlan1",
+            connectivity_check_host="192.168.1.1",
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=7,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=20,
+        ),
     )
 
     write_config(target, updated)
@@ -221,6 +254,14 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
     assert loaded.archive_sync.bm300_enabled is True
     assert loaded.archive_sync.bm300_max_pages_per_sync == 9
     assert loaded.bluetooth.live_hard_timeout_seconds == 120
+    assert loaded.self_healing.periodic_reboot_enabled is True
+    assert loaded.self_healing.periodic_reboot_hours == 12
+    assert loaded.self_healing.wifi_watchdog_enabled is True
+    assert loaded.self_healing.wifi_interface == "wlan1"
+    assert loaded.self_healing.connectivity_check_host == "192.168.1.1"
+    assert loaded.self_healing.wifi_reconnect_after_minutes == 7
+    assert loaded.self_healing.wifi_reboot_enabled is True
+    assert loaded.self_healing.wifi_reboot_after_minutes == 20
 
 
 def test_validate_config_bounds_archive_sync_page_count() -> None:
@@ -254,3 +295,27 @@ def test_validate_config_rejects_negative_live_hard_timeout() -> None:
     assert "bluetooth.live_hard_timeout_seconds must be zero or greater" in validate_config(
         negative_live_hard_timeout
     )
+
+
+def test_validate_config_bounds_self_healing_values() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    invalid = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_hours=49,
+            wifi_interface="",
+            connectivity_check_host="",
+            wifi_reconnect_after_minutes=0,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=0,
+        ),
+    )
+
+    errors = validate_config(invalid)
+
+    assert "self_healing.periodic_reboot_hours must be between 1 and 48" in errors
+    assert "self_healing.wifi_interface must not be empty" in errors
+    assert "self_healing.connectivity_check_host must not be empty" in errors
+    assert "self_healing.wifi_reconnect_after_minutes must be at least 1" in errors
+    assert "self_healing.wifi_reboot_after_minutes must be at least 1" in errors

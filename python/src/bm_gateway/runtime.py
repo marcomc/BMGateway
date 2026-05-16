@@ -461,6 +461,8 @@ def build_fake_snapshot(config: AppConfig, devices: list[Device]) -> GatewaySnap
         web=config.web,
         retention=config.retention,
         usb_otg=config.usb_otg,
+        archive_sync=config.archive_sync,
+        self_healing=config.self_healing,
         verbose=config.verbose,
     )
     return build_snapshot(fake_config, devices)

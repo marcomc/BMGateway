@@ -10,6 +10,8 @@ from typing import Any
 from .localization import allowed_language_codes, is_supported_language_preference
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "bm-gateway" / "config.toml"
+DEFAULT_RAW_RETENTION_DAYS = 730
+DEFAULT_DAILY_RETENTION_DAYS = 0
 
 
 @dataclass(frozen=True)
@@ -93,9 +95,22 @@ class ArchiveSyncConfig:
 
 
 @dataclass(frozen=True)
+class SelfHealingConfig:
+    periodic_reboot_enabled: bool = False
+    periodic_reboot_hours: int = 24
+    wifi_watchdog_enabled: bool = False
+    wifi_interface: str = "wlan0"
+    connectivity_check_host: str = "1.1.1.1"
+    wifi_reconnect_enabled: bool = True
+    wifi_reconnect_after_minutes: int = 5
+    wifi_reboot_enabled: bool = False
+    wifi_reboot_after_minutes: int = 15
+
+
+@dataclass(frozen=True)
 class RetentionConfig:
-    raw_retention_days: int = 180
-    daily_retention_days: int = 0
+    raw_retention_days: int = DEFAULT_RAW_RETENTION_DAYS
+    daily_retention_days: int = DEFAULT_DAILY_RETENTION_DAYS
 
 
 @dataclass(frozen=True)
@@ -110,6 +125,7 @@ class AppConfig:
     retention: RetentionConfig
     usb_otg: USBOTGConfig = field(default_factory=USBOTGConfig)
     archive_sync: ArchiveSyncConfig = field(default_factory=ArchiveSyncConfig)
+    self_healing: SelfHealingConfig = field(default_factory=SelfHealingConfig)
     verbose: bool = False
 
     def with_cli_overrides(self, *, verbose: bool) -> "AppConfig":
@@ -126,6 +142,7 @@ class AppConfig:
             retention=self.retention,
             usb_otg=self.usb_otg,
             archive_sync=self.archive_sync,
+            self_healing=self.self_healing,
             verbose=True,
         )
 
@@ -198,6 +215,17 @@ class AppConfig:
                 "bm200_max_pages_per_sync": self.archive_sync.bm200_max_pages_per_sync,
                 "bm300_enabled": self.archive_sync.bm300_enabled,
                 "bm300_max_pages_per_sync": self.archive_sync.bm300_max_pages_per_sync,
+            },
+            "self_healing": {
+                "periodic_reboot_enabled": self.self_healing.periodic_reboot_enabled,
+                "periodic_reboot_hours": self.self_healing.periodic_reboot_hours,
+                "wifi_watchdog_enabled": self.self_healing.wifi_watchdog_enabled,
+                "wifi_interface": self.self_healing.wifi_interface,
+                "connectivity_check_host": self.self_healing.connectivity_check_host,
+                "wifi_reconnect_enabled": self.self_healing.wifi_reconnect_enabled,
+                "wifi_reconnect_after_minutes": self.self_healing.wifi_reconnect_after_minutes,
+                "wifi_reboot_enabled": self.self_healing.wifi_reboot_enabled,
+                "wifi_reboot_after_minutes": self.self_healing.wifi_reboot_after_minutes,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -331,6 +359,23 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"bm300_enabled = {_bool_to_toml(config.archive_sync.bm300_enabled)}",
             f"bm300_max_pages_per_sync = {config.archive_sync.bm300_max_pages_per_sync}",
             "",
+            "[self_healing]",
+            (
+                "periodic_reboot_enabled = "
+                f"{_bool_to_toml(config.self_healing.periodic_reboot_enabled)}"
+            ),
+            f"periodic_reboot_hours = {config.self_healing.periodic_reboot_hours}",
+            f"wifi_watchdog_enabled = {_bool_to_toml(config.self_healing.wifi_watchdog_enabled)}",
+            f"wifi_interface = {_string_to_toml(config.self_healing.wifi_interface)}",
+            (
+                "connectivity_check_host = "
+                f"{_string_to_toml(config.self_healing.connectivity_check_host)}"
+            ),
+            f"wifi_reconnect_enabled = {_bool_to_toml(config.self_healing.wifi_reconnect_enabled)}",
+            f"wifi_reconnect_after_minutes = {config.self_healing.wifi_reconnect_after_minutes}",
+            f"wifi_reboot_enabled = {_bool_to_toml(config.self_healing.wifi_reboot_enabled)}",
+            f"wifi_reboot_after_minutes = {config.self_healing.wifi_reboot_after_minutes}",
+            "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
             f"daily_retention_days = {config.retention.daily_retention_days}",
@@ -349,6 +394,7 @@ def load_config(path: Path) -> AppConfig:
     web_table = _table_or_empty(data, "web")
     usb_otg_table = _table_or_empty(data, "usb_otg")
     archive_sync_table = _table_or_empty(data, "archive_sync")
+    self_healing_table = _table_or_empty(data, "self_healing")
     retention_table = _table_or_empty(data, "retention")
 
     gateway = GatewayConfig(
@@ -431,8 +477,12 @@ def load_config(path: Path) -> AppConfig:
         ),
     )
     retention = RetentionConfig(
-        raw_retention_days=int(retention_table.get("raw_retention_days", 180)),
-        daily_retention_days=int(retention_table.get("daily_retention_days", 0)),
+        raw_retention_days=int(
+            retention_table.get("raw_retention_days", DEFAULT_RAW_RETENTION_DAYS)
+        ),
+        daily_retention_days=int(
+            retention_table.get("daily_retention_days", DEFAULT_DAILY_RETENTION_DAYS)
+        ),
     )
     archive_sync = ArchiveSyncConfig(
         enabled=bool(archive_sync_table.get("enabled", True)),
@@ -442,6 +492,17 @@ def load_config(path: Path) -> AppConfig:
         bm200_max_pages_per_sync=int(archive_sync_table.get("bm200_max_pages_per_sync", 3)),
         bm300_enabled=bool(archive_sync_table.get("bm300_enabled", True)),
         bm300_max_pages_per_sync=int(archive_sync_table.get("bm300_max_pages_per_sync", 3)),
+    )
+    self_healing = SelfHealingConfig(
+        periodic_reboot_enabled=bool(self_healing_table.get("periodic_reboot_enabled", False)),
+        periodic_reboot_hours=int(self_healing_table.get("periodic_reboot_hours", 24)),
+        wifi_watchdog_enabled=bool(self_healing_table.get("wifi_watchdog_enabled", False)),
+        wifi_interface=str(self_healing_table.get("wifi_interface", "wlan0")),
+        connectivity_check_host=str(self_healing_table.get("connectivity_check_host", "1.1.1.1")),
+        wifi_reconnect_enabled=bool(self_healing_table.get("wifi_reconnect_enabled", True)),
+        wifi_reconnect_after_minutes=int(self_healing_table.get("wifi_reconnect_after_minutes", 5)),
+        wifi_reboot_enabled=bool(self_healing_table.get("wifi_reboot_enabled", False)),
+        wifi_reboot_after_minutes=int(self_healing_table.get("wifi_reboot_after_minutes", 15)),
     )
     source_path = path.resolve()
     device_registry_path = _resolve_registry_path(source_path, gateway.device_registry)
@@ -457,6 +518,7 @@ def load_config(path: Path) -> AppConfig:
         retention=retention,
         usb_otg=usb_otg,
         archive_sync=archive_sync,
+        self_healing=self_healing,
     )
 
 
@@ -542,6 +604,26 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("archive_sync.bm200_max_pages_per_sync must be between 1 and 85")
     if not 1 <= config.archive_sync.bm300_max_pages_per_sync <= 59:
         errors.append("archive_sync.bm300_max_pages_per_sync must be between 1 and 59")
+    if not 1 <= config.self_healing.periodic_reboot_hours <= 48:
+        errors.append("self_healing.periodic_reboot_hours must be between 1 and 48")
+    if not config.self_healing.wifi_interface.strip():
+        errors.append("self_healing.wifi_interface must not be empty")
+    if not config.self_healing.connectivity_check_host.strip():
+        errors.append("self_healing.connectivity_check_host must not be empty")
+    if config.self_healing.wifi_reconnect_after_minutes < 1:
+        errors.append("self_healing.wifi_reconnect_after_minutes must be at least 1")
+    if config.self_healing.wifi_reboot_after_minutes < 1:
+        errors.append("self_healing.wifi_reboot_after_minutes must be at least 1")
+    if (
+        config.self_healing.wifi_reboot_enabled
+        and config.self_healing.wifi_reconnect_enabled
+        and config.self_healing.wifi_reboot_after_minutes
+        <= config.self_healing.wifi_reconnect_after_minutes
+    ):
+        errors.append(
+            "self_healing.wifi_reboot_after_minutes must be greater than "
+            "wifi_reconnect_after_minutes when both actions are enabled"
+        )
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:

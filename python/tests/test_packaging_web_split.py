@@ -124,15 +124,19 @@ def test_install_service_script_installs_scoped_web_action_sudoers_policy() -> N
     assert 'visudo -cf "${sudoers_path}"' in payload
 
 
-def test_install_service_script_skips_web_action_sudoers_policy_when_web_disabled() -> None:
+def test_install_service_script_keeps_runtime_sudoers_policy_when_web_disabled() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
     )
     payload = script_path.read_text(encoding="utf-8")
 
-    assert 'if [[ "${enable_web}" -eq 1 ]]; then' in payload
-    assert 'rm -f "${sudoers_path}"' in payload
-    assert "Skipped web action sudoers policy because web service is disabled" in payload
+    assert "/usr/bin/systemctl reboot" in payload
+    assert "/usr/bin/systemctl restart NetworkManager.service" in payload
+    assert "/usr/bin/nmcli device connect *" in payload
+    assert (
+        'if [[ "${install_usb_otg_tools}" -eq 1 ]] && [[ "${enable_web}" -eq 1 ]]; then' in payload
+    )
+    assert "Installed service action sudoers policy" in payload
 
 
 def test_web_service_unit_keeps_sudo_helper_capabilities_available() -> None:

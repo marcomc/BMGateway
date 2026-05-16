@@ -205,8 +205,9 @@ Useful options:
 - `--web-port <port>`
 - `--glances-port <port>`
 
-When `--disable-web` is used, the installer disables the web service and removes
-the `/etc/sudoers.d/bm-gateway-web` web-action policy.
+When `--disable-web` is used, the installer disables the web service but keeps
+the scoped `/etc/sudoers.d/bm-gateway-web` service-action policy needed by
+runtime self-healing recovery commands.
 
 ## Install `uv`
 
@@ -420,6 +421,14 @@ The installed config keeps:
 - `web.show_chart_markers = false`
 - `web.appearance = "system"`
 - `web.language = "auto"`
+- `self_healing.periodic_reboot_enabled = false`
+- `self_healing.periodic_reboot_hours = 24`
+- `self_healing.wifi_watchdog_enabled = false`
+- `self_healing.wifi_interface = "wlan0"`
+- `self_healing.connectivity_check_host = "1.1.1.1"`
+- `self_healing.wifi_reconnect_after_minutes = 5`
+- `self_healing.wifi_reboot_enabled = false`
+- `self_healing.wifi_reboot_after_minutes = 15`
 - `usb_otg.enabled = false`
 - `usb_otg.image_width_px = 480`
 - `usb_otg.image_height_px = 234`
@@ -433,6 +442,25 @@ The poll interval is editable in Settings. Values below `300` seconds are
 allowed for testing, but the Settings page shows a red warning because frequent
 BM6/BM200 polling can increase Bluetooth discovery failures, device contention,
 and error-heavy history.
+
+## Optional: Enable Self-Healing
+
+Self-healing is disabled by default and can be configured from Settings or
+`config.toml`.
+
+There are two independent recovery paths:
+
+- periodic reboot: set `self_healing.periodic_reboot_enabled = true` and choose
+  `self_healing.periodic_reboot_hours` from `1` to `48`
+- Wi-Fi watchdog: set `self_healing.wifi_watchdog_enabled = true`, choose a
+  reachable `self_healing.connectivity_check_host`, and tune the reconnect and
+  reboot delays in minutes
+
+For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
+only `self_healing.wifi_reconnect_enabled = true`. Enable
+`self_healing.wifi_reboot_enabled = true` only if reconnect attempts do not
+restore the link reliably. The reboot delay must be longer than the reconnect
+delay when both actions are enabled.
 
 ## Optional: Prepare USB OTG Image Export
 

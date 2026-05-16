@@ -1691,6 +1691,19 @@ details summary::-webkit-details-marker { display: none; }
 .settings-control .inline-field-help {
   margin-top: 0.4rem;
 }
+.settings-dependent-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.settings-dependent-fieldset:disabled {
+  opacity: 0.48;
+}
+.settings-dependent-fieldset:disabled input,
+.settings-dependent-fieldset:disabled select,
+.settings-dependent-fieldset:disabled textarea {
+  cursor: not-allowed;
+}
 .primary-button,
 .secondary-button,
 .ghost-button {

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import cast
 
@@ -80,6 +80,44 @@ def test_prune_history_removes_old_raw_rows_but_keeps_daily_rollup_when_unlimite
         fetch_daily_history(database_path, device_id="bm200_house", limit=30)[0]["day"]
         == "2024-01-01"
     )
+
+
+def test_prune_history_removes_old_archive_rows_with_raw_retention(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    now = datetime.now(tz=timezone.utc).astimezone()
+    old_ts = (now - timedelta(days=3)).isoformat(timespec="seconds")
+    kept_ts = (now - timedelta(hours=12)).isoformat(timespec="seconds")
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": old_ts,
+                "voltage": 12.61,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+            {
+                "ts": kept_ts,
+                "voltage": 12.62,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+        ],
+    )
+
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+
+    archive_rows = fetch_archive_history(database_path, device_id="bm200_house", limit=10)
+    assert [row["ts"] for row in archive_rows] == [kept_ts]
 
 
 def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> None:

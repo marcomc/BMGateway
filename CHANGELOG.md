@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.2.3] - Unreleased - Unreachable Device Status Split and Raspberry Pi Compatibility and NEON Detection Improvements
+## [0.3.0] - Unreleased - Unreachable Device Status Split and Raspberry Pi Compatibility and Self-Healing Improvements
 
 ### Changed
 
@@ -19,6 +19,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   so unsupported boards show a red Settings warning, disable the frame export
   controls, and skip Chromium-based frame rendering before repeated export
   failures occur.
+- Added optional runtime self-healing settings for scheduled Raspberry Pi
+  reboots, Wi-Fi connectivity watchdog checks, delayed Wi-Fi reconnect
+  attempts, and delayed reboot recovery when Wi-Fi stays unavailable.
+- Kept BM300 Pro/BM7 archive imports cumulative across sync windows and kept
+  Fleet Trend lines continuous when adjacent samples come from different
+  persisted sources.
+- Extended the default raw history retention to two years and applied the same
+  retention pruning to imported archive readings.
 
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 

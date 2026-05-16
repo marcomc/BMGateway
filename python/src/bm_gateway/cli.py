@@ -49,6 +49,7 @@ from .runtime import (
     sleep_interval,
     state_file_path,
 )
+from .self_healing import evaluate_self_healing, new_self_healing_state
 from .state_store import (
     fetch_archive_history,
     fetch_counts,
@@ -679,6 +680,7 @@ def _handle_run(
     publisher = _publisher_for_run(dry_run=dry_run)
     completed = 0
     last_snapshot: GatewaySnapshot | None = None
+    self_healing_state = new_self_healing_state()
 
     while iteration_limit is None or completed < iteration_limit:
         runtime = _load_runtime_or_print_errors(path, verbose=verbose)
@@ -740,6 +742,19 @@ def _handle_run(
             elif export_usb_otg_now:
                 print(f"USB OTG image export failed: {export_result.reason}", file=sys.stderr)
                 return 1
+        if not dry_run:
+            for event in evaluate_self_healing(config=config, state=self_healing_state):
+                append_audit_event(
+                    config=config,
+                    state_dir=state_dir,
+                    source="runtime",
+                    trigger="automatic",
+                    action=event.action,
+                    status=event.status,
+                    details=event.details,
+                )
+                if event.action in {"periodic_reboot_requested", "wifi_reboot_requested"}:
+                    sys.stderr.write(f"Self-healing action requested: {event.action}\n")
         completed += 1
         if iteration_limit is not None and completed >= iteration_limit:
             break

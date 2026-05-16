@@ -151,11 +151,29 @@
         }
       }
     },
+    "self_healing": {
+      "type": "object",
+      "properties": {
+        "periodic_reboot_enabled": { "type": "boolean" },
+        "periodic_reboot_hours": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 48
+        },
+        "wifi_watchdog_enabled": { "type": "boolean" },
+        "wifi_interface": { "type": "string" },
+        "connectivity_check_host": { "type": "string" },
+        "wifi_reconnect_enabled": { "type": "boolean" },
+        "wifi_reconnect_after_minutes": { "type": "integer", "minimum": 1 },
+        "wifi_reboot_enabled": { "type": "boolean" },
+        "wifi_reboot_after_minutes": { "type": "integer", "minimum": 1 }
+      }
+    },
     "retention": {
       "type": "object",
       "properties": {
-        "raw_retention_days": { "type": "integer", "minimum": 1 },
-        "daily_retention_days": { "type": "integer", "minimum": 0 }
+        "raw_retention_days": { "type": "integer", "minimum": 1, "default": 730 },
+        "daily_retention_days": { "type": "integer", "minimum": 0, "default": 0 }
       }
     }
   }

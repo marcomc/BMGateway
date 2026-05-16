@@ -62,6 +62,7 @@ Optional web executable for:
 - MQTT publishing and Home Assistant discovery support
 - service-friendly Raspberry Pi deployment shape
 - modular web UI localization selected through `web.language`
+- optional self-healing for scheduled host reboots and Wi-Fi recovery
 
 BM200/BM6-family and BM300 Pro/BM7-family live polling now share the same BLE
 scan, connect, notify, retry, and cleanup control flow. The protocol-specific
@@ -82,6 +83,9 @@ History surfaces include:
 - daily rollups
 - monthly rollups
 - yearly summaries
+
+Raw history retention defaults to two years. Daily rollups default to unlimited
+retention because they are compact and support long-range comparison views.
 
 Archive-history merge/backfill plumbing exists, but BM6-family onboard archive
 retrieval is still incomplete on real hardware.

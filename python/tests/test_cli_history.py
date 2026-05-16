@@ -1463,6 +1463,114 @@ def test_sync_bm300_device_archive_honors_bounded_page_depth(
     assert len(archive) == 130
 
 
+def test_sync_bm300_device_archive_accumulates_previous_standard_windows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    device = Device(
+        id="bm300_doc",
+        type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+    )
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm300_doc",
+        device_type="bm300pro",
+        name="BM300 DOC",
+        mac="AA:BB:CC:DD:EE:30",
+        adapter="hci0",
+        driver="bm300pro",
+        profile=BM300_ARCHIVE_PROFILE,
+        readings=[
+            {
+                "ts": "2026-04-25T18:00:00+00:00",
+                "voltage": 12.7,
+                "min_crank_voltage": None,
+                "event_type": 0,
+                "soc": 82,
+                "temperature": 17.0,
+                "raw_record": "4f652110",
+                "page_selector": 3,
+                "record_index": 255,
+                "timestamp_quality": "estimated",
+            }
+        ],
+    )
+
+    async def fake_read_selector(
+        *,
+        address: str,
+        adapter: str,
+        timeout_seconds: float,
+        scan_timeout_seconds: float,
+        selector_byte: int,
+        selector_value: int,
+        reference_ts: object = None,
+        transport: object = None,
+    ) -> list[BM300HistoryReading]:
+        _ = (
+            address,
+            adapter,
+            timeout_seconds,
+            scan_timeout_seconds,
+            selector_byte,
+            reference_ts,
+            transport,
+        )
+        reference_ts = datetime(2026, 4, 26, 18, 54, tzinfo=timezone.utc)
+        return [
+            BM300HistoryReading(
+                ts=(reference_ts - timedelta(minutes=index * 2)).isoformat(timespec="seconds"),
+                voltage=(0x4B0 + index) / 100,
+                min_crank_voltage=None,
+                event_type=index % 10,
+                soc=index % 101,
+                temperature=float(10 + (index % 40)),
+                raw_record=(
+                    f"{0x4B0 + index:03x}{index % 101:02x}{10 + (index % 40):02x}{index % 10:x}"
+                ),
+                page_selector=selector_value,
+                record_index=index,
+                timestamp_quality="estimated",
+            )
+            for index in range({1: 130, 2: 160, 3: 180}[selector_value])
+        ]
+
+    def fake_run_in_subprocess_with_timeout(
+        *,
+        function: Any,
+        args: tuple[object, ...],
+        timeout_seconds: float,
+        timeout_error: Any,
+    ) -> dict[str, object]:
+        _ = (timeout_seconds, timeout_error)
+        return cast(dict[str, object], function(*args))
+
+    monkeypatch.setattr("bm_gateway.archive_sync.read_bm300_history_selector", fake_read_selector)
+    monkeypatch.setattr(
+        "bm_gateway.archive_sync.run_in_subprocess_with_timeout",
+        fake_run_in_subprocess_with_timeout,
+    )
+
+    payload = sync_bm300_device_archive(
+        config=config,
+        device=device,
+        database_path=database_path,
+        page_count=3,
+    )
+
+    archive = fetch_archive_history(database_path, device_id="bm300_doc", limit=300)
+
+    assert payload["inserted"] == 180
+    assert len(archive) == 181
+    assert archive[-1]["ts"] == "2026-04-25T18:00:00+00:00"
+    assert archive[-1]["raw_record"] == "4f652110"
+
+
 def test_run_cycle_triggers_archive_sync_after_gap(tmp_path: Path) -> None:
     config_path = _write_example_files(tmp_path)
     config = load_config(config_path)

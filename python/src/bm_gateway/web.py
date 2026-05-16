@@ -49,6 +49,7 @@ from .web_actions import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_self_healing_preferences,
     update_usb_otg_preferences,
     update_web_preferences,
 )
@@ -128,6 +129,7 @@ __all__ = [
     "update_gateway_preferences",
     "update_home_assistant_preferences",
     "update_mqtt_preferences",
+    "update_self_healing_preferences",
     "update_usb_otg_preferences",
     "update_web_preferences",
     "_add_device_form_html",
@@ -1465,6 +1467,98 @@ def serve_management(
                     bm200_max_pages_per_sync=bm200_max_pages_per_sync,
                     bm300_enabled=_bool_from_form(form, "bm300_enabled"),
                     bm300_max_pages_per_sync=bm300_max_pages_per_sync,
+                )
+                if errors:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/self-healing":
+                config, snapshot, current_database_path = self._load_current()
+                try:
+                    periodic_reboot_hours = int(
+                        form.get(
+                            "periodic_reboot_hours",
+                            [str(config.self_healing.periodic_reboot_hours)],
+                        )[0]
+                    )
+                    wifi_reconnect_after_minutes = int(
+                        form.get(
+                            "wifi_reconnect_after_minutes",
+                            [str(config.self_healing.wifi_reconnect_after_minutes)],
+                        )[0]
+                    )
+                    wifi_reboot_after_minutes = int(
+                        form.get(
+                            "wifi_reboot_after_minutes",
+                            [str(config.self_healing.wifi_reboot_after_minutes)],
+                        )[0]
+                    )
+                except ValueError:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: self-healing values must be numeric",
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_self_healing_preferences(
+                    config_path=config_path,
+                    periodic_reboot_enabled=_bool_from_form(form, "periodic_reboot_enabled"),
+                    periodic_reboot_hours=periodic_reboot_hours,
+                    wifi_watchdog_enabled=_bool_from_form(form, "wifi_watchdog_enabled"),
+                    wifi_interface=form.get(
+                        "wifi_interface",
+                        [config.self_healing.wifi_interface],
+                    )[0],
+                    connectivity_check_host=form.get(
+                        "connectivity_check_host",
+                        [config.self_healing.connectivity_check_host],
+                    )[0],
+                    wifi_reconnect_enabled=(
+                        _bool_from_form(form, "wifi_reconnect_enabled")
+                        if "wifi_reconnect_enabled" in form
+                        else config.self_healing.wifi_reconnect_enabled
+                    ),
+                    wifi_reconnect_after_minutes=wifi_reconnect_after_minutes,
+                    wifi_reboot_enabled=(
+                        _bool_from_form(form, "wifi_reboot_enabled")
+                        if "wifi_reboot_enabled" in form
+                        else config.self_healing.wifi_reboot_enabled
+                    ),
+                    wifi_reboot_after_minutes=wifi_reboot_after_minutes,
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)

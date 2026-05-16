@@ -183,7 +183,6 @@ def _run_bm300_device_archive_import(
         selectors=(1, 2, 3)[:requested_depth],
         profile=BM300_ARCHIVE_PROFILE,
         replace_profiles=(
-            BM300_ARCHIVE_PROFILE,
             BM300_LEGACY_PROFILE,
             "bm7_d15505_b7_v1_experimental",
         ),
