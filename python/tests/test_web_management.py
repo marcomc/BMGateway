@@ -4897,24 +4897,25 @@ def test_chart_points_include_daily_temperature_rollups() -> None:
     ]
 
 
-def test_fleet_chart_points_use_compact_raw_history_limit(
+def test_fleet_chart_points_reads_raw_history_from_latest_time_window(
     monkeypatch: MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     from bm_gateway import web_pages
 
-    raw_limits: list[int] = []
+    raw_since_values: list[str] = []
 
-    def fake_recent_history(
+    def fake_recent_history_since(
         _database_path: Path,
         *,
         device_id: str,
-        limit: int,
+        since_ts: str,
     ) -> list[dict[str, object]]:
-        raw_limits.append(limit)
+        assert device_id == "bm200_house"
+        raw_since_values.append(since_ts)
         return [
             {
-                "ts": "2026-04-19T10:05:00+02:00",
+                "ts": "2026-04-15T10:05:00+02:00",
                 "voltage": 13.32,
                 "soc": 92,
                 "temperature": 17.2,
@@ -4922,7 +4923,21 @@ def test_fleet_chart_points_use_compact_raw_history_limit(
             }
         ]
 
-    monkeypatch.setattr(web_pages, "fetch_recent_history", fake_recent_history)
+    def fail_recent_history(
+        _database_path: Path,
+        *,
+        device_id: str,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        raise AssertionError("Fleet chart should load raw history by time window")
+
+    monkeypatch.setattr(
+        web_pages,
+        "latest_history_timestamp",
+        lambda _database_path, *, device_id: "2026-04-19T10:05:00+02:00",
+    )
+    monkeypatch.setattr(web_pages, "fetch_recent_history", fail_recent_history)
+    monkeypatch.setattr(web_pages, "fetch_recent_history_since", fake_recent_history_since)
     monkeypatch.setattr(
         web_pages,
         "fetch_daily_history",
@@ -4934,8 +4949,8 @@ def test_fleet_chart_points_use_compact_raw_history_limit(
         devices=[{"id": "bm200_house", "name": "House"}],
     )
 
-    assert raw_limits == [web_pages.FLEET_CHART_HISTORY_LIMIT]
-    assert web_pages.FLEET_CHART_HISTORY_LIMIT < web_pages.RECENT_CHART_HISTORY_LIMIT
+    assert raw_since_values == ["2026-04-11T10:05:00+02:00"]
+    assert web_pages.FLEET_CHART_RAW_HISTORY_DAYS >= 7
     assert legend == [("House", "#17c45a")]
     assert points[0]["series_id"] == "bm200_house"
 

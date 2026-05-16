@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import html
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import cast
 from urllib.parse import quote
@@ -32,6 +33,8 @@ from .device_registry import (
 from .state_store import (
     fetch_daily_history,
     fetch_recent_history,
+    fetch_recent_history_since,
+    latest_history_timestamp,
 )
 from .web_support import default_curve_pairs
 from .web_ui import (
@@ -78,6 +81,7 @@ VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
 
 RECENT_CHART_HISTORY_LIMIT = 6000
 FLEET_CHART_HISTORY_LIMIT = 1000
+FLEET_CHART_RAW_HISTORY_DAYS = 8
 
 
 def _device_color_key(device: dict[str, object], *, fallback_index: int = 0) -> str:
@@ -1673,11 +1677,30 @@ def _chart_points(
     return points
 
 
+def _fleet_raw_history_since(
+    *,
+    database_path: Path,
+    device_id: str,
+    raw_window_days: int,
+) -> str | None:
+    if raw_window_days <= 0:
+        return None
+    latest_ts = latest_history_timestamp(database_path, device_id=device_id)
+    if latest_ts is None:
+        return None
+    try:
+        latest = datetime.fromisoformat(latest_ts)
+    except ValueError:
+        return None
+    return (latest - timedelta(days=raw_window_days)).isoformat()
+
+
 def _fleet_chart_points(
     *,
     database_path: Path,
     devices: list[dict[str, object]],
     raw_limit: int = FLEET_CHART_HISTORY_LIMIT,
+    raw_window_days: int = FLEET_CHART_RAW_HISTORY_DAYS,
 ) -> tuple[list[dict[str, object]], list[tuple[str, str]]]:
     points: list[dict[str, object]] = []
     legend: list[tuple[str, str]] = []
@@ -1688,13 +1711,23 @@ def _fleet_chart_points(
         device_name = str(device.get("name", device_id))
         color = _device_accent_color(device, fallback_index=index)
         legend.append((device_name, color))
+        raw_since = _fleet_raw_history_since(
+            database_path=database_path,
+            device_id=device_id,
+            raw_window_days=raw_window_days,
+        )
+        raw_history = (
+            fetch_recent_history_since(database_path, device_id=device_id, since_ts=raw_since)
+            if raw_since is not None
+            else fetch_recent_history(
+                database_path,
+                device_id=device_id,
+                limit=raw_limit,
+            )
+        )
         points.extend(
             _chart_points(
-                fetch_recent_history(
-                    database_path,
-                    device_id=device_id,
-                    limit=raw_limit,
-                ),
+                raw_history,
                 fetch_daily_history(database_path, device_id=device_id, limit=730),
                 series=device_name,
                 series_id=device_id,

@@ -983,28 +983,82 @@ def fetch_recent_history(
     connection = _connect_database(path, migrate_legacy=False)
     try:
         buffered_limit = max(limit * 4, limit + 64)
-        sample_rows = connection.execute(
-            """
-            SELECT
-                sample_ts AS ts,
-                voltage,
-                soc,
-                temperature,
-                state,
-                error_code,
-                error_detail,
-                source AS sample_source,
-                source_priority
-            FROM device_samples
-            WHERE device_id = ?
-            ORDER BY sample_ts DESC, source_priority DESC
-            LIMIT ?
-            """,
-            (device_id, buffered_limit),
-        ).fetchall()
+        sample_rows = cast(
+            list[tuple[Any, ...]],
+            connection.execute(
+                """
+                SELECT
+                    sample_ts AS ts,
+                    voltage,
+                    soc,
+                    temperature,
+                    state,
+                    error_code,
+                    error_detail,
+                    source AS sample_source,
+                    source_priority
+                FROM device_samples
+                WHERE device_id = ?
+                ORDER BY sample_ts DESC, source_priority DESC
+                LIMIT ?
+                """,
+                (device_id, buffered_limit),
+            ).fetchall(),
+        )
     finally:
         connection.close()
-    merged_by_ts: dict[str, tuple[object, ...]] = {}
+    rows = sorted(
+        _dedupe_sample_history_rows(sample_rows),
+        key=lambda item: str(item[0]),
+        reverse=True,
+    )[:limit]
+    return _sample_history_dicts(rows)
+
+
+def fetch_recent_history_since(
+    path: Path,
+    *,
+    device_id: str,
+    since_ts: str,
+) -> list[dict[str, object]]:
+    connection = _connect_database(path, migrate_legacy=False)
+    try:
+        sample_rows = cast(
+            list[tuple[Any, ...]],
+            connection.execute(
+                """
+                SELECT
+                    sample_ts AS ts,
+                    voltage,
+                    soc,
+                    temperature,
+                    state,
+                    error_code,
+                    error_detail,
+                    source AS sample_source,
+                    source_priority
+                FROM device_samples
+                WHERE device_id = ?
+                  AND sample_ts >= ?
+                ORDER BY sample_ts DESC, source_priority DESC
+                """,
+                (device_id, since_ts),
+            ).fetchall(),
+        )
+    finally:
+        connection.close()
+    rows = sorted(
+        _dedupe_sample_history_rows(sample_rows),
+        key=lambda item: str(item[0]),
+        reverse=True,
+    )
+    return _sample_history_dicts(rows)
+
+
+def _dedupe_sample_history_rows(
+    sample_rows: list[tuple[Any, ...]],
+) -> list[tuple[Any, ...]]:
+    merged_by_ts: dict[str, tuple[Any, ...]] = {}
     for row in sample_rows:
         ts = str(row[0])
         existing = merged_by_ts.get(ts)
@@ -1012,7 +1066,10 @@ def fetch_recent_history(
         existing_priority = cast(int, existing[8]) if existing is not None else None
         if existing is None or (existing_priority is not None and row_priority > existing_priority):
             merged_by_ts[ts] = row
-    rows = sorted(merged_by_ts.values(), key=lambda item: str(item[0]), reverse=True)[:limit]
+    return list(merged_by_ts.values())
+
+
+def _sample_history_dicts(rows: list[tuple[Any, ...]]) -> list[dict[str, object]]:
     return [
         {
             "ts": row[0],

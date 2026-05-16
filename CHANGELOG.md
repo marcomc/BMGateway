@@ -41,6 +41,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   SoC value, and hardened web action tests against startup races in the local
   test server.
 
+### Fixed
+
+- Fixed Fleet Trend short-range charts so they load raw samples by time window
+  instead of by a fixed recent-row count after live and archive history were
+  unified in `device_samples`.
+
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 
 ### Changed

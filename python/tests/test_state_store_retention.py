@@ -14,6 +14,7 @@ from bm_gateway.state_store import (
     fetch_degradation_report,
     fetch_monthly_history,
     fetch_recent_history,
+    fetch_recent_history_since,
     fetch_storage_summary,
     fetch_yearly_history,
     history_device_id_exists,
@@ -1522,6 +1523,46 @@ def test_fetch_recent_history_prefers_live_rows_over_archive_rows_with_same_time
     assert rows[0]["sample_source"] == "live"
     assert rows[0]["voltage"] == 12.73
     assert rows[0]["soc"] == 58
+
+
+def test_fetch_recent_history_since_reads_time_window_without_recent_count_limit(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+    persist_snapshot(database_path, _snapshot("2024-01-02T00:00:00+00:00", soc=59))
+    persist_snapshot(database_path, _snapshot("2024-01-03T00:00:00+00:00", soc=60))
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-03T00:00:00+00:00",
+                "voltage": 12.61,
+                "min_crank_voltage": 11.95,
+                "event_type": 1,
+            }
+        ],
+    )
+
+    rows = fetch_recent_history_since(
+        database_path,
+        device_id="bm200_house",
+        since_ts="2024-01-02T00:00:00+00:00",
+    )
+
+    assert [row["ts"] for row in rows] == [
+        "2024-01-03T00:00:00+00:00",
+        "2024-01-02T00:00:00+00:00",
+    ]
+    assert rows[0]["sample_source"] == "live"
+    assert rows[0]["soc"] == 60
 
 
 def test_fetch_daily_history_merges_archive_only_days(tmp_path: Path) -> None:
