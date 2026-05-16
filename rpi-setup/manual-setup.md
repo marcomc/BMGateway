@@ -464,6 +464,7 @@ The installed config keeps:
 - `self_healing.wifi_watchdog_enabled = false`
 - `self_healing.wifi_interface = "wlan0"`
 - `self_healing.connectivity_check_host = "1.1.1.1"`
+- `self_healing.wifi_reconnect_enabled = true`
 - `self_healing.wifi_reconnect_after_minutes = 5`
 - `self_healing.wifi_reboot_enabled = false`
 - `self_healing.wifi_reboot_after_minutes = 15`
@@ -495,10 +496,11 @@ There are two independent recovery paths:
   reboot delays in minutes
 
 For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
-only `self_healing.wifi_reconnect_enabled = true`. Enable
-`self_healing.wifi_reboot_enabled = true` only if reconnect attempts do not
-restore the link reliably. The reboot delay must be longer than the reconnect
-delay when both actions are enabled.
+`self_healing.wifi_watchdog_enabled = true`,
+`self_healing.wifi_reconnect_enabled = true`, and
+`self_healing.wifi_reboot_enabled = false`. Enable Wi-Fi reboot only if
+reconnect attempts do not restore the link reliably. The reboot delay must be
+longer than the reconnect delay when both actions are enabled.
 
 ## Optional: Prepare USB OTG Image Export
 

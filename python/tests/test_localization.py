@@ -548,6 +548,43 @@ def test_supported_locale_catalogs_warn_for_missing_rendered_page_text() -> None
             )
 
 
+def test_supported_locale_catalogs_warn_for_custom_self_healing_settings() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=True,
+            periodic_reboot_hours=12,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=6,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=18,
+        ),
+    )
+    english_html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+    assert "Every 12 hours" in english_html
+    assert "After 6 minutes" in english_html
+    assert "After 18 minutes" in english_html
+    dynamic_html = (
+        '<html lang="en"><body><p>Every 12 hours</p>'
+        "<p>After 6 minutes</p><p>After 18 minutes</p></body></html>"
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        missing = missing_translations_for_html(dynamic_html, locale.code)
+        assert "Every 12 hours" not in missing
+        assert "After 6 minutes" not in missing
+        assert "After 18 minutes" not in missing
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", LocalizationWarning)
+            localized_html = localize_html(dynamic_html, locale.code)
+        assert f'<html lang="{locale.code}"' in localized_html
+
+
 def _representative_english_pages() -> list[str]:
     config = load_config(Path("python/config/config.toml.example"))
     device = {

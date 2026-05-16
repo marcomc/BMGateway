@@ -455,6 +455,16 @@ def render_settings_html(
             str(config.archive_sync.bm300_max_pages_per_sync),
         )
     )
+    wifi_reconnect_summary = (
+        f"After {config.self_healing.wifi_reconnect_after_minutes} minutes"
+        if config.self_healing.wifi_watchdog_enabled and config.self_healing.wifi_reconnect_enabled
+        else "Disabled"
+    )
+    wifi_reboot_summary = (
+        f"After {config.self_healing.wifi_reboot_after_minutes} minutes"
+        if config.self_healing.wifi_watchdog_enabled and config.self_healing.wifi_reboot_enabled
+        else "Disabled"
+    )
     self_healing_section_body = (
         settings_row(
             "Periodic reboot",
@@ -470,22 +480,8 @@ def render_settings_html(
         )
         + settings_row("Wi-Fi interface", config.self_healing.wifi_interface)
         + settings_row("Connectivity check host", config.self_healing.connectivity_check_host)
-        + settings_row(
-            "Wi-Fi reconnect",
-            (
-                f"After {config.self_healing.wifi_reconnect_after_minutes} minutes"
-                if config.self_healing.wifi_reconnect_enabled
-                else "Disabled"
-            ),
-        )
-        + settings_row(
-            "Wi-Fi reboot",
-            (
-                f"After {config.self_healing.wifi_reboot_after_minutes} minutes"
-                if config.self_healing.wifi_reboot_enabled
-                else "Disabled"
-            ),
-        )
+        + settings_row("Wi-Fi reconnect", wifi_reconnect_summary)
+        + settings_row("Wi-Fi reboot", wifi_reboot_summary)
     )
     usb_otg_warning = (
         banner_strip(
@@ -1295,11 +1291,6 @@ def render_settings_html(
             + usb_otg_warning
             + usb_otg_hardware_warning
             + _usb_otg_refresh_interval_warning(config)
-            + (
-                '<fieldset disabled aria-describedby="usb-otg-hardware-warning">'
-                if not supported_usb_otg_frame_renderer
-                else ""
-            )
             + settings_control_row(
                 "USB OTG image export",
                 (
@@ -1314,6 +1305,11 @@ def render_settings_html(
                     "storage drive. This remains inactive until the USB gadget hardware path "
                     "is available."
                 ),
+            )
+            + (
+                '<fieldset disabled aria-describedby="usb-otg-hardware-warning">'
+                if not supported_usb_otg_frame_renderer
+                else ""
             )
             + _settings_markup_row("USB OTG support", usb_otg_support_badge)
             + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
@@ -1416,13 +1412,9 @@ def render_settings_html(
             + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
             + settings_row("Gadget name", config.usb_otg.gadget_name)
             + ("</fieldset>" if not supported_usb_otg_frame_renderer else "")
-            + (
-                '<div style="margin-top:1rem">'
-                + f"{button('Save USB OTG settings', kind='primary')}"
-                + "</div>"
-                if supported_usb_otg_frame_renderer
-                else ""
-            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save USB OTG settings', kind='primary')}"
+            + "</div>"
             + "</form>"
             + '<div class="inline-actions" style="margin-top:1rem">'
             + (

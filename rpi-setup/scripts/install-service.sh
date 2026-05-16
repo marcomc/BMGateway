@@ -206,6 +206,7 @@ home_assistant = dict(data.get("home_assistant", {}))
 web = dict(data.get("web", {}))
 usb_otg = dict(data.get("usb_otg", {}))
 archive_sync = dict(data.get("archive_sync", {}))
+self_healing = dict(data.get("self_healing", {}))
 retention = dict(data.get("retention", {}))
 
 if str(gateway.get("name", "")).startswith("__"):
@@ -234,6 +235,7 @@ payload = "\n".join(
         f'adapter = {string_to_toml(bluetooth.get("adapter", "auto"))}',
         f'scan_timeout_seconds = {int(bluetooth.get("scan_timeout_seconds", 15))}',
         f'connect_timeout_seconds = {int(bluetooth.get("connect_timeout_seconds", 45))}',
+        f'live_hard_timeout_seconds = {int(bluetooth.get("live_hard_timeout_seconds", 0))}',
         "",
         "[mqtt]",
         f'enabled = {bool_to_toml(bool(mqtt.get("enabled", enable_home_assistant)))}',
@@ -286,6 +288,38 @@ payload = "\n".join(
         f'bm200_max_pages_per_sync = {int(archive_sync.get("bm200_max_pages_per_sync", 3))}',
         f'bm300_enabled = {bool_to_toml(bool(archive_sync.get("bm300_enabled", True)))}',
         f'bm300_max_pages_per_sync = {int(archive_sync.get("bm300_max_pages_per_sync", 3))}',
+        "",
+        "[self_healing]",
+        (
+            "periodic_reboot_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('periodic_reboot_enabled', False)))}"
+        ),
+        f'periodic_reboot_hours = {int(self_healing.get("periodic_reboot_hours", 24))}',
+        (
+            "wifi_watchdog_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('wifi_watchdog_enabled', False)))}"
+        ),
+        f'wifi_interface = {string_to_toml(self_healing.get("wifi_interface", "wlan0"))}',
+        (
+            "connectivity_check_host = "
+            f'{string_to_toml(self_healing.get("connectivity_check_host", "1.1.1.1"))}'
+        ),
+        (
+            "wifi_reconnect_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('wifi_reconnect_enabled', True)))}"
+        ),
+        (
+            "wifi_reconnect_after_minutes = "
+            f'{int(self_healing.get("wifi_reconnect_after_minutes", 5))}'
+        ),
+        (
+            "wifi_reboot_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('wifi_reboot_enabled', False)))}"
+        ),
+        (
+            "wifi_reboot_after_minutes = "
+            f'{int(self_healing.get("wifi_reboot_after_minutes", 15))}'
+        ),
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 730))}',
@@ -368,11 +402,13 @@ sudoers_commands="${sudoers_commands}, /usr/bin/systemctl restart NetworkManager
 sudoers_commands="${sudoers_commands}, /usr/bin/systemctl restart wpa_supplicant.service"
 sudoers_commands="${sudoers_commands}, /usr/bin/nmcli radio wifi on"
 sudoers_commands="${sudoers_commands}, /usr/bin/nmcli device connect *"
-if [[ "${install_usb_otg_tools}" -eq 1 ]] && [[ "${enable_web}" -eq 1 ]]; then
-  sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare"
-  sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} restore"
+if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   sudoers_commands="${sudoers_commands}, ${usb_otg_drive_helper_path} setup *"
   sudoers_commands="${sudoers_commands}, ${usb_otg_drive_helper_path} refresh *"
+  if [[ "${enable_web}" -eq 1 ]]; then
+    sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare"
+    sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} restore"
+  fi
 fi
 cat >"${sudoers_path}" <<EOF
 ${service_user} ALL=(root) NOPASSWD: ${sudoers_commands}

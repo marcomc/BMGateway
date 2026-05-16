@@ -91,7 +91,7 @@ from .web_pages import (
     render_snapshot_html,
     render_usb_otg_export_pending_html,
 )
-from .web_pages_frame import FRAME_OVERVIEW_DEVICES_PER_PAGE, frame_battery_overview_page_count
+from .web_pages_frame import frame_battery_overview_page_count
 from .web_support import read_text
 
 __all__ = [
@@ -1744,13 +1744,22 @@ def serve_management(
             if parsed.path == "/settings/usb-otg":
                 config, snapshot, current_database_path = self._load_current()
                 try:
-                    image_width_px = int(form.get("image_width_px", ["480"])[0])
-                    image_height_px = int(form.get("image_height_px", ["234"])[0])
-                    refresh_interval_seconds = int(form.get("refresh_interval_seconds", ["0"])[0])
+                    image_width_px = int(
+                        form.get("image_width_px", [str(config.usb_otg.image_width_px)])[0]
+                    )
+                    image_height_px = int(
+                        form.get("image_height_px", [str(config.usb_otg.image_height_px)])[0]
+                    )
+                    refresh_interval_seconds = int(
+                        form.get(
+                            "refresh_interval_seconds",
+                            [str(config.usb_otg.refresh_interval_seconds)],
+                        )[0]
+                    )
                     overview_devices_per_image = int(
                         form.get(
                             "overview_devices_per_image",
-                            [str(FRAME_OVERVIEW_DEVICES_PER_PAGE)],
+                            [str(config.usb_otg.overview_devices_per_image)],
                         )[0]
                     )
                 except ValueError:
@@ -1780,8 +1789,16 @@ def serve_management(
                     appearance=form.get("appearance", [config.usb_otg.appearance])[0],
                     refresh_interval_seconds=refresh_interval_seconds,
                     overview_devices_per_image=overview_devices_per_image,
-                    export_battery_overview=_bool_from_form(form, "export_battery_overview"),
-                    export_fleet_trend=_bool_from_form(form, "export_fleet_trend"),
+                    export_battery_overview=(
+                        _bool_from_form(form, "export_battery_overview")
+                        if "export_battery_overview" in form
+                        else config.usb_otg.export_battery_overview
+                    ),
+                    export_fleet_trend=(
+                        _bool_from_form(form, "export_fleet_trend")
+                        if "export_fleet_trend" in form
+                        else config.usb_otg.export_fleet_trend
+                    ),
                     fleet_trend_metrics=(
                         tuple(form.get("fleet_trend_metrics", []))
                         if "fleet_trend_metrics" in form

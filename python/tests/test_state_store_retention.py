@@ -12,6 +12,7 @@ from bm_gateway.state_store import (
     fetch_archive_history,
     fetch_daily_history,
     fetch_degradation_report,
+    fetch_monthly_history,
     fetch_recent_history,
     fetch_storage_summary,
     fetch_yearly_history,
@@ -26,7 +27,18 @@ from bm_gateway.state_store import (
 )
 
 
-def _snapshot(ts: str) -> GatewaySnapshot:
+def _snapshot(
+    ts: str,
+    *,
+    connected: bool = True,
+    voltage: float = 12.73,
+    soc: int = 58,
+    temperature: float | None = None,
+    state: str | None = None,
+    error_code: str | None = None,
+    error_detail: str | None = None,
+    last_seen: str | None = None,
+) -> GatewaySnapshot:
     return GatewaySnapshot(
         generated_at=ts,
         gateway_name="BMGateway",
@@ -34,7 +46,7 @@ def _snapshot(ts: str) -> GatewaySnapshot:
         mqtt_enabled=True,
         mqtt_connected=False,
         devices_total=1,
-        devices_online=1,
+        devices_online=1 if connected else 0,
         poll_interval_seconds=15,
         devices=[
             DeviceReading(
@@ -43,15 +55,15 @@ def _snapshot(ts: str) -> GatewaySnapshot:
                 name="BM200 House",
                 mac="AA:BB:CC:DD:EE:01",
                 enabled=True,
-                connected=True,
-                voltage=12.73,
-                soc=58,
-                temperature=None,
+                connected=connected,
+                voltage=voltage,
+                soc=soc,
+                temperature=temperature,
                 rssi=None,
-                state="normal",
-                error_code=None,
-                error_detail=None,
-                last_seen=ts,
+                state=state or ("normal" if connected else "error"),
+                error_code=error_code,
+                error_detail=error_detail,
+                last_seen=ts if last_seen is None else last_seen,
                 adapter="hci0",
                 driver="bm200",
             )
@@ -80,6 +92,80 @@ def test_persist_snapshot_uses_device_samples_as_canonical_raw_store(tmp_path: P
         fetch_recent_history(database_path, device_id="bm200_house", limit=1)[0]["sample_source"]
         == "live"
     )
+
+
+def test_persist_snapshot_does_not_double_count_duplicate_canonical_sample(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    snapshot = _snapshot("2024-01-01T00:00:00+00:00")
+
+    persist_snapshot(database_path, snapshot)
+    persist_snapshot(database_path, snapshot)
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=10)
+    connection = sqlite3.connect(database_path)
+    try:
+        sample_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
+    finally:
+        connection.close()
+
+    assert sample_count == (1,)
+    assert daily[0]["samples"] == 1
+    assert daily[0]["avg_voltage"] == 12.73
+
+
+def test_persist_snapshot_rolls_up_error_attempts_by_sample_day(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T23:55:00+00:00"))
+
+    persist_snapshot(
+        database_path,
+        _snapshot(
+            "2024-01-02T00:05:00+00:00",
+            connected=False,
+            voltage=0.0,
+            soc=0,
+            error_code="timeout",
+            error_detail="Device not found",
+            last_seen="2024-01-01T23:55:00+00:00",
+        ),
+    )
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=10)
+
+    assert daily[0]["day"] == "2024-01-02"
+    assert daily[0]["samples"] == 0
+    assert daily[0]["error_count"] == 1
+    assert daily[1]["day"] == "2024-01-01"
+    assert daily[1]["samples"] == 1
+    assert daily[1]["error_count"] == 0
+
+
+def test_persist_snapshot_averages_temperature_over_non_null_values(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    persist_snapshot(
+        database_path,
+        _snapshot("2024-01-01T00:00:00+00:00", temperature=None),
+    )
+    persist_snapshot(
+        database_path,
+        _snapshot("2024-01-01T00:05:00+00:00", temperature=20.0),
+    )
+    persist_snapshot(
+        database_path,
+        _snapshot("2024-01-01T00:10:00+00:00", temperature=22.0),
+    )
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=10)
+
+    assert daily[0]["samples"] == 3
+    assert daily[0]["avg_temperature"] == 21.0
 
 
 def test_prune_history_removes_old_raw_rows_and_rebuilds_daily_rollups(
@@ -559,6 +645,73 @@ def test_fetch_yearly_history_uses_archive_samples_after_import(tmp_path: Path) 
     ]
 
 
+def test_monthly_and_yearly_history_ignore_days_without_soc(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.6,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+            {
+                "ts": "2024-01-01T00:02:00+00:00",
+                "voltage": 12.8,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+        ],
+    )
+    persist_snapshot(database_path, _snapshot("2024-01-02T00:00:00+00:00", soc=80))
+
+    monthly = fetch_monthly_history(database_path, device_id="bm200_house", limit=5)
+    yearly = fetch_yearly_history(database_path, device_id="bm200_house", limit=5)
+
+    assert monthly[0]["samples"] == 3
+    assert monthly[0]["avg_soc"] == 80.0
+    assert yearly[0]["samples"] == 3
+    assert yearly[0]["avg_soc"] == 80.0
+
+
+def test_monthly_and_yearly_history_return_null_soc_when_no_days_have_soc(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.6,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            }
+        ],
+    )
+
+    monthly = fetch_monthly_history(database_path, device_id="bm200_house", limit=5)
+    yearly = fetch_yearly_history(database_path, device_id="bm200_house", limit=5)
+
+    assert monthly[0]["avg_soc"] is None
+    assert yearly[0]["avg_soc"] is None
+
+
 def test_fetch_yearly_history_uses_sample_weighted_averages(tmp_path: Path) -> None:
     database_path = tmp_path / "gateway.db"
     connection = sqlite3.connect(database_path)
@@ -1010,6 +1163,163 @@ def test_rebuild_daily_rollups_repairs_error_polluted_rollups(tmp_path: Path) ->
             "last_seen": "2024-01-01T00:05:00+00:00",
         }
     ]
+
+
+def test_history_readers_do_not_migrate_legacy_raw_rows(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute(
+            """
+            CREATE TABLE device_readings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                snapshot_generated_at TEXT NOT NULL,
+                device_id TEXT NOT NULL,
+                device_type TEXT NOT NULL,
+                name TEXT NOT NULL,
+                mac TEXT NOT NULL,
+                enabled INTEGER NOT NULL,
+                connected INTEGER NOT NULL,
+                voltage REAL NOT NULL,
+                soc INTEGER NOT NULL,
+                temperature REAL,
+                rssi INTEGER,
+                state TEXT NOT NULL,
+                error_code TEXT,
+                error_detail TEXT,
+                last_seen TEXT NOT NULL,
+                adapter TEXT NOT NULL,
+                driver TEXT NOT NULL
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO device_readings (
+                snapshot_generated_at,
+                device_id,
+                device_type,
+                name,
+                mac,
+                enabled,
+                connected,
+                voltage,
+                soc,
+                temperature,
+                rssi,
+                state,
+                error_code,
+                error_detail,
+                last_seen,
+                adapter,
+                driver
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "2024-01-01T00:00:00+00:00",
+                "bm200_house",
+                "bm200",
+                "BM200 House",
+                "AA:BB:CC:DD:EE:01",
+                1,
+                1,
+                12.73,
+                58,
+                None,
+                None,
+                "normal",
+                None,
+                None,
+                "2024-01-01T00:00:00+00:00",
+                "hci0",
+                "bm200",
+            ),
+        )
+        connection.execute(
+            """
+            CREATE TABLE device_daily_rollups (
+                device_id TEXT NOT NULL,
+                day TEXT NOT NULL,
+                samples INTEGER NOT NULL,
+                min_voltage REAL NOT NULL,
+                max_voltage REAL NOT NULL,
+                avg_voltage REAL NOT NULL,
+                avg_soc REAL,
+                min_temperature REAL,
+                max_temperature REAL,
+                avg_temperature REAL,
+                error_count INTEGER NOT NULL,
+                last_seen TEXT NOT NULL,
+                PRIMARY KEY (device_id, day)
+            )
+            """
+        )
+        connection.execute(
+            """
+            INSERT INTO device_daily_rollups (
+                device_id,
+                day,
+                samples,
+                min_voltage,
+                max_voltage,
+                avg_voltage,
+                avg_soc,
+                min_temperature,
+                max_temperature,
+                avg_temperature,
+                error_count,
+                last_seen
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "bm200_house",
+                "2024-01-01",
+                1,
+                12.73,
+                12.73,
+                12.73,
+                58.0,
+                None,
+                None,
+                None,
+                0,
+                "2024-01-01T00:00:00+00:00",
+            ),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    rows = fetch_daily_history(database_path, device_id="bm200_house", limit=5)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        sample_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
+        migration_flag = connection.execute(
+            "SELECT value FROM state_store_metadata WHERE key = ?",
+            ("legacy_history_imported_to_device_samples",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert rows[0]["samples"] == 1
+    assert sample_count == (0,)
+    assert migration_flag is None
+
+    rebuild_daily_rollups(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        sample_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
+        migration_flag = connection.execute(
+            "SELECT value FROM state_store_metadata WHERE key = ?",
+            ("legacy_history_imported_to_device_samples",),
+        ).fetchone()
+    finally:
+        connection.close()
+
+    assert sample_count == (1,)
+    assert migration_flag == ("1",)
 
 
 def test_import_archive_history_is_idempotent_and_queryable(tmp_path: Path) -> None:

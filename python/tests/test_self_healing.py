@@ -6,6 +6,7 @@ from pathlib import Path
 from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway.config import load_config
 from bm_gateway.self_healing import (
+    default_connectivity_checker,
     default_schedule_reboot,
     default_wifi_reconnect,
     evaluate_self_healing,
@@ -67,7 +68,7 @@ def test_self_healing_reconnects_wifi_before_rebooting() -> None:
     reconnect_calls: list[str] = []
     reboot_calls = 0
 
-    def _offline(_host: str) -> bool:
+    def _offline(_host: str, _interface: str) -> bool:
         return False
 
     def _reconnect(interface: str) -> bool:
@@ -123,18 +124,41 @@ def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
         config=config,
         state=state,
         now_monotonic=10.0,
-        connectivity_checker=lambda _host: False,
+        connectivity_checker=lambda _host, _interface: False,
     )
     restored = evaluate_self_healing(
         config=config,
         state=state,
         now_monotonic=30.0,
-        connectivity_checker=lambda _host: True,
+        connectivity_checker=lambda _host, _interface: True,
     )
 
     assert [event.action for event in lost] == ["wifi_connectivity_lost"]
     assert [event.action for event in restored] == ["wifi_connectivity_restored"]
     assert state.wifi_outage_started_monotonic is None
+
+
+def test_default_connectivity_checker_checks_configured_interface(
+    monkeypatch: MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def _which(command: str) -> str | None:
+        return "/usr/bin/ping" if command == "ping" else None
+
+    def _run(command: list[str], **_kwargs: object) -> object:
+        captured["command"] = command
+
+        class _Completed:
+            returncode = 0
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.self_healing.shutil.which", _which)
+    monkeypatch.setattr("bm_gateway.self_healing.subprocess.run", _run)
+
+    assert default_connectivity_checker("1.1.1.1", "wlan0") is True
+    assert captured["command"] == ["ping", "-c", "1", "-W", "3", "-I", "wlan0", "1.1.1.1"]
 
 
 def test_default_wifi_reconnect_prefers_networkmanager(monkeypatch: MonkeyPatch) -> None:

@@ -2773,6 +2773,16 @@ def test_render_settings_html_disables_wifi_recovery_when_watchdog_is_disabled()
     assert "dependentFields.disabled = !watchdogToggle.checked" in html
 
 
+def test_render_settings_html_suppresses_wifi_recovery_actions_when_watchdog_disabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "Wi-Fi reconnect" in html
+    assert "Wi-Fi reboot" in html
+    assert "After 5 minutes" not in html
+    assert "After 15 minutes" not in html
+
+
 def test_render_settings_html_enables_wifi_recovery_when_watchdog_is_enabled() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(
@@ -3395,8 +3405,9 @@ def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() ->
     assert "Zero USB Plug" in html
 
 
-def test_render_settings_html_disables_usb_otg_controls_without_frame_renderer_support() -> None:
+def test_render_settings_html_allows_disabling_usb_otg_when_frame_renderer_unsupported() -> None:
     config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, usb_otg=replace(config.usb_otg, enabled=True))
     html = render_settings_html(
         config=config,
         snapshot={},
@@ -3412,7 +3423,13 @@ def test_render_settings_html_disables_usb_otg_controls_without_frame_renderer_s
     assert "Not supported" in html
     assert '<fieldset disabled aria-describedby="usb-otg-hardware-warning">' in html
     assert 'name="usb_otg_enabled"' in html
-    assert "Save USB OTG settings" not in html
+    checkbox_name_index = html.index('name="usb_otg_enabled"')
+    checkbox_start_index = html.rfind("<input", 0, checkbox_name_index)
+    checkbox_end_index = html.find(">", checkbox_name_index)
+    checkbox_markup = html[checkbox_start_index:checkbox_end_index]
+    assert "disabled" not in checkbox_markup
+    assert checkbox_name_index < html.index("<fieldset disabled aria-describedby")
+    assert "Save USB OTG settings" in html
     assert "Export Frame Images" not in html
     assert "Refresh USB OTG Drive" not in html
 
@@ -4878,6 +4895,49 @@ def test_chart_points_include_daily_temperature_rollups() -> None:
             "series_color": "#4f8df7",
         }
     ]
+
+
+def test_fleet_chart_points_use_compact_raw_history_limit(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from bm_gateway import web_pages
+
+    raw_limits: list[int] = []
+
+    def fake_recent_history(
+        _database_path: Path,
+        *,
+        device_id: str,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        raw_limits.append(limit)
+        return [
+            {
+                "ts": "2026-04-19T10:05:00+02:00",
+                "voltage": 13.32,
+                "soc": 92,
+                "temperature": 17.2,
+                "error_code": None,
+            }
+        ]
+
+    monkeypatch.setattr(web_pages, "fetch_recent_history", fake_recent_history)
+    monkeypatch.setattr(
+        web_pages,
+        "fetch_daily_history",
+        lambda _database_path, *, device_id, limit: [],
+    )
+
+    points, legend = web_pages._fleet_chart_points(
+        database_path=tmp_path / "gateway.db",
+        devices=[{"id": "bm200_house", "name": "House"}],
+    )
+
+    assert raw_limits == [web_pages.FLEET_CHART_HISTORY_LIMIT]
+    assert web_pages.FLEET_CHART_HISTORY_LIMIT < web_pages.RECENT_CHART_HISTORY_LIMIT
+    assert legend == [("House", "#17c45a")]
+    assert points[0]["series_id"] == "bm200_house"
 
 
 def test_render_device_html_escapes_history_values_and_renders_chart() -> None:

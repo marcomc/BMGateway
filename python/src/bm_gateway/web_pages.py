@@ -77,6 +77,7 @@ VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
 )
 
 RECENT_CHART_HISTORY_LIMIT = 6000
+FLEET_CHART_HISTORY_LIMIT = 1000
 
 
 def _device_color_key(device: dict[str, object], *, fallback_index: int = 0) -> str:
@@ -1676,6 +1677,7 @@ def _fleet_chart_points(
     *,
     database_path: Path,
     devices: list[dict[str, object]],
+    raw_limit: int = FLEET_CHART_HISTORY_LIMIT,
 ) -> tuple[list[dict[str, object]], list[tuple[str, str]]]:
     points: list[dict[str, object]] = []
     legend: list[tuple[str, str]] = []
@@ -1691,7 +1693,7 @@ def _fleet_chart_points(
                 fetch_recent_history(
                     database_path,
                     device_id=device_id,
-                    limit=RECENT_CHART_HISTORY_LIMIT,
+                    limit=raw_limit,
                 ),
                 fetch_daily_history(database_path, device_id=device_id, limit=730),
                 series=device_name,

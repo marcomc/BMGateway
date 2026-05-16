@@ -99,6 +99,26 @@ def test_install_service_script_preserves_archive_sync_preferences() -> None:
     assert 'archive_sync.get("bm300_max_pages_per_sync", 3)' in payload
 
 
+def test_install_service_script_preserves_runtime_recovery_preferences() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+
+    assert 'bluetooth.get("live_hard_timeout_seconds", 0)' in payload
+    assert 'self_healing = dict(data.get("self_healing", {}))' in payload
+    assert "[self_healing]" in payload
+    assert "self_healing.get('periodic_reboot_enabled', False)" in payload
+    assert 'self_healing.get("periodic_reboot_hours", 24)' in payload
+    assert "self_healing.get('wifi_watchdog_enabled', False)" in payload
+    assert 'self_healing.get("wifi_interface", "wlan0")' in payload
+    assert 'self_healing.get("connectivity_check_host", "1.1.1.1")' in payload
+    assert "self_healing.get('wifi_reconnect_enabled', True)" in payload
+    assert 'self_healing.get("wifi_reconnect_after_minutes", 5)' in payload
+    assert "self_healing.get('wifi_reboot_enabled', False)" in payload
+    assert 'self_healing.get("wifi_reboot_after_minutes", 15)' in payload
+
+
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
@@ -133,9 +153,10 @@ def test_install_service_script_keeps_runtime_sudoers_policy_when_web_disabled()
     assert "/usr/bin/systemctl reboot" in payload
     assert "/usr/bin/systemctl restart NetworkManager.service" in payload
     assert "/usr/bin/nmcli device connect *" in payload
-    assert (
-        'if [[ "${install_usb_otg_tools}" -eq 1 ]] && [[ "${enable_web}" -eq 1 ]]; then' in payload
-    )
+    assert 'if [[ "${install_usb_otg_tools}" -eq 1 ]]; then' in payload
+    assert "${usb_otg_drive_helper_path} setup *" in payload
+    assert "${usb_otg_drive_helper_path} refresh *" in payload
+    assert 'if [[ "${enable_web}" -eq 1 ]]; then' in payload
     assert "Installed service action sudoers policy" in payload
 
 

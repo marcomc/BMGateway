@@ -53,6 +53,15 @@ At the start of every new AI agent chat for this repository, read:
   descriptions, errors, generated frame output, or other visible interface
   strings, wire the text through the localization system and update the locale
   catalogs in the same change.
+- When adding or changing config keys, keep load, write, schema, examples,
+  installer rewrite paths, docs, and tests in sync in the same change.
+- When adding derived persistence such as rollups or summaries, rebuild or
+  validate it from the canonical source rows and timestamps rather than
+  incrementing a second source of truth independently.
+- When hardware or support checks disable settings fields, keep disable and
+  teardown paths available and preserve disabled-field values on submit.
+- For interface-specific recovery or diagnostics, probe through the configured
+  interface or adapter instead of relying on global host reachability.
 
 ## Live Validation Rules
 

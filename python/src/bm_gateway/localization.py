@@ -104,6 +104,10 @@ _DYNAMIC_TRANSLATION_SUFFIXES: Final = (
     (" Device", "Device"),
     (" History", "History"),
 )
+_DYNAMIC_TRANSLATION_TEMPLATES: Final = (
+    (re.compile(r"^Every (?P<hours>\d+) hours$"), "Every {hours} hours"),
+    (re.compile(r"^After (?P<minutes>\d+) minutes$"), "After {minutes} minutes"),
+)
 _IGNORED_TEXT_PATTERNS: Final = (
     re.compile(r"^/[-A-Za-z0-9._:/?=&%#<>]+$"),
     re.compile(r"^[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)+$"),
@@ -174,7 +178,13 @@ class Translation:
     def gettext(self, text: str) -> str:
         if self.locale.code == "en":
             return text
-        return self.catalog.get(text, text)
+        translated = self.catalog.get(text)
+        if translated is not None:
+            return translated
+        template_translation = _dynamic_template_translation(text, self.catalog)
+        if template_translation is not None:
+            return template_translation
+        return text
 
 
 def supported_locale_codes() -> tuple[str, ...]:
@@ -255,6 +265,7 @@ def missing_translations_for_html(document: str, locale: str | None) -> tuple[st
         if _is_translation_candidate(value)
         and value not in translation.catalog
         and not _has_translated_dynamic_affix(value, translation.catalog)
+        and not _has_translated_dynamic_template(value, translation.catalog)
     }
     return tuple(sorted(missing))
 
@@ -318,6 +329,18 @@ def _has_translated_dynamic_affix(value: str, catalog: dict[str, str]) -> bool:
     ) or any(
         value.endswith(suffix) and key in catalog for suffix, key in _DYNAMIC_TRANSLATION_SUFFIXES
     )
+
+
+def _dynamic_template_translation(value: str, catalog: dict[str, str]) -> str | None:
+    for pattern, key in _DYNAMIC_TRANSLATION_TEMPLATES:
+        match = pattern.fullmatch(value)
+        if match is not None and key in catalog:
+            return catalog[key].format(**match.groupdict())
+    return None
+
+
+def _has_translated_dynamic_template(value: str, catalog: dict[str, str]) -> bool:
+    return _dynamic_template_translation(value, catalog) is not None
 
 
 def _translated_dynamic_text(value: str, catalog: dict[str, str]) -> str:

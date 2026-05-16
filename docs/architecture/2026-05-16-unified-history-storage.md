@@ -1,5 +1,13 @@
 # Unified History Storage
 
+## Contents
+
+- [Purpose](#purpose)
+- [Current Flow](#current-flow)
+- [Tables](#tables)
+- [Retention](#retention)
+- [Import Failure Behavior](#import-failure-behavior)
+
 ## Purpose
 
 Live samples and onboard archive imports share one canonical SQLite table:

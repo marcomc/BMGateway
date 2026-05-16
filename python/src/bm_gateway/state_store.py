@@ -6,7 +6,7 @@ import json
 import sqlite3
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from typing import Callable, cast
+from typing import Any, Callable, cast
 
 from .models import GatewaySnapshot
 
@@ -17,6 +17,8 @@ LIVE_SAMPLE_PROFILE = "live"
 ARCHIVE_SAMPLE_SOURCE = "device_archive"
 LIVE_SAMPLE_PRIORITY = 2
 ARCHIVE_SAMPLE_PRIORITY = 1
+LEGACY_HISTORY_MIGRATION_KEY = "legacy_history_imported_to_device_samples"
+_SCHEMA_READY_PATHS: set[Path] = set()
 
 
 def write_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
@@ -30,7 +32,7 @@ def load_snapshot(path: Path) -> dict[str, object]:
 
 
 def fetch_latest_successful_seen(path: Path) -> dict[str, str]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         rows = connection.execute(
             """
@@ -53,9 +55,20 @@ def fetch_latest_successful_seen(path: Path) -> dict[str, str]:
     return latest
 
 
-def _connect_database(path: Path) -> sqlite3.Connection:
+def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Connection:
+    path = path.expanduser()
     path.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(path)
+    schema_key = path.resolve(strict=False)
+    connection = sqlite3.connect(path, timeout=30)
+    connection.execute("PRAGMA busy_timeout = 30000")
+    if migrate_legacy:
+        connection.execute("PRAGMA journal_mode = WAL")
+    if schema_key in _SCHEMA_READY_PATHS:
+        if migrate_legacy:
+            if _migrate_legacy_history_to_device_samples(connection):
+                _rebuild_daily_rollups(connection)
+            connection.commit()
+        return connection
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS gateway_snapshots (
@@ -193,6 +206,14 @@ def _connect_database(path: Path) -> sqlite3.Connection:
     )
     connection.execute(
         """
+        CREATE TABLE IF NOT EXISTS state_store_metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_device_readings_device_ts
         ON device_readings (device_id, snapshot_generated_at DESC)
         """
@@ -250,9 +271,10 @@ def _connect_database(path: Path) -> sqlite3.Connection:
             connection.execute(
                 f"ALTER TABLE device_archive_readings ADD COLUMN {column_name} {definition}"
             )
-    if _migrate_legacy_history_to_device_samples(connection):
+    if migrate_legacy and _migrate_legacy_history_to_device_samples(connection):
         _rebuild_daily_rollups(connection)
     connection.commit()
+    _SCHEMA_READY_PATHS.add(schema_key)
     return connection
 
 
@@ -322,6 +344,13 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
 
 
 def _migrate_legacy_history_to_device_samples(connection: sqlite3.Connection) -> bool:
+    row = connection.execute(
+        "SELECT value FROM state_store_metadata WHERE key = ?",
+        (LEGACY_HISTORY_MIGRATION_KEY,),
+    ).fetchone()
+    if row is not None and row[0] == "1":
+        return False
+
     changes_before = connection.total_changes
     connection.execute(
         """
@@ -447,7 +476,16 @@ def _migrate_legacy_history_to_device_samples(connection: sqlite3.Connection) ->
         FROM device_archive_readings
         """
     )
-    return connection.total_changes > changes_before
+    migrated = connection.total_changes > changes_before
+    connection.execute(
+        """
+        INSERT INTO state_store_metadata (key, value)
+        VALUES (?, '1')
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """,
+        (LEGACY_HISTORY_MIGRATION_KEY,),
+    )
+    return migrated
 
 
 def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
@@ -477,6 +515,7 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                 snapshot.poll_interval_seconds,
             ),
         )
+        affected_device_days: set[tuple[str, str]] = set()
         for device in snapshot.devices:
             connection.execute(
                 """
@@ -543,101 +582,13 @@ def persist_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
                     device.driver,
                 ),
             )
-            day = device.last_seen[:10]
-            if device.error_code is None and device.voltage > 0:
-                connection.execute(
-                    """
-                    INSERT INTO device_daily_rollups (
-                        device_id,
-                        day,
-                        samples,
-                        min_voltage,
-                        max_voltage,
-                        avg_voltage,
-                        avg_soc,
-                        min_temperature,
-                        max_temperature,
-                        avg_temperature,
-                        error_count,
-                        last_seen
-                    ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, 0, ?)
-                    ON CONFLICT(device_id, day) DO UPDATE SET
-                        samples = samples + 1,
-                        min_voltage = CASE
-                            WHEN samples = 0 THEN excluded.min_voltage
-                            ELSE MIN(min_voltage, excluded.min_voltage)
-                        END,
-                        max_voltage = CASE
-                            WHEN samples = 0 THEN excluded.max_voltage
-                            ELSE MAX(max_voltage, excluded.max_voltage)
-                        END,
-                        avg_voltage = CASE
-                            WHEN samples = 0 THEN excluded.avg_voltage
-                            ELSE ((avg_voltage * samples) + excluded.avg_voltage) / (samples + 1)
-                        END,
-                        avg_soc = CASE
-                            WHEN samples = 0 THEN excluded.avg_soc
-                            ELSE ((avg_soc * samples) + excluded.avg_soc) / (samples + 1)
-                        END,
-                        min_temperature = CASE
-                            WHEN excluded.min_temperature IS NULL THEN min_temperature
-                            WHEN min_temperature IS NULL THEN excluded.min_temperature
-                            ELSE MIN(min_temperature, excluded.min_temperature)
-                        END,
-                        max_temperature = CASE
-                            WHEN excluded.max_temperature IS NULL THEN max_temperature
-                            WHEN max_temperature IS NULL THEN excluded.max_temperature
-                            ELSE MAX(max_temperature, excluded.max_temperature)
-                        END,
-                        avg_temperature = CASE
-                            WHEN excluded.avg_temperature IS NULL THEN avg_temperature
-                            WHEN avg_temperature IS NULL THEN excluded.avg_temperature
-                            ELSE (
-                                (avg_temperature * samples) + excluded.avg_temperature
-                            ) / (samples + 1)
-                        END,
-                        last_seen = excluded.last_seen
-                    """,
-                    (
-                        device.id,
-                        day,
-                        device.voltage,
-                        device.voltage,
-                        device.voltage,
-                        float(device.soc),
-                        device.temperature,
-                        device.temperature,
-                        device.temperature,
-                        device.last_seen,
-                    ),
-                )
-            else:
-                connection.execute(
-                    """
-                    INSERT INTO device_daily_rollups (
-                        device_id,
-                        day,
-                        samples,
-                        min_voltage,
-                        max_voltage,
-                        avg_voltage,
-                        avg_soc,
-                        min_temperature,
-                        max_temperature,
-                        avg_temperature,
-                        error_count,
-                        last_seen
-                    ) VALUES (?, ?, 0, 0.0, 0.0, 0.0, 0.0, NULL, NULL, NULL, 1, ?)
-                    ON CONFLICT(device_id, day) DO UPDATE SET
-                        error_count = error_count + 1,
-                        last_seen = excluded.last_seen
-                    """,
-                    (
-                        device.id,
-                        day,
-                        device.last_seen,
-                    ),
-                )
+            sample_day = snapshot.generated_at[:10]
+            if sample_day:
+                affected_device_days.add((device.id, sample_day))
+            last_seen_day = device.last_seen[:10]
+            if last_seen_day:
+                affected_device_days.add((device.id, last_seen_day))
+        _rebuild_daily_rollups_for_device_days(connection, affected_device_days)
         connection.commit()
     finally:
         connection.close()
@@ -687,6 +638,64 @@ def _rebuild_daily_rollups(connection: sqlite3.Connection) -> None:
         """
     ).fetchall()
     connection.execute("DELETE FROM device_daily_rollups")
+    _insert_daily_rollup_rows(connection, rows)
+
+
+def _rebuild_daily_rollups_for_device_days(
+    connection: sqlite3.Connection,
+    device_days: set[tuple[str, str]],
+) -> None:
+    for device_id, day in sorted(device_days):
+        connection.execute(
+            "DELETE FROM device_daily_rollups WHERE device_id = ? AND day = ?",
+            (device_id, day),
+        )
+        rows = connection.execute(
+            """
+            WITH ranked_samples AS (
+                SELECT
+                    *,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY device_id, sample_ts
+                        ORDER BY source_priority DESC, imported_at DESC, id DESC
+                    ) AS row_rank
+                FROM device_samples
+                WHERE device_id = ?
+                  AND substr(sample_ts, 1, 10) = ?
+            )
+            SELECT
+                device_id,
+                substr(sample_ts, 1, 10) AS day,
+                SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END)
+                    AS samples,
+                MIN(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                    AS min_voltage,
+                MAX(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                    AS max_voltage,
+                AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                    AS avg_voltage,
+                AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN soc END) AS avg_soc,
+                MIN(CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END)
+                    AS min_temperature,
+                MAX(CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END)
+                    AS max_temperature,
+                AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END)
+                    AS avg_temperature,
+                SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
+                MAX(last_seen) AS last_seen
+            FROM ranked_samples
+            WHERE row_rank = 1
+            GROUP BY device_id, day
+            """,
+            (device_id, day),
+        ).fetchall()
+        _insert_daily_rollup_rows(connection, rows)
+
+
+def _insert_daily_rollup_rows(
+    connection: sqlite3.Connection,
+    rows: list[tuple[Any, ...]],
+) -> None:
     connection.executemany(
         """
         INSERT INTO device_daily_rollups (
@@ -763,7 +772,7 @@ def prune_history(path: Path, *, raw_retention_days: int, daily_retention_days: 
 
 
 def fetch_counts(path: Path) -> dict[str, int]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         gateway_count = connection.execute("SELECT COUNT(*) FROM gateway_snapshots").fetchone()
         sample_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
@@ -790,7 +799,7 @@ def fetch_counts(path: Path) -> dict[str, int]:
 
 
 def fetch_storage_summary(path: Path) -> dict[str, object]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         raw_rows = connection.execute(
             """
@@ -896,7 +905,7 @@ def fetch_storage_summary(path: Path) -> dict[str, object]:
 
 
 def history_device_id_exists(path: Path, device_id: str) -> bool:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         for table_name in (
             "device_samples",
@@ -971,7 +980,7 @@ def fetch_recent_history(
     device_id: str,
     limit: int = 200,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         buffered_limit = max(limit * 4, limit + 64)
         sample_rows = connection.execute(
@@ -1342,7 +1351,7 @@ def fetch_archive_history(
     device_id: str,
     limit: int = 2000,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         rows = connection.execute(
             """
@@ -1394,7 +1403,7 @@ def fetch_archive_history(
 
 
 def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list[dict[str, object]]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         rows = connection.execute(
             """
@@ -1435,7 +1444,7 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
 
 
 def latest_history_timestamp(path: Path, *, device_id: str) -> str | None:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         row = connection.execute(
             """
@@ -1455,7 +1464,7 @@ def latest_history_timestamp(path: Path, *, device_id: str) -> str | None:
 
 
 def latest_live_history_timestamp(path: Path, *, device_id: str) -> str | None:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         row = connection.execute(
             """
@@ -1481,7 +1490,7 @@ def latest_archive_history_timestamp(
     device_id: str,
     profile: str | None = None,
 ) -> str | None:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         if profile is None:
             row = connection.execute(
@@ -1517,7 +1526,7 @@ def fetch_monthly_history(
     device_id: str,
     limit: int = 24,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         rows = connection.execute(
             """
@@ -1527,7 +1536,12 @@ def fetch_monthly_history(
                 MIN(min_voltage),
                 MAX(max_voltage),
                 COALESCE(SUM(avg_voltage * samples) / NULLIF(SUM(samples), 0), 0.0),
-                COALESCE(SUM(avg_soc * samples) / NULLIF(SUM(samples), 0), 0.0),
+                CASE
+                    WHEN SUM(CASE WHEN avg_soc IS NOT NULL THEN samples ELSE 0 END) = 0
+                    THEN NULL
+                    ELSE SUM(avg_soc * samples)
+                        / SUM(CASE WHEN avg_soc IS NOT NULL THEN samples ELSE 0 END)
+                END,
                 CASE
                     WHEN SUM(CASE WHEN avg_temperature IS NOT NULL THEN samples ELSE 0 END) = 0
                     THEN NULL
@@ -1569,7 +1583,7 @@ def fetch_yearly_history(
     device_id: str,
     limit: int = 10,
 ) -> list[dict[str, object]]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         rows = connection.execute(
             """
@@ -1579,7 +1593,12 @@ def fetch_yearly_history(
                 MIN(min_voltage),
                 MAX(max_voltage),
                 COALESCE(SUM(avg_voltage * samples) / NULLIF(SUM(samples), 0), 0.0),
-                COALESCE(SUM(avg_soc * samples) / NULLIF(SUM(samples), 0), 0.0),
+                CASE
+                    WHEN SUM(CASE WHEN avg_soc IS NOT NULL THEN samples ELSE 0 END) = 0
+                    THEN NULL
+                    ELSE SUM(avg_soc * samples)
+                        / SUM(CASE WHEN avg_soc IS NOT NULL THEN samples ELSE 0 END)
+                END,
                 CASE
                     WHEN SUM(CASE WHEN avg_temperature IS NOT NULL THEN samples ELSE 0 END) = 0
                     THEN NULL
@@ -1618,7 +1637,7 @@ def fetch_yearly_history(
 def _load_daily_rows_for_analytics(
     path: Path, *, device_id: str
 ) -> list[tuple[date, float, float | None, int, int]]:
-    connection = _connect_database(path)
+    connection = _connect_database(path, migrate_legacy=False)
     try:
         rows = connection.execute(
             """

@@ -10,7 +10,7 @@ from typing import Callable
 
 from .config import AppConfig
 
-ConnectivityChecker = Callable[[str], bool]
+ConnectivityChecker = Callable[[str, str], bool]
 ReconnectAction = Callable[[str], bool]
 RebootAction = Callable[[], None]
 
@@ -37,11 +37,15 @@ def new_self_healing_state(now_monotonic: float | None = None) -> SelfHealingSta
     )
 
 
-def default_connectivity_checker(host: str) -> bool:
+def default_connectivity_checker(host: str, interface: str) -> bool:
     if shutil.which("ping") is None:
         return True
+    command = ["ping", "-c", "1", "-W", "3"]
+    if interface.strip():
+        command.extend(["-I", interface])
+    command.append(host)
     completed = subprocess.run(
-        ["ping", "-c", "1", "-W", "3", host],
+        command,
         check=False,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
@@ -122,7 +126,7 @@ def evaluate_self_healing(
         state.wifi_reboot_requested = False
         return events
 
-    if connectivity_checker(healing.connectivity_check_host):
+    if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
         if state.wifi_outage_started_monotonic is not None:
             events.append(
                 SelfHealingEvent(
