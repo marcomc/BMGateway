@@ -1,6 +1,6 @@
 # Optional Live BLE Monitoring Proposal
 
-## Table of Contents
+## Contents
 
 - [Summary](#summary)
 - [Observed Behavior](#observed-behavior)

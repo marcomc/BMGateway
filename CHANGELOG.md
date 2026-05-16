@@ -4,7 +4,55 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
+## [0.3.0] - Unreachable Device Status Split and Raspberry Pi Compatibility and Self-Healing Improvements
+
+### Changed
+
+- Added a documentation maintenance guide, a canonical application-surface map
+  for runtime, CLI, web UI, Home Assistant, and Raspberry Pi services, and
+  source-backed horizontal Mermaid flow diagrams in the main documentation
+  entry points, setup guides, web component guide, and history storage guide.
+- Added CSS browser-compatibility linting through `webhint`, wired into
+  `make check`, so Edge DevTools-style CSS compatibility findings are covered
+  by the maintainer quality gate.
+- Split unreachable device status into latest poll attempt and last successful
+  sample time, so Home and History cards no longer make failed scans look like
+  fresh successful readings.
+- Documented Raspberry Pi model compatibility for normal gateway operation,
+  USB gadget picture-frame export, and ARM NEON support, including the
+  ARMv6/BCM2835 boards that cannot run the local Chromium-based frame image
+  exporter.
+- Added Raspberry Pi NEON or ASIMD detection for USB OTG picture-frame export
+  so unsupported boards show a red Settings warning, disable the frame export
+  controls, and skip Chromium-based frame rendering before repeated export
+  failures occur.
+- Added optional runtime self-healing settings for scheduled Raspberry Pi
+  reboots, Wi-Fi connectivity watchdog checks, delayed Wi-Fi reconnect
+  attempts, and delayed reboot recovery when Wi-Fi stays unavailable.
+- Kept BM300 Pro/BM7 archive imports cumulative across sync windows and kept
+  Fleet Trend lines continuous when adjacent samples come from different
+  persisted sources.
+- Extended the default raw history retention to two years and applied the same
+  retention pruning to imported archive readings.
+- Unified live and archive history persistence into the canonical
+  `device_samples` table, with daily rollups rebuilt from retained samples and
+  `archive_import_batches` recording completed or failed onboard imports.
+- Fixed degradation comparison reports when retained archive-only days have no
+  SoC value, and hardened web action tests against startup races in the local
+  test server.
+
+### Fixed
+
+- Fixed upgraded legacy databases so history readers migrate existing
+  `device_readings` and `device_archive_readings` rows before querying the
+  canonical `device_samples` table.
+- Fixed long-running processes so replacing `gateway.db` no longer leaves the
+  schema cache pointing at a missing or empty database.
+- Fixed the self-healing settings UI so the new recovery labels are translated
+  across all supported locale catalogs.
+- Fixed Fleet Trend short-range charts so they load raw samples by time window
+  instead of by a fixed recent-row count after live and archive history were
+  unified in `device_samples`.
 
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 

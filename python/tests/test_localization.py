@@ -144,6 +144,52 @@ def test_gateway_alert_templates_are_translated_in_all_supported_locales() -> No
         assert missing == [], f"{locale.code} missing gateway alert translations: {missing}"
 
 
+def test_self_healing_labels_are_translated_in_all_supported_locales() -> None:
+    message_keys = (
+        "After 15 minutes",
+        "After 5 minutes",
+        "After {minutes} minutes",
+        "Attempts NetworkManager reconnect before considering a reboot.",
+        "Connectivity check host",
+        "Enable Wi-Fi connectivity watchdog",
+        "Enable Wi-Fi connectivity watchdog to edit these recovery options.",
+        "Enable scheduled Raspberry Pi reboot",
+        "Every 24 hours",
+        "Every {hours} hours",
+        (
+            "Monitor a known host and trigger configured recovery actions only after a "
+            "continuous outage."
+        ),
+        "Periodic reboot",
+        "Reboot Raspberry Pi if Wi-Fi stays unavailable",
+        "Reboot delay",
+        "Reboot interval",
+        "Reconnect delay",
+        "Save self-healing settings",
+        "Self-Healing",
+        "Set the periodic reboot interval in hours, from 1 to 48.",
+        "Set the wireless interface to reconnect, usually wlan0.",
+        "Try reconnecting Wi-Fi after an outage",
+        "Use a router, Home Assistant host, or stable IP that proves Wi-Fi works.",
+        "Use only when reconnect attempts are not enough for this location.",
+        "Use this as a coarse recovery cadence for unattended appliances.",
+        "Wait this many outage minutes before rebooting the Raspberry Pi.",
+        "Wait this many outage minutes before trying Wi-Fi reconnect.",
+        "Wi-Fi interface",
+        "Wi-Fi reboot",
+        "Wi-Fi reconnect",
+        "Wi-Fi watchdog",
+        "self-healing values must be numeric",
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        translation = translation_for(locale.code)
+        missing = [key for key in message_keys if translation.gettext(key) == key]
+        assert missing == [], f"{locale.code} missing self-healing translations: {missing}"
+
+
 def test_localize_html_sets_lang_dir_and_translates_text_nodes() -> None:
     localized = localize_html(
         '<!doctype html><html lang="en"><body><h1>Settings</h1>'
@@ -287,6 +333,8 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
     message_keys = (
         "Validation failed",
         "Validation failed: USB OTG settings values must be numeric",
+        "USB OTG picture-frame export is not supported on this Raspberry Pi because "
+        "Chromium requires ARM NEON or ASIMD support",
         "Device added. First poll started.",
         "Run completed",
         "Run failed",
@@ -311,6 +359,8 @@ def test_common_web_action_messages_are_translated_in_all_supported_locales() ->
         "Settings saved; USB OTG frame image export started",
         "USB OTG frame images exported",
         "USB OTG frame image export failed",
+        "USB OTG frame image export is not supported on this hardware because "
+        "Chromium requires ARM NEON or ASIMD support.",
         "Preparing USB OTG frame image export",
         "Rendered frame image",
         "Writing images to USB OTG drive",
@@ -544,6 +594,43 @@ def test_supported_locale_catalogs_warn_for_missing_rendered_page_text() -> None
             )
 
 
+def test_supported_locale_catalogs_warn_for_custom_self_healing_settings() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=True,
+            periodic_reboot_hours=12,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=6,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=18,
+        ),
+    )
+    english_html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+    assert "Every 12 hours" in english_html
+    assert "After 6 minutes" in english_html
+    assert "After 18 minutes" in english_html
+    dynamic_html = (
+        '<html lang="en"><body><p>Every 12 hours</p>'
+        "<p>After 6 minutes</p><p>After 18 minutes</p></body></html>"
+    )
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        missing = missing_translations_for_html(dynamic_html, locale.code)
+        assert "Every 12 hours" not in missing
+        assert "After 6 minutes" not in missing
+        assert "After 18 minutes" not in missing
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", LocalizationWarning)
+            localized_html = localize_html(dynamic_html, locale.code)
+        assert f'<html lang="{locale.code}"' in localized_html
+
+
 def _representative_english_pages() -> list[str]:
     config = load_config(Path("python/config/config.toml.example"))
     device = {
@@ -642,7 +729,7 @@ def _representative_english_pages() -> list[str]:
     ]
     legend = [("Battery Alpha", "#17c45a")]
     storage_summary: dict[str, object] = {
-        "counts": {"gateway_snapshots": 1, "device_readings": 1, "device_daily_rollups": 1},
+        "counts": {"gateway_snapshots": 1, "device_samples": 1, "device_daily_rollups": 1},
         "devices": [],
     }
     contract: dict[str, object] = {
@@ -673,6 +760,7 @@ def _representative_english_pages() -> list[str]:
             usb_otg_device_controller_detected=True,
             usb_otg_boot_mode_prepared=True,
             usb_otg_support_installed=True,
+            usb_otg_frame_renderer_supported=True,
         ),
         render_settings_html(
             config=config,
@@ -685,6 +773,7 @@ def _representative_english_pages() -> list[str]:
             usb_otg_device_controller_detected=True,
             usb_otg_boot_mode_prepared=True,
             usb_otg_support_installed=True,
+            usb_otg_frame_renderer_supported=True,
         ),
         render_history_html(
             device_id="battery_alpha",

@@ -699,9 +699,15 @@ details summary::-webkit-details-marker { display: none; }
   font-weight: 600;
   color: var(--text-secondary);
 }
+.history-device-current.unreachable {
+  color: var(--accent-red);
+}
 .history-device-card.selected .history-device-current {
   color: var(--card-accent);
   font-weight: 800;
+}
+.history-device-card.selected .history-device-current.unreachable {
+  color: var(--accent-red);
 }
 .history-device-card.selected .meta-name {
   color: var(--text-primary);
@@ -736,8 +742,6 @@ details summary::-webkit-details-marker { display: none; }
   overflow-y: hidden;
   scroll-snap-type: x proximity;
   scroll-padding-inline: var(--history-device-page-padding);
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
 }
 .history-device-scroller::-webkit-scrollbar {
   display: none;
@@ -962,8 +966,6 @@ details summary::-webkit-details-marker { display: none; }
   overflow-y: hidden;
   scroll-snap-type: x proximity;
   scroll-padding-inline: var(--overview-page-padding);
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
 }
 .home-overview-scroller::-webkit-scrollbar {
   display: none;
@@ -1328,6 +1330,12 @@ details summary::-webkit-details-marker { display: none; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.home-overview-last-seen {
+  margin-top: 0.2rem;
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--accent-red);
+}
 .battery-card-status {
   display: inline-flex;
   align-items: center;
@@ -1558,6 +1566,7 @@ details summary::-webkit-details-marker { display: none; }
   letter-spacing: 0.01em;
   text-align: center;
   white-space: nowrap;
+  -webkit-user-select: none;
   user-select: none;
   transition: color 140ms ease, transform 140ms ease;
 }
@@ -1679,6 +1688,19 @@ details summary::-webkit-details-marker { display: none; }
 .settings-control .inline-field-help {
   margin-top: 0.4rem;
 }
+.settings-dependent-fieldset {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+.settings-dependent-fieldset:disabled {
+  opacity: 0.48;
+}
+.settings-dependent-fieldset:disabled input,
+.settings-dependent-fieldset:disabled select,
+.settings-dependent-fieldset:disabled textarea {
+  cursor: not-allowed;
+}
 .primary-button,
 .secondary-button,
 .ghost-button {
@@ -1742,11 +1764,16 @@ details summary::-webkit-details-marker { display: none; }
   overflow-x: auto;
   overflow-y: hidden;
   padding-bottom: 0.1rem;
-  scrollbar-width: none;
-  -webkit-overflow-scrolling: touch;
 }
 .control-rail::-webkit-scrollbar {
   display: none;
+}
+@supports (scrollbar-width: none) {
+  .history-device-scroller,
+  .home-overview-scroller,
+  .control-rail {
+    scrollbar-width: none;
+  }
 }
 .control-segment button {
   flex: 0 0 auto;
@@ -1833,6 +1860,7 @@ details summary::-webkit-details-marker { display: none; }
 .chart-frame.is-pannable {
   cursor: grab;
   touch-action: none;
+  -webkit-user-select: none;
   user-select: none;
 }
 .chart-frame.is-panning {
@@ -1945,6 +1973,7 @@ details summary::-webkit-details-marker { display: none; }
   pointer-events: none;
   opacity: 0;
   transition: opacity 120ms ease;
+  -webkit-backdrop-filter: blur(14px);
   backdrop-filter: blur(14px);
 }
 .chart-tooltip.visible {
@@ -2068,7 +2097,11 @@ details summary::-webkit-details-marker { display: none; }
 .raw-readings-scroll {
   max-height: 24rem;
   overflow: auto;
-  scrollbar-gutter: stable;
+}
+@supports (scrollbar-gutter: stable) {
+  .raw-readings-scroll {
+    scrollbar-gutter: stable;
+  }
 }
 .raw-readings-table {
   min-width: max-content;
@@ -2239,6 +2272,7 @@ details summary::-webkit-details-marker { display: none; }
   z-index: 20;
   border-top: 1px solid var(--border-soft);
   background: var(--bg-nav);
+  -webkit-backdrop-filter: blur(12px);
   backdrop-filter: blur(12px);
   box-shadow: 0 -8px 24px rgba(17, 24, 39, 0.08);
 }

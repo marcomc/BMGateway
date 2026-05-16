@@ -71,6 +71,7 @@ def _build_fake_reading(device: Device, *, generated_at: str, adapter: str) -> D
         last_seen=generated_at,
         adapter=adapter,
         driver=device_driver_type(device.type),
+        last_attempt=generated_at,
     )
 
 
@@ -92,6 +93,7 @@ def _build_disabled_reading(device: Device, *, generated_at: str, adapter: str) 
         last_seen=generated_at,
         adapter=adapter,
         driver=device_driver_type(device.type),
+        last_attempt=generated_at,
     )
 
 
@@ -113,6 +115,7 @@ def _build_unsupported_reading(device: Device, *, generated_at: str, adapter: st
         last_seen=generated_at,
         adapter=adapter,
         driver=device_driver_type(device.type),
+        last_attempt=generated_at,
     )
 
 
@@ -137,6 +140,7 @@ def _build_error_reading(
     generated_at: str,
     adapter: str,
     error: Exception,
+    last_seen: str = "",
 ) -> DeviceReading:
     error_code, error_detail = _classify_live_error(error)
     state = "offline" if error_code == "device_not_found" else "error"
@@ -154,9 +158,10 @@ def _build_error_reading(
         state=state,
         error_code=error_code,
         error_detail=error_detail,
-        last_seen=generated_at,
+        last_seen=last_seen,
         adapter=adapter,
         driver=device_driver_type(device.type),
+        last_attempt=generated_at,
     )
 
 
@@ -287,10 +292,12 @@ def build_snapshot(
     bm200_reader: BM200Reader | None = None,
     bm300_reader: BM300Reader | None = None,
     state_dir: Path | None = None,
+    last_successful_seen: dict[str, str] | None = None,
 ) -> GatewaySnapshot:
     generated_at = _generated_at()
     adapter = _active_adapter(config)
     readings: list[DeviceReading] = []
+    previous_seen = last_successful_seen or {}
     bm200_live_reader: BM200Reader
     if bm200_reader is None:
         configured_live_hard_timeout_seconds = float(config.bluetooth.live_hard_timeout_seconds)
@@ -395,6 +402,7 @@ def build_snapshot(
                     generated_at=generated_at,
                     adapter=adapter,
                     error=error,
+                    last_seen=previous_seen.get(device.id, ""),
                 )
             )
             continue
@@ -417,6 +425,7 @@ def build_snapshot(
                 last_seen=generated_at,
                 adapter=adapter,
                 driver=driver_type,
+                last_attempt=generated_at,
             )
         )
 
@@ -452,6 +461,8 @@ def build_fake_snapshot(config: AppConfig, devices: list[Device]) -> GatewaySnap
         web=config.web,
         retention=config.retention,
         usb_otg=config.usb_otg,
+        archive_sync=config.archive_sync,
+        self_healing=config.self_healing,
         verbose=config.verbose,
     )
     return build_snapshot(fake_config, devices)

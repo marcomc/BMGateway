@@ -1,6 +1,6 @@
 # History Backfill Integration Proposal
 
-## Table of Contents
+## Contents
 
 - [Summary](#summary)
 - [Verified Constraints](#verified-constraints)

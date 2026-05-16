@@ -53,6 +53,15 @@ At the start of every new AI agent chat for this repository, read:
   descriptions, errors, generated frame output, or other visible interface
   strings, wire the text through the localization system and update the locale
   catalogs in the same change.
+- When adding or changing config keys, keep load, write, schema, examples,
+  installer rewrite paths, docs, and tests in sync in the same change.
+- When adding derived persistence such as rollups or summaries, rebuild or
+  validate it from the canonical source rows and timestamps rather than
+  incrementing a second source of truth independently.
+- When hardware or support checks disable settings fields, keep disable and
+  teardown paths available and preserve disabled-field values on submit.
+- For interface-specific recovery or diagnostics, probe through the configured
+  interface or adapter instead of relying on global host reachability.
 
 ## Live Validation Rules
 
@@ -80,11 +89,15 @@ Expected checks:
 - `uv run ruff check python/src python/tests`
 - `uv run ruff format --check python/src python/tests`
 - `uv run mypy python/src python/tests`
+- `node_modules/.bin/hint --formatters stylish python/src/bm_gateway/assets/web.css`
 - `markdownlint --config .markdownlint.json README.md CHANGELOG.md TODO.md AGENTS.md docs/*.md python/*.md home-assistant/*.md rpi-setup/*.md rpi-setup/ansible/*.md web/*.md`
 - `shellcheck --enable=all scripts/*.sh`
 
 ## Documentation Rules
 
+- Before making substantial documentation changes, read
+  `docs/documentation-maintenance.md` and follow its canonical-source,
+  terminology, duplication, and diagram rules.
 - Keep `README.md` accurate for end users.
 - Keep component `README.md` files accurate for contributors.
 - Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
@@ -99,6 +112,13 @@ Expected checks:
   information in the most appropriate canonical document, maintain sensible
   grouping and section hierarchy, and move or reshape content when the current
   location or structure is no longer the best fit.
+- Use `Quick Index` for routing pages and `Contents` for long local-reference
+  pages, as defined in `docs/documentation-maintenance.md`.
+- Use horizontal Mermaid `flowchart LR` diagrams for architecture, data-flow,
+  and operator-flow documentation when a diagram clarifies the path.
+- Use project-relative paths in repository documentation. Do not include
+  personal home paths unless documenting the default installed user path.
+- Avoid `&` in Markdown headings; use `and` for stable anchors.
 - Treat `bmgateway.local` as acceptable public documentation because it is the
   project's default hostname and Bonjour or mDNS service name. When relevant,
   remind users that they can override it with the documented hostname settings,

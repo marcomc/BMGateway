@@ -1,10 +1,11 @@
 # BMGateway
 
-## Table of Contents
+## Quick Index
 
 - [Overview](#overview)
 - [Choose Your Path](#choose-your-path)
 - [What Is Included](#what-is-included)
+- [System Flow](#system-flow)
 - [Repository Structure](#repository-structure)
 - [Documentation Map](#documentation-map)
 - [Development](#development)
@@ -30,6 +31,9 @@ The project is intentionally battery-first:
 - Home Assistant integration through MQTT discovery
 - a mobile-friendly local web UI for Home, History, Devices, and Settings
 
+For the runtime, command-line, web UI, and Home Assistant boundaries, use
+[Application surfaces](docs/application-surfaces.md#application-surfaces).
+
 ## Choose Your Path
 
 ### I Want To Install It On A Raspberry Pi
@@ -48,7 +52,7 @@ Start here:
 
 - [home-assistant/setup.md](home-assistant/setup.md)
 
-Reference contract:
+Developer reference:
 
 - [home-assistant/contract.md](home-assistant/contract.md)
 
@@ -56,6 +60,7 @@ Reference contract:
 
 Start here:
 
+- [docs/application-surfaces.md](docs/application-surfaces.md)
 - [python/README.md](python/README.md)
 - [docs/README.md](docs/README.md)
 
@@ -76,8 +81,37 @@ Start here:
 - Modular web localization with a Settings language selector
 - Per-device colors, badges, and battery metadata
 - Battery, fleet, history, and device charts
+- Optional Raspberry Pi self-healing for scheduled reboots and Wi-Fi recovery
 
 For the first release summary, use [CHANGELOG.md](CHANGELOG.md).
+
+## System Flow
+
+This high-level flow shows the normal appliance path from battery monitors to
+local state, the web UI, and Home Assistant MQTT discovery.
+
+```mermaid
+flowchart LR
+    accTitle: BMGateway system flow
+    accDescr: Shows how battery monitor readings move through the runtime, local state, web UI, MQTT broker, and Home Assistant.
+    Devices["BM200/BM6 and BM300 Pro/BM7 devices"]
+    Runtime["bm-gateway"]
+    State["latest_snapshot.json and gateway.db"]
+    Web["bm-gateway-web"]
+    Browser["browser on bmgateway.local"]
+    Broker["MQTT broker"]
+    HomeAssistant["Home Assistant"]
+
+    Devices --> Runtime
+    Runtime --> State
+    Runtime --> Broker
+    Broker --> HomeAssistant
+    State --> Web
+    Web --> Browser
+```
+
+The full surface map lives in
+[docs/application-surfaces.md](docs/application-surfaces.md#application-surfaces).
 
 ## Repository Structure
 
@@ -107,8 +141,10 @@ Use one canonical source per topic:
 | --- | --- |
 | First-release summary | [CHANGELOG.md](CHANGELOG.md) |
 | Active backlog | [TODO.md](TODO.md) |
+| Runtime, CLI, web UI, and integration surfaces | [docs/application-surfaces.md](docs/application-surfaces.md) |
 | Python package and contributor entry point | [python/README.md](python/README.md) |
 | Developer notes and architecture index | [docs/README.md](docs/README.md) |
+| Documentation maintenance rules | [docs/documentation-maintenance.md](docs/documentation-maintenance.md) |
 | Home Assistant setup | [home-assistant/setup.md](home-assistant/setup.md) |
 | Home Assistant MQTT contract | [home-assistant/contract.md](home-assistant/contract.md) |
 | Raspberry Pi installation | [rpi-setup/manual-setup.md](rpi-setup/manual-setup.md) |
@@ -130,7 +166,7 @@ The default quality gate is `make check`.
 
 The current documented release is:
 
-- `0.2.2`
+- `0.3.0`
 
 Use [CHANGELOG.md](CHANGELOG.md) for release content and [TODO.md](TODO.md) for
 work that is not shipped yet.

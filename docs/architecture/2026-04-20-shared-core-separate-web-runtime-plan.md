@@ -40,7 +40,7 @@ main CLI.
 
 | Layer | Responsibility |
 | --- | --- |
-| Shared core | Config loading, device registry, BLE drivers, runtime snapshots, SQLite persistence, MQTT publishing, Home Assistant contract, archive sync |
+| Shared core | Config loading, device registry, BLE drivers, runtime snapshots, SQLite persistence, MQTT publishing, Home Assistant MQTT contract, archive sync |
 | Runtime executable | `bm-gateway` for `config`, `devices`, `ha`, `history`, and `run` |
 | Web executable | `bm-gateway-web` for the optional management UI and snapshot rendering |
 | Compatibility layer | None. The dedicated web executable is now the only supported web entrypoint. |

@@ -85,6 +85,21 @@ bm200_max_pages_per_sync = 3
 bm300_enabled = true
 bm300_max_pages_per_sync = 3
 
+[self_healing]
+# Optional safety reboot cadence. Keep disabled unless the appliance benefits
+# from a scheduled clean restart.
+periodic_reboot_enabled = false
+periodic_reboot_hours = 24
+# Optional Wi-Fi watchdog. The runtime pings the check host; after a continuous
+# outage it can first try to reconnect Wi-Fi and later reboot the Raspberry Pi.
+wifi_watchdog_enabled = false
+wifi_interface = "wlan0"
+connectivity_check_host = "1.1.1.1"
+wifi_reconnect_enabled = true
+wifi_reconnect_after_minutes = 5
+wifi_reboot_enabled = false
+wifi_reboot_after_minutes = 15
+
 [retention]
-raw_retention_days = 180
+raw_retention_days = 730
 daily_retention_days = 0

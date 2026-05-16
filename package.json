@@ -1,0 +1,12 @@
+{
+  "name": "bm-gateway-quality-tools",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Node-based quality tools for BMGateway.",
+  "scripts": {
+    "lint:css": "hint --formatters stylish python/src/bm_gateway/assets/web.css"
+  },
+  "devDependencies": {
+    "hint": "7.1.13"
+  }
+}

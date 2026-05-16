@@ -49,11 +49,13 @@ from .runtime import (
     sleep_interval,
     state_file_path,
 )
+from .self_healing import evaluate_self_healing, new_self_healing_state
 from .state_store import (
     fetch_archive_history,
     fetch_counts,
     fetch_daily_history,
     fetch_degradation_report,
+    fetch_latest_successful_seen,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_storage_summary,
@@ -536,9 +538,15 @@ def _run_cycle(
     publish_discovery: bool,
     state_dir: Path | None,
 ) -> GatewaySnapshot:
-    snapshot = build_snapshot(config, devices, state_dir=state_dir)
-    audit_now = datetime.fromisoformat(snapshot.generated_at)
     database_path = database_file_path(config, state_dir=state_dir)
+    last_successful_seen = fetch_latest_successful_seen(database_path)
+    snapshot = build_snapshot(
+        config,
+        devices,
+        state_dir=state_dir,
+        last_successful_seen=last_successful_seen,
+    )
+    audit_now = datetime.fromisoformat(snapshot.generated_at)
     archive_backfill_details = (
         plan_archive_backfill_details(
             config=config,
@@ -672,6 +680,7 @@ def _handle_run(
     publisher = _publisher_for_run(dry_run=dry_run)
     completed = 0
     last_snapshot: GatewaySnapshot | None = None
+    self_healing_state = new_self_healing_state()
 
     while iteration_limit is None or completed < iteration_limit:
         runtime = _load_runtime_or_print_errors(path, verbose=verbose)
@@ -733,6 +742,19 @@ def _handle_run(
             elif export_usb_otg_now:
                 print(f"USB OTG image export failed: {export_result.reason}", file=sys.stderr)
                 return 1
+        if not dry_run:
+            for event in evaluate_self_healing(config=config, state=self_healing_state):
+                append_audit_event(
+                    config=config,
+                    state_dir=state_dir,
+                    source="runtime",
+                    trigger="automatic",
+                    action=event.action,
+                    status=event.status,
+                    details=event.details,
+                )
+                if event.action in {"periodic_reboot_requested", "wifi_reboot_requested"}:
+                    sys.stderr.write(f"Self-healing action requested: {event.action}\n")
         completed += 1
         if iteration_limit is not None and completed >= iteration_limit:
             break
@@ -897,7 +919,7 @@ def _handle_history_stats(
 
     counts = cast(dict[str, int], summary["counts"])
     print(f"gateway_snapshots: {counts['gateway_snapshots']}")
-    print(f"device_readings: {counts['device_readings']}")
+    print(f"device_samples: {counts['device_samples']}")
     print(f"device_daily_rollups: {counts['device_daily_rollups']}")
     for device in cast(list[dict[str, object]], summary["devices"]):
         print(
@@ -946,7 +968,7 @@ def _handle_history_prune(
         f"raw_retention_days={config.retention.raw_retention_days} "
         f"daily_retention_days={config.retention.daily_retention_days}"
     )
-    print(f"device_readings: {before['device_readings']} -> {after['device_readings']}")
+    print(f"device_samples: {before['device_samples']} -> {after['device_samples']}")
     print(
         f"device_daily_rollups: {before['device_daily_rollups']} -> {after['device_daily_rollups']}"
     )

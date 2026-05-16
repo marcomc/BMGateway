@@ -201,6 +201,13 @@ def render_device_html(
     device_color = shared._device_accent_color(summary)
     battery_meta_summary = shared._battery_metadata_summary(summary).replace(" · ", " ")
     vehicle_summary = shared._vehicle_summary(summary)
+    latest_attempt_card = ""
+    if not bool(summary.get("connected", False)):
+        latest_attempt_card = summary_card(
+            "Latest Attempt",
+            shared._display_timestamp(summary.get("last_attempt", "unknown")),
+            classes="timestamp-summary",
+        )
     subtitle_lines: list[str] = []
     if battery_meta_summary and battery_meta_summary != "Battery details not set":
         subtitle_lines.append(battery_meta_summary)
@@ -229,6 +236,7 @@ def render_device_html(
                     shared._display_timestamp(summary.get("last_seen", "unknown")),
                     classes="timestamp-summary",
                 )
+                + latest_attempt_card
                 + summary_card("Vehicle", vehicle_text)
                 + summary_card(
                     "Battery Metadata",

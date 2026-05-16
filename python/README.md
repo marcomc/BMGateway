@@ -1,6 +1,6 @@
 # Python Component
 
-## Table of Contents
+## Contents
 
 - [Purpose](#purpose)
 - [Layout](#layout)
@@ -16,7 +16,9 @@ This directory contains the packaged Python implementation for `BMGateway`.
 
 This is the contributor entry point for the application code. For the project
 overview, use the root [README.md](../README.md). For architectural context,
-use [../docs/README.md](../docs/README.md).
+use [../docs/README.md](../docs/README.md). For the runtime, CLI, web UI, and
+Home Assistant surface map, use
+[../docs/application-surfaces.md](../docs/application-surfaces.md).
 
 ## Layout
 
@@ -40,10 +42,13 @@ Main runtime CLI for:
 
 - config validation and inspection
 - device listing
-- Home Assistant contract and discovery export
+- Home Assistant MQTT contract and discovery export
 - runtime execution
 - history inspection and pruning
 - bounded BM6/BM7 protocol probes for live debugging
+
+The command reference is maintained in
+[Application surfaces](../docs/application-surfaces.md#command-line).
 
 ### `bm-gateway-web`
 
@@ -52,6 +57,9 @@ Optional web executable for:
 - full management UI
 - standalone snapshot serving
 - snapshot HTML rendering
+
+The web UI route and API reference is maintained in
+[Application surfaces](../docs/application-surfaces.md#web-ui).
 
 ## Key Runtime Capabilities
 
@@ -62,6 +70,7 @@ Optional web executable for:
 - MQTT publishing and Home Assistant discovery support
 - service-friendly Raspberry Pi deployment shape
 - modular web UI localization selected through `web.language`
+- optional self-healing for scheduled host reboots and Wi-Fi recovery
 
 BM200/BM6-family and BM300 Pro/BM7-family live polling now share the same BLE
 scan, connect, notify, retry, and cleanup control flow. The protocol-specific
@@ -83,13 +92,27 @@ History surfaces include:
 - monthly rollups
 - yearly summaries
 
-Archive-history merge/backfill plumbing exists, but BM6-family onboard archive
-retrieval is still incomplete on real hardware.
+Live polling and onboard archive imports write to the same canonical
+`device_samples` table. Archive imports insert missing samples at their own
+timestamps, so a later reimport can fill a gap between existing live samples
+without overwriting the surrounding data.
+
+`device_daily_rollups` is a derived cache rebuilt from `device_samples` for
+daily, monthly, yearly, and degradation views. `archive_import_batches` records
+whether an archive import is running, completed, or failed, but it is not an
+intermediate measurement store.
+
+Raw history retention defaults to two years and applies to `device_samples`.
+Daily rollups default to no extra rollup-only pruning; after samples are
+pruned, rollups are rebuilt from the retained canonical samples.
 
 The audit log is newline-delimited JSON intended for machine correlation during
 operations debugging. It records automatic polling cycles, per-device poll
 results, archive-sync activity, and key manual web-managed actions, and prunes
 files older than 90 days automatically.
+
+The detailed storage flow is documented in
+[Unified history storage](../docs/architecture/2026-05-16-unified-history-storage.md).
 
 ## Device Registry Coverage
 
@@ -107,6 +130,8 @@ Use these as the canonical references instead of repeating the same guidance:
 
 - Architecture:
   [../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)
+- Application surfaces:
+  [../docs/application-surfaces.md](../docs/application-surfaces.md)
 - Verified BM6/BM200 notes:
   [../docs/2026-04-19-bm6-bm200-integration-notes.md](../docs/2026-04-19-bm6-bm200-integration-notes.md)
 - BM300 Pro/BM7 notes:

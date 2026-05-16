@@ -1,10 +1,34 @@
 # Raspberry Pi Gateway Manual Setup
 
+## Contents
+
+- [Scope](#scope)
+- [Base System](#base-system)
+- [System Packages](#system-packages)
+- [One-Liner Bootstrap](#one-liner-bootstrap)
+- [Install uv](#install-uv)
+- [Clone the Repository](#clone-the-repository)
+- [Install the Executables](#install-the-executables)
+- [Structured Audit Logs](#structured-audit-logs)
+- [Optional: Install Glances for Home Assistant](#optional-install-glances-for-home-assistant)
+- [Optional: Install Cockpit](#optional-install-cockpit)
+- [Optional: Make admin Passwordless for sudo](#optional-make-admin-passwordless-for-sudo)
+- [Radio Bring-Up on the Current Host](#radio-bring-up-on-the-current-host)
+- [Troubleshooting Runbooks](#troubleshooting-runbooks)
+- [Configure the Gateway](#configure-the-gateway)
+- [Optional: Enable Self-Healing](#optional-enable-self-healing)
+- [Optional: Prepare USB OTG Image Export](#optional-prepare-usb-otg-image-export)
+- [Validate the Setup](#validate-the-setup)
+- [Install the Service Assets](#install-the-service-assets)
+- [Live Validation on the Real Gateway Host](#live-validation-on-the-real-gateway-host)
+- [Service and Module Policy for This Project](#service-and-module-policy-for-this-project)
+- [Repository Areas](#repository-areas)
+
 ## Scope
 
 This guide bootstraps the currently used Raspberry Pi gateway hardware to the
 point where the `BMGateway` CLI can validate config, inspect the device
-registry, and render the Home Assistant contract.
+registry, and inspect Home Assistant MQTT discovery details.
 
 The actual audited host in this project is:
 
@@ -29,10 +53,10 @@ still applies, but the hardware validation expectations differ.
 - Ensure Bluetooth is enabled
 - Ensure the system clock and timezone are correct
 
-Before assuming Wi-Fi or Bluetooth exists, validate the actual board model.
-Not every Raspberry Pi has integrated radios. Follow
-[hardware-audit.md](hardware-audit.md) first when bringing up a new or unknown
-device.
+Before assuming Wi-Fi, Bluetooth, USB gadget mode, or Chromium-compatible CPU
+features exist, validate the actual board model. Not every Raspberry Pi has the
+same radios or CPU instruction set. Follow [hardware-audit.md](hardware-audit.md)
+first when bringing up a new or unknown device.
 
 Recommended checks:
 
@@ -43,24 +67,30 @@ bluetoothctl --version
 timedatectl
 ```
 
-Integrated Wi-Fi and Bluetooth are present on these commonly relevant boards:
+Hardware requirements by use case:
 
-- Raspberry Pi `3B`
-- Raspberry Pi `3B+`
-- Raspberry Pi `Zero W`
-- Raspberry Pi `Zero 2 W`
-- Raspberry Pi `4`
-- Raspberry Pi `400`
-- Raspberry Pi `5`
+| Use case | Required board capabilities | Notes |
+| --- | --- | --- |
+| Normal gateway | Network plus Bluetooth, either onboard or through USB adapters | NEON and USB gadget mode are not required. Older boards can work, but they are slower and may need USB radios. |
+| USB picture-frame export | Normal gateway capabilities, a USB gadget or device-controller path, and ARM NEON support for Chromium screenshots | Raspberry Pi `Zero 2 W` is the recommended small-board target. Verify the gadget controller with `/sys/class/udc`. |
 
-Important distinction for the Zero family:
+Common Raspberry Pi compatibility:
 
-- Raspberry Pi `Zero W` has integrated Wi-Fi and Bluetooth
-- Raspberry Pi `Zero 2 W` has integrated Wi-Fi and Bluetooth
-- plain Raspberry Pi `Zero` without the `W` does not
+| Raspberry Pi model or family | Integrated Wi-Fi and Bluetooth | ARM NEON | USB gadget path | Normal gateway | Local picture-frame export |
+| --- | --- | --- | --- | --- | --- |
+| `Model A`, `A+`, `Model B`, `B+`, `Model B Rev 2`, `Compute Module 1` | No | No | Not the documented path | Yes, with network and Bluetooth adapters | No |
+| `Zero` | No | No | Yes | Yes, with network and Bluetooth adapters | No |
+| `Zero W` | Yes | No | Yes | Yes | No |
+| `Zero 2 W` | Yes | Yes | Yes | Yes | Recommended |
+| `2B` | No | Yes | Not the documented path | Yes, with network and Bluetooth adapters | No documented frame path |
+| `3B`, `3B+`, `4`, `400`, `5` | Yes | Yes | Board-dependent; verify `/sys/class/udc` | Yes | Only if a usable USB gadget path is verified |
+| `Compute Module 3`, `3+`, `4`, `5` | Carrier-dependent | Yes | Carrier-dependent | Yes, with required radios | Only if the carrier exposes a usable USB gadget path |
 
-The currently used Raspberry Pi `Model B Rev 2` does not include onboard
-Wi-Fi or Bluetooth, so USB radios are required on that host.
+The Raspberry Pi models that do not support NEON are the ARMv6/BCM2835 boards:
+Raspberry Pi `Model A`, `A+`, `Model B`, `B+`, `Model B Rev 2`, `Compute
+Module 1`, `Zero`, and `Zero W`. They can still run normal BMGateway workloads
+when network and Bluetooth are available, but they cannot run the current
+Chromium-based frame screenshot exporter locally.
 
 ## System Packages
 
@@ -133,6 +163,31 @@ full appliance installation in one step:
 ./scripts/bootstrap-install.sh
 ```
 
+This diagram shows the bootstrap path from a prepared Raspberry Pi to running
+services and printed management URLs.
+
+```mermaid
+flowchart LR
+    accTitle: Raspberry Pi bootstrap flow
+    accDescr: Shows how bootstrap-install.sh prepares packages, host services, uv, the checkout, runtime install, systemd services, and final URLs.
+    Packages["Install packages"]
+    Host["Set hostname and radios"]
+    UV["Install uv"]
+    Checkout["Clone or update checkout"]
+    Runtime["make install"]
+    Config["config and device registry"]
+    Services["systemd services"]
+    URLs["management URLs"]
+
+    Packages --> Host
+    Host --> UV
+    UV --> Checkout
+    Checkout --> Runtime
+    Runtime --> Config
+    Config --> Services
+    Services --> URLs
+```
+
 That is the recommended command once the repository is already present on the
 target machine.
 
@@ -199,8 +254,9 @@ Useful options:
 - `--web-port <port>`
 - `--glances-port <port>`
 
-When `--disable-web` is used, the installer disables the web service and removes
-the `/etc/sudoers.d/bm-gateway-web` web-action policy.
+When `--disable-web` is used, the installer disables the web service but keeps
+the scoped `/etc/sudoers.d/bm-gateway-web` service-action policy needed by
+runtime self-healing recovery commands.
 
 ## Install `uv`
 
@@ -414,6 +470,15 @@ The installed config keeps:
 - `web.show_chart_markers = false`
 - `web.appearance = "system"`
 - `web.language = "auto"`
+- `self_healing.periodic_reboot_enabled = false`
+- `self_healing.periodic_reboot_hours = 24`
+- `self_healing.wifi_watchdog_enabled = false`
+- `self_healing.wifi_interface = "wlan0"`
+- `self_healing.connectivity_check_host = "1.1.1.1"`
+- `self_healing.wifi_reconnect_enabled = true`
+- `self_healing.wifi_reconnect_after_minutes = 5`
+- `self_healing.wifi_reboot_enabled = false`
+- `self_healing.wifi_reboot_after_minutes = 15`
 - `usb_otg.enabled = false`
 - `usb_otg.image_width_px = 480`
 - `usb_otg.image_height_px = 234`
@@ -428,10 +493,37 @@ allowed for testing, but the Settings page shows a red warning because frequent
 BM6/BM200 polling can increase Bluetooth discovery failures, device contention,
 and error-heavy history.
 
+## Optional: Enable Self-Healing
+
+Self-healing is disabled by default and can be configured from Settings or
+`config.toml`.
+
+There are two independent recovery paths:
+
+- periodic reboot: set `self_healing.periodic_reboot_enabled = true` and choose
+  `self_healing.periodic_reboot_hours` from `1` to `48`
+- Wi-Fi watchdog: set `self_healing.wifi_watchdog_enabled = true`, choose a
+  reachable `self_healing.connectivity_check_host`, and tune the reconnect and
+  reboot delays in minutes
+
+For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
+`self_healing.wifi_watchdog_enabled = true`,
+`self_healing.wifi_reconnect_enabled = true`, and
+`self_healing.wifi_reboot_enabled = false`. Enable Wi-Fi reboot only if
+reconnect attempts do not restore the link reliably. The reboot delay must be
+longer than the reconnect delay when both actions are enabled.
+
 ## Optional: Prepare USB OTG Image Export
 
 `BMGateway` includes a disabled-by-default USB OTG image-export setting for
 external monitors and digital picture frames.
+
+For picture-frame use, use Raspberry Pi `Zero 2 W` or another ARMv7/ARMv8
+board. Raspberry Pi `Zero W` is usable as a slower normal gateway, but it is
+not suitable for local frame-image generation because the exporter screenshots
+hidden web pages with Chromium and current ARM Chromium builds require NEON
+SIMD support. A `Zero W` can expose an already-built backing image through USB
+OTG gadget mode, but it cannot reliably regenerate the same images locally.
 
 This setting is intentionally split into three parts in the web UI:
 
@@ -584,6 +676,27 @@ sudo systemctl status cockpit.socket
 For appliance-affecting changes, validate on the real gateway host after local
 checks pass.
 
+This diagram shows the validation sequence for appliance-affecting changes
+after local checks pass.
+
+```mermaid
+flowchart LR
+    accTitle: Live gateway validation
+    accDescr: Shows the post-deploy validation sequence for services, web/API health, Bluetooth and mDNS, and one-shot polling.
+    Local["local checks pass"]
+    Deploy["make dev-deploy"]
+    Services["service state"]
+    Web["web and API checks"]
+    Radios["Bluetooth and mDNS checks"]
+    Poll["dry-run and live poll"]
+
+    Local --> Deploy
+    Deploy --> Services
+    Services --> Web
+    Web --> Radios
+    Radios --> Poll
+```
+
 The default hostname is `bmgateway.local`. If you changed it during bootstrap,
 replace that hostname with your chosen `<hostname>.local` or export a different
 value in the commands below.
@@ -712,8 +825,8 @@ Blacklist only:
 
 ## Repository Areas
 
-- `python/` contains the packaged CLI and future runtime code
-- `home-assistant/` contains the MQTT/Home Assistant contract docs and assets
+- `python/` contains the packaged CLI, runtime, shared core, and web executable
+- `home-assistant/` contains the MQTT/Home Assistant docs and assets
 - `rpi-setup/ansible/` contains the first provisioning playbook
 - `rpi-setup/systemd/` contains the service unit
 - `rpi-setup/scripts/` contains install and update helpers

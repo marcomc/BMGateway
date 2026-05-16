@@ -17,3 +17,4 @@ BMGateway-v2-premium-scaffold/
 
 .playwright-cli/
 docs/qa/
+node_modules/

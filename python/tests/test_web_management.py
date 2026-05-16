@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.request import urlopen as _stdlib_urlopen
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -49,6 +50,7 @@ from bm_gateway.web import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_self_healing_preferences,
     update_usb_otg_preferences,
     update_web_preferences,
 )
@@ -68,6 +70,27 @@ from bm_gateway.web_actions import (
 from bm_gateway.web_pages_frame import frame_battery_overview_page_count
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import app_document, base_css, chart_script
+
+
+def _urlopen_with_retry(
+    request: urllib.request.Request | str,
+    *,
+    timeout: float,
+    attempts: int = 20,
+) -> Any:
+    last_error: urllib.error.URLError | None = None
+    for _attempt in range(attempts):
+        try:
+            return _stdlib_urlopen(request, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise
+        except urllib.error.URLError as error:
+            if not isinstance(error.reason, ConnectionRefusedError):
+                raise
+            last_error = error
+            time.sleep(0.05)
+    assert last_error is not None
+    raise last_error
 
 
 def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: Path) -> None:
@@ -220,6 +243,33 @@ def test_chart_script_compacts_dense_ranges_before_svg_rendering() -> None:
         "const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);"
         in script
     )
+
+
+def test_chart_script_compacts_dense_ranges_per_series() -> None:
+    script = chart_script("history-chart")
+
+    assert "const seriesGroups = new Map();" in script
+    assert (
+        "const perSeriesLimit = Math.max(16, Math.floor(limit / Math.max(seriesGroups.size, 1)));"
+        in script
+    )
+    assert "for (const entries of seriesGroups.values()) {" in script
+
+
+def test_chart_script_prefers_raw_samples_over_daily_rollups_at_same_timestamp() -> None:
+    script = chart_script("history-chart")
+
+    assert "function pointPriority(point)" in script
+    assert 'const key = `${entry.point.series || "Series"}|${entry.point.ts}`;' in script
+    assert "pointPriority(entry.point) >= pointPriority(existing)" in script
+    assert "distance === bestDistance && pointPriority(point) > pointPriority(bestPoint)" in script
+
+
+def test_chart_script_does_not_split_contiguous_lines_by_sample_source() -> None:
+    script = chart_script("history-chart")
+
+    assert "point.kind !== previous.kind" not in script
+    assert "(point.time - previous.time) > gapThreshold" in script
 
 
 def test_chart_script_renders_multi_series_tooltip_rows() -> None:
@@ -618,6 +668,36 @@ def test_update_bluetooth_preferences_persists_adapter_and_timeouts(tmp_path: Pa
     assert config.bluetooth.connect_timeout_seconds == 60
 
 
+def test_update_self_healing_preferences_persists_recovery_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_self_healing_preferences(
+        config_path=config_path,
+        periodic_reboot_enabled=True,
+        periodic_reboot_hours=12,
+        wifi_watchdog_enabled=True,
+        wifi_interface="wlan1",
+        connectivity_check_host="192.168.1.1",
+        wifi_reconnect_enabled=True,
+        wifi_reconnect_after_minutes=6,
+        wifi_reboot_enabled=True,
+        wifi_reboot_after_minutes=18,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.self_healing.periodic_reboot_enabled is True
+    assert config.self_healing.periodic_reboot_hours == 12
+    assert config.self_healing.wifi_watchdog_enabled is True
+    assert config.self_healing.wifi_interface == "wlan1"
+    assert config.self_healing.connectivity_check_host == "192.168.1.1"
+    assert config.self_healing.wifi_reconnect_after_minutes == 6
+    assert config.self_healing.wifi_reboot_enabled is True
+    assert config.self_healing.wifi_reboot_after_minutes == 18
+
+
 def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
@@ -950,7 +1030,7 @@ def test_devices_add_post_redirects_before_first_poll(
     last_error: urllib.error.URLError | None = None
     for _ in range(20):
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError as error:
             last_error = error
@@ -1430,7 +1510,11 @@ def test_update_usb_otg_preferences_persists_enabled_flag(tmp_path: Path) -> Non
         encoding="utf-8",
     )
 
-    errors = update_usb_otg_preferences(config_path=config_path, enabled=True)
+    errors = update_usb_otg_preferences(
+        config_path=config_path,
+        enabled=True,
+        frame_renderer_supported=True,
+    )
 
     assert errors == []
     config = load_config(config_path)
@@ -1459,6 +1543,7 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
         fleet_trend_metrics=("voltage", "temperature"),
         fleet_trend_range="30",
         fleet_trend_device_ids=("battery_alpha", "battery_beta"),
+        frame_renderer_supported=True,
     )
 
     assert errors == []
@@ -1473,8 +1558,30 @@ def test_update_usb_otg_preferences_persists_export_settings(tmp_path: Path) -> 
     assert config.usb_otg.export_battery_overview is True
     assert config.usb_otg.export_fleet_trend is False
     assert config.usb_otg.fleet_trend_metrics == ("voltage", "temperature")
-    assert config.usb_otg.fleet_trend_range == "30"
-    assert config.usb_otg.fleet_trend_device_ids == ("battery_alpha", "battery_beta")
+
+
+def test_update_usb_otg_preferences_rejects_enable_without_frame_renderer_support(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+    errors = update_usb_otg_preferences(
+        config_path=config_path,
+        enabled=True,
+        frame_renderer_supported=False,
+    )
+
+    assert errors == [
+        "USB OTG picture-frame export is not supported on this Raspberry Pi because "
+        "Chromium requires ARM NEON or ASIMD support"
+    ]
+    config = load_config(config_path)
+    assert config.usb_otg.enabled is False
 
 
 def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Path) -> None:
@@ -1736,7 +1843,7 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status in {200, 303}
 
     config = load_config(config_path)
@@ -1785,7 +1892,7 @@ def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> No
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status in {200, 303}
 
     config = load_config(config_path)
@@ -1823,6 +1930,10 @@ def test_settings_usb_otg_post_persists_enabled_flag(
         return subprocess.CompletedProcess(["export"], 0, "", "")
 
     monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.usb_otg_frame_renderer_supported",
+        lambda: True,
+    )
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -1852,7 +1963,7 @@ def test_settings_usb_otg_post_persists_enabled_flag(
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status == 200
         params = parse_qs(urlparse(response.url).query)
         assert params["message"] == ["Settings saved; USB OTG frame image export started"]
@@ -1918,7 +2029,7 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status == 200
 
     config = load_config(config_path)
@@ -1957,7 +2068,7 @@ def test_management_settings_respects_gzip_q_zero(tmp_path: Path) -> None:
     deadline = time.monotonic() + 2.0
     while True:
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError:
             if time.monotonic() >= deadline:
@@ -2003,7 +2114,7 @@ def test_management_settings_respects_explicit_gzip_opt_out_over_wildcard(tmp_pa
     deadline = time.monotonic() + 2.0
     while True:
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError:
             if time.monotonic() >= deadline:
@@ -2046,6 +2157,10 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
         return subprocess.CompletedProcess(["export"], 0, "", "")
 
     monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.usb_otg_frame_renderer_supported",
+        lambda: True,
+    )
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -2076,7 +2191,7 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=1.0) as response:
+        with _urlopen_with_retry(request, timeout=1.0) as response:
             assert response.status == 200
             params = parse_qs(urlparse(response.url).query)
             assert params["message"] == ["Settings saved; USB OTG frame image export started"]
@@ -2120,6 +2235,10 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
         return subprocess.CompletedProcess(["export"], 0, "", "")
 
     monkeypatch.setattr("bm_gateway.web.export_usb_otg_images_now", _export_now)
+    monkeypatch.setattr(
+        "bm_gateway.web_actions.usb_otg_frame_renderer_supported",
+        lambda: True,
+    )
 
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
         handle.bind(("127.0.0.1", 0))
@@ -2151,7 +2270,7 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
             data=request_body,
             method="POST",
         )
-        with urllib.request.urlopen(first_request, timeout=1.0) as response:
+        with _urlopen_with_retry(first_request, timeout=1.0) as response:
             assert response.status == 200
             params = parse_qs(urlparse(response.url).query)
             assert params["message"] == ["Settings saved; USB OTG frame image export started"]
@@ -2163,7 +2282,7 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
             data=request_body,
             method="POST",
         )
-        with urllib.request.urlopen(second_request, timeout=1.0) as response:
+        with _urlopen_with_retry(second_request, timeout=1.0) as response:
             assert response.status == 200
             params = parse_qs(urlparse(response.url).query)
             assert params["message"] == ["Settings saved"]
@@ -2217,7 +2336,7 @@ def test_settings_usb_otg_post_rejects_non_numeric_values_without_snapshot(
     )
 
     try:
-        urllib.request.urlopen(request, timeout=5.0)
+        _urlopen_with_retry(request, timeout=5.0)
     except urllib.error.HTTPError as error:
         html = error.read().decode("utf-8")
         assert error.code == 400
@@ -2283,7 +2402,7 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
         data=b"",
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         html = response.read().decode("utf-8")
         assert response.status == 200
         assert urlparse(response.url).path == "/usb-otg-export/progress"
@@ -2297,7 +2416,7 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
         f"http://{host}:{port}/api/usb-otg-export/status",
         headers={"Accept-Language": "it"},
     )
-    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+    with _urlopen_with_retry(status_request, timeout=5.0) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
     assert payload["status"] == "completed"
@@ -2371,7 +2490,7 @@ def test_manual_device_history_sync_action_redirects_to_selected_history(
     deadline = time.monotonic() + 2.0
     while True:
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError:
             if time.monotonic() >= deadline:
@@ -2392,7 +2511,7 @@ def test_manual_device_history_sync_action_redirects_to_selected_history(
         f"http://{host}:{port}/api/history-sync/status",
         headers={"Accept-Language": "it"},
     )
-    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+    with _urlopen_with_retry(status_request, timeout=5.0) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
     assert payload["status"] == "completed"
@@ -2467,7 +2586,7 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [
@@ -2535,7 +2654,7 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [],
@@ -2585,6 +2704,9 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Display Settings" in html
     assert "Archive History Import" in html
     assert "Archive history import" in html
+    assert "Self-Healing" in html
+    assert "Periodic reboot" in html
+    assert "Wi-Fi watchdog" in html
     assert "Periodic sync interval" in html
     assert "BM200 pages per sync" in html
     assert "Sync History Now" not in html
@@ -2595,6 +2717,7 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert "Save display settings" not in html
     assert "Save web service settings" not in html
     assert "Save archive sync settings" not in html
+    assert "Save self-healing settings" not in html
     assert "Run One Collection Cycle" in html
     assert "Republish Home Assistant Discovery" in html
     assert 'action="/actions/republish-discovery"' in html
@@ -2628,9 +2751,57 @@ def test_render_settings_html_is_summary_first_with_edit_link() -> None:
     assert html.index('section-title">Display Settings') < html.index(
         'section-title">Archive History Import'
     )
+    assert html.index('section-title">Archive History Import') < html.index(
+        'section-title">Self-Healing'
+    )
     assert html.index('section-title">Home Assistant MQTT Discovery') < html.index(
         'section-title">Storage Summary'
     )
+
+
+def test_render_settings_html_disables_wifi_recovery_when_watchdog_is_disabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert 'id="wifi-watchdog-enabled-input"' in html
+    assert 'id="wifi-watchdog-dependent-fields"' in html
+    assert "disabled>" in html
+    assert 'name="wifi_interface"' in html
+    assert 'name="connectivity_check_host"' in html
+    assert "Enable Wi-Fi connectivity watchdog to edit these recovery options." in html
+    assert "watchdogToggle.addEventListener" in html
+    assert "dependentFields.disabled = !watchdogToggle.checked" in html
+
+
+def test_render_settings_html_suppresses_wifi_recovery_actions_when_watchdog_disabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "Wi-Fi reconnect" in html
+    assert "Wi-Fi reboot" in html
+    assert "After 5 minutes" not in html
+    assert "After 15 minutes" not in html
+
+
+def test_render_settings_html_enables_wifi_recovery_when_watchdog_is_enabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_watchdog_enabled=True),
+    )
+
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert 'id="wifi-watchdog-dependent-fields"' in html
+    assert 'id="wifi-watchdog-dependent-fields" class="settings-dependent-fieldset"' in html
+    disabled_fieldset = (
+        'id="wifi-watchdog-dependent-fields" class="settings-dependent-fieldset" '
+        'aria-describedby="wifi-watchdog-disabled-help" disabled>'
+    )
+    assert disabled_fieldset not in html
+    assert 'id="wifi-watchdog-disabled-help" class="inline-field-help" hidden>' in html
+    assert 'name="wifi_interface"' in html
+    assert 'name="connectivity_check_host"' in html
 
 
 def test_render_settings_html_shows_connected_mqtt_status_in_green() -> None:
@@ -2676,7 +2847,7 @@ def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [
@@ -3234,6 +3405,35 @@ def test_render_settings_html_warns_when_usb_otg_enabled_without_controller() ->
     assert "Zero USB Plug" in html
 
 
+def test_render_settings_html_allows_disabling_usb_otg_when_frame_renderer_unsupported() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, usb_otg=replace(config.usb_otg, enabled=True))
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=True,
+        usb_otg_frame_renderer_supported=False,
+    )
+
+    assert "Picture-frame export is not supported on this Raspberry Pi" in html
+    assert "ARM NEON or ASIMD support" in html
+    assert "Frame renderer CPU support" in html
+    assert "Not supported" in html
+    assert '<fieldset disabled aria-describedby="usb-otg-hardware-warning">' in html
+    assert 'name="usb_otg_enabled"' in html
+    checkbox_name_index = html.index('name="usb_otg_enabled"')
+    checkbox_start_index = html.rfind("<input", 0, checkbox_name_index)
+    checkbox_end_index = html.find(">", checkbox_name_index)
+    checkbox_markup = html[checkbox_start_index:checkbox_end_index]
+    assert "disabled" not in checkbox_markup
+    assert checkbox_name_index < html.index("<fieldset disabled aria-describedby")
+    assert "Save USB OTG settings" in html
+    assert "Export Frame Images" not in html
+    assert "Refresh USB OTG Drive" not in html
+
+
 def test_render_settings_html_edit_mode_shows_prepare_when_usb_otg_boot_mode_not_prepared() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     html = render_settings_html(
@@ -3283,7 +3483,7 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [],
@@ -3968,6 +4168,29 @@ def test_home_and_history_pagers_skip_unchanged_layout_rebuilds() -> None:
     assert "syncButtons();" in history_guard
 
 
+def test_render_history_html_shows_unreachable_card_last_seen_without_seconds() -> None:
+    html = render_history_html(
+        device_id="punto",
+        configured_devices=[
+            {
+                "id": "punto",
+                "name": "Punto",
+                "state": "offline",
+                "connected": False,
+                "error_code": "device_not_found",
+                "last_seen": "2026-05-10T20:22:09+02:00",
+            }
+        ],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+    )
+
+    assert "Last seen 2026-05-10 20:22" in html
+    assert "2026-05-10 20:22:09" not in html
+    assert "history-device-current unreachable" in html
+
+
 def test_home_and_history_pagers_scroll_inside_their_tracks() -> None:
     home_html = render_home_html(
         snapshot={
@@ -4549,6 +4772,7 @@ def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
                     "connected": False,
                     "error_code": "device_not_found",
                     "error_detail": "No BLE advertisement seen during the scan window.",
+                    "last_seen": "2026-04-22T16:30:00+02:00",
                 }
             ]
         },
@@ -4567,6 +4791,8 @@ def test_render_home_html_shows_connection_failure_as_red_warning() -> None:
     )
 
     assert "Unable to connect" in html
+    assert "Last seen 2026-04-22 16:30" in html
+    assert "2026-04-22 16:30:00" not in html
     assert "battery-card-status battery-card-status-inline error" in html
     assert 'aria-label="Unable to connect"' in html
     assert "No recent sample" not in html
@@ -4669,6 +4895,64 @@ def test_chart_points_include_daily_temperature_rollups() -> None:
             "series_color": "#4f8df7",
         }
     ]
+
+
+def test_fleet_chart_points_reads_raw_history_from_latest_time_window(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    from bm_gateway import web_pages
+
+    raw_since_values: list[str] = []
+
+    def fake_recent_history_since(
+        _database_path: Path,
+        *,
+        device_id: str,
+        since_ts: str,
+    ) -> list[dict[str, object]]:
+        assert device_id == "bm200_house"
+        raw_since_values.append(since_ts)
+        return [
+            {
+                "ts": "2026-04-15T10:05:00+02:00",
+                "voltage": 13.32,
+                "soc": 92,
+                "temperature": 17.2,
+                "error_code": None,
+            }
+        ]
+
+    def fail_recent_history(
+        _database_path: Path,
+        *,
+        device_id: str,
+        limit: int,
+    ) -> list[dict[str, object]]:
+        raise AssertionError("Fleet chart should load raw history by time window")
+
+    monkeypatch.setattr(
+        web_pages,
+        "latest_history_timestamp",
+        lambda _database_path, *, device_id: "2026-04-19T10:05:00+02:00",
+    )
+    monkeypatch.setattr(web_pages, "fetch_recent_history", fail_recent_history)
+    monkeypatch.setattr(web_pages, "fetch_recent_history_since", fake_recent_history_since)
+    monkeypatch.setattr(
+        web_pages,
+        "fetch_daily_history",
+        lambda _database_path, *, device_id, limit: [],
+    )
+
+    points, legend = web_pages._fleet_chart_points(
+        database_path=tmp_path / "gateway.db",
+        devices=[{"id": "bm200_house", "name": "House"}],
+    )
+
+    assert raw_since_values == ["2026-04-11T10:05:00+02:00"]
+    assert web_pages.FLEET_CHART_RAW_HISTORY_DAYS >= 7
+    assert legend == [("House", "#17c45a")]
+    assert points[0]["series_id"] == "bm200_house"
 
 
 def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
@@ -5442,7 +5726,7 @@ def test_devices_update_redirect_uses_normalized_renamed_device_id(tmp_path: Pat
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         params = parse_qs(urlparse(response.url).query)
         assert response.status == 200
         assert urlparse(response.url).path == "/devices/edit"

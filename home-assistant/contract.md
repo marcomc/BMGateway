@@ -1,5 +1,15 @@
 # Home Assistant MQTT Contract
 
+## Contents
+
+- [Purpose](#purpose)
+- [Discovery Strategy](#discovery-strategy)
+- [Topic Layout](#topic-layout)
+- [Gateway Entities](#gateway-entities)
+- [Device Entities](#device-entities)
+- [State Payload Shape](#state-payload-shape)
+- [Notes](#notes)
+
 ## Purpose
 
 This document defines the MQTT-facing contract that `BMGateway` exposes to
@@ -80,13 +90,15 @@ Gateway state topic:
 
 ```json
 {
-  "version": "0.1.0",
-  "uptime": 1200,
   "active_adapter": "hci0",
-  "running": true,
-  "mqtt_connected": true,
+  "availability": "online",
+  "devices_online": 1,
   "devices_total": 2,
-  "devices_online": 1
+  "generated_at": "2026-05-16T12:00:00+02:00",
+  "mqtt_connected": true,
+  "running": true,
+  "uptime": 300,
+  "version": "0.3.0"
 }
 ```
 
@@ -94,13 +106,19 @@ Per-device state topic:
 
 ```json
 {
-  "voltage": 12.64,
-  "soc": 81,
-  "temperature": 23.4,
+  "adapter": "hci0",
+  "availability": "online",
+  "availability_reason": "ok",
   "connected": true,
+  "driver": "bm200",
+  "error_code": null,
+  "error_detail": null,
   "last_seen": "2026-04-17T15:45:00+02:00",
   "rssi": -71,
-  "state": "normal"
+  "soc": 81,
+  "state": "normal",
+  "temperature": 23.4,
+  "voltage": 12.64
 }
 ```
 

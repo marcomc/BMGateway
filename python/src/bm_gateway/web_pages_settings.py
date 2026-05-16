@@ -18,6 +18,9 @@ from .usb_otg import (
     usb_otg_device_controller_detected as detect_usb_otg_device_controller,
 )
 from .usb_otg import (
+    usb_otg_frame_renderer_supported as detect_usb_otg_frame_renderer_supported,
+)
+from .usb_otg import (
     usb_otg_support_installed as detect_usb_otg_support_installed,
 )
 from .web_ui import (
@@ -51,6 +54,29 @@ def _settings_markup_row(label: str, value_html: str) -> str:
         f'<div class="settings-value">{value_html}</div>'
         "</div>"
     )
+
+
+def _self_healing_settings_script() -> str:
+    return """
+<script>
+(() => {
+  const watchdogToggle = document.getElementById("wifi-watchdog-enabled-input");
+  const dependentFields = document.getElementById("wifi-watchdog-dependent-fields");
+  const disabledHelp = document.getElementById("wifi-watchdog-disabled-help");
+  if (!watchdogToggle || !dependentFields) {
+    return;
+  }
+  const syncWatchdogFields = () => {
+    dependentFields.disabled = !watchdogToggle.checked;
+    if (disabledHelp) {
+      disabledHelp.hidden = watchdogToggle.checked;
+    }
+  };
+  watchdogToggle.addEventListener("change", syncWatchdogFields);
+  syncWatchdogFields();
+})();
+</script>
+"""
 
 
 def _usb_otg_fleet_device_checkbox(
@@ -162,6 +188,7 @@ def render_settings_html(
     usb_otg_device_controller_detected: bool | None = None,
     usb_otg_boot_mode_prepared: bool | None = None,
     usb_otg_support_installed: bool | None = None,
+    usb_otg_frame_renderer_supported: bool | None = None,
     theme_preference: str = "system",
     language: str | None = None,
 ) -> str:
@@ -172,7 +199,7 @@ def render_settings_html(
     storage_summary = storage_summary or {
         "counts": {
             "gateway_snapshots": 0,
-            "device_readings": 0,
+            "device_samples": 0,
             "device_daily_rollups": 0,
         },
         "devices": [],
@@ -198,6 +225,11 @@ def render_settings_html(
         detect_usb_otg_support_installed()
         if usb_otg_support_installed is None
         else usb_otg_support_installed
+    )
+    supported_usb_otg_frame_renderer = (
+        detect_usb_otg_frame_renderer_supported()
+        if usb_otg_frame_renderer_supported is None
+        else usb_otg_frame_renderer_supported
     )
     device_tabs = (
         "".join(
@@ -245,6 +277,23 @@ def render_settings_html(
         if mqtt_connected
         else '<span class="status-badge error">Disconnected</span>'
     )
+    usb_otg_hardware_warning = (
+        banner_strip(
+            html.escape(
+                "Picture-frame export is not supported on this Raspberry Pi because this "
+                "ARM CPU does not report ARM NEON or ASIMD support. Current Chromium frame "
+                "rendering requires NEON; use a Raspberry Pi Zero 2 W or another ARMv7 or "
+                "ARMv8 board for local picture-frame generation."
+            ),
+            kind="error",
+        ).replace(
+            'class="banner-strip error"',
+            'id="usb-otg-hardware-warning" class="banner-strip error"',
+        )
+        if not supported_usb_otg_frame_renderer
+        else ""
+    )
+    usb_otg_actions_available = installed_usb_otg_support and supported_usb_otg_frame_renderer
     detected_adapter_summary = ", ".join(detected_adapter_names) or "No adapters detected"
     api_chips = "".join(
         api_chip(endpoint)
@@ -278,7 +327,7 @@ def render_settings_html(
         )
         + summary_card(
             "Raw / rollups",
-            f"{counts.get('device_readings', 0)} / {counts.get('device_daily_rollups', 0)}",
+            f"{counts.get('device_samples', 0)} / {counts.get('device_daily_rollups', 0)}",
             subvalue=f"MQTT connected: {snapshot.get('mqtt_connected', False)}",
             classes="compact-summary",
         )
@@ -299,7 +348,7 @@ def render_settings_html(
             '<form method="post" action="/actions/export-usb-otg-images">'
             f"{button('Export Frame Images', kind='secondary')}"
             "</form>"
-            if installed_usb_otg_support
+            if usb_otg_actions_available
             else ""
         )
         + '<form method="post" action="/actions/restart-runtime">'
@@ -406,6 +455,34 @@ def render_settings_html(
             str(config.archive_sync.bm300_max_pages_per_sync),
         )
     )
+    wifi_reconnect_summary = (
+        f"After {config.self_healing.wifi_reconnect_after_minutes} minutes"
+        if config.self_healing.wifi_watchdog_enabled and config.self_healing.wifi_reconnect_enabled
+        else "Disabled"
+    )
+    wifi_reboot_summary = (
+        f"After {config.self_healing.wifi_reboot_after_minutes} minutes"
+        if config.self_healing.wifi_watchdog_enabled and config.self_healing.wifi_reboot_enabled
+        else "Disabled"
+    )
+    self_healing_section_body = (
+        settings_row(
+            "Periodic reboot",
+            (
+                f"Every {config.self_healing.periodic_reboot_hours} hours"
+                if config.self_healing.periodic_reboot_enabled
+                else "Disabled"
+            ),
+        )
+        + settings_row(
+            "Wi-Fi watchdog",
+            "Enabled" if config.self_healing.wifi_watchdog_enabled else "Disabled",
+        )
+        + settings_row("Wi-Fi interface", config.self_healing.wifi_interface)
+        + settings_row("Connectivity check host", config.self_healing.connectivity_check_host)
+        + settings_row("Wi-Fi reconnect", wifi_reconnect_summary)
+        + settings_row("Wi-Fi reboot", wifi_reboot_summary)
+    )
     usb_otg_warning = (
         banner_strip(
             html.escape(
@@ -440,16 +517,27 @@ def render_settings_html(
         if installed_usb_otg_support
         else '<span class="status-badge error">Not installed</span>'
     )
+    usb_otg_frame_renderer_badge = (
+        '<span class="status-badge ok">Supported</span>'
+        if supported_usb_otg_frame_renderer
+        else '<span class="status-badge error">Not supported</span>'
+    )
     usb_otg_section_body = (
         usb_otg_install_warning
         + usb_otg_warning
+        + usb_otg_hardware_warning
         + _usb_otg_refresh_interval_warning(config)
         + settings_row(
             "USB OTG image export",
-            "Enabled" if config.usb_otg.enabled else "Disabled",
+            (
+                "Enabled"
+                if config.usb_otg.enabled and supported_usb_otg_frame_renderer
+                else ("Unsupported" if config.usb_otg.enabled else "Disabled")
+            ),
         )
         + _settings_markup_row("USB OTG support", usb_otg_support_badge)
         + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
+        + _settings_markup_row("Frame renderer CPU support", usb_otg_frame_renderer_badge)
         + settings_row(
             "Output size",
             f"{config.usb_otg.image_width_px} x {config.usb_otg.image_height_px} px",
@@ -992,6 +1080,119 @@ def render_settings_html(
             + "</div>"
             + "</form>"
         )
+        self_healing_section_body = (
+            '<form method="post" action="/settings/self-healing">'
+            + settings_control_row(
+                "Periodic reboot",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="periodic_reboot_enabled"'
+                    f"{shared._checked_attr(config.self_healing.periodic_reboot_enabled)}>"
+                    "<span>Enable scheduled Raspberry Pi reboot</span></label>"
+                ),
+                help_text="Use this as a coarse recovery cadence for unattended appliances.",
+            )
+            + settings_control_row(
+                "Reboot interval",
+                (
+                    '<input id="periodic-reboot-hours-input" type="text" '
+                    'name="periodic_reboot_hours" '
+                    f'value="{config.self_healing.periodic_reboot_hours}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Set the periodic reboot interval in hours, from 1 to 48.",
+            )
+            + settings_control_row(
+                "Wi-Fi watchdog",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input id="wifi-watchdog-enabled-input" type="checkbox" '
+                    'name="wifi_watchdog_enabled"'
+                    f"{shared._checked_attr(config.self_healing.wifi_watchdog_enabled)}>"
+                    "<span>Enable Wi-Fi connectivity watchdog</span></label>"
+                ),
+                help_text=(
+                    "Monitor a known host and trigger configured recovery actions only after "
+                    "a continuous outage."
+                ),
+            )
+            + (
+                '<fieldset id="wifi-watchdog-dependent-fields" '
+                'class="settings-dependent-fieldset" '
+                'aria-describedby="wifi-watchdog-disabled-help"'
+                f"{' disabled' if not config.self_healing.wifi_watchdog_enabled else ''}>"
+                '<div id="wifi-watchdog-disabled-help" class="inline-field-help"'
+                f"{'' if not config.self_healing.wifi_watchdog_enabled else ' hidden'}>"
+                "Enable Wi-Fi connectivity watchdog to edit these recovery options."
+                "</div>"
+            )
+            + settings_control_row(
+                "Wi-Fi interface",
+                (
+                    '<input id="wifi-interface-input" type="text" name="wifi_interface" '
+                    f'value="{html.escape(config.self_healing.wifi_interface)}" '
+                    'autocomplete="off">'
+                ),
+                help_text="Set the wireless interface to reconnect, usually wlan0.",
+            )
+            + settings_control_row(
+                "Connectivity check host",
+                (
+                    '<input id="connectivity-check-host-input" type="text" '
+                    'name="connectivity_check_host" '
+                    f'value="{html.escape(config.self_healing.connectivity_check_host)}" '
+                    'autocomplete="off">'
+                ),
+                help_text=(
+                    "Use a router, Home Assistant host, or stable IP that proves Wi-Fi works."
+                ),
+            )
+            + settings_control_row(
+                "Wi-Fi reconnect",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="wifi_reconnect_enabled"'
+                    f"{shared._checked_attr(config.self_healing.wifi_reconnect_enabled)}>"
+                    "<span>Try reconnecting Wi-Fi after an outage</span></label>"
+                ),
+                help_text="Attempts NetworkManager reconnect before considering a reboot.",
+            )
+            + settings_control_row(
+                "Reconnect delay",
+                (
+                    '<input id="wifi-reconnect-minutes-input" type="text" '
+                    'name="wifi_reconnect_after_minutes" '
+                    f'value="{config.self_healing.wifi_reconnect_after_minutes}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Wait this many outage minutes before trying Wi-Fi reconnect.",
+            )
+            + settings_control_row(
+                "Wi-Fi reboot",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="wifi_reboot_enabled"'
+                    f"{shared._checked_attr(config.self_healing.wifi_reboot_enabled)}>"
+                    "<span>Reboot Raspberry Pi if Wi-Fi stays unavailable</span></label>"
+                ),
+                help_text="Use only when reconnect attempts are not enough for this location.",
+            )
+            + settings_control_row(
+                "Reboot delay",
+                (
+                    '<input id="wifi-reboot-minutes-input" type="text" '
+                    'name="wifi_reboot_after_minutes" '
+                    f'value="{config.self_healing.wifi_reboot_after_minutes}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Wait this many outage minutes before rebooting the Raspberry Pi.",
+            )
+            + "</fieldset>"
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save self-healing settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+        )
         archive_sync_section_body = (
             '<form method="post" action="/settings/archive-sync">'
             + settings_control_row(
@@ -1088,6 +1289,7 @@ def render_settings_html(
             '<form method="post" action="/settings/usb-otg">'
             + usb_otg_install_warning
             + usb_otg_warning
+            + usb_otg_hardware_warning
             + _usb_otg_refresh_interval_warning(config)
             + settings_control_row(
                 "USB OTG image export",
@@ -1104,8 +1306,14 @@ def render_settings_html(
                     "is available."
                 ),
             )
+            + (
+                '<fieldset disabled aria-describedby="usb-otg-hardware-warning">'
+                if not supported_usb_otg_frame_renderer
+                else ""
+            )
             + _settings_markup_row("USB OTG support", usb_otg_support_badge)
             + _settings_markup_row("USB OTG device controller", usb_otg_controller_badge)
+            + _settings_markup_row("Frame renderer CPU support", usb_otg_frame_renderer_badge)
             + settings_control_row(
                 "Image width",
                 (
@@ -1203,27 +1411,30 @@ def render_settings_html(
             + settings_row("Backing disk image", config.usb_otg.image_path)
             + settings_row("Image size", f"{config.usb_otg.size_mb} MB")
             + settings_row("Gadget name", config.usb_otg.gadget_name)
+            + ("</fieldset>" if not supported_usb_otg_frame_renderer else "")
             + '<div style="margin-top:1rem">'
             + f"{button('Save USB OTG settings', kind='primary')}"
             + "</div>"
             + "</form>"
             + '<div class="inline-actions" style="margin-top:1rem">'
             + (
-                '<form method="post" action="/actions/restore-usb-host-mode" '
-                "onsubmit=\"return confirm('Restore Raspberry Pi USB host boot mode? "
-                "A reboot will be required.')\">"
-                f"{button('Restore USB Host Mode', kind='secondary')}"
-                "</form>"
-                if prepared_usb_otg_boot_mode
-                else (
-                    '<form method="post" action="/actions/prepare-usb-otg-mode" '
-                    "onsubmit=\"return confirm('Prepare Raspberry Pi USB OTG peripheral "
-                    "boot mode? A reboot will be required.')\">"
-                    f"{button('Prepare USB OTG Mode', kind='secondary')}"
+                (
+                    '<form method="post" action="/actions/restore-usb-host-mode" '
+                    "onsubmit=\"return confirm('Restore Raspberry Pi USB host boot mode? "
+                    "A reboot will be required.')\">"
+                    f"{button('Restore USB Host Mode', kind='secondary')}"
                     "</form>"
-                    if installed_usb_otg_support
-                    else ""
+                    if prepared_usb_otg_boot_mode
+                    else (
+                        '<form method="post" action="/actions/prepare-usb-otg-mode" '
+                        "onsubmit=\"return confirm('Prepare Raspberry Pi USB OTG peripheral "
+                        "boot mode? A reboot will be required.')\">"
+                        f"{button('Prepare USB OTG Mode', kind='secondary')}"
+                        "</form>"
+                    )
                 )
+                if usb_otg_actions_available
+                else ""
             )
             + "</div>"
         )
@@ -1346,6 +1557,10 @@ def render_settings_html(
             body=archive_sync_section_body,
         )
         + section_card(
+            title="Self-Healing",
+            body=self_healing_section_body,
+        )
+        + section_card(
             title="USB OTG Image Export",
             body=usb_otg_section_body,
         )
@@ -1399,6 +1614,7 @@ def render_settings_html(
         version_label=version_label,
         theme_preference=theme_preference,
         language=resolved_language,
+        script=_self_healing_settings_script() if edit_mode else "",
     )
 
 

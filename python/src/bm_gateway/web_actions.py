@@ -36,6 +36,7 @@ from .state_store import (
     load_snapshot,
     rename_history_device_id,
 )
+from .usb_otg import USB_OTG_FRAME_RENDERER_ENABLE_ERROR, usb_otg_frame_renderer_supported
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
 
@@ -117,6 +118,12 @@ def _gateway_snapshot_from_mapping(snapshot: dict[str, object]) -> GatewaySnapsh
                     last_seen=str(item.get("last_seen", snapshot.get("generated_at", ""))),
                     adapter=str(item.get("adapter", "")),
                     driver=str(item.get("driver", "")),
+                    last_attempt=str(
+                        item.get(
+                            "last_attempt",
+                            item.get("last_seen", snapshot.get("generated_at", "")),
+                        )
+                    ),
                 )
             )
     return GatewaySnapshot(
@@ -524,8 +531,20 @@ def update_usb_otg_preferences(
     fleet_trend_metrics: tuple[str, ...] | None = None,
     fleet_trend_range: str | None = None,
     fleet_trend_device_ids: tuple[str, ...] | None = None,
+    frame_renderer_supported: bool | None = None,
 ) -> list[str]:
     config = load_config(config_path)
+    if frame_renderer_supported is None:
+        frame_renderer_supported = usb_otg_frame_renderer_supported()
+    if enabled and not frame_renderer_supported:
+        errors = [USB_OTG_FRAME_RENDERER_ENABLE_ERROR]
+        _audit_manual_web_action(
+            config,
+            action="usb_otg_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
+        return errors
     updated = replace(
         config,
         usb_otg=replace(
@@ -641,6 +660,61 @@ def update_archive_sync_preferences(
             "bm200_max_pages_per_sync": bm200_max_pages_per_sync,
             "bm300_enabled": bm300_enabled,
             "bm300_max_pages_per_sync": bm300_max_pages_per_sync,
+        },
+    )
+    return []
+
+
+def update_self_healing_preferences(
+    *,
+    config_path: Path,
+    periodic_reboot_enabled: bool,
+    periodic_reboot_hours: int,
+    wifi_watchdog_enabled: bool,
+    wifi_interface: str,
+    connectivity_check_host: str,
+    wifi_reconnect_enabled: bool,
+    wifi_reconnect_after_minutes: int,
+    wifi_reboot_enabled: bool,
+    wifi_reboot_after_minutes: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=periodic_reboot_enabled,
+            periodic_reboot_hours=periodic_reboot_hours,
+            wifi_watchdog_enabled=wifi_watchdog_enabled,
+            wifi_interface=wifi_interface,
+            connectivity_check_host=connectivity_check_host,
+            wifi_reconnect_enabled=wifi_reconnect_enabled,
+            wifi_reconnect_after_minutes=wifi_reconnect_after_minutes,
+            wifi_reboot_enabled=wifi_reboot_enabled,
+            wifi_reboot_after_minutes=wifi_reboot_after_minutes,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        _audit_manual_web_action(
+            config,
+            action="self_healing_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
+        return errors
+    write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="self_healing_preferences_update",
+        status="completed",
+        details={
+            "periodic_reboot_enabled": periodic_reboot_enabled,
+            "wifi_watchdog_enabled": wifi_watchdog_enabled,
+            "wifi_reconnect_enabled": wifi_reconnect_enabled,
+            "wifi_reboot_enabled": wifi_reboot_enabled,
         },
     )
     return []

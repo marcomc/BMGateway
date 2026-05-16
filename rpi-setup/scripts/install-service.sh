@@ -206,6 +206,7 @@ home_assistant = dict(data.get("home_assistant", {}))
 web = dict(data.get("web", {}))
 usb_otg = dict(data.get("usb_otg", {}))
 archive_sync = dict(data.get("archive_sync", {}))
+self_healing = dict(data.get("self_healing", {}))
 retention = dict(data.get("retention", {}))
 
 if str(gateway.get("name", "")).startswith("__"):
@@ -234,6 +235,7 @@ payload = "\n".join(
         f'adapter = {string_to_toml(bluetooth.get("adapter", "auto"))}',
         f'scan_timeout_seconds = {int(bluetooth.get("scan_timeout_seconds", 15))}',
         f'connect_timeout_seconds = {int(bluetooth.get("connect_timeout_seconds", 45))}',
+        f'live_hard_timeout_seconds = {int(bluetooth.get("live_hard_timeout_seconds", 0))}',
         "",
         "[mqtt]",
         f'enabled = {bool_to_toml(bool(mqtt.get("enabled", enable_home_assistant)))}',
@@ -287,8 +289,40 @@ payload = "\n".join(
         f'bm300_enabled = {bool_to_toml(bool(archive_sync.get("bm300_enabled", True)))}',
         f'bm300_max_pages_per_sync = {int(archive_sync.get("bm300_max_pages_per_sync", 3))}',
         "",
+        "[self_healing]",
+        (
+            "periodic_reboot_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('periodic_reboot_enabled', False)))}"
+        ),
+        f'periodic_reboot_hours = {int(self_healing.get("periodic_reboot_hours", 24))}',
+        (
+            "wifi_watchdog_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('wifi_watchdog_enabled', False)))}"
+        ),
+        f'wifi_interface = {string_to_toml(self_healing.get("wifi_interface", "wlan0"))}',
+        (
+            "connectivity_check_host = "
+            f'{string_to_toml(self_healing.get("connectivity_check_host", "1.1.1.1"))}'
+        ),
+        (
+            "wifi_reconnect_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('wifi_reconnect_enabled', True)))}"
+        ),
+        (
+            "wifi_reconnect_after_minutes = "
+            f'{int(self_healing.get("wifi_reconnect_after_minutes", 5))}'
+        ),
+        (
+            "wifi_reboot_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('wifi_reboot_enabled', False)))}"
+        ),
+        (
+            "wifi_reboot_after_minutes = "
+            f'{int(self_healing.get("wifi_reboot_after_minutes", 15))}'
+        ),
+        "",
         "[retention]",
-        f'raw_retention_days = {int(retention.get("raw_retention_days", 180))}',
+        f'raw_retention_days = {int(retention.get("raw_retention_days", 730))}',
         f'daily_retention_days = {int(retention.get("daily_retention_days", 0))}',
         "",
     ]
@@ -360,20 +394,28 @@ WorkingDirectory=${state_dir}
 WantedBy=multi-user.target
 EOF
 
-if [[ "${enable_web}" -eq 1 ]]; then
-  sudoers_commands="/usr/bin/systemctl restart bm-gateway.service, /usr/bin/systemctl restart bluetooth.service, /usr/bin/systemctl reboot, /usr/bin/systemctl poweroff"
-  if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
-    sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare, ${usb_otg_boot_mode_path} restore, ${usb_otg_drive_helper_path} setup *, ${usb_otg_drive_helper_path} refresh *"
+sudoers_commands="/usr/bin/systemctl restart bm-gateway.service"
+sudoers_commands="${sudoers_commands}, /usr/bin/systemctl restart bluetooth.service"
+sudoers_commands="${sudoers_commands}, /usr/bin/systemctl reboot"
+sudoers_commands="${sudoers_commands}, /usr/bin/systemctl poweroff"
+sudoers_commands="${sudoers_commands}, /usr/bin/systemctl restart NetworkManager.service"
+sudoers_commands="${sudoers_commands}, /usr/bin/systemctl restart wpa_supplicant.service"
+sudoers_commands="${sudoers_commands}, /usr/bin/nmcli radio wifi on"
+sudoers_commands="${sudoers_commands}, /usr/bin/nmcli device connect *"
+if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
+  sudoers_commands="${sudoers_commands}, ${usb_otg_drive_helper_path} setup *"
+  sudoers_commands="${sudoers_commands}, ${usb_otg_drive_helper_path} refresh *"
+  if [[ "${enable_web}" -eq 1 ]]; then
+    sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} prepare"
+    sudoers_commands="${sudoers_commands}, ${usb_otg_boot_mode_path} restore"
   fi
-  cat >"${sudoers_path}" <<EOF
+fi
+cat >"${sudoers_path}" <<EOF
 ${service_user} ALL=(root) NOPASSWD: ${sudoers_commands}
 EOF
-  chmod 0440 "${sudoers_path}"
-  if command -v visudo >/dev/null 2>&1; then
-    visudo -cf "${sudoers_path}"
-  fi
-else
-  rm -f "${sudoers_path}"
+chmod 0440 "${sudoers_path}"
+if command -v visudo >/dev/null 2>&1; then
+  visudo -cf "${sudoers_path}"
 fi
 
 if [[ "${enable_glances}" -eq 1 ]]; then
@@ -436,11 +478,7 @@ fi
 
 printf 'Installed runtime service to %s\n' "${unit_path}"
 printf 'Installed web service to %s\n' "${web_unit_path}"
-if [[ "${enable_web}" -eq 1 ]]; then
-  printf 'Installed web action sudoers policy to %s\n' "${sudoers_path}"
-else
-  printf 'Skipped web action sudoers policy because web service is disabled\n'
-fi
+printf 'Installed service action sudoers policy to %s\n' "${sudoers_path}"
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   printf 'Installed USB OTG helpers to %s and %s\n' \
     "${usb_otg_boot_mode_path}" "${usb_otg_drive_helper_path}"

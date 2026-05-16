@@ -1,9 +1,11 @@
 # Web Component
 
-## Table of Contents
+## Contents
 
 - [Purpose](#purpose)
 - [Current Product Surface](#current-product-surface)
+- [Implementation Flow](#implementation-flow)
+- [Chart Performance](#chart-performance)
 - [Configuration Knobs](#configuration-knobs)
 - [Adding Or Updating Locales](#adding-or-updating-locales)
 - [Canonical References](#canonical-references)
@@ -18,6 +20,7 @@ It does not repeat installation steps or architecture detail. For those, use:
 - root overview: [../README.md](../README.md)
 - Raspberry Pi install: [../rpi-setup/manual-setup.md](../rpi-setup/manual-setup.md)
 - architecture: [../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)
+- application surfaces: [../docs/application-surfaces.md](../docs/application-surfaces.md)
 - Python implementation: [../python/README.md](../python/README.md)
 
 ## Current Product Surface
@@ -39,6 +42,36 @@ The implementation lives in the shared Python package:
 - packaged web assets: `python/src/bm_gateway/assets/`
 - localization layer: `python/src/bm_gateway/localization.py`
 - packaged locale catalogs: `python/src/bm_gateway/locales/`
+
+## Implementation Flow
+
+This diagram shows how requests move through the server-rendered web
+implementation.
+
+```mermaid
+flowchart LR
+    accTitle: Web implementation flow
+    accDescr: Shows how browser requests route through web.py into renderers or actions, use shared state, and return HTML or JSON.
+    Request["browser request"]
+    Router["python/src/bm_gateway/web.py"]
+    Renderer["web_pages_*.py"]
+    Actions["web_actions.py"]
+    State["config, devices, snapshot, gateway.db"]
+    Response["HTML or JSON response"]
+
+    Request --> Router
+    Router --> Renderer
+    Router --> Actions
+    State --> Renderer
+    Actions --> State
+    Renderer --> Response
+    Actions --> Response
+```
+
+The route and API reference is maintained in
+[Application surfaces](../docs/application-surfaces.md#web-ui). Keep detailed
+route lists there so this component guide can focus on product behavior,
+localization, and chart rendering.
 
 ## Chart Performance
 
@@ -190,5 +223,7 @@ tables, charts, and button groups may still need a visual pass.
 - Python contributor guide: [../python/README.md](../python/README.md)
 - Architecture plan:
   [../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](../docs/architecture/2026-04-20-shared-core-separate-web-runtime-plan.md)
+- Application surfaces:
+  [../docs/application-surfaces.md](../docs/application-surfaces.md)
 - BM6/BM200 notes:
   [../docs/2026-04-19-bm6-bm200-integration-notes.md](../docs/2026-04-19-bm6-bm200-integration-notes.md)

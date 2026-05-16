@@ -130,4 +130,4 @@ def test_validate_release_version_state_accepts_current_repository() -> None:
 
     state = validate_release_version_state(root)
 
-    assert state.package_version == "0.2.2"
+    assert state.package_version == "0.3.0"

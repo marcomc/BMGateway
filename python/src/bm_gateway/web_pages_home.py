@@ -213,6 +213,15 @@ def home_overview_scroller_html(
             else f"<div class='meta battery-card-meta-extra'>{html.escape(battery_summary)}</div>"
         )
         circle_status = shared._battery_card_status_markup(device, inline=True)
+        unreachable_message = shared._unreachable_last_seen_message(device)
+        unreachable_html = (
+            ""
+            if unreachable_message is None
+            else (
+                "<div class='meta home-overview-last-seen'>"
+                f"{html.escape(unreachable_message)}</div>"
+            )
+        )
         gauge_value = html.escape(shared._format_number(device.get("soc"), digits=0, suffix="%"))
         gauge_inner = (
             '<div class="home-orb-layout">'
@@ -227,6 +236,7 @@ def home_overview_scroller_html(
             f'<div class="home-orb-center {status_class}">'
             f'<div class="battery-card-gauge-value">{gauge_value}</div>'
             f"{circle_status}"
+            f"{unreachable_html}"
             f'<div class="battery-card-gauge-label">{temperature_text}</div>'
             f'<div class="battery-card-gauge-subvalue">{voltage_text}</div>'
             "</div>"

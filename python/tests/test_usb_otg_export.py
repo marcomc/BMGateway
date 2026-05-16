@@ -9,7 +9,10 @@ from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import Device
 from bm_gateway.models import DeviceReading, GatewaySnapshot
-from bm_gateway.usb_otg import usb_otg_support_installed
+from bm_gateway.usb_otg import (
+    usb_otg_frame_renderer_supported,
+    usb_otg_support_installed,
+)
 from bm_gateway.usb_otg_export import (
     _chromium_capture_height,
     _compact_frame_chart_points,
@@ -53,6 +56,40 @@ def test_usb_otg_support_detects_installed_helper_and_mkfs_path(
     monkeypatch.setattr("bm_gateway.usb_otg.shutil.which", lambda _name: "/usr/sbin/mkfs.vfat")
 
     assert usb_otg_support_installed(drive_helper_path=helper)
+
+
+def test_usb_otg_frame_renderer_support_rejects_armv6_without_neon(tmp_path: Path) -> None:
+    cpuinfo = tmp_path / "cpuinfo"
+    cpuinfo.write_text(
+        "\n".join(
+            [
+                "processor\t: 0",
+                "model name\t: ARMv6-compatible processor rev 7 (v6l)",
+                "Features\t: half thumb fastmult vfp edsp java tls",
+                "Hardware\t: BCM2835",
+                "Model\t\t: Raspberry Pi Zero W Rev 1.1",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    assert not usb_otg_frame_renderer_supported(cpuinfo_path=cpuinfo)
+
+
+def test_usb_otg_frame_renderer_support_accepts_neon_and_asimd(tmp_path: Path) -> None:
+    neon_cpuinfo = tmp_path / "neon-cpuinfo"
+    neon_cpuinfo.write_text(
+        "model name\t: ARMv7 Processor\nFeatures\t: half thumb fastmult vfp edsp neon tls\n",
+        encoding="utf-8",
+    )
+    asimd_cpuinfo = tmp_path / "asimd-cpuinfo"
+    asimd_cpuinfo.write_text(
+        "model name\t: Cortex-A53\nFeatures\t: fp asimd evtstrm crc32 cpuid\n",
+        encoding="utf-8",
+    )
+
+    assert usb_otg_frame_renderer_supported(cpuinfo_path=neon_cpuinfo)
+    assert usb_otg_frame_renderer_supported(cpuinfo_path=asimd_cpuinfo)
 
 
 def test_crop_screenshot_to_frame_preserves_top_left_frame(tmp_path: Path) -> None:
@@ -619,6 +656,44 @@ def test_update_usb_otg_drive_returns_failure_when_rendering_fails(tmp_path: Pat
 
     assert result.exported is False
     assert result.reason == "render failed"
+
+
+def test_update_usb_otg_drive_skips_rendering_without_neon_support(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(config, usb_otg=replace(config.usb_otg, enabled=True))
+    devices = [
+        Device(
+            id="bm200_house",
+            type="bm200",
+            name="House Battery",
+            mac="AA:BB:CC:DD:EE:01",
+            color_key="green",
+        )
+    ]
+
+    def _unexpected_renderer(
+        html_text: str,
+        output_path: Path,
+        width: int,
+        height: int,
+        image_format: str,
+    ) -> None:
+        raise AssertionError("renderer must not run without NEON support")
+
+    result = update_usb_otg_drive(
+        config=config,
+        devices=devices,
+        snapshot=_snapshot(),
+        database_path=tmp_path / "runtime" / "gateway.db",
+        page_renderer=_unexpected_renderer,
+        frame_renderer_supported=False,
+    )
+
+    assert result.exported is False
+    assert result.reason == (
+        "USB OTG frame image export is not supported on this hardware because "
+        "Chromium requires ARM NEON or ASIMD support."
+    )
 
 
 def test_usb_otg_export_due_uses_poll_interval_when_refresh_interval_is_zero(
