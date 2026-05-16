@@ -87,6 +87,7 @@ rsync -az --delete \
   --exclude '.pytest_cache' \
   --exclude '.ruff_cache' \
   --exclude '.playwright-cli' \
+  --exclude 'node_modules' \
   --exclude '__pycache__' \
   --exclude 'build' \
   --exclude 'dist' \
