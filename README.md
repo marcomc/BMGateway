@@ -87,18 +87,27 @@ For the first release summary, use [CHANGELOG.md](CHANGELOG.md).
 
 ## System Flow
 
+This high-level flow shows the normal appliance path from battery monitors to
+local state, the web UI, and Home Assistant MQTT discovery.
+
 ```mermaid
 flowchart LR
+    accTitle: BMGateway system flow
+    accDescr: Shows how battery monitor readings move through the runtime, local state, web UI, MQTT broker, and Home Assistant.
     Devices["BM200/BM6 and BM300 Pro/BM7 devices"]
     Runtime["bm-gateway"]
-    State["runtime state"]
+    State["latest_snapshot.json and gateway.db"]
     Web["bm-gateway-web"]
+    Browser["browser on bmgateway.local"]
+    Broker["MQTT broker"]
     HomeAssistant["Home Assistant"]
 
     Devices --> Runtime
     Runtime --> State
-    Runtime --> HomeAssistant
+    Runtime --> Broker
+    Broker --> HomeAssistant
     State --> Web
+    Web --> Browser
 ```
 
 The full surface map lives in

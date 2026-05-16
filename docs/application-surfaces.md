@@ -26,8 +26,12 @@ architecture decision behind the split, use
 
 ## System Flow
 
+This diagram shows the shipped top-level data and control flow.
+
 ```mermaid
 flowchart LR
+    accTitle: Application surface flow
+    accDescr: Shows the top-level flow among devices, the runtime, local state, the web UI, MQTT, Home Assistant, and CLI access.
     BM["BM200/BM6 and BM300 Pro/BM7 devices"]
     Runtime["bm-gateway runtime"]
     State["latest_snapshot.json and gateway.db"]
@@ -91,8 +95,12 @@ The runtime path is `bm-gateway run`. It can run once, run forever under
 `bm-gateway.service`, publish Home Assistant discovery, persist snapshots, and
 write SQLite history.
 
+This diagram shows the runtime inputs and the artifacts it writes each cycle.
+
 ```mermaid
 flowchart LR
+    accTitle: Runtime write path
+    accDescr: Shows how config, device registry, and protocol drivers feed bm-gateway run and which local and MQTT outputs it writes.
     Config["config.toml"]
     Registry["devices.toml"]
     Driver["BM driver"]
@@ -202,8 +210,12 @@ The web UI settings are grouped by real config ownership:
 discovery. Home Assistant does not scan the gateway web UI and does not require
 a custom integration for the normal path.
 
+This diagram shows the MQTT discovery and state path used by Home Assistant.
+
 ```mermaid
 flowchart LR
+    accTitle: Home Assistant MQTT flow
+    accDescr: Shows how bm-gateway publishes discovery and state topics through the MQTT broker for Home Assistant entities.
     Runtime["bm-gateway run"]
     Discovery["MQTT discovery payloads"]
     State["gateway and device state topics"]
@@ -239,6 +251,29 @@ The default runtime state is resolved from config and contains:
 | `runtime/latest_snapshot.json` | latest gateway and device snapshot |
 | `runtime/gateway.db` | SQLite canonical samples, derived rollups, import batches, and metadata |
 | `runtime/audit/YYYY-MM-DD.jsonl` | structured operational audit events |
+
+This diagram shows how runtime state files are produced and consumed.
+
+```mermaid
+flowchart LR
+    accTitle: Runtime state artifacts
+    accDescr: Shows how bm-gateway produces snapshots, SQLite history, and audit logs, and how web, CLI, and diagnostic surfaces consume them.
+    Runtime["bm-gateway run"]
+    Snapshot["latest_snapshot.json"]
+    Database["gateway.db"]
+    Audit["runtime/audit/*.jsonl"]
+    Web["bm-gateway-web"]
+    HistoryCLI["bm-gateway history"]
+    Diagnostics["operations diagnostics"]
+
+    Runtime --> Snapshot
+    Runtime --> Database
+    Runtime --> Audit
+    Snapshot --> Web
+    Database --> Web
+    Database --> HistoryCLI
+    Audit --> Diagnostics
+```
 
 Raw history retention defaults to two years and applies to canonical
 `device_samples`. Daily rollups are rebuilt from retained samples and default

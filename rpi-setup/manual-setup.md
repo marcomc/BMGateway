@@ -163,15 +163,26 @@ full appliance installation in one step:
 ./scripts/bootstrap-install.sh
 ```
 
+This diagram shows the bootstrap path from a prepared Raspberry Pi to running
+services and printed management URLs.
+
 ```mermaid
 flowchart LR
-    Packages["system packages"]
-    Runtime["standalone runtime"]
+    accTitle: Raspberry Pi bootstrap flow
+    accDescr: Shows how bootstrap-install.sh prepares packages, host services, uv, the checkout, runtime install, systemd services, and final URLs.
+    Packages["Install packages"]
+    Host["Set hostname and radios"]
+    UV["Install uv"]
+    Checkout["Clone or update checkout"]
+    Runtime["make install"]
     Config["config and device registry"]
-    Services["runtime and web services"]
+    Services["systemd services"]
     URLs["management URLs"]
 
-    Packages --> Runtime
+    Packages --> Host
+    Host --> UV
+    UV --> Checkout
+    Checkout --> Runtime
     Runtime --> Config
     Config --> Services
     Services --> URLs
@@ -664,6 +675,27 @@ sudo systemctl status cockpit.socket
 
 For appliance-affecting changes, validate on the real gateway host after local
 checks pass.
+
+This diagram shows the validation sequence for appliance-affecting changes
+after local checks pass.
+
+```mermaid
+flowchart LR
+    accTitle: Live gateway validation
+    accDescr: Shows the post-deploy validation sequence for services, web/API health, Bluetooth and mDNS, and one-shot polling.
+    Local["local checks pass"]
+    Deploy["make dev-deploy"]
+    Services["service state"]
+    Web["web and API checks"]
+    Radios["Bluetooth and mDNS checks"]
+    Poll["dry-run and live poll"]
+
+    Local --> Deploy
+    Deploy --> Services
+    Services --> Web
+    Web --> Radios
+    Radios --> Poll
+```
 
 The default hostname is `bmgateway.local`. If you changed it during bootstrap,
 replace that hostname with your chosen `<hostname>.local` or export a different

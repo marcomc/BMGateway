@@ -24,8 +24,13 @@ The goal is simple operational behavior:
 
 ## Current Flow
 
+This diagram shows how live samples and archive imports share the canonical
+history store.
+
 ```mermaid
 flowchart LR
+    accTitle: Unified history storage flow
+    accDescr: Shows live polling and onboard archive imports writing canonical samples, rollups, recent views, long-range views, and retention pruning.
     Live["Live BLE poll"] --> Samples["device_samples<br/>source=live"]
     Archive["Onboard archive import"] --> Batch["archive_import_batches<br/>running/completed/failed"]
     Archive --> SamplesArchive["device_samples<br/>source=device_archive"]

@@ -45,8 +45,13 @@ The implementation lives in the shared Python package:
 
 ## Implementation Flow
 
+This diagram shows how requests move through the server-rendered web
+implementation.
+
 ```mermaid
 flowchart LR
+    accTitle: Web implementation flow
+    accDescr: Shows how browser requests route through web.py into renderers or actions, use shared state, and return HTML or JSON.
     Request["browser request"]
     Router["python/src/bm_gateway/web.py"]
     Renderer["web_pages_*.py"]
@@ -57,9 +62,10 @@ flowchart LR
     Request --> Router
     Router --> Renderer
     Router --> Actions
-    Renderer --> State
+    State --> Renderer
     Actions --> State
     Renderer --> Response
+    Actions --> Response
 ```
 
 The route and API reference is maintained in

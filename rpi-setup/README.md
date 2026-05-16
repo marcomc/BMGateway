@@ -64,16 +64,22 @@ The one-line bootstrap installs the full appliance by default:
 - optional Cockpit HTTPS host administration on port `9090`
 - live-ready config with an empty device registry
 
+This diagram summarizes the bootstrap artifacts installed on the Raspberry Pi.
+
 ```mermaid
 flowchart LR
+    accTitle: Raspberry Pi installed artifacts
+    accDescr: Shows how the bootstrap installer creates the runtime, config, and systemd service artifacts.
     Bootstrap["bootstrap-install.sh"]
     Install["make install"]
+    Config["config and registry"]
     Services["systemd services"]
     Runtime["bm-gateway.service"]
     Web["bm-gateway-web.service"]
 
     Bootstrap --> Install
-    Bootstrap --> Services
+    Install --> Config
+    Config --> Services
     Services --> Runtime
     Services --> Web
 ```

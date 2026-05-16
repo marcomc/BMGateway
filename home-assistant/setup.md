@@ -61,12 +61,23 @@ The practical message flow is:
 
 ```mermaid
 flowchart LR
-    Gateway["BMGateway"]
+    accTitle: Home Assistant discovery flow
+    accDescr: Shows how BMGateway settings enable runtime discovery and state messages through the MQTT broker to Home Assistant entities.
+    Settings["MQTT and Home Assistant settings"]
+    Runtime["bm-gateway run"]
+    Discovery["retained discovery topics"]
+    State["live gateway and device state"]
     Broker["MQTT broker"]
-    HomeAssistant["Home Assistant"]
+    HomeAssistant["Home Assistant MQTT integration"]
+    Entities["gateway and battery entities"]
 
-    Gateway --> Broker
+    Settings --> Runtime
+    Runtime --> Discovery
+    Runtime --> State
+    Discovery --> Broker
+    State --> Broker
     Broker --> HomeAssistant
+    HomeAssistant --> Entities
 ```
 
 In configuration terms:
