@@ -10,6 +10,7 @@ from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import (
     delete_archive_history_profiles,
     fetch_archive_history,
+    fetch_counts,
     fetch_daily_history,
     fetch_degradation_report,
     fetch_monthly_history,
@@ -93,6 +94,31 @@ def test_persist_snapshot_uses_device_samples_as_canonical_raw_store(tmp_path: P
         fetch_recent_history(database_path, device_id="bm200_house", limit=1)[0]["sample_source"]
         == "live"
     )
+
+
+def test_schema_cache_recreates_database_after_file_replacement(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+
+    for suffix in ("", "-shm", "-wal"):
+        database_path.with_name(f"{database_path.name}{suffix}").unlink(missing_ok=True)
+
+    counts = fetch_counts(database_path)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        tables = {
+            str(row[0])
+            for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type = 'table'"
+            ).fetchall()
+        }
+    finally:
+        connection.close()
+
+    assert counts["device_samples"] == 0
+    assert counts["device_readings"] == 0
+    assert {"device_samples", "state_store_metadata"} <= tables
 
 
 def test_persist_snapshot_does_not_double_count_duplicate_canonical_sample(

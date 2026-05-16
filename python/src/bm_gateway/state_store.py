@@ -18,6 +18,17 @@ ARCHIVE_SAMPLE_SOURCE = "device_archive"
 LIVE_SAMPLE_PRIORITY = 2
 ARCHIVE_SAMPLE_PRIORITY = 1
 LEGACY_HISTORY_MIGRATION_KEY = "legacy_history_imported_to_device_samples"
+_REQUIRED_SCHEMA_TABLES = frozenset(
+    {
+        "gateway_snapshots",
+        "device_readings",
+        "device_daily_rollups",
+        "device_archive_readings",
+        "device_samples",
+        "archive_import_batches",
+        "state_store_metadata",
+    }
+)
 _SCHEMA_READY_PATHS: set[Path] = set()
 
 
@@ -63,12 +74,13 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
     connection.execute("PRAGMA busy_timeout = 30000")
     if migrate_legacy:
         connection.execute("PRAGMA journal_mode = WAL")
-    if schema_key in _SCHEMA_READY_PATHS:
+    if schema_key in _SCHEMA_READY_PATHS and _database_schema_is_ready(connection):
         if migrate_legacy:
             if _migrate_legacy_history_to_device_samples(connection):
                 _rebuild_daily_rollups(connection)
             connection.commit()
         return connection
+    _SCHEMA_READY_PATHS.discard(schema_key)
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS gateway_snapshots (
@@ -276,6 +288,20 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
     connection.commit()
     _SCHEMA_READY_PATHS.add(schema_key)
     return connection
+
+
+def _database_schema_is_ready(connection: sqlite3.Connection) -> bool:
+    placeholders = ", ".join("?" for _ in _REQUIRED_SCHEMA_TABLES)
+    rows = connection.execute(
+        f"""
+        SELECT name
+        FROM sqlite_master
+        WHERE type = 'table'
+          AND name IN ({placeholders})
+        """,
+        tuple(_REQUIRED_SCHEMA_TABLES),
+    ).fetchall()
+    return {str(row[0]) for row in rows} == _REQUIRED_SCHEMA_TABLES
 
 
 def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:

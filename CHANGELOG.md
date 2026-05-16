@@ -46,6 +46,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Fixed upgraded legacy databases so history readers migrate existing
   `device_readings` and `device_archive_readings` rows before querying the
   canonical `device_samples` table.
+- Fixed long-running processes so replacing `gateway.db` no longer leaves the
+  schema cache pointing at a missing or empty database.
 - Fixed Fleet Trend short-range charts so they load raw samples by time window
   instead of by a fixed recent-row count after live and archive history were
   unified in `device_samples`.
