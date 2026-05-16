@@ -646,7 +646,7 @@ def _representative_english_pages() -> list[str]:
     ]
     legend = [("Battery Alpha", "#17c45a")]
     storage_summary: dict[str, object] = {
-        "counts": {"gateway_snapshots": 1, "device_readings": 1, "device_daily_rollups": 1},
+        "counts": {"gateway_snapshots": 1, "device_samples": 1, "device_daily_rollups": 1},
         "devices": [],
     }
     contract: dict[str, object] = {

@@ -30,6 +30,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   persisted sources.
 - Extended the default raw history retention to two years and applied the same
   retention pruning to imported archive readings.
+- Unified live and archive history persistence into the canonical
+  `device_samples` table, with daily rollups rebuilt from retained samples and
+  `archive_import_batches` recording completed or failed onboard imports.
+- Fixed degradation comparison reports when retained archive-only days have no
+  SoC value, and hardened web action tests against startup races in the local
+  test server.
 
 ## [0.2.2] - 2026-05-03 - Raspberry Pi Bluetooth Recovery and mDNS Hostname Recovery
 

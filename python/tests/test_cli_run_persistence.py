@@ -95,7 +95,7 @@ def test_run_once_persists_sqlite_database(tmp_path: Path) -> None:
     connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
     try:
         gateway_count = connection.execute("SELECT COUNT(*) FROM gateway_snapshots").fetchone()
-        device_count = connection.execute("SELECT COUNT(*) FROM device_readings").fetchone()
+        device_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
     finally:
         connection.close()
 
@@ -129,7 +129,7 @@ def test_run_once_still_persists_when_mqtt_publish_fails(tmp_path: Path) -> None
     connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
     try:
         gateway_count = connection.execute("SELECT COUNT(*) FROM gateway_snapshots").fetchone()
-        device_count = connection.execute("SELECT COUNT(*) FROM device_readings").fetchone()
+        device_count = connection.execute("SELECT COUNT(*) FROM device_samples").fetchone()
     finally:
         connection.close()
 
@@ -188,7 +188,7 @@ def test_live_mode_run_uses_simulated_bm200_reader(
     connection = sqlite3.connect(state_dir / "runtime" / "gateway.db")
     try:
         row = connection.execute(
-            "SELECT voltage, soc, state FROM device_readings ORDER BY id DESC LIMIT 1"
+            "SELECT voltage, soc, state FROM device_samples ORDER BY id DESC LIMIT 1"
         ).fetchone()
     finally:
         connection.close()

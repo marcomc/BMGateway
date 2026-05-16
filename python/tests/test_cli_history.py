@@ -1870,8 +1870,8 @@ def test_history_prune_uses_configured_retention(
 
     assert result == 0
     payload = json.loads(captured.out)
-    assert payload["before"]["device_readings"] == 1
-    assert payload["after"]["device_readings"] == 1
+    assert payload["before"]["device_samples"] == 1
+    assert payload["after"]["device_samples"] == 1
 
 
 def test_sync_archive_backfill_candidates_raises_for_fatal_bluetooth_errors(

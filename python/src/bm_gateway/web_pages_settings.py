@@ -199,7 +199,7 @@ def render_settings_html(
     storage_summary = storage_summary or {
         "counts": {
             "gateway_snapshots": 0,
-            "device_readings": 0,
+            "device_samples": 0,
             "device_daily_rollups": 0,
         },
         "devices": [],
@@ -327,7 +327,7 @@ def render_settings_html(
         )
         + summary_card(
             "Raw / rollups",
-            f"{counts.get('device_readings', 0)} / {counts.get('device_daily_rollups', 0)}",
+            f"{counts.get('device_samples', 0)} / {counts.get('device_daily_rollups', 0)}",
             subvalue=f"MQTT connected: {snapshot.get('mqtt_connected', False)}",
             classes="compact-summary",
         )

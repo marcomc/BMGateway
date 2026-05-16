@@ -1058,7 +1058,7 @@ def serve_management(
                         storage_summary={
                             "counts": {
                                 "gateway_snapshots": 0,
-                                "device_readings": 0,
+                                "device_samples": 0,
                                 "device_daily_rollups": 0,
                             },
                             "devices": [],

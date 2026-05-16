@@ -92,16 +92,27 @@ History surfaces include:
 - monthly rollups
 - yearly summaries
 
-Raw history retention defaults to two years. Daily rollups default to unlimited
-retention because they are compact and support long-range comparison views.
+Live polling and onboard archive imports write to the same canonical
+`device_samples` table. Archive imports insert missing samples at their own
+timestamps, so a later reimport can fill a gap between existing live samples
+without overwriting the surrounding data.
 
-Archive-history merge/backfill plumbing exists, but BM6-family onboard archive
-retrieval is still incomplete on real hardware.
+`device_daily_rollups` is a derived cache rebuilt from `device_samples` for
+daily, monthly, yearly, and degradation views. `archive_import_batches` records
+whether an archive import is running, completed, or failed, but it is not an
+intermediate measurement store.
+
+Raw history retention defaults to two years and applies to `device_samples`.
+Daily rollups default to no extra rollup-only pruning; after samples are
+pruned, rollups are rebuilt from the retained canonical samples.
 
 The audit log is newline-delimited JSON intended for machine correlation during
 operations debugging. It records automatic polling cycles, per-device poll
 results, archive-sync activity, and key manual web-managed actions, and prunes
 files older than 90 days automatically.
+
+The detailed storage flow is documented in
+[Unified history storage](../docs/architecture/2026-05-16-unified-history-storage.md).
 
 ## Device Registry Coverage
 

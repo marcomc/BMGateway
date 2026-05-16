@@ -421,7 +421,8 @@ def test_persist_snapshot_writes_gateway_and_device_rows(tmp_path: Path) -> None
 
     counts = fetch_counts(database_path)
     assert counts["gateway_snapshots"] == 1
-    assert counts["device_readings"] == 1
+    assert counts["device_samples"] == 1
+    assert counts["device_readings"] == 0
     assert counts["device_daily_rollups"] == 1
 
 

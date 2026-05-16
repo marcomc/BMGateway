@@ -237,12 +237,13 @@ The default runtime state is resolved from config and contains:
 | Artifact | Purpose |
 | :-- | :-- |
 | `runtime/latest_snapshot.json` | latest gateway and device snapshot |
-| `runtime/gateway.db` | SQLite history, rollups, archive rows, and metadata |
+| `runtime/gateway.db` | SQLite canonical samples, derived rollups, import batches, and metadata |
 | `runtime/audit/YYYY-MM-DD.jsonl` | structured operational audit events |
 
-Raw history retention defaults to two years. Daily rollups default to unlimited
-retention because they are compact and support long-range views. Audit logs are
-pruned automatically after 90 days.
+Raw history retention defaults to two years and applies to canonical
+`device_samples`. Daily rollups are rebuilt from retained samples and default
+to no extra rollup-only pruning. Audit logs are pruned automatically after
+90 days.
 
 ## Raspberry Pi Services
 

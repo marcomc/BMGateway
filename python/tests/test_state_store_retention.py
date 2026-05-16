@@ -59,7 +59,30 @@ def _snapshot(ts: str) -> GatewaySnapshot:
     )
 
 
-def test_prune_history_removes_old_raw_rows_but_keeps_daily_rollup_when_unlimited(
+def test_persist_snapshot_uses_device_samples_as_canonical_raw_store(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
+
+    connection = sqlite3.connect(database_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT device_id, sample_ts, source, source_profile, voltage, soc
+            FROM device_samples
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert rows == [("bm200_house", "2024-01-01T00:00:00+00:00", "live", "live", 12.73, 58)]
+    assert (
+        fetch_recent_history(database_path, device_id="bm200_house", limit=1)[0]["sample_source"]
+        == "live"
+    )
+
+
+def test_prune_history_removes_old_raw_rows_and_rebuilds_daily_rollups(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "gateway.db"
@@ -75,11 +98,8 @@ def test_prune_history_removes_old_raw_rows_but_keeps_daily_rollup_when_unlimite
         connection.close()
 
     assert raw_count == (0,)
-    assert daily_count == (1,)
-    assert (
-        fetch_daily_history(database_path, device_id="bm200_house", limit=30)[0]["day"]
-        == "2024-01-01"
-    )
+    assert daily_count == (0,)
+    assert fetch_daily_history(database_path, device_id="bm200_house", limit=30) == []
 
 
 def test_prune_history_removes_old_archive_rows_with_raw_retention(
@@ -120,6 +140,175 @@ def test_prune_history_removes_old_archive_rows_with_raw_retention(
     assert [row["ts"] for row in archive_rows] == [kept_ts]
 
 
+def test_prune_history_removes_old_canonical_samples_with_raw_retention(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    now = datetime.now(tz=timezone.utc).astimezone()
+    old_ts = (now - timedelta(days=3)).isoformat(timespec="seconds")
+    kept_ts = (now - timedelta(hours=12)).isoformat(timespec="seconds")
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": old_ts,
+                "voltage": 12.61,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+            {
+                "ts": kept_ts,
+                "voltage": 12.62,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+        ],
+    )
+
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+
+    connection = sqlite3.connect(database_path)
+    try:
+        rows = connection.execute(
+            "SELECT sample_ts FROM device_samples ORDER BY sample_ts"
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert rows == [(kept_ts,)]
+
+
+def test_import_archive_history_uses_device_samples_as_canonical_store(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    inserted = import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.61,
+                "min_crank_voltage": 11.95,
+                "event_type": 1,
+            }
+        ],
+    )
+
+    connection = sqlite3.connect(database_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT device_id, sample_ts, source, source_profile, voltage, min_crank_voltage
+            FROM device_samples
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert inserted == 1
+    assert rows == [
+        (
+            "bm200_house",
+            "2024-01-01T00:00:00+00:00",
+            "device_archive",
+            "legacy_bm2_history",
+            12.61,
+            11.95,
+        )
+    ]
+
+
+def test_import_archive_history_records_completed_batch(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.61,
+                "min_crank_voltage": 11.95,
+                "event_type": 1,
+            }
+        ],
+    )
+
+    connection = sqlite3.connect(database_path)
+    try:
+        rows = connection.execute(
+            """
+            SELECT device_id, profile, status, fetched_count, inserted_count
+            FROM archive_import_batches
+            """
+        ).fetchall()
+    finally:
+        connection.close()
+
+    assert rows == [("bm200_house", "legacy_bm2_history", "completed", 1, 1)]
+
+
+def test_history_readers_use_canonical_samples_when_legacy_tables_are_empty(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(database_path, _snapshot("2024-01-02T00:00:00+00:00"))
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.61,
+                "soc": 70,
+                "min_crank_voltage": 11.95,
+                "event_type": 1,
+            }
+        ],
+    )
+    connection = sqlite3.connect(database_path)
+    try:
+        connection.execute("DELETE FROM device_readings")
+        connection.execute("DELETE FROM device_archive_readings")
+        connection.commit()
+    finally:
+        connection.close()
+
+    recent_rows = fetch_recent_history(database_path, device_id="bm200_house", limit=10)
+    archive_rows = fetch_archive_history(database_path, device_id="bm200_house", limit=10)
+
+    assert [row["sample_source"] for row in recent_rows] == ["live", "device_archive"]
+    assert archive_rows[0]["ts"] == "2024-01-01T00:00:00+00:00"
+    assert latest_history_timestamp(database_path, device_id="bm200_house") == (
+        "2024-01-02T00:00:00+00:00"
+    )
+
+
 def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> None:
     database_path = tmp_path / "gateway.db"
     persist_snapshot(database_path, _snapshot("2024-01-01T00:00:00+00:00"))
@@ -129,9 +318,11 @@ def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> N
 
     assert summary["counts"] == {
         "gateway_snapshots": 2,
-        "device_readings": 2,
+        "device_samples": 2,
+        "device_readings": 0,
         "device_daily_rollups": 2,
         "device_archive_readings": 0,
+        "archive_import_batches": 0,
     }
     assert summary["devices"] == [
         {
@@ -149,7 +340,7 @@ def test_fetch_storage_summary_reports_raw_and_daily_ranges(tmp_path: Path) -> N
     ]
 
 
-def test_rename_history_device_id_updates_raw_daily_and_archive_tables(
+def test_rename_history_device_id_updates_canonical_daily_and_archive_rows(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "gateway.db"
@@ -197,23 +388,22 @@ def test_rename_history_device_id_updates_raw_daily_and_archive_tables(
     )
     connection = sqlite3.connect(database_path)
     try:
-        raw_metadata = connection.execute(
-            "SELECT DISTINCT device_type, name, mac FROM device_readings WHERE device_id = ?",
-            ("starter",),
-        ).fetchall()
-        archive_metadata = connection.execute(
+        sample_metadata = connection.execute(
             """
-            SELECT DISTINCT device_type, name, mac
-            FROM device_archive_readings
+            SELECT DISTINCT source, device_type, name, mac
+            FROM device_samples
             WHERE device_id = ?
+            ORDER BY source
             """,
             ("starter",),
         ).fetchall()
     finally:
         connection.close()
 
-    assert raw_metadata == [("bm200", "Starter Battery", "AA:BB:CC:DD:EE:99")]
-    assert archive_metadata == [("bm200", "Starter Battery", "AA:BB:CC:DD:EE:99")]
+    assert sample_metadata == [
+        ("device_archive", "bm200", "Starter Battery", "AA:BB:CC:DD:EE:99"),
+        ("live", "bm200", "Starter Battery", "AA:BB:CC:DD:EE:99"),
+    ]
 
 
 def test_import_archive_history_preserves_bm6_history_fields(tmp_path: Path) -> None:
@@ -317,6 +507,55 @@ def test_fetch_yearly_history_groups_daily_rollups_by_year(tmp_path: Path) -> No
             "error_count": 0,
             "last_seen": "2024-01-01T00:00:00+00:00",
         },
+    ]
+
+
+def test_fetch_yearly_history_uses_archive_samples_after_import(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.6,
+                "soc": 70,
+                "temperature": 20.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+            {
+                "ts": "2024-01-01T00:02:00+00:00",
+                "voltage": 12.8,
+                "soc": 74,
+                "temperature": 22.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+        ],
+    )
+
+    yearly = fetch_yearly_history(database_path, device_id="bm200_house", limit=5)
+
+    assert yearly == [
+        {
+            "device_id": "bm200_house",
+            "year": "2024",
+            "samples": 2,
+            "min_voltage": 12.6,
+            "max_voltage": 12.8,
+            "avg_voltage": 12.7,
+            "avg_soc": 72.0,
+            "avg_temperature": 21.0,
+            "error_count": 0,
+            "last_seen": "2024-01-01T00:02:00+00:00",
+        }
     ]
 
 
@@ -523,6 +762,42 @@ def test_fetch_degradation_report_uses_sample_weighted_averages(tmp_path: Path) 
     assert windows[0]["days"] == 30
     assert windows[0]["current_avg_voltage"] == 12.63
     assert windows[0]["current_avg_soc"] == 75.32
+
+
+def test_fetch_degradation_report_ignores_days_without_soc(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2024-01-01T00:00:00+00:00",
+                "voltage": 12.61,
+                "min_crank_voltage": 11.95,
+                "event_type": 1,
+            },
+            {
+                "ts": "2024-01-01T00:02:00+00:00",
+                "voltage": 12.58,
+                "min_crank_voltage": 11.92,
+                "event_type": 1,
+            },
+        ],
+    )
+
+    report = fetch_degradation_report(database_path, device_id="bm200_house")
+
+    assert report == {
+        "device_id": "bm200_house",
+        "latest_day": "2024-01-01",
+        "windows": [],
+    }
 
 
 def test_persist_snapshot_keeps_daily_rollups_weighted_only_by_valid_samples(
@@ -786,7 +1061,8 @@ def test_import_archive_history_is_idempotent_and_queryable(tmp_path: Path) -> N
     assert inserted_second == 0
     assert archive_rows[0]["ts"] == "2024-01-01T00:02:00"
     assert archive_rows[0]["sample_source"] == "device_archive"
-    assert summary_counts["device_archive_readings"] == 2
+    assert summary_counts["device_samples"] == 2
+    assert summary_counts["device_archive_readings"] == 0
     assert summary_devices[0]["archive_samples"] == 2
 
 
@@ -888,10 +1164,22 @@ def test_replace_archive_history_profiles_rolls_back_when_import_fails(tmp_path:
         )
 
     archive_rows = fetch_archive_history(database_path, device_id="bm300_doc", limit=10)
+    connection = sqlite3.connect(database_path)
+    try:
+        batches = connection.execute(
+            """
+            SELECT profile, status, fetched_count, inserted_count
+            FROM archive_import_batches
+            ORDER BY id
+            """
+        ).fetchall()
+    finally:
+        connection.close()
 
     assert len(archive_rows) == 1
     assert archive_rows[0]["profile"] == "bm7_d15505_b6_v1"
     assert archive_rows[0]["ts"] == "2024-01-01T00:00:00+00:00"
+    assert batches[-1] == ("bm7_d15505_b7_v1", "failed", 2, 0)
 
 
 def test_fetch_recent_history_prefers_live_rows_over_archive_rows_with_same_timestamp(

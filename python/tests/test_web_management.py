@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.request import urlopen as _stdlib_urlopen
 
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
@@ -69,6 +70,27 @@ from bm_gateway.web_actions import (
 from bm_gateway.web_pages_frame import frame_battery_overview_page_count
 from bm_gateway.web_pages_settings import render_reboot_pending_html, render_shutdown_pending_html
 from bm_gateway.web_ui import app_document, base_css, chart_script
+
+
+def _urlopen_with_retry(
+    request: urllib.request.Request | str,
+    *,
+    timeout: float,
+    attempts: int = 20,
+) -> Any:
+    last_error: urllib.error.URLError | None = None
+    for _attempt in range(attempts):
+        try:
+            return _stdlib_urlopen(request, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise
+        except urllib.error.URLError as error:
+            if not isinstance(error.reason, ConnectionRefusedError):
+                raise
+            last_error = error
+            time.sleep(0.05)
+    assert last_error is not None
+    raise last_error
 
 
 def test_update_config_from_text_writes_validated_config_and_registry(tmp_path: Path) -> None:
@@ -1008,7 +1030,7 @@ def test_devices_add_post_redirects_before_first_poll(
     last_error: urllib.error.URLError | None = None
     for _ in range(20):
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError as error:
             last_error = error
@@ -1821,7 +1843,7 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status in {200, 303}
 
     config = load_config(config_path)
@@ -1870,7 +1892,7 @@ def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> No
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status in {200, 303}
 
     config = load_config(config_path)
@@ -1941,7 +1963,7 @@ def test_settings_usb_otg_post_persists_enabled_flag(
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status == 200
         params = parse_qs(urlparse(response.url).query)
         assert params["message"] == ["Settings saved; USB OTG frame image export started"]
@@ -2007,7 +2029,7 @@ def test_settings_usb_otg_post_preserves_all_devices_sentinel(tmp_path: Path) ->
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         assert response.status == 200
 
     config = load_config(config_path)
@@ -2046,7 +2068,7 @@ def test_management_settings_respects_gzip_q_zero(tmp_path: Path) -> None:
     deadline = time.monotonic() + 2.0
     while True:
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError:
             if time.monotonic() >= deadline:
@@ -2092,7 +2114,7 @@ def test_management_settings_respects_explicit_gzip_opt_out_over_wildcard(tmp_pa
     deadline = time.monotonic() + 2.0
     while True:
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError:
             if time.monotonic() >= deadline:
@@ -2169,7 +2191,7 @@ def test_settings_usb_otg_post_starts_export_without_waiting(
     )
 
     try:
-        with urllib.request.urlopen(request, timeout=1.0) as response:
+        with _urlopen_with_retry(request, timeout=1.0) as response:
             assert response.status == 200
             params = parse_qs(urlparse(response.url).query)
             assert params["message"] == ["Settings saved; USB OTG frame image export started"]
@@ -2248,7 +2270,7 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
             data=request_body,
             method="POST",
         )
-        with urllib.request.urlopen(first_request, timeout=1.0) as response:
+        with _urlopen_with_retry(first_request, timeout=1.0) as response:
             assert response.status == 200
             params = parse_qs(urlparse(response.url).query)
             assert params["message"] == ["Settings saved; USB OTG frame image export started"]
@@ -2260,7 +2282,7 @@ def test_settings_usb_otg_post_does_not_start_second_export_while_running(
             data=request_body,
             method="POST",
         )
-        with urllib.request.urlopen(second_request, timeout=1.0) as response:
+        with _urlopen_with_retry(second_request, timeout=1.0) as response:
             assert response.status == 200
             params = parse_qs(urlparse(response.url).query)
             assert params["message"] == ["Settings saved"]
@@ -2314,7 +2336,7 @@ def test_settings_usb_otg_post_rejects_non_numeric_values_without_snapshot(
     )
 
     try:
-        urllib.request.urlopen(request, timeout=5.0)
+        _urlopen_with_retry(request, timeout=5.0)
     except urllib.error.HTTPError as error:
         html = error.read().decode("utf-8")
         assert error.code == 400
@@ -2380,7 +2402,7 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
         data=b"",
         method="POST",
     )
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         html = response.read().decode("utf-8")
         assert response.status == 200
         assert urlparse(response.url).path == "/usb-otg-export/progress"
@@ -2394,7 +2416,7 @@ def test_manual_usb_otg_export_redirects_to_progress_page_and_reports_status(
         f"http://{host}:{port}/api/usb-otg-export/status",
         headers={"Accept-Language": "it"},
     )
-    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+    with _urlopen_with_retry(status_request, timeout=5.0) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
     assert payload["status"] == "completed"
@@ -2468,7 +2490,7 @@ def test_manual_device_history_sync_action_redirects_to_selected_history(
     deadline = time.monotonic() + 2.0
     while True:
         try:
-            response_handle = urllib.request.urlopen(request, timeout=5.0)
+            response_handle = _urlopen_with_retry(request, timeout=5.0)
             break
         except urllib.error.URLError:
             if time.monotonic() >= deadline:
@@ -2489,7 +2511,7 @@ def test_manual_device_history_sync_action_redirects_to_selected_history(
         f"http://{host}:{port}/api/history-sync/status",
         headers={"Accept-Language": "it"},
     )
-    with urllib.request.urlopen(status_request, timeout=5.0) as response:
+    with _urlopen_with_retry(status_request, timeout=5.0) as response:
         payload = json.loads(response.read().decode("utf-8"))
 
     assert payload["status"] == "completed"
@@ -2564,7 +2586,7 @@ def test_render_management_html_includes_contract_and_storage_sections() -> None
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [
@@ -2632,7 +2654,7 @@ def test_render_management_html_includes_analytics_and_device_links() -> None:
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [],
@@ -2815,7 +2837,7 @@ def test_render_settings_html_storage_summary_filters_removed_devices() -> None:
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [
@@ -3444,7 +3466,7 @@ def test_render_settings_html_edit_mode_merges_summary_and_edit_controls() -> No
         storage_summary={
             "counts": {
                 "gateway_snapshots": 3,
-                "device_readings": 30,
+                "device_samples": 30,
                 "device_daily_rollups": 10,
             },
             "devices": [],
@@ -5629,7 +5651,7 @@ def test_devices_update_redirect_uses_normalized_renamed_device_id(tmp_path: Pat
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=5.0) as response:
+    with _urlopen_with_retry(request, timeout=5.0) as response:
         params = parse_qs(urlparse(response.url).query)
         assert response.status == 200
         assert urlparse(response.url).path == "/devices/edit"

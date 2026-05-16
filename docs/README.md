@@ -43,6 +43,7 @@ Mermaid diagram convention used by this repository.
 | Documentation maintenance rules | [documentation-maintenance.md](documentation-maintenance.md) |
 | Runtime, CLI, web UI, and integration surfaces | [application-surfaces.md](application-surfaces.md) |
 | Architecture boundary | [architecture/2026-04-20-shared-core-separate-web-runtime-plan.md](architecture/2026-04-20-shared-core-separate-web-runtime-plan.md) |
+| Unified history storage | [architecture/2026-05-16-unified-history-storage.md](architecture/2026-05-16-unified-history-storage.md) |
 | History backfill integration proposal | [architecture/2026-04-26-history-backfill-integration-proposal.md](architecture/2026-04-26-history-backfill-integration-proposal.md) |
 | Service account and privilege hardening proposal | [architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md](architecture/2026-04-22-service-account-and-privilege-hardening-proposal.md) |
 | USB-OTG image export hardware test | [architecture/2026-04-23-usb-otg-image-export-test.md](architecture/2026-04-23-usb-otg-image-export-test.md) |
@@ -66,6 +67,8 @@ Mermaid diagram convention used by this repository.
   [protocol-probe-tools.md](protocol-probe-tools.md)
 - Archive-history backfill strategy for reconnect and periodic import:
   [architecture/2026-04-26-history-backfill-integration-proposal.md](architecture/2026-04-26-history-backfill-integration-proposal.md)
+- Canonical live and archive history storage:
+  [architecture/2026-05-16-unified-history-storage.md](architecture/2026-05-16-unified-history-storage.md)
 - Raspberry Pi 3B operating-system and web-surface research:
   [research/2026-04-17-pi3b-web-and-os-research.md](research/2026-04-17-pi3b-web-and-os-research.md)
 

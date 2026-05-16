@@ -919,7 +919,7 @@ def _handle_history_stats(
 
     counts = cast(dict[str, int], summary["counts"])
     print(f"gateway_snapshots: {counts['gateway_snapshots']}")
-    print(f"device_readings: {counts['device_readings']}")
+    print(f"device_samples: {counts['device_samples']}")
     print(f"device_daily_rollups: {counts['device_daily_rollups']}")
     for device in cast(list[dict[str, object]], summary["devices"]):
         print(
@@ -968,7 +968,7 @@ def _handle_history_prune(
         f"raw_retention_days={config.retention.raw_retention_days} "
         f"daily_retention_days={config.retention.daily_retention_days}"
     )
-    print(f"device_readings: {before['device_readings']} -> {after['device_readings']}")
+    print(f"device_samples: {before['device_samples']} -> {after['device_samples']}")
     print(
         f"device_daily_rollups: {before['device_daily_rollups']} -> {after['device_daily_rollups']}"
     )

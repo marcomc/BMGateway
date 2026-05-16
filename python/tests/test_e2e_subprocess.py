@@ -314,7 +314,7 @@ def test_web_executable_serve_and_manage_work_end_to_end_with_fake_runtime(tmp_p
         assert status_payload["devices_online"] == 1
         assert devices_payload["devices"][0]["id"] == "bm200_house"
         assert contract_payload["gateway"]["state_topic"] == "bm_gateway/gateway/state"
-        assert storage_payload["counts"]["device_readings"] == 1
+        assert storage_payload["counts"]["device_samples"] == 1
         assert history_payload[0]["device_id"] == "bm200_house"
         assert yearly_payload[0]["device_id"] == "bm200_house"
         assert analytics_payload["device_id"] == "bm200_house"
