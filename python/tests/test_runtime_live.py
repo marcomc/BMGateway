@@ -26,7 +26,7 @@ from bm_gateway.runtime import (
     build_snapshot,
     database_file_path,
     recover_adapter,
-    snapshot_has_all_live_timeouts,
+    snapshot_needs_timeout_recovery,
 )
 from bm_gateway.state_store import fetch_counts, persist_snapshot
 from bm_gateway.system_alerts import GatewayAlert
@@ -369,7 +369,13 @@ def test_build_snapshot_skips_missing_device_after_not_found_backoff() -> None:
 
     assert attempts["count"] == 1
     assert first_snapshot.devices[0].error_code == "device_not_found"
+    assert first_snapshot.devices[0].error_detail == (
+        "No BLE advertisement seen during the scan window."
+    )
     assert second_snapshot.devices[0].error_code == "device_not_found"
+    assert second_snapshot.devices[0].error_detail == (
+        "Skipped BLE poll after repeated missing advertisements."
+    )
     assert second_snapshot.devices[0].last_seen == "2026-05-27T05:29:22+02:00"
 
 
@@ -427,22 +433,36 @@ def _reading(
     )
 
 
-def test_snapshot_has_all_live_timeouts_only_for_all_enabled_live_devices() -> None:
+def test_snapshot_needs_timeout_recovery_allows_backed_off_missing_devices() -> None:
     timeout_snapshot = _snapshot_with_readings(
         [
             _reading("bm200_house", connected=False, error_code="timeout"),
             _reading("bm300_van", connected=False, error_code="timeout", driver="bm300pro"),
         ]
     )
-    mixed_snapshot = _snapshot_with_readings(
+    timeout_with_missing_snapshot = _snapshot_with_readings(
         [
             _reading("bm200_house", connected=False, error_code="timeout"),
             _reading("spare_nlp20", connected=False, error_code="device_not_found"),
         ]
     )
+    all_missing_snapshot = _snapshot_with_readings(
+        [
+            _reading("spare_nlp5", connected=False, error_code="device_not_found"),
+            _reading("spare_nlp20", connected=False, error_code="device_not_found"),
+        ]
+    )
+    one_missing_while_others_online_snapshot = _snapshot_with_readings(
+        [
+            _reading("spare_nlp5", connected=True, error_code=None),
+            _reading("spare_nlp20", connected=False, error_code="device_not_found"),
+        ]
+    )
 
-    assert snapshot_has_all_live_timeouts(timeout_snapshot) is True
-    assert snapshot_has_all_live_timeouts(mixed_snapshot) is False
+    assert snapshot_needs_timeout_recovery(timeout_snapshot) is True
+    assert snapshot_needs_timeout_recovery(timeout_with_missing_snapshot) is True
+    assert snapshot_needs_timeout_recovery(all_missing_snapshot) is True
+    assert snapshot_needs_timeout_recovery(one_missing_while_others_online_snapshot) is False
 
 
 def test_live_timeout_recovery_tracker_requests_recovery_after_threshold() -> None:

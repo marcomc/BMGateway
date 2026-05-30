@@ -62,6 +62,9 @@ At the start of every new AI agent chat for this repository, read:
   teardown paths available and preserve disabled-field values on submit.
 - For interface-specific recovery or diagnostics, probe through the configured
   interface or adapter instead of relying on global host reachability.
+- When adding BLE backoff or retry suppression for individual devices, keep
+  fleet-level recovery triggers active for adapter-wide unreachable states and
+  test both one-missing-device and all-devices-unreachable cases.
 
 ## Live Validation Rules
 

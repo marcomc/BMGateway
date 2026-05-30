@@ -40,6 +40,8 @@ BM300Reader = Callable[[Device, str, float, float], BM300Measurement]
 LIVE_DEVICE_TYPES = {"bm200", "bm300pro"}
 DEFAULT_MISSING_DEVICE_SKIP_CYCLES = (1, 2, 4, 6)
 DEFAULT_ALL_TIMEOUT_RECOVERY_CYCLES = 2
+MISSING_DEVICE_DETAIL = "No BLE advertisement seen during the scan window."
+BACKOFF_DEVICE_DETAIL = "Skipped BLE poll after repeated missing advertisements."
 
 
 @dataclass
@@ -92,7 +94,7 @@ class LiveDeviceBackoff:
         )
 
 
-def snapshot_has_all_live_timeouts(snapshot: GatewaySnapshot) -> bool:
+def snapshot_needs_timeout_recovery(snapshot: GatewaySnapshot) -> bool:
     live_readings = [
         reading
         for reading in snapshot.devices
@@ -101,12 +103,12 @@ def snapshot_has_all_live_timeouts(snapshot: GatewaySnapshot) -> bool:
     return (
         bool(live_readings)
         and snapshot.devices_online == 0
-        and all(reading.error_code == "timeout" for reading in live_readings)
+        and all(reading.error_code in {"timeout", "device_not_found"} for reading in live_readings)
     )
 
 
 class LiveTimeoutRecoveryTracker:
-    """Request host BLE recovery after consecutive all-device timeout cycles."""
+    """Request host BLE recovery after consecutive fleet-wide unreachable cycles."""
 
     def __init__(
         self,
@@ -117,7 +119,7 @@ class LiveTimeoutRecoveryTracker:
         self.consecutive_timeout_cycles = 0
 
     def record_snapshot(self, snapshot: GatewaySnapshot) -> bool:
-        if snapshot_has_all_live_timeouts(snapshot):
+        if snapshot_needs_timeout_recovery(snapshot):
             self.consecutive_timeout_cycles += 1
             return self.consecutive_timeout_cycles >= self._threshold
         self.consecutive_timeout_cycles = 0
@@ -130,6 +132,10 @@ def _active_adapter(config: AppConfig) -> str:
 
 def _generated_at() -> str:
     return datetime.now(tz=timezone.utc).astimezone().isoformat(timespec="seconds")
+
+
+class _LiveDeviceBackoffSkippedError(Exception):
+    """Raised internally when a device poll is skipped by live backoff."""
 
 
 def _build_fake_reading(device: Device, *, generated_at: str, adapter: str) -> DeviceReading:
@@ -208,8 +214,10 @@ def _classify_live_error(error: Exception) -> tuple[str, str]:
     detail = str(error) or error.__class__.__name__
     if isinstance(error, BluetoothOperationBusyError):
         return "bluetooth_busy", detail
+    if isinstance(error, _LiveDeviceBackoffSkippedError):
+        return "device_not_found", BACKOFF_DEVICE_DETAIL
     if isinstance(error, BleakDeviceNotFoundError | BleakBM300DeviceNotFoundError):
-        return "device_not_found", "No BLE advertisement seen during the scan window."
+        return "device_not_found", MISSING_DEVICE_DETAIL
     if isinstance(error, BM200TimeoutError | BM300TimeoutError):
         return "timeout", detail
     if isinstance(error, BM200ProtocolError | BM300ProtocolError):
@@ -454,17 +462,12 @@ def build_snapshot(
             continue
 
         if device_backoff is not None and device_backoff.should_skip(device.id):
-            error: Exception
-            if driver_type == "bm300pro":
-                error = BleakBM300DeviceNotFoundError(device.mac)
-            else:
-                error = BleakDeviceNotFoundError(device.mac)
             readings.append(
                 _build_error_reading(
                     device,
                     generated_at=generated_at,
                     adapter=adapter,
-                    error=error,
+                    error=_LiveDeviceBackoffSkippedError(device.mac),
                     last_seen=previous_seen.get(device.id, ""),
                 )
             )

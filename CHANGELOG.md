@@ -8,9 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
-- Added live BLE recovery after two consecutive polling cycles where every
-  enabled live device times out, so a degraded BlueZ or adapter state is
-  restarted automatically instead of staying stuck indefinitely.
+- Added live BLE recovery after two consecutive polling cycles where no enabled
+  live device comes online and every live device is either timed out or missing,
+  so a degraded BlueZ or adapter state is restarted automatically instead of
+  staying stuck indefinitely.
 - Added per-device backoff for devices that are not advertising, so one missing
   spare monitor no longer forces repeated long BLE scan windows before the
   runtime can continue with the rest of the fleet.

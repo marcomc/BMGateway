@@ -72,7 +72,7 @@ The web UI route and API reference is maintained in
 - modular web UI localization selected through `web.language`
 - optional self-healing for scheduled host reboots and Wi-Fi recovery
 - live BLE backoff for devices that stop advertising and recovery after two
-  all-device timeout cycles
+  fleet-wide timeout cycles
 
 BM200/BM6-family and BM300 Pro/BM7-family live polling now share the same BLE
 scan, connect, notify, retry, and cleanup control flow. The protocol-specific

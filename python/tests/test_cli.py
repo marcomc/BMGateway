@@ -604,5 +604,8 @@ def test_run_requests_bluetooth_recovery_after_consecutive_all_timeout_cycles(
 
     assert result == 1
     assert cycle_count["count"] == 2
-    assert recovery_errors == ["All enabled live devices timed out for 2 consecutive cycles."]
+    assert recovery_errors == [
+        "No enabled live devices came online for 2 consecutive cycles; "
+        "readings were timeout or device_not_found."
+    ]
     assert "Bluetooth recovery requested" in captured.err
