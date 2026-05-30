@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from bm_gateway import __version__, cli
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
-from bm_gateway.models import GatewaySnapshot
+from bm_gateway.models import DeviceReading, GatewaySnapshot
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -523,4 +523,86 @@ def test_run_returns_error_when_bluetooth_recovery_is_required(
     captured = capsys.readouterr()
 
     assert result == 1
-    assert "Bluetooth transport entered a fatal state" in captured.err
+    assert "Bluetooth recovery requested" in captured.err
+
+
+def test_run_requests_bluetooth_recovery_after_consecutive_all_timeout_cycles(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8").replace(
+            'reader_mode = "fake"',
+            'reader_mode = "live"',
+        ),
+        encoding="utf-8",
+    )
+    timeout_snapshot = GatewaySnapshot(
+        generated_at="2026-05-30T18:00:00+02:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=0,
+        poll_interval_seconds=1,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=False,
+                voltage=0.0,
+                soc=0,
+                temperature=None,
+                rssi=None,
+                state="error",
+                error_code="timeout",
+                error_detail="timed out",
+                last_seen="",
+                adapter="hci0",
+                driver="bm200",
+                last_attempt="2026-05-30T18:00:00+02:00",
+            )
+        ],
+    )
+    cycle_count = {"count": 0}
+    recovery_errors: list[str] = []
+
+    def fake_run_cycle(**_kwargs: object) -> GatewaySnapshot:
+        cycle_count["count"] += 1
+        return timeout_snapshot
+
+    def fake_require_bluetooth_recovery(error: BaseException) -> None:
+        recovery_errors.append(str(error))
+        raise BluetoothRecoveryRequiredError(error=error, recovery_attempted=True)
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", fake_run_cycle)
+    monkeypatch.setattr(
+        "bm_gateway.cli.require_bluetooth_recovery",
+        fake_require_bluetooth_recovery,
+    )
+    monkeypatch.setattr("bm_gateway.cli.collect_gateway_alerts", lambda **_kwargs: [])
+    monkeypatch.setattr("bm_gateway.cli.sleep_interval", lambda _seconds: None)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--iterations",
+            "3",
+            "--dry-run",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert result == 1
+    assert cycle_count["count"] == 2
+    assert recovery_errors == ["All enabled live devices timed out for 2 consecutive cycles."]
+    assert "Bluetooth recovery requested" in captured.err

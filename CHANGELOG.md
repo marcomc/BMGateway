@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.1] - 2026-05-30 - BLE Timeout Recovery and Missing Device Backoff
+
+### Fixed
+
+- Added live BLE recovery after two consecutive polling cycles where every
+  enabled live device times out, so a degraded BlueZ or adapter state is
+  restarted automatically instead of staying stuck indefinitely.
+- Added per-device backoff for devices that are not advertising, so one missing
+  spare monitor no longer forces repeated long BLE scan windows before the
+  runtime can continue with the rest of the fleet.
+
 ## [0.3.0] - Unreachable Device Status Split and Raspberry Pi Compatibility and Self-Healing Improvements
 
 ### Changed

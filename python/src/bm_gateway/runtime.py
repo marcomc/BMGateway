@@ -5,10 +5,11 @@ from __future__ import annotations
 import asyncio
 import shutil
 import subprocess
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from time import sleep
-from typing import Callable
+from typing import Callable, Sequence
 
 from .bluetooth_lock import BluetoothOperationBusyError, exclusive_bluetooth_operation
 from .bluetooth_recovery import is_fatal_bluetooth_error, require_bluetooth_recovery
@@ -37,6 +38,90 @@ from .system_alerts import collect_gateway_alerts
 BM200Reader = Callable[[Device, str, float, float], BM200Measurement]
 BM300Reader = Callable[[Device, str, float, float], BM300Measurement]
 LIVE_DEVICE_TYPES = {"bm200", "bm300pro"}
+DEFAULT_MISSING_DEVICE_SKIP_CYCLES = (1, 2, 4, 6)
+DEFAULT_ALL_TIMEOUT_RECOVERY_CYCLES = 2
+
+
+@dataclass
+class _DeviceBackoffRecord:
+    consecutive_not_found: int = 0
+    skip_cycles_remaining: int = 0
+
+
+class LiveDeviceBackoff:
+    """Track short per-device skips after repeated missing advertisements."""
+
+    def __init__(
+        self,
+        *,
+        trigger_failures: int = 1,
+        skip_cycle_sequence: Sequence[int] = DEFAULT_MISSING_DEVICE_SKIP_CYCLES,
+    ) -> None:
+        self._trigger_failures = max(1, trigger_failures)
+        sequence = tuple(max(0, item) for item in skip_cycle_sequence)
+        self._skip_cycle_sequence = sequence or (1,)
+        self._records: dict[str, _DeviceBackoffRecord] = {}
+
+    def should_skip(self, device_id: str) -> bool:
+        record = self._records.get(device_id)
+        if record is None or record.skip_cycles_remaining <= 0:
+            return False
+        record.skip_cycles_remaining -= 1
+        return True
+
+    def record_success(self, device_id: str) -> None:
+        self._records.pop(device_id, None)
+
+    def record_error(self, device_id: str, error_code: str | None) -> None:
+        if error_code != "device_not_found":
+            self._records.pop(device_id, None)
+            return
+
+        record = self._records.setdefault(device_id, _DeviceBackoffRecord())
+        record.consecutive_not_found += 1
+        if record.consecutive_not_found < self._trigger_failures:
+            return
+
+        sequence_index = min(
+            record.consecutive_not_found - self._trigger_failures,
+            len(self._skip_cycle_sequence) - 1,
+        )
+        record.skip_cycles_remaining = max(
+            record.skip_cycles_remaining,
+            self._skip_cycle_sequence[sequence_index],
+        )
+
+
+def snapshot_has_all_live_timeouts(snapshot: GatewaySnapshot) -> bool:
+    live_readings = [
+        reading
+        for reading in snapshot.devices
+        if reading.enabled and reading.driver in LIVE_DEVICE_TYPES
+    ]
+    return (
+        bool(live_readings)
+        and snapshot.devices_online == 0
+        and all(reading.error_code == "timeout" for reading in live_readings)
+    )
+
+
+class LiveTimeoutRecoveryTracker:
+    """Request host BLE recovery after consecutive all-device timeout cycles."""
+
+    def __init__(
+        self,
+        *,
+        consecutive_cycle_threshold: int = DEFAULT_ALL_TIMEOUT_RECOVERY_CYCLES,
+    ) -> None:
+        self._threshold = max(1, consecutive_cycle_threshold)
+        self.consecutive_timeout_cycles = 0
+
+    def record_snapshot(self, snapshot: GatewaySnapshot) -> bool:
+        if snapshot_has_all_live_timeouts(snapshot):
+            self.consecutive_timeout_cycles += 1
+            return self.consecutive_timeout_cycles >= self._threshold
+        self.consecutive_timeout_cycles = 0
+        return False
 
 
 def _active_adapter(config: AppConfig) -> str:
@@ -293,6 +378,7 @@ def build_snapshot(
     bm300_reader: BM300Reader | None = None,
     state_dir: Path | None = None,
     last_successful_seen: dict[str, str] | None = None,
+    device_backoff: LiveDeviceBackoff | None = None,
 ) -> GatewaySnapshot:
     generated_at = _generated_at()
     adapter = _active_adapter(config)
@@ -367,6 +453,23 @@ def build_snapshot(
             )
             continue
 
+        if device_backoff is not None and device_backoff.should_skip(device.id):
+            error: Exception
+            if driver_type == "bm300pro":
+                error = BleakBM300DeviceNotFoundError(device.mac)
+            else:
+                error = BleakDeviceNotFoundError(device.mac)
+            readings.append(
+                _build_error_reading(
+                    device,
+                    generated_at=generated_at,
+                    adapter=adapter,
+                    error=error,
+                    last_seen=previous_seen.get(device.id, ""),
+                )
+            )
+            continue
+
         try:
             with exclusive_bluetooth_operation(
                 config,
@@ -383,9 +486,17 @@ def build_snapshot(
                 except (
                     BleakDeviceNotFoundError,
                     BleakBM300DeviceNotFoundError,
-                    BM200TimeoutError,
-                    BM300TimeoutError,
                 ):
+                    if device_backoff is not None:
+                        raise
+                    recover_adapter(adapter)
+                    measurement = live_reader(
+                        device,
+                        adapter,
+                        float(config.bluetooth.connect_timeout_seconds),
+                        float(config.bluetooth.scan_timeout_seconds),
+                    )
+                except (BM200TimeoutError, BM300TimeoutError):
                     recover_adapter(adapter)
                     measurement = live_reader(
                         device,
@@ -405,8 +516,13 @@ def build_snapshot(
                     last_seen=previous_seen.get(device.id, ""),
                 )
             )
+            if device_backoff is not None:
+                error_code, _error_detail = _classify_live_error(error)
+                device_backoff.record_error(device.id, error_code)
             continue
 
+        if device_backoff is not None:
+            device_backoff.record_success(device.id)
         readings.append(
             DeviceReading(
                 id=device.id,
