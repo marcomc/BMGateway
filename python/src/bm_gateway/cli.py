@@ -754,7 +754,7 @@ def _handle_run(
                 require_bluetooth_recovery(
                     RuntimeError(
                         "No enabled live devices came online for "
-                        f"{timeout_recovery.consecutive_timeout_cycles} consecutive cycles; "
+                        f"{timeout_recovery.consecutive_recovery_cycles} consecutive cycles; "
                         "readings were timeout or device_not_found."
                     )
                 )

@@ -27,6 +27,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added per-device backoff for devices that are not advertising, so one missing
   spare monitor no longer forces repeated long BLE scan windows before the
   runtime can continue with the rest of the fleet.
+- Kept fleet-level BLE recovery active when every live device remains in
+  per-device backoff for a sustained run, without counting an individual skip
+  as a fresh BLE probe failure.
 
 ## [0.3.0] - Unreachable Device Status Split and Raspberry Pi Compatibility and Self-Healing Improvements
 

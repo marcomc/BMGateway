@@ -20,6 +20,7 @@ from bm_gateway.drivers.bm200 import BleakDeviceNotFoundError, BM200Measurement,
 from bm_gateway.drivers.bm300 import BM300Measurement, BM300TimeoutError
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.runtime import (
+    BACKOFF_DEVICE_DETAIL,
     LiveDeviceBackoff,
     LiveTimeoutRecoveryTracker,
     _effective_live_hard_timeout_seconds,
@@ -463,6 +464,22 @@ def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
             ),
         ]
     )
+    all_backoff_skip_snapshot = _snapshot_with_readings(
+        [
+            _reading(
+                "bm200_house",
+                connected=False,
+                error_code="device_not_found",
+                error_detail=BACKOFF_DEVICE_DETAIL,
+            ),
+            _reading(
+                "spare_nlp20",
+                connected=False,
+                error_code="device_not_found",
+                error_detail=BACKOFF_DEVICE_DETAIL,
+            ),
+        ]
+    )
     one_missing_while_others_online_snapshot = _snapshot_with_readings(
         [
             _reading("spare_nlp5", connected=True, error_code=None),
@@ -472,6 +489,7 @@ def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
 
     assert snapshot_needs_timeout_recovery(all_real_failures_snapshot) is True
     assert snapshot_needs_timeout_recovery(real_failure_with_backoff_skip_snapshot) is False
+    assert snapshot_needs_timeout_recovery(all_backoff_skip_snapshot) is False
     assert snapshot_needs_timeout_recovery(one_missing_while_others_online_snapshot) is False
 
     tracker = LiveTimeoutRecoveryTracker(consecutive_cycle_threshold=2)
@@ -479,6 +497,11 @@ def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
     assert tracker.record_snapshot(real_failure_with_backoff_skip_snapshot) is False
     assert tracker.consecutive_timeout_cycles == 1
     assert tracker.record_snapshot(all_real_failures_snapshot) is True
+
+    backoff_tracker = LiveTimeoutRecoveryTracker(consecutive_cycle_threshold=2)
+    assert backoff_tracker.record_snapshot(all_backoff_skip_snapshot) is False
+    assert backoff_tracker.record_snapshot(all_backoff_skip_snapshot) is True
+    assert backoff_tracker.consecutive_recovery_cycles == 2
 
 
 def test_live_timeout_recovery_tracker_requests_recovery_after_threshold() -> None:
@@ -497,6 +520,7 @@ def test_live_timeout_recovery_tracker_requests_recovery_after_threshold() -> No
     assert tracker.record_snapshot(timeout_snapshot) is True
     assert tracker.record_snapshot(success_snapshot) is False
     assert tracker.consecutive_timeout_cycles == 0
+    assert tracker.consecutive_backoff_only_cycles == 0
     assert tracker.record_snapshot(timeout_snapshot) is False
     assert tracker.record_snapshot(non_backoff_failure_snapshot) is False
     assert tracker.consecutive_timeout_cycles == 0

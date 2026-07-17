@@ -107,6 +107,17 @@ def _snapshot_has_fleet_unreachable_errors(snapshot: GatewaySnapshot) -> bool:
     )
 
 
+def _snapshot_has_only_backoff_skips(snapshot: GatewaySnapshot) -> bool:
+    live_readings = [
+        reading
+        for reading in snapshot.devices
+        if reading.enabled and reading.driver in LIVE_DEVICE_TYPES
+    ]
+    return _snapshot_has_fleet_unreachable_errors(snapshot) and all(
+        reading.error_detail == BACKOFF_DEVICE_DETAIL for reading in live_readings
+    )
+
+
 def snapshot_needs_timeout_recovery(snapshot: GatewaySnapshot) -> bool:
     live_readings = [
         reading
@@ -128,14 +139,26 @@ class LiveTimeoutRecoveryTracker:
     ) -> None:
         self._threshold = max(1, consecutive_cycle_threshold)
         self.consecutive_timeout_cycles = 0
+        self.consecutive_backoff_only_cycles = 0
+
+    @property
+    def consecutive_recovery_cycles(self) -> int:
+        """Return the consecutive-cycle count that triggered recovery."""
+        return max(self.consecutive_timeout_cycles, self.consecutive_backoff_only_cycles)
 
     def record_snapshot(self, snapshot: GatewaySnapshot) -> bool:
         if snapshot_needs_timeout_recovery(snapshot):
+            self.consecutive_backoff_only_cycles = 0
             self.consecutive_timeout_cycles += 1
             return self.consecutive_timeout_cycles >= self._threshold
+        if _snapshot_has_only_backoff_skips(snapshot):
+            self.consecutive_backoff_only_cycles += 1
+            return self.consecutive_backoff_only_cycles >= self._threshold
         if _snapshot_has_fleet_unreachable_errors(snapshot):
+            self.consecutive_backoff_only_cycles = 0
             return False
         self.consecutive_timeout_cycles = 0
+        self.consecutive_backoff_only_cycles = 0
         return False
 
 
