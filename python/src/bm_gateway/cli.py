@@ -203,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     history_sync.add_argument(
         "--page-count",
         type=int,
-        default=3,
+        default=None,
         help=(
             "Cumulative history pages to request. BM200/BM6 uses d15505 byte-7; "
             "BM300 Pro/BM7 uses the validated d15505 byte-7 depth path."
@@ -855,7 +855,7 @@ def _handle_history_sync_device(
     device_id: str,
     as_json: bool,
     state_dir: Path | None,
-    page_count: int,
+    page_count: int | None,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -871,18 +871,28 @@ def _handle_history_sync_device(
         if device_driver_type(device.type) == "bm300pro":
             if not config.archive_sync.bm300_enabled:
                 raise ValueError("BM300 archive sync is disabled in settings.")
+            effective_page_count = (
+                page_count
+                if page_count is not None
+                else config.archive_sync.bm300_max_pages_per_sync
+            )
             payload = sync_bm300_device_archive(
                 config=config,
                 device=device,
                 database_path=database_path,
-                page_count=page_count,
+                page_count=effective_page_count,
             )
         else:
+            effective_page_count = (
+                page_count
+                if page_count is not None
+                else config.archive_sync.bm200_max_pages_per_sync
+            )
             payload = sync_bm200_device_archive(
                 config=config,
                 device=device,
                 database_path=database_path,
-                page_count=page_count,
+                page_count=effective_page_count,
             )
     except Exception as exc:
         failure = {

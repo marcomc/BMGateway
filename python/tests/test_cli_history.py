@@ -298,6 +298,71 @@ def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFi
     assert payload["inserted"] == 10
 
 
+@pytest.mark.parametrize(
+    ("configured_page_count", "expected_page_count"),
+    [(85, 85), (4, 4)],
+    ids=("full-history-default", "explicit-cap"),
+)
+def test_history_sync_device_uses_the_configured_bm200_page_cap_by_default(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    configured_page_count: int,
+    expected_page_count: int,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[archive_sync]\n"
+        + f"bm200_max_pages_per_sync = {configured_page_count}\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+
+    def fake_sync(
+        *,
+        config: object,
+        device: object,
+        database_path: Path,
+        page_count: int,
+    ) -> dict[str, object]:
+        assert database_path == state_dir / "runtime" / "gateway.db"
+        assert page_count == expected_page_count
+        return {
+            "device_id": "bm200_house",
+            "fetched": 12,
+            "inserted": 10,
+            "adapter": "hci0",
+            "profile": "bm6_d15505_b7_v1",
+        }
+
+    from bm_gateway import cli as cli_module
+
+    cli_module_any = cast(Any, cli_module)
+    original = cli_module_any.sync_bm200_device_archive
+    cli_module_any.sync_bm200_device_archive = fake_sync
+    try:
+        result = cli.main(
+            [
+                "--config",
+                str(config_path),
+                "history",
+                "sync-device",
+                "--device-id",
+                "bm200_house",
+                "--state-dir",
+                str(state_dir),
+                "--json",
+            ]
+        )
+    finally:
+        cli_module_any.sync_bm200_device_archive = original
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert json.loads(captured.out)["synced"] is True
+
+
 def test_history_sync_device_help_mentions_bm300_byte7_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
