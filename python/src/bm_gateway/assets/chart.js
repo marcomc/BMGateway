@@ -699,31 +699,115 @@
       }}
       return `${{serverEndpoint}}${{serverEndpoint.includes("?") ? "&" : "?"}}${{params.toString()}}`;
     }}
+    function daysInMonth(year, month) {{
+      if (month === 2) {{
+        return ((year % 4 === 0 && year % 100 !== 0) || year % 400 === 0) ? 29 : 28;
+      }}
+      return [31, 0, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1];
+    }}
+    function shiftIsoTimestampByMicroseconds(value, offsetMicroseconds) {{
+      const match = /^(\d{{4}})-(\d{{2}})-(\d{{2}})T(\d{{2}}):(\d{{2}}):(\d{{2}})(?:\.(\d{{1,6}}))?(Z|[+-]\d{{2}}:\d{{2}})$/.exec(value);
+      if (!match || !Number.isSafeInteger(offsetMicroseconds)) {{
+        return null;
+      }}
+      let year = Number(match[1]);
+      let month = Number(match[2]);
+      let day = Number(match[3]);
+      const hour = Number(match[4]);
+      const minute = Number(match[5]);
+      const second = Number(match[6]);
+      const microsecond = Number((match[7] || "").padEnd(6, "0"));
+      if (
+        month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)
+        || hour > 23 || minute > 59 || second > 59
+      ) {{
+        return null;
+      }}
+      const microsecondsPerSecond = 1000 * 1000;
+      const microsecondsPerDay = 24 * 60 * 60 * microsecondsPerSecond;
+      const shiftedTime = (
+        (((hour * 60) + minute) * 60 + second) * microsecondsPerSecond
+      ) + microsecond + offsetMicroseconds;
+      const dayOffset = Math.floor(shiftedTime / microsecondsPerDay);
+      let remainingMicroseconds = shiftedTime - (dayOffset * microsecondsPerDay);
+      let remainingDays = dayOffset;
+      while (remainingDays > 0) {{
+        const monthDays = daysInMonth(year, month);
+        if (day + remainingDays <= monthDays) {{
+          day += remainingDays;
+          remainingDays = 0;
+        }} else {{
+          remainingDays -= monthDays - day + 1;
+          day = 1;
+          month += 1;
+          if (month > 12) {{
+            month = 1;
+            year += 1;
+          }}
+        }}
+      }}
+      while (remainingDays < 0) {{
+        if (day + remainingDays >= 1) {{
+          day += remainingDays;
+          remainingDays = 0;
+        }} else {{
+          remainingDays += day;
+          month -= 1;
+          if (month < 1) {{
+            month = 12;
+            year -= 1;
+          }}
+          day = daysInMonth(year, month);
+        }}
+      }}
+      const nextHour = Math.floor(remainingMicroseconds / (60 * 60 * microsecondsPerSecond));
+      remainingMicroseconds -= nextHour * 60 * 60 * microsecondsPerSecond;
+      const nextMinute = Math.floor(remainingMicroseconds / (60 * microsecondsPerSecond));
+      remainingMicroseconds -= nextMinute * 60 * microsecondsPerSecond;
+      const nextSecond = Math.floor(remainingMicroseconds / microsecondsPerSecond);
+      const nextMicrosecond = remainingMicroseconds - (nextSecond * microsecondsPerSecond);
+      const fractional = nextMicrosecond === 0
+        ? ""
+        : `.${{String(nextMicrosecond).padStart(6, "0").replace(/0+$/, "")}}`;
+      return `${{String(year).padStart(4, "0")}}-${{String(month).padStart(2, "0")}}-${{String(day).padStart(2, "0")}}T${{String(nextHour).padStart(2, "0")}}:${{String(nextMinute).padStart(2, "0")}}:${{String(nextSecond).padStart(2, "0")}}${{fractional}}${{match[8]}}`;
+    }}
+    function previousServerWindowEnd(payload) {{
+      const start = payload?.window?.start;
+      if (typeof start !== "string") {{
+        return null;
+      }}
+      if (payload?.resolution !== "daily") {{
+        return shiftIsoTimestampByMicroseconds(start, -1);
+      }}
+      const parsedStart = parseTime(start);
+      return parsedStart === null ? null : new Date(parsedStart - 1).toISOString();
+    }}
     function nextServerWindowEnd(payload, rangeValue) {{
       const duration = rangeDurationMs(rangeValue);
-      const end = parseTime(payload?.window?.end);
-      if (duration === null || end === null) {{
+      const end = payload?.window?.end;
+      if (duration === null || typeof end !== "string") {{
         return null;
+      }}
+      if (payload?.resolution !== "daily") {{
+        return shiftIsoTimestampByMicroseconds(end, (duration * 1000) + 1);
       }}
       // Daily endpoints round the requested end to the local calendar day, so
       // adding a millisecond would skip the immediately following day.
-      return end + duration + (payload?.resolution === "daily" ? 0 : 1);
+      const parsedEnd = parseTime(end);
+      return parsedEnd === null ? null : new Date(parsedEnd + duration).toISOString();
     }}
     function prefetchAdjacentWindows(payload, rangeValue) {{
-      const start = parseTime(payload?.window?.start);
+      const previousEnd = previousServerWindowEnd(payload);
       const nextEnd = nextServerWindowEnd(payload, rangeValue);
-      if (start === null) {{
-        return;
-      }}
-      if (payload.window.has_previous) {{
+      if (payload.window.has_previous && previousEnd !== null) {{
         void loadServerWindow(
-          new Date(start - 1).toISOString(),
+          previousEnd,
           {{ prefetch: true, rangeValue }},
         );
       }}
       if (payload.window.has_next && nextEnd !== null) {{
         void loadServerWindow(
-          new Date(nextEnd).toISOString(),
+          nextEnd,
           {{ prefetch: true, rangeValue }},
         );
       }}
@@ -887,20 +971,20 @@
       if (!currentWindow || !currentWindow.pageable || currentWindow.duration === null) {{
         return;
       }}
-      const requestedEnd = direction < 0
-        ? (currentWindow.effectiveStart ?? 0) - 1
-        : serverWindowed
-          ? nextServerWindowEnd(serverWindow, currentRange)
-          : (currentWindow.effectiveEnd ?? 0) + currentWindow.duration + 1;
-      if (requestedEnd === null) {{
+      if (serverWindowed) {{
+        const requestedEnd = direction < 0
+          ? previousServerWindowEnd(serverWindow)
+          : nextServerWindowEnd(serverWindow, currentRange);
+        if (requestedEnd !== null) {{
+          void loadServerWindow(requestedEnd);
+        }}
         return;
       }}
-      if (serverWindowed) {{
-        void loadServerWindow(new Date(requestedEnd).toISOString());
-      }} else {{
-        currentWindowEnd = requestedEnd;
-        requestRender();
-      }}
+      const requestedEnd = direction < 0
+        ? (currentWindow.effectiveStart ?? 0) - 1
+        : (currentWindow.effectiveEnd ?? 0) + currentWindow.duration + 1;
+      currentWindowEnd = requestedEnd;
+      requestRender();
     }}
     for (const button of rangeButtons) {{
       button.addEventListener("click", () => {{

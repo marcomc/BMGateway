@@ -38,6 +38,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pruning, even if a later import restores the same raw-sample count.
 - Raw chart page predicates and availability bounds now preserve microsecond
   timestamp precision.
+- Raw chart navigation and prefetch now preserve microsecond page cursors.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

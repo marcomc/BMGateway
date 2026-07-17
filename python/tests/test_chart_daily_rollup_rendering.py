@@ -266,6 +266,173 @@ setImmediate(() => {
     assert "13.20 V" in details["meta"]
 
 
+def test_server_window_chart_preserves_microsecond_raw_cursors_for_paging_and_prefetch() -> None:
+    rendered_script = chart_script("history-chart")
+    source = re.search(r"<script>(.*)</script>", rendered_script, re.DOTALL)
+    assert source is not None
+
+    for direction, has_previous, has_next, expected_end in (
+        (
+            "previous",
+            True,
+            False,
+            "2026-07-10T12:00:00.000499+00:00",
+        ),
+        (
+            "next",
+            False,
+            True,
+            "2026-07-12T12:00:00.000501+00:00",
+        ),
+    ):
+        current_payload = {
+            "resolution": "raw",
+            "points": [
+                {
+                    "ts": "2026-07-11T12:00:00.000500+00:00",
+                    "kind": "raw",
+                    "voltage": 13.2,
+                    "soc": 80,
+                    "temperature": 20.0,
+                    "series": "Liberty LD13CZT",
+                    "series_color": "#17c45a",
+                }
+            ],
+            "window": {
+                "start": "2026-07-10T12:00:00.000500+00:00",
+                "end": "2026-07-11T12:00:00.000500+00:00",
+                "available_start": "2026-07-01T12:00:00.000500+00:00",
+                "available_end": "2026-07-20T12:00:00.000500+00:00",
+                "has_previous": has_previous,
+                "has_next": has_next,
+            },
+        }
+        adjacent_payload = {
+            "resolution": "raw",
+            "points": [],
+            "window": {
+                "start": "2026-07-10T12:00:00+00:00",
+                "end": "2026-07-11T12:00:00+00:00",
+                "available_start": "2026-07-01T12:00:00+00:00",
+                "available_end": "2026-07-20T12:00:00+00:00",
+                "has_previous": False,
+                "has_next": False,
+            },
+        }
+        harness = """
+class ClassList {
+  constructor(...values) { this.values = new Set(values.filter(Boolean)); }
+  contains(value) { return this.values.has(value); }
+  add(value) { this.values.add(value); }
+  remove(value) { this.values.delete(value); }
+  toggle(value, enabled) {
+    const next = enabled === undefined ? !this.values.has(value) : Boolean(enabled);
+    if (next) this.values.add(value); else this.values.delete(value);
+    return next;
+  }
+}
+const element = ({ dataset = {}, classes = [] } = {}) => ({
+  dataset,
+  classList: new ClassList(...classes),
+  style: { setProperty() {} },
+  hidden: false,
+  disabled: false,
+  textContent: "",
+  innerHTML: "",
+  clientWidth: 960,
+  clientHeight: 360,
+  listeners: {},
+  addEventListener(type, callback) { this.listeners[type] = callback; },
+  setAttribute() {},
+  closest() { return null; },
+  scrollIntoView() {},
+  getBoundingClientRect() {
+    return { left: 0, top: 0, right: 960, bottom: 360, width: 960, height: 360 };
+  },
+  setPointerCapture() {},
+  releasePointerCapture() {},
+});
+const canvas = element();
+const meta = element();
+const previous = element();
+const next = element();
+const range = element({ dataset: { range: "1", rangeLabel: "1 day" }, classes: ["active"] });
+const metric = element({ dataset: { metric: "voltage" }, classes: ["active"] });
+const legend = element({ dataset: { seriesLabel: "Liberty LD13CZT" }, classes: ["active"] });
+const card = element();
+card.querySelectorAll = (selector) => {
+  if (selector === "[data-range]") return [range];
+  if (selector === "[data-metric]") return [metric];
+  if (selector === "[data-series-label]") return [legend];
+  return [];
+};
+const frame = element({
+  dataset: { chartEndpoint: "/api/chart-history?device_id=liberty", showMarkers: "false" },
+});
+frame.querySelector = (selector) => selector === ".chart-canvas" ? canvas : null;
+frame.closest = () => card;
+const data = element();
+data.textContent = "[]";
+global.document = {
+  body: element(),
+  getElementById(id) {
+    if (id === "history-chart") return frame;
+    if (id === "history-chart-meta") return meta;
+    if (id === "history-chart-data") return data;
+    return null;
+  },
+  querySelector(selector) {
+    return selector.includes("previous") ? previous : next;
+  },
+};
+global.window = {
+  getComputedStyle: () => ({ getPropertyValue: () => "" }),
+  matchMedia: () => ({ matches: false }),
+  addEventListener() {},
+};
+global.requestAnimationFrame = (callback) => callback();
+global.setTimeout = (callback) => callback();
+const currentPayload = __CURRENT_PAYLOAD__;
+const adjacentPayload = __ADJACENT_PAYLOAD__;
+const requests = [];
+global.fetch = async (url) => {
+  requests.push(url);
+  if (requests.length === 1) {
+    return { ok: true, json: async () => currentPayload };
+  }
+  if (requests.length === 2) {
+    return { ok: false, json: async () => ({}) };
+  }
+  return { ok: true, json: async () => adjacentPayload };
+};
+__SCRIPT__
+setImmediate(() => {
+  const navigation = __DIRECTION__ === "previous" ? previous : next;
+  navigation.listeners.click();
+  setImmediate(() => {
+    process.stdout.write(JSON.stringify(requests.map((url) => (
+      new URLSearchParams(url.split("?")[1]).get("end")
+    ))));
+  });
+});
+"""
+        harness = (
+            harness.replace("__CURRENT_PAYLOAD__", json.dumps(current_payload))
+            .replace("__ADJACENT_PAYLOAD__", json.dumps(adjacent_payload))
+            .replace("__DIRECTION__", json.dumps(direction))
+            .replace("__SCRIPT__", source.group(1))
+        )
+
+        completed = subprocess.run(
+            ["node", "-e", harness],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        assert json.loads(completed.stdout) == [None, expected_end, expected_end]
+
+
 def test_server_window_chart_shows_a_localized_error_when_loading_fails() -> None:
     rendered_script = chart_script("history-chart")
     source = re.search(r"<script>(.*)</script>", rendered_script, re.DOTALL)

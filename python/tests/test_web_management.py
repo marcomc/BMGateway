@@ -249,7 +249,9 @@ def test_chart_script_keeps_server_window_samples_exact_before_svg_rendering() -
     assert "const windowCache = new Map();" in script
     assert "while (windowCache.size > 3)" in script
     assert "function nextServerWindowEnd(payload, rangeValue)" in script
-    assert 'payload?.resolution === "daily" ? 0 : 1' in script
+    assert "function shiftIsoTimestampByMicroseconds(value, offsetMicroseconds)" in script
+    assert "return shiftIsoTimestampByMicroseconds(start, -1);" in script
+    assert "return shiftIsoTimestampByMicroseconds(end, (duration * 1000) + 1);" in script
     exact_window_render = (
         "? points\n        : compactPointsForDisplay(points, currentMetric, currentRange);"
     )
