@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   pages cannot repeat a sample at the shared edge.
 - The service installer now preserves an explicitly configured three-page
   BM200 archive-sync cap instead of converting it to the new default.
+- Daily rollups now remain authoritative after raw retention prunes a day, even
+  when a later archive import happens to restore the same raw-sample count.
+- Raw samples recorded within the same second now retain chronological order
+  and precise chart-history availability bounds.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

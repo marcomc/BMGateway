@@ -322,6 +322,14 @@ def test_archive_profile_changes_preserve_daily_rollup_when_raw_history_is_parti
         lambda _days: "2026-07-15T12:00:00+02:00",
     )
     prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+    connection = sqlite3.connect(database_path)
+    try:
+        # Existing databases receive the new marker with its complete-history
+        # default, so the retained-versus-raw count fallback remains necessary.
+        connection.execute("UPDATE device_daily_rollups SET raw_history_complete = 1")
+        connection.commit()
+    finally:
+        connection.close()
 
     import_archive_history(
         database_path,
@@ -377,6 +385,65 @@ def test_archive_profile_changes_preserve_daily_rollup_when_raw_history_is_parti
     assert daily[0]["max_voltage"] == 14.0
     assert daily[0]["avg_voltage"] == 13.0
     assert archive[0]["profile"] == "legacy_bm2_history"
+
+
+def test_archive_import_does_not_replace_retained_rollup_when_raw_counts_tie(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    for timestamp, voltage in (
+        ("2026-07-15T00:00:00+02:00", 12.0),
+        ("2026-07-15T06:00:00+02:00", 13.0),
+        ("2026-07-15T18:00:00+02:00", 14.0),
+    ):
+        persist_snapshot(database_path, _snapshot(timestamp, voltage=voltage))
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda _days: "2026-07-15T12:00:00+02:00",
+    )
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2026-07-15T20:00:00+02:00",
+                "voltage": 14.5,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+            {
+                "ts": "2026-07-15T21:00:00+02:00",
+                "voltage": 15.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+        ],
+    )
+
+    assert fetch_counts(database_path)["device_samples"] == 3
+    assert fetch_daily_history(database_path, device_id="bm200_house", limit=1) == [
+        {
+            "device_id": "bm200_house",
+            "day": "2026-07-15",
+            "samples": 3,
+            "min_voltage": 12.0,
+            "max_voltage": 14.0,
+            "avg_voltage": 13.0,
+            "avg_soc": 58.0,
+            "avg_temperature": None,
+            "error_count": 0,
+            "last_seen": "2026-07-15T18:00:00+02:00",
+        }
+    ]
 
 
 def test_archive_profile_changes_rebuild_daily_rollups_from_complete_raw_history(
@@ -1888,6 +1955,29 @@ def test_history_window_preserves_millisecond_boundaries_between_raw_pages(tmp_p
 
     assert [row["ts"] for row in previous_page] == [previous_page_end]
     assert [row["ts"] for row in next_page] == [next_page_start]
+
+
+def test_history_window_and_bounds_order_millisecond_samples_across_offsets(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    first_sample = "2026-07-11T14:00:00.000+02:00"
+    second_sample = "2026-07-11T12:00:00.001+00:00"
+    persist_snapshot(database_path, _snapshot(second_sample, voltage=12.72))
+    persist_snapshot(database_path, _snapshot(first_sample, voltage=12.61))
+
+    assert fetch_history_bounds(database_path, device_id="bm200_house") == (
+        first_sample,
+        second_sample,
+    )
+    rows = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T12:00:00.000+00:00",
+        end_ts=second_sample,
+    )
+
+    assert [row["ts"] for row in rows] == [first_sample, second_sample]
 
 
 def test_fetch_daily_history_merges_archive_only_days(tmp_path: Path) -> None:

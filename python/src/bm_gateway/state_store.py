@@ -135,6 +135,7 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
             avg_temperature REAL,
             error_count INTEGER NOT NULL,
             last_seen TEXT NOT NULL,
+            raw_history_complete INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (device_id, day)
         )
         """
@@ -267,6 +268,7 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
         ("min_temperature", "REAL"),
         ("max_temperature", "REAL"),
         ("avg_temperature", "REAL"),
+        ("raw_history_complete", "INTEGER NOT NULL DEFAULT 1"),
     ):
         if column_name not in existing_columns:
             connection.execute(
@@ -332,6 +334,7 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
             avg_temperature REAL,
             error_count INTEGER NOT NULL,
             last_seen TEXT NOT NULL,
+            raw_history_complete INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (device_id, day)
         )
         """
@@ -354,7 +357,8 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
             max_temperature,
             avg_temperature,
             error_count,
-            last_seen
+            last_seen,
+            raw_history_complete
         )
         SELECT
             device_id,
@@ -368,7 +372,8 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
             {legacy_column("max_temperature", "NULL")},
             {legacy_column("avg_temperature", "NULL")},
             error_count,
-            last_seen
+            last_seen,
+            {legacy_column("raw_history_complete", "1")}
         FROM device_daily_rollups_legacy
         """
     )
@@ -680,7 +685,7 @@ def _daily_rollup_requires_retained_samples(
 ) -> bool:
     retained_rollup = connection.execute(
         """
-        SELECT samples, error_count
+        SELECT samples, error_count, raw_history_complete
         FROM device_daily_rollups
         WHERE device_id = ? AND day = ?
         """,
@@ -688,6 +693,8 @@ def _daily_rollup_requires_retained_samples(
     ).fetchone()
     if retained_rollup is None:
         return False
+    if not bool(retained_rollup[2]):
+        return True
     raw_counts = connection.execute(
         """
         WITH ranked_samples AS (
@@ -836,6 +843,7 @@ def _insert_daily_rollup_rows(
             avg_temperature = excluded.avg_temperature,
             error_count = excluded.error_count,
             last_seen = excluded.last_seen
+        WHERE device_daily_rollups.raw_history_complete = 1
         """,
         [
             (
@@ -904,6 +912,25 @@ def prune_history(path: Path, *, raw_retention_days: int, daily_retention_days: 
         # Thereafter daily retention, rather than raw retention, controls their lifetime.
         _rebuild_daily_rollups(connection)
         raw_cutoff = _cutoff_iso(raw_retention_days)
+        # A retained rollup becomes authoritative as soon as pruning removes any
+        # raw rows for its day. Later imports can happen to restore the same row
+        # count without restoring the pruned samples, so only the explicit
+        # coverage marker can determine whether a rebuild is safe.
+        connection.execute(
+            """
+            UPDATE device_daily_rollups
+            SET raw_history_complete = 0
+            WHERE raw_history_complete = 1
+              AND EXISTS (
+                  SELECT 1
+                  FROM device_samples
+                  WHERE device_samples.device_id = device_daily_rollups.device_id
+                    AND substr(device_samples.sample_ts, 1, 10) = device_daily_rollups.day
+                    AND device_samples.sample_ts < ?
+              )
+            """,
+            (raw_cutoff,),
+        )
         connection.execute(
             "DELETE FROM device_readings WHERE snapshot_generated_at < ?",
             (raw_cutoff,),
@@ -1243,7 +1270,7 @@ def fetch_history_window(
                 WHERE device_id = ?
                   AND julianday(sample_ts) >= julianday(?)
                   AND julianday(sample_ts) <= julianday(?)
-                ORDER BY unixepoch(sample_ts) ASC, source_priority DESC
+                ORDER BY julianday(sample_ts) ASC, source_priority DESC
                 """,
                 (device_id, start_ts, end_ts),
             ).fetchall(),
@@ -1305,7 +1332,7 @@ def fetch_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | Non
             WHERE device_id = ?
               AND error_code IS NULL
               AND voltage > 0
-            ORDER BY unixepoch(sample_ts) ASC, source_priority DESC
+            ORDER BY julianday(sample_ts) ASC, source_priority DESC
             LIMIT 1
             """,
             (device_id,),
@@ -1317,7 +1344,7 @@ def fetch_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | Non
             WHERE device_id = ?
               AND error_code IS NULL
               AND voltage > 0
-            ORDER BY unixepoch(sample_ts) DESC, source_priority DESC
+            ORDER BY julianday(sample_ts) DESC, source_priority DESC
             LIMIT 1
             """,
             (device_id,),
