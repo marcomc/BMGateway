@@ -208,7 +208,13 @@ usb_otg = dict(data.get("usb_otg", {}))
 archive_sync = dict(data.get("archive_sync", {}))
 self_healing = dict(data.get("self_healing", {}))
 retention = dict(data.get("retention", {}))
-bm200_max_pages_per_sync = max(1, int(archive_sync.get("bm200_max_pages_per_sync", 85)))
+bm200_page_cap_marker = config_path.with_name(
+    f".{config_path.name}.bm200-page-cap-85-v0.3.2"
+)
+legacy_bm200_max_pages_per_sync = int(archive_sync.get("bm200_max_pages_per_sync", 85))
+bm200_max_pages_per_sync = max(1, legacy_bm200_max_pages_per_sync)
+if legacy_bm200_max_pages_per_sync == 3 and not bm200_page_cap_marker.exists():
+    bm200_max_pages_per_sync = 85
 
 if str(gateway.get("name", "")).startswith("__"):
     gateway["name"] = "BMGateway"
@@ -329,6 +335,7 @@ payload = "\n".join(
     ]
 )
 config_path.write_text(payload, encoding="utf-8")
+bm200_page_cap_marker.touch(exist_ok=True)
 PY
 
 python3 - <<'PY' "${devices_path}"

@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed the effective 3-page cap from automatic BM200/BM6 archive recovery, so
   reconnect backfill can request the full 85-page retained history window when a
   multi-day outage needs more than the routine sync depth.
+- Migrated the old generated 3-page BM200/BM6 default to 85 pages during the
+  first service refresh, while preserving any page cap set after that migration.
 
 ## [0.3.1] - 2026-05-30 - BLE Timeout Recovery and Missing Device Backoff
 
