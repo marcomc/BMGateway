@@ -771,6 +771,21 @@
         : `.${{String(nextMicrosecond).padStart(6, "0").replace(/0+$/, "")}}`;
       return `${{String(year).padStart(4, "0")}}-${{String(month).padStart(2, "0")}}-${{String(day).padStart(2, "0")}}T${{String(nextHour).padStart(2, "0")}}:${{String(nextMinute).padStart(2, "0")}}:${{String(nextSecond).padStart(2, "0")}}${{fractional}}${{match[8]}}`;
     }}
+    function shiftDailyCursor(value, offsetDays) {{
+      const match = /^(\d{{4}})-(\d{{2}})-(\d{{2}})(?:T|$)/.exec(value);
+      if (!match || !Number.isSafeInteger(offsetDays)) {{
+        return null;
+      }}
+      const year = Number(match[1]);
+      const month = Number(match[2]);
+      const day = Number(match[3]);
+      if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {{
+        return null;
+      }}
+      const date = new Date(`${{match[1]}}-${{match[2]}}-${{match[3]}}T00:00:00Z`);
+      date.setUTCDate(date.getUTCDate() + offsetDays);
+      return `${{String(date.getUTCFullYear()).padStart(4, "0")}}-${{String(date.getUTCMonth() + 1).padStart(2, "0")}}-${{String(date.getUTCDate()).padStart(2, "0")}}`;
+    }}
     function previousServerWindowEnd(payload) {{
       const start = payload?.window?.start;
       if (typeof start !== "string") {{
@@ -779,8 +794,7 @@
       if (payload?.resolution !== "daily") {{
         return shiftIsoTimestampByMicroseconds(start, -1);
       }}
-      const parsedStart = parseTime(start);
-      return parsedStart === null ? null : new Date(parsedStart - 1).toISOString();
+      return shiftDailyCursor(start, -1);
     }}
     function nextServerWindowEnd(payload, rangeValue) {{
       const duration = rangeDurationMs(rangeValue);
@@ -791,10 +805,8 @@
       if (payload?.resolution !== "daily") {{
         return shiftIsoTimestampByMicroseconds(end, (duration * 1000) + 1);
       }}
-      // Daily endpoints round the requested end to the local calendar day, so
-      // adding a millisecond would skip the immediately following day.
-      const parsedEnd = parseTime(end);
-      return parsedEnd === null ? null : new Date(parsedEnd + duration).toISOString();
+      // Date-only cursors are interpreted in the gateway's configured timezone.
+      return shiftDailyCursor(end, duration / (24 * 60 * 60 * 1000));
     }}
     function prefetchAdjacentWindows(payload, rangeValue) {{
       const previousEnd = previousServerWindowEnd(payload);

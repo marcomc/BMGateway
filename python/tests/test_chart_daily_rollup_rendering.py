@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 
@@ -106,54 +107,10 @@ process.stdout.write(canvas.innerHTML.includes("<polyline") ? "line" : "empty");
     assert completed.stdout == "line"
 
 
-def test_server_window_chart_keeps_daily_pages_contiguous_when_paging_forward() -> None:
+def test_server_window_chart_uses_gateway_calendar_dates_for_daily_paging_across_dst() -> None:
     rendered_script = chart_script("history-chart")
     source = re.search(r"<script>(.*)</script>", rendered_script, re.DOTALL)
     assert source is not None
-    current_payload = {
-        "resolution": "daily",
-        "points": [
-            {
-                "ts": "2026-07-10T23:58:00+02:00",
-                "kind": "daily",
-                "voltage": 12.8,
-                "soc": 80,
-                "temperature": 20.0,
-                "series": "Liberty LD13CZT",
-                "series_color": "#17c45a",
-            }
-        ],
-        "window": {
-            "start": "2026-07-04T00:00:00+02:00",
-            "end": "2026-07-10T23:59:59+02:00",
-            "available_start": "2026-04-01T00:00:00+02:00",
-            "available_end": "2026-07-17T23:59:59+02:00",
-            "has_previous": False,
-            "has_next": True,
-        },
-    }
-    next_payload = {
-        "resolution": "daily",
-        "points": [
-            {
-                "ts": "2026-07-17T23:58:00+02:00",
-                "kind": "daily",
-                "voltage": 13.2,
-                "soc": 79,
-                "temperature": 19.0,
-                "series": "Liberty LD13CZT",
-                "series_color": "#17c45a",
-            }
-        ],
-        "window": {
-            "start": "2026-07-11T00:00:00+02:00",
-            "end": "2026-07-17T23:59:59+02:00",
-            "available_start": "2026-04-01T00:00:00+02:00",
-            "available_end": "2026-07-17T23:59:59+02:00",
-            "has_previous": False,
-            "has_next": False,
-        },
-    }
     harness = """
 class ClassList {
   constructor(...values) { this.values = new Set(values.filter(Boolean)); }
@@ -228,42 +185,77 @@ global.window = {
 global.requestAnimationFrame = (callback) => callback();
 global.setTimeout = (callback) => callback();
 const currentPayload = __CURRENT_PAYLOAD__;
-const nextPayload = __NEXT_PAYLOAD__;
+const adjacentPayload = __ADJACENT_PAYLOAD__;
 const requests = [];
 global.fetch = async (url) => {
   requests.push(url);
-  return { ok: true, json: async () => requests.length === 1 ? currentPayload : nextPayload };
+  return { ok: true, json: async () => requests.length === 1 ? currentPayload : adjacentPayload };
 };
 __SCRIPT__
 setImmediate(() => {
-  next.listeners.click();
+  const navigation = __DIRECTION__ === "previous" ? previous : next;
+  navigation.listeners.click();
   setImmediate(() => {
-    const nextEnd = new URLSearchParams(requests[1].split("?")[1]).get("end");
-    process.stdout.write(JSON.stringify({
-      requests: requests.length,
-      nextEnd,
-      meta: meta.innerHTML,
-    }));
+    process.stdout.write(JSON.stringify(requests.map((url) => (
+      new URLSearchParams(url.split("?")[1]).get("end")
+    ))));
   });
 });
 """
-    harness = (
-        harness.replace("__CURRENT_PAYLOAD__", json.dumps(current_payload))
-        .replace("__NEXT_PAYLOAD__", json.dumps(next_payload))
-        .replace("__SCRIPT__", source.group(1))
-    )
+    for direction, current_start, current_end, expected_end in (
+        ("previous", "2026-03-30T00:00:00+02:00", "2026-04-05T23:59:59+02:00", "2026-03-29"),
+        ("next", "2026-03-16T00:00:00+01:00", "2026-03-22T23:59:59+01:00", "2026-03-29"),
+    ):
+        current_payload = {
+            "resolution": "daily",
+            "points": [
+                {
+                    "ts": current_end,
+                    "kind": "daily",
+                    "voltage": 12.8,
+                    "soc": 80,
+                    "temperature": 20.0,
+                    "series": "Liberty LD13CZT",
+                    "series_color": "#17c45a",
+                }
+            ],
+            "window": {
+                "start": current_start,
+                "end": current_end,
+                "available_start": "2026-03-01T00:00:00+01:00",
+                "available_end": "2026-04-30T23:59:59+02:00",
+                "has_previous": direction == "previous",
+                "has_next": direction == "next",
+            },
+        }
+        adjacent_payload = {
+            "resolution": "daily",
+            "points": [],
+            "window": {
+                "start": "2026-03-23T00:00:00+01:00",
+                "end": "2026-03-29T23:59:59+02:00",
+                "available_start": "2026-03-01T00:00:00+01:00",
+                "available_end": "2026-04-30T23:59:59+02:00",
+                "has_previous": False,
+                "has_next": False,
+            },
+        }
+        rendered_harness = (
+            harness.replace("__CURRENT_PAYLOAD__", json.dumps(current_payload))
+            .replace("__ADJACENT_PAYLOAD__", json.dumps(adjacent_payload))
+            .replace("__DIRECTION__", json.dumps(direction))
+            .replace("__SCRIPT__", source.group(1))
+        )
 
-    completed = subprocess.run(
-        ["node", "-e", harness],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    details = json.loads(completed.stdout)
+        completed = subprocess.run(
+            ["node", "-e", rendered_harness],
+            check=True,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "TZ": "America/Los_Angeles"},
+        )
 
-    assert details["requests"] == 2
-    assert details["nextEnd"] == "2026-07-17T21:59:59.000Z"
-    assert "13.20 V" in details["meta"]
+        assert json.loads(completed.stdout) == [None, expected_end]
 
 
 def test_server_window_chart_preserves_microsecond_raw_cursors_for_paging_and_prefetch() -> None:
