@@ -40,7 +40,6 @@ from .usb_otg import USB_OTG_FRAME_RENDERER_ENABLE_ERROR, usb_otg_frame_renderer
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
 
-BM200_FULL_HISTORY_PAGE_COUNT = 85
 HistorySyncProgress = Callable[[int, int, str], None]
 
 
@@ -1043,7 +1042,7 @@ def sync_device_history_now(
                 config=config,
                 device=device,
                 database_path=database_path,
-                page_count=BM200_FULL_HISTORY_PAGE_COUNT,
+                page_count=max(1, config.archive_sync.bm200_max_pages_per_sync),
                 progress=progress,
             )
         elif driver_type == "bm300pro":

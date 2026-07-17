@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
+
+### Fixed
+
+- Removed the effective 3-page cap from automatic BM200/BM6 archive recovery, so
+  reconnect backfill can request the full 85-page retained history window when a
+  multi-day outage needs more than the routine sync depth.
+- Migrated the old generated 3-page BM200/BM6 default to 85 pages during the
+  first service refresh, while preserving any page cap set after that migration.
+- Made CLI-triggered manual BM200/BM6 archive syncs use the configured page cap
+  when `--page-count` is omitted.
+
+## [0.3.1] - 2026-05-30 - BLE Timeout Recovery and Missing Device Backoff
+
+### Fixed
+
+- Added live BLE recovery after two consecutive polling cycles where no enabled
+  live device comes online and every live device is either timed out or missing,
+  so a degraded BlueZ or adapter state is restarted automatically instead of
+  staying stuck indefinitely.
+- Added per-device backoff for devices that are not advertising, so one missing
+  spare monitor no longer forces repeated long BLE scan windows before the
+  runtime can continue with the rest of the fleet.
+- Kept fleet-level BLE recovery active when every live device remains in
+  per-device backoff for a sustained run, without counting an individual skip
+  as a fresh BLE probe failure.
+
 ## [0.3.0] - Unreachable Device Status Split and Raspberry Pi Compatibility and Self-Healing Improvements
 
 ### Changed

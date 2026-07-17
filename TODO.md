@@ -6,8 +6,9 @@
   BM200/BM6 archive import now reads cumulative `d15505` page counts, stores
   voltage, SoC, temperature, raw record, page selector, record index, and
   timestamp quality, and runs through periodic/reconnect backfill plus a
-  per-device History page action. Manual BM200/BM6 sync now requests 85
-  cumulative pages, matching the 30-day retention estimate, but the latest
+  per-device History page action. Automatic reconnect recovery and manual
+  BM200/BM6 sync now allow 85 cumulative pages, matching the 30-day retention
+  estimate, but the latest
   `battery_alpha` byte-7 sweep saturated around 1511-1522 records, or about
   50 hours. The controlled `d15505` matrix and full sweeps found byte index
   `4` as the only strong BM200/BM6 segment or range selector candidate:
@@ -50,10 +51,14 @@
   and automatic backfill. Live validation on `bm300_alpha` proved cumulative
   overlap across `b7=01`, `02`, and `03` with exact 256-record then 512-record
   overlap, and the standard BM300 import now covers 769 records, about
-  25 hours 38 minutes, on that device. Remaining work is extending beyond the
-  current depth-3 validated window, proving whether selectors above `03` stay
-  cumulative, and profiling whether `byte 6` is a bank/window selector needed
-  to approach the claimed 72-day retention.
+  25 hours 38 minutes, on that device. Live validation on 2026-05-31 across
+  `libertv_ld13czt`, `doc_fb12899`, and `punto_fa376ht` showed byte-7
+  selectors `01..10` all remain readable and cumulative, reaching about
+  2560 records per device, while the standard importer still clamps runtime DB
+  imports to selectors `01..03`. Remaining work is extending beyond the current
+  depth-3 import window, validating selectors above `10`, safely widening the
+  importer, and profiling whether `byte 6` is a bank/window selector needed to
+  approach the claimed 72-day retention.
   Remaining work also includes semantic parsing of raw `d15501` version
   payloads, cranking/charging event records, the final archive `p` nibble, and
   rapid acceleration/deceleration persistence.
@@ -296,13 +301,12 @@
     or releases the original app as expected
 
 - [ ] Expand archive-history backfill beyond the verified bounded BM200 path.
-  BM200/BM6 automatic periodic and reconnect-triggered import uses a
-  conservative configured page cap, while manual per-device sync on the History
-  page requests the full 85-page 30-day retention estimate. BM300 Pro/BM7
-  archive import is also implemented behind a separate opt-in gate using byte-6
-  selector `01`. Validate the full BM200/BM6 page-count result before claiming
-  complete 30-day recovery, and validate BM300 Pro/BM7 byte-6 selectors beyond
-  `01` before claiming full 72-day recovery.
+  BM200/BM6 automatic reconnect recovery and manual per-device sync on the
+  History page can request the full 85-page 30-day retention estimate. BM300
+  Pro/BM7 archive import is also implemented behind a separate opt-in gate using
+  byte-6 selector `01`. Validate the full BM200/BM6 page-count result before
+  claiming complete 30-day recovery, and validate BM300 Pro/BM7 byte-6 selectors
+  beyond `01` before claiming full 72-day recovery.
   Reference:
   - [docs/architecture/2026-04-26-history-backfill-integration-proposal.md](docs/architecture/2026-04-26-history-backfill-integration-proposal.md)
   Actions:

@@ -19,7 +19,7 @@ from .archive_sync import (
 )
 from .audit_log import append_audit_event
 from .bluetooth_lock import exclusive_bluetooth_operation
-from .bluetooth_recovery import BluetoothRecoveryRequiredError
+from .bluetooth_recovery import BluetoothRecoveryRequiredError, require_bluetooth_recovery
 from .bm300_multipage import BM300MultipageValidationError, run_bm300_multipage_import
 from .config import DEFAULT_CONFIG_PATH, AppConfig, load_config, validate_config
 from .contract import build_contract, build_discovery_payloads
@@ -42,6 +42,8 @@ from .protocol_probe import (
     utc_timestamp,
 )
 from .runtime import (
+    LiveDeviceBackoff,
+    LiveTimeoutRecoveryTracker,
     _active_adapter,
     build_snapshot,
     database_file_path,
@@ -201,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     history_sync.add_argument(
         "--page-count",
         type=int,
-        default=3,
+        default=None,
         help=(
             "Cumulative history pages to request. BM200/BM6 uses d15505 byte-7; "
             "BM300 Pro/BM7 uses the validated d15505 byte-7 depth path."
@@ -537,15 +539,25 @@ def _run_cycle(
     publisher: Publisher,
     publish_discovery: bool,
     state_dir: Path | None,
+    device_backoff: LiveDeviceBackoff | None = None,
 ) -> GatewaySnapshot:
     database_path = database_file_path(config, state_dir=state_dir)
     last_successful_seen = fetch_latest_successful_seen(database_path)
-    snapshot = build_snapshot(
-        config,
-        devices,
-        state_dir=state_dir,
-        last_successful_seen=last_successful_seen,
-    )
+    if device_backoff is not None:
+        snapshot = build_snapshot(
+            config,
+            devices,
+            state_dir=state_dir,
+            last_successful_seen=last_successful_seen,
+            device_backoff=device_backoff,
+        )
+    else:
+        snapshot = build_snapshot(
+            config,
+            devices,
+            state_dir=state_dir,
+            last_successful_seen=last_successful_seen,
+        )
     audit_now = datetime.fromisoformat(snapshot.generated_at)
     archive_backfill_details = (
         plan_archive_backfill_details(
@@ -660,6 +672,40 @@ def _run_cycle(
     return snapshot
 
 
+def _handle_bluetooth_recovery_required(
+    *,
+    config: AppConfig,
+    state_dir: Path | None,
+    error: BluetoothRecoveryRequiredError,
+) -> int:
+    runtime_alerts = collect_gateway_alerts(
+        configured_adapter=_active_adapter(config),
+    )
+    append_audit_event(
+        config=config,
+        state_dir=state_dir,
+        source="runtime",
+        trigger="automatic",
+        action="bluetooth_recovery_requested",
+        status="failed",
+        details={
+            "error_type": error.error.__class__.__name__,
+            "error": str(error.error) or error.error.__class__.__name__,
+            "recovery_attempted": error.recovery_attempted,
+            "recovery_detail": error.recovery_detail,
+            "gateway_alerts": [alert.to_dict() for alert in runtime_alerts],
+        },
+    )
+    message = "Bluetooth recovery requested; requested bluetooth.service restart"
+    if error.recovery_detail:
+        message += f": {error.recovery_detail}"
+    sys.stderr.write(message + "\n")
+    for alert in runtime_alerts:
+        alert_message = describe_gateway_alert(alert)
+        sys.stderr.write(f"Gateway alert: {alert_message}\n")
+    return 1
+
+
 def _handle_run(
     path: Path,
     *,
@@ -681,6 +727,8 @@ def _handle_run(
     completed = 0
     last_snapshot: GatewaySnapshot | None = None
     self_healing_state = new_self_healing_state()
+    device_backoff = LiveDeviceBackoff()
+    timeout_recovery = LiveTimeoutRecoveryTracker()
 
     while iteration_limit is None or completed < iteration_limit:
         runtime = _load_runtime_or_print_errors(path, verbose=verbose)
@@ -693,36 +741,29 @@ def _handle_run(
                 publisher=publisher,
                 publish_discovery=publish_discovery,
                 state_dir=state_dir,
+                device_backoff=device_backoff,
             )
         except BluetoothRecoveryRequiredError as exc:
-            runtime_alerts = collect_gateway_alerts(
-                configured_adapter=_active_adapter(config),
-            )
-            append_audit_event(
+            return _handle_bluetooth_recovery_required(
                 config=config,
                 state_dir=state_dir,
-                source="runtime",
-                trigger="automatic",
-                action="bluetooth_recovery_requested",
-                status="failed",
-                details={
-                    "error_type": exc.error.__class__.__name__,
-                    "error": str(exc.error) or exc.error.__class__.__name__,
-                    "recovery_attempted": exc.recovery_attempted,
-                    "recovery_detail": exc.recovery_detail,
-                    "gateway_alerts": [alert.to_dict() for alert in runtime_alerts],
-                },
+                error=exc,
             )
-            message = (
-                "Bluetooth transport entered a fatal state; requested bluetooth.service restart"
-            )
-            if exc.recovery_detail:
-                message += f": {exc.recovery_detail}"
-            sys.stderr.write(message + "\n")
-            for alert in runtime_alerts:
-                alert_message = describe_gateway_alert(alert)
-                sys.stderr.write(f"Gateway alert: {alert_message}\n")
-            return 1
+        if config.gateway.reader_mode == "live" and timeout_recovery.record_snapshot(last_snapshot):
+            try:
+                require_bluetooth_recovery(
+                    RuntimeError(
+                        "No enabled live devices came online for "
+                        f"{timeout_recovery.consecutive_recovery_cycles} consecutive cycles; "
+                        "readings were timeout or device_not_found."
+                    )
+                )
+            except BluetoothRecoveryRequiredError as exc:
+                return _handle_bluetooth_recovery_required(
+                    config=config,
+                    state_dir=state_dir,
+                    error=exc,
+                )
         if not dry_run and (config.usb_otg.enabled or export_usb_otg_now):
             from .usb_otg_export import export_due, mark_usb_otg_exported, update_usb_otg_drive
 
@@ -814,7 +855,7 @@ def _handle_history_sync_device(
     device_id: str,
     as_json: bool,
     state_dir: Path | None,
-    page_count: int,
+    page_count: int | None,
 ) -> int:
     runtime = _load_runtime_or_print_errors(path, verbose=verbose)
     if runtime is None:
@@ -830,18 +871,28 @@ def _handle_history_sync_device(
         if device_driver_type(device.type) == "bm300pro":
             if not config.archive_sync.bm300_enabled:
                 raise ValueError("BM300 archive sync is disabled in settings.")
+            effective_page_count = (
+                page_count
+                if page_count is not None
+                else config.archive_sync.bm300_max_pages_per_sync
+            )
             payload = sync_bm300_device_archive(
                 config=config,
                 device=device,
                 database_path=database_path,
-                page_count=page_count,
+                page_count=effective_page_count,
             )
         else:
+            effective_page_count = (
+                page_count
+                if page_count is not None
+                else config.archive_sync.bm200_max_pages_per_sync
+            )
             payload = sync_bm200_device_archive(
                 config=config,
                 device=device,
                 database_path=database_path,
-                page_count=page_count,
+                page_count=effective_page_count,
             )
     except Exception as exc:
         failure = {

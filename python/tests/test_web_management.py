@@ -1612,6 +1612,11 @@ def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Pa
     assert config.archive_sync.bm200_max_pages_per_sync == 6
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 9
+    audit_files = list((tmp_path / "data" / "runtime" / "audit").glob("*.jsonl"))
+    assert len(audit_files) == 1
+    audit_payload = json.loads(audit_files[0].read_text(encoding="utf-8").splitlines()[-1])
+    assert audit_payload["action"] == "archive_sync_preferences_update"
+    assert audit_payload["details"]["bm200_max_pages_per_sync"] == 6
 
 
 def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
@@ -1692,11 +1697,19 @@ def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
     assert payloads[-1]["action"] == "history_sync_batch_completed"
     assert payloads[-1]["trigger"] == "manual"
     assert payloads[-1]["details"]["requested"] == 2
+    assert payloads[-1]["details"]["device_pages"] == {"bm200_house": 2, "bm300_doc": 5}
 
 
-def test_sync_device_history_now_requests_full_bm200_retention(
+@pytest.mark.parametrize(
+    ("configured_page_count", "expected_page_count"),
+    [(None, 85), (4, 4)],
+    ids=("default-full-history", "explicit-cap"),
+)
+def test_sync_device_history_now_honors_bm200_page_cap(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
+    configured_page_count: int | None,
+    expected_page_count: int,
 ) -> None:
     (tmp_path / "devices.toml").write_text(
         "\n".join(
@@ -1713,8 +1726,14 @@ def test_sync_device_history_now_requests_full_bm200_retention(
         encoding="utf-8",
     )
     config_path = tmp_path / "config.toml"
+    config_text = Path("python/config/config.toml.example").read_text(encoding="utf-8")
+    if configured_page_count is not None:
+        config_text = config_text.replace(
+            "bm200_max_pages_per_sync = 85",
+            f"bm200_max_pages_per_sync = {configured_page_count}",
+        )
     config_path.write_text(
-        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        config_text,
         encoding="utf-8",
     )
     captured: dict[str, object] = {}
@@ -1752,7 +1771,7 @@ def test_sync_device_history_now_requests_full_bm200_retention(
     assert payload["synced"] is True
     assert payload["fetched"] == 512
     assert payload["inserted"] == 64
-    assert captured == {"device_id": "bm200_house", "page_count": 85}
+    assert captured == {"device_id": "bm200_house", "page_count": expected_page_count}
 
 
 def test_sync_device_history_now_rejects_bm300_when_archive_sync_is_disabled(

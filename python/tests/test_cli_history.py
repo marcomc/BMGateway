@@ -298,6 +298,71 @@ def test_history_sync_device_emits_json(tmp_path: Path, capsys: pytest.CaptureFi
     assert payload["inserted"] == 10
 
 
+@pytest.mark.parametrize(
+    ("configured_page_count", "expected_page_count"),
+    [(85, 85), (4, 4)],
+    ids=("full-history-default", "explicit-cap"),
+)
+def test_history_sync_device_uses_the_configured_bm200_page_cap_by_default(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+    configured_page_count: int,
+    expected_page_count: int,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[archive_sync]\n"
+        + f"bm200_max_pages_per_sync = {configured_page_count}\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+
+    def fake_sync(
+        *,
+        config: object,
+        device: object,
+        database_path: Path,
+        page_count: int,
+    ) -> dict[str, object]:
+        assert database_path == state_dir / "runtime" / "gateway.db"
+        assert page_count == expected_page_count
+        return {
+            "device_id": "bm200_house",
+            "fetched": 12,
+            "inserted": 10,
+            "adapter": "hci0",
+            "profile": "bm6_d15505_b7_v1",
+        }
+
+    from bm_gateway import cli as cli_module
+
+    cli_module_any = cast(Any, cli_module)
+    original = cli_module_any.sync_bm200_device_archive
+    cli_module_any.sync_bm200_device_archive = fake_sync
+    try:
+        result = cli.main(
+            [
+                "--config",
+                str(config_path),
+                "history",
+                "sync-device",
+                "--device-id",
+                "bm200_house",
+                "--state-dir",
+                str(state_dir),
+                "--json",
+            ]
+        )
+    finally:
+        cli_module_any.sync_bm200_device_archive = original
+
+    captured = capsys.readouterr()
+
+    assert result == 0
+    assert json.loads(captured.out)["synced"] is True
+
+
 def test_history_sync_device_help_mentions_bm300_byte7_path(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -536,6 +601,107 @@ def test_plan_archive_backfill_flags_connected_devices_with_real_history_gap(
     )
 
     assert candidates == {"bm200_house": 1}
+
+
+@pytest.mark.parametrize(
+    ("configured_page_count", "expected_page_count"),
+    [(None, 85), (3, 3)],
+    ids=("default-full-history", "explicit-cap"),
+)
+def test_plan_archive_backfill_honors_bm200_reconnect_page_cap(
+    tmp_path: Path,
+    configured_page_count: int | None,
+    expected_page_count: int,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    archive_sync = replace(
+        config.archive_sync,
+        reconnect_min_gap_seconds=3600,
+        safety_margin_seconds=0,
+    )
+    if configured_page_count is not None:
+        archive_sync = replace(
+            archive_sync,
+            bm200_max_pages_per_sync=configured_page_count,
+        )
+    config = replace(
+        config,
+        archive_sync=archive_sync,
+    )
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T00:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=1,
+            poll_interval_seconds=600,
+            devices=[
+                DeviceReading(
+                    id="bm200_house",
+                    type="bm200",
+                    name="BM200 House",
+                    mac="AA:BB:CC:DD:EE:01",
+                    enabled=True,
+                    connected=True,
+                    voltage=12.73,
+                    soc=58,
+                    temperature=None,
+                    rssi=None,
+                    state="normal",
+                    error_code=None,
+                    error_detail=None,
+                    last_seen="2024-01-01T00:00:00+00:00",
+                    adapter="hci0",
+                    driver="bm200",
+                )
+            ],
+        ),
+    )
+
+    snapshot = GatewaySnapshot(
+        generated_at="2024-01-31T00:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=600,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=True,
+                voltage=12.81,
+                soc=61,
+                temperature=None,
+                rssi=-60,
+                state="normal",
+                error_code=None,
+                error_detail=None,
+                last_seen="2024-01-31T00:00:00+00:00",
+                adapter="hci0",
+                driver="bm200",
+            )
+        ],
+    )
+
+    candidates = plan_archive_backfill(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+    )
+
+    assert candidates == {"bm200_house": expected_page_count}
 
 
 def test_plan_archive_backfill_includes_bm300_when_bm7_archive_sync_is_enabled(
