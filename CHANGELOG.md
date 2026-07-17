@@ -32,6 +32,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   when a later archive import happens to restore the same raw-sample count.
 - Raw samples recorded within the same second now retain chronological order
   and precise chart-history availability bounds.
+- Short raw chart ranges now end at the newest raw sample and can page back
+  into retained daily history without leaving an empty future interval.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

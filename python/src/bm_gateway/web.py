@@ -548,75 +548,128 @@ def _chart_history_payload(
 ) -> dict[str, object]:
     raw_bounds = fetch_history_bounds(database_path, device_id=device_id)
     daily_bounds = fetch_daily_history_bounds(database_path, device_id=device_id)
-    bound_values = [value for bounds in (raw_bounds, daily_bounds) if bounds for value in bounds]
-    if not bound_values:
+    if raw_bounds is None and daily_bounds is None:
         return _empty_chart_history_payload(range_value=range_value)
     try:
         chart_timezone = ZoneInfo(timezone_name)
     except (ValueError, ZoneInfoNotFoundError):
         return _empty_chart_history_payload(range_value=range_value)
     try:
-        parsed_bounds = [
-            _parse_chart_history_timestamp(value, timezone=chart_timezone) for value in bound_values
-        ]
+        raw_available_bounds = (
+            (
+                _parse_chart_history_timestamp(raw_bounds[0], timezone=chart_timezone),
+                _parse_chart_history_timestamp(raw_bounds[1], timezone=chart_timezone),
+            )
+            if raw_bounds
+            else None
+        )
+        daily_available_bounds = (
+            (
+                _parse_chart_history_timestamp(daily_bounds[0], timezone=chart_timezone),
+                _parse_chart_history_timestamp(daily_bounds[1], timezone=chart_timezone),
+            )
+            if daily_bounds
+            else None
+        )
     except ValueError:
         return _empty_chart_history_payload(range_value=range_value)
-    available_start = min(parsed_bounds)
-    available_end = max(parsed_bounds)
 
-    duration = timedelta(days=int(range_value))
-    requested_end = available_end
+    parsed_requested_end: datetime | None = None
     if end_value.strip():
         try:
-            requested_end = _parse_chart_history_timestamp(
+            parsed_requested_end = _parse_chart_history_timestamp(
                 end_value,
                 timezone=chart_timezone,
             )
         except ValueError:
-            requested_end = available_end
-    requested_end = min(available_end, max(available_start, requested_end))
+            pass
+
+    duration = timedelta(days=int(range_value))
+    resolution = "raw" if duration.days <= _CHART_HISTORY_RAW_MAX_DAYS else "daily"
+    daily_precedes_raw = (
+        raw_available_bounds is not None
+        and daily_available_bounds is not None
+        and daily_available_bounds[0].date() < raw_available_bounds[0].date()
+    )
+    requested_before_raw_history = (
+        parsed_requested_end is not None
+        and raw_available_bounds is not None
+        and parsed_requested_end < raw_available_bounds[0]
+    )
+    if (
+        resolution == "raw"
+        and raw_available_bounds is not None
+        and not (daily_precedes_raw and requested_before_raw_history)
+    ):
+        available_start, available_end = raw_available_bounds
+    elif daily_available_bounds is not None:
+        resolution = "daily"
+        available_start, available_end = daily_available_bounds
+    elif raw_available_bounds is not None:
+        available_start, available_end = raw_available_bounds
+    else:  # pragma: no cover - bounds are checked above
+        return _empty_chart_history_payload(range_value=range_value)
+
+    def _clamp_requested_end() -> datetime:
+        if parsed_requested_end is None:
+            return available_end
+        return min(available_end, max(available_start, parsed_requested_end))
+
+    requested_end = _clamp_requested_end()
     window_end = requested_end
     window_start = max(available_start, window_end - duration)
+    # Retained rollups cover a requested page that raw history can no longer fill.
+    raw_range_incomplete = (
+        raw_available_bounds is not None
+        and daily_available_bounds is not None
+        and daily_precedes_raw
+        and raw_available_bounds[1] - raw_available_bounds[0] < duration
+    )
 
-    resolution = "raw" if duration.days <= _CHART_HISTORY_RAW_MAX_DAYS else "daily"
     if resolution == "raw":
-        raw_history = fetch_history_window(
-            database_path,
-            device_id=device_id,
-            start_ts=_format_chart_history_timestamp(window_start),
-            end_ts=_format_chart_history_timestamp(window_end),
-        )
-        daily_history = fetch_daily_history_window(
-            database_path,
-            device_id=device_id,
-            start_day=window_start.date().isoformat(),
-            end_day=window_end.date().isoformat(),
-        )
-        valid_raw_samples_by_day = fetch_history_day_sample_counts(
-            database_path,
-            device_id=device_id,
-            start_day=window_start.date().isoformat(),
-            end_day=window_end.date().isoformat(),
-        )
-        daily_requires_rollup = False
-        for row in daily_history:
-            sample_count = row["samples"]
-            if isinstance(sample_count, int) and sample_count > 0:
-                day = str(row["day"])
-                if sample_count > valid_raw_samples_by_day.get(day, 0):
-                    daily_requires_rollup = True
-                    break
-        if raw_history and not daily_requires_rollup:
-            points = _chart_points(
-                raw_history,
-                [],
-                series=series,
-                series_id=device_id,
-                series_color=series_color,
-            )
-        else:
+        if raw_range_incomplete:
             resolution = "daily"
+        else:
+            raw_history = fetch_history_window(
+                database_path,
+                device_id=device_id,
+                start_ts=_format_chart_history_timestamp(window_start),
+                end_ts=_format_chart_history_timestamp(window_end),
+            )
+            daily_history = fetch_daily_history_window(
+                database_path,
+                device_id=device_id,
+                start_day=window_start.date().isoformat(),
+                end_day=window_end.date().isoformat(),
+            )
+            valid_raw_samples_by_day = fetch_history_day_sample_counts(
+                database_path,
+                device_id=device_id,
+                start_day=window_start.date().isoformat(),
+                end_day=window_end.date().isoformat(),
+            )
+            daily_requires_rollup = False
+            for row in daily_history:
+                sample_count = row["samples"]
+                if isinstance(sample_count, int) and sample_count > 0:
+                    day = str(row["day"])
+                    if sample_count > valid_raw_samples_by_day.get(day, 0):
+                        daily_requires_rollup = True
+                        break
+            if raw_history and not daily_requires_rollup:
+                points = _chart_points(
+                    raw_history,
+                    [],
+                    series=series,
+                    series_id=device_id,
+                    series_color=series_color,
+                )
+            else:
+                resolution = "daily"
     if resolution == "daily":
+        if daily_available_bounds is not None:
+            available_start, available_end = daily_available_bounds
+            requested_end = _clamp_requested_end()
         window_start, window_end = _daily_chart_window(
             available_start=available_start,
             available_end=available_end,
@@ -645,7 +698,8 @@ def _chart_history_payload(
             "end": _format_chart_history_timestamp(window_end),
             "available_start": _format_chart_history_timestamp(available_start),
             "available_end": _format_chart_history_timestamp(available_end),
-            "has_previous": window_start > available_start,
+            "has_previous": window_start > available_start
+            or (resolution == "raw" and daily_precedes_raw),
             "has_next": window_end < available_end,
         },
     }

@@ -12,7 +12,7 @@ import urllib.request
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import urlopen as _stdlib_urlopen
 
@@ -351,6 +351,146 @@ def test_chart_history_payload_handles_invalid_timezone(
             "has_next": False,
         },
     }
+
+
+def test_chart_history_payload_uses_raw_bounds_for_short_raw_ranges(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-01T12:00:00+02:00",
+            "2026-07-17T12:00:00+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-01T00:00:00+02:00",
+            "2026-07-17T23:59:59+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_window",
+        lambda _database_path, **_kwargs: [
+            {
+                "ts": "2026-07-17T12:00:00+02:00",
+                "voltage": 13.2,
+                "soc": 80,
+                "temperature": 24.0,
+                "error_code": None,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_window",
+        lambda _database_path, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_day_sample_counts",
+        lambda _database_path, **_kwargs: {},
+    )
+
+    payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+
+    assert payload["resolution"] == "raw"
+    points = cast(list[dict[str, object]], payload["points"])
+    assert points[-1]["ts"] == "2026-07-17T12:00:00+02:00"
+    assert payload["window"] == {
+        "start": "2026-07-10T12:00:00+02:00",
+        "end": "2026-07-17T12:00:00+02:00",
+        "available_start": "2026-07-01T12:00:00+02:00",
+        "available_end": "2026-07-17T12:00:00+02:00",
+        "has_previous": True,
+        "has_next": False,
+    }
+
+
+def test_chart_history_payload_pages_back_from_raw_to_earlier_daily_rollups(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-10T12:00:00+02:00",
+            "2026-07-17T12:00:00+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-01T00:00:00+02:00",
+            "2026-07-17T23:59:59+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_window",
+        lambda _database_path, **_kwargs: [
+            {
+                "ts": "2026-07-17T12:00:00+02:00",
+                "voltage": 13.2,
+                "soc": 80,
+                "temperature": 24.0,
+                "error_code": None,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_window",
+        lambda _database_path, **_kwargs: [
+            {
+                "day": "2026-07-10",
+                "samples": 1,
+                "avg_voltage": 13.1,
+                "avg_soc": 79.0,
+                "avg_temperature": 23.5,
+                "last_seen": "2026-07-10T23:58:00+02:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_day_sample_counts",
+        lambda _database_path, **_kwargs: {"2026-07-10": 1},
+    )
+
+    raw_payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+    previous_payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="2026-07-10T11:59:59.999+02:00",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+
+    assert raw_payload["resolution"] == "raw"
+    raw_window = cast(dict[str, object], raw_payload["window"])
+    assert raw_window["end"] == "2026-07-17T12:00:00+02:00"
+    assert raw_window["has_previous"] is True
+    assert raw_window["has_next"] is False
+    assert previous_payload["resolution"] == "daily"
+    previous_window = cast(dict[str, object], previous_payload["window"])
+    assert previous_window["available_start"] == "2026-07-01T00:00:00+02:00"
+    assert previous_window["end"] == "2026-07-10T23:59:59+02:00"
 
 
 def test_chart_history_window_api_returns_only_the_requested_raw_page(
