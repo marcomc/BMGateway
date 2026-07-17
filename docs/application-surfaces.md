@@ -184,6 +184,7 @@ Primary JSON routes:
 | `/api/storage` | SQLite storage summary |
 | `/api/analytics?device_id=<id>` | degradation report for one device |
 | `/api/history?device_id=<id>&kind=<kind>` | raw, daily, monthly, or yearly history |
+| `/api/chart-history?device_id=<id>&range=<range>&end=<timestamp>` | one chart window; raw samples for 30-day-or-shorter all-raw windows, daily rollups for pages that cross raw expiry and for wider or all-history ranges |
 | `/api/history-sync/status` | history sync progress |
 | `/api/usb-otg-export/status` | USB OTG image-export progress |
 

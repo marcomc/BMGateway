@@ -13,6 +13,8 @@ from bm_gateway.state_store import (
     fetch_counts,
     fetch_daily_history,
     fetch_degradation_report,
+    fetch_history_bounds,
+    fetch_history_window,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_recent_history_since,
@@ -195,7 +197,7 @@ def test_persist_snapshot_averages_temperature_over_non_null_values(
     assert daily[0]["avg_temperature"] == 21.0
 
 
-def test_prune_history_removes_old_raw_rows_and_rebuilds_daily_rollups(
+def test_prune_history_removes_old_raw_rows_and_retains_daily_rollups(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "gateway.db"
@@ -211,8 +213,9 @@ def test_prune_history_removes_old_raw_rows_and_rebuilds_daily_rollups(
         connection.close()
 
     assert raw_count == (0,)
-    assert daily_count == (0,)
-    assert fetch_daily_history(database_path, device_id="bm200_house", limit=30) == []
+    assert daily_count == (1,)
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=30)
+    assert daily[0]["day"] == "2024-01-01"
 
 
 def test_prune_history_removes_old_archive_rows_with_raw_retention(
@@ -1644,6 +1647,27 @@ def test_fetch_recent_history_since_reads_time_window_without_recent_count_limit
     ]
     assert rows[0]["sample_source"] == "live"
     assert rows[0]["soc"] == 60
+
+
+def test_history_window_uses_chronological_order_across_dst_offset_change(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    before_fallback = "2025-10-26T02:30:00+02:00"
+    after_fallback = "2025-10-26T02:00:00+01:00"
+    persist_snapshot(database_path, _snapshot(before_fallback, voltage=12.61))
+    persist_snapshot(database_path, _snapshot(after_fallback, voltage=12.72))
+
+    assert fetch_history_bounds(database_path, device_id="bm200_house") == (
+        before_fallback,
+        after_fallback,
+    )
+    rows = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2025-10-26T00:00:00+00:00",
+        end_ts="2025-10-26T02:00:00+00:00",
+    )
+
+    assert [row["ts"] for row in rows] == [before_fallback, after_fallback]
 
 
 def test_fetch_daily_history_merges_archive_only_days(tmp_path: Path) -> None:

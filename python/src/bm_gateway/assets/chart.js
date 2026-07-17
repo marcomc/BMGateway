@@ -149,14 +149,10 @@
     }}
     return rangeLabel || t("Selected range");
   }}
-  function summarizeCoverage(points, metric) {{
-    const usable = points.filter((point) => typeof point[metric] === "number");
-    const timestamps = usable.map((point) => parseTime(point.ts)).filter((point) => point !== null);
-    if (timestamps.length === 0) {{
+  function summarizeCoverageSpan(earliest, latest) {{
+    if (earliest === null || latest === null) {{
       return t("No retained history for this metric");
     }}
-    const earliest = Math.min(...timestamps);
-    const latest = Math.max(...timestamps);
     const spanMs = Math.max(latest - earliest, 0);
     if (spanMs < 36 * 60 * 60 * 1000) {{
       return t("Less than 1 day available");
@@ -171,6 +167,14 @@
     }}
     const spanYears = Math.max(1, Math.round(spanDays / 365));
     return `${{spanYears}} ${{spanYears === 1 ? t("year available") : t("years available")}}`;
+  }}
+  function summarizeCoverage(points, metric) {{
+    const usable = points.filter((point) => typeof point[metric] === "number");
+    const timestamps = usable.map((point) => parseTime(point.ts)).filter((point) => point !== null);
+    return summarizeCoverageSpan(
+      timestamps.length > 0 ? Math.min(...timestamps) : null,
+      timestamps.length > 0 ? Math.max(...timestamps) : null,
+    );
   }}
   function metricBounds(metric, values) {{
     if (metric === "soc") {{
@@ -352,14 +356,19 @@
       const timestamp = parseTime(point.ts) ?? start;
       return `\n<text x="${{point.x.toFixed(1)}}" y="${{height - (isCompact ? 5 : 12)}}" text-anchor="middle" fill="${{chartAxis}}" font-size="${{isCompact ? 10 : 12}}">${{formatAxisLabel(timestamp, xSpan)}}</text>`;
     }}).join("");
-    const gapThreshold = Math.max(xSpan / 8, 6 * 60 * 60 * 1000);
+    const gapThreshold = (previous, point) => Math.max(
+      xSpan / 8,
+      previous.kind === "daily" && point.kind === "daily"
+        ? 36 * 60 * 60 * 1000
+        : 6 * 60 * 60 * 1000,
+    );
     const segmentSeries = (points) => {{
       const segments = [];
       let current = [];
       for (const point of points) {{
         const previous = current[current.length - 1];
         const shouldBreak = previous && (
-          (point.time - previous.time) > gapThreshold
+          (point.time - previous.time) > gapThreshold(previous, point)
         );
         if (shouldBreak) {{
           segments.push(current);
@@ -387,7 +396,7 @@
         const lineSvg = segment.length > 1
           ? `<polyline fill="none" stroke="${{series.color}}" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round" points="${{line}}" />`
           : "";
-        const dotsSvg = showMarkers
+        const dotsSvg = showMarkers || segment.length === 1
           ? segment.map((point) => `<circle cx="${{point.x.toFixed(1)}}" cy="${{point.y.toFixed(1)}}" r="4.5" fill="${{chartSurface}}" stroke="${{series.color}}" stroke-width="3" />`).join("")
           : "";
         return `${{areaSvg}}${{lineSvg}}${{dotsSvg}}`;
@@ -571,7 +580,9 @@
       return;
     }}
     const dataScript = document.getElementById(id + "-data");
-    const allPoints = JSON.parse(dataScript?.textContent || frame.dataset.chartPoints || "[]");
+    let allPoints = JSON.parse(dataScript?.textContent || frame.dataset.chartPoints || "[]");
+    const serverEndpoint = frame.dataset.chartEndpoint || "";
+    const serverWindowed = Boolean(serverEndpoint);
     const card = frame.closest(".chart-card");
     if (!card) {{
       return;
@@ -581,6 +592,7 @@
     const legendButtons = Array.from(card.querySelectorAll("[data-series-label]"));
     const showMarkers = frame.dataset.showMarkers === "true";
     let currentRange = rangeButtons.find((button) => button.classList.contains("active"))?.dataset.range || "30";
+    let appliedRange = currentRange;
     let currentMetric = metricButtons.find((button) => button.classList.contains("active"))?.dataset.metric || "voltage";
     let visibleSeries = new Set(
       legendButtons.map((button) => button.dataset.seriesLabel).filter((label) => Boolean(label))
@@ -596,6 +608,11 @@
     let pendingFocusClientX = null;
     let pendingFocusClientY = null;
     let pendingFocusPointerType = "";
+    let serverWindow = null;
+    let isLoading = false;
+    let activeRequest = 0;
+    let dragTargetEnd = null;
+    const windowCache = new Map();
     function overlayBounds() {{
       const overlay = frame.querySelector(".chart-overlay");
       return overlay ? overlay.getBoundingClientRect() : null;
@@ -618,12 +635,18 @@
       frame.classList.toggle("is-pannable", pageable);
       if (previousButton) {{
         previousButton.hidden = !pageable;
-        previousButton.disabled = !currentWindow?.canPrevious;
+        previousButton.disabled = isLoading || !currentWindow?.canPrevious;
       }}
       if (nextButton) {{
         nextButton.hidden = !pageable;
-        nextButton.disabled = !currentWindow?.canNext;
+        nextButton.disabled = isLoading || !currentWindow?.canNext;
       }}
+    }}
+    function setLoading(loading) {{
+      isLoading = loading;
+      frame.classList.toggle("is-loading", loading);
+      frame.setAttribute("aria-busy", String(loading));
+      updateNavigationState();
     }}
     function updateLegendState() {{
       for (const button of legendButtons) {{
@@ -634,23 +657,150 @@
         button.setAttribute("aria-pressed", String(isVisible));
       }}
     }}
+    function updateActiveRangeButton() {{
+      for (const button of rangeButtons) {{
+        button.classList.toggle("active", button.dataset.range === currentRange);
+      }}
+    }}
+    function serverWindowState(points) {{
+      const payload = serverWindow?.window || {{}};
+      const earliest = parseTime(payload.available_start);
+      const latest = parseTime(payload.available_end);
+      const effectiveStart = parseTime(payload.start);
+      const effectiveEnd = parseTime(payload.end);
+      const duration = rangeDurationMs(currentRange);
+      return {{
+        points,
+        earliest,
+        latest,
+        duration,
+        effectiveStart,
+        effectiveEnd,
+        pageable: duration !== null && (payload.has_previous || payload.has_next),
+        canPrevious: Boolean(payload.has_previous),
+        canNext: Boolean(payload.has_next),
+      }};
+    }}
+    function cacheKey(rangeValue, requestedEnd) {{
+      return `${{rangeValue}}|${{requestedEnd || "latest"}}`;
+    }}
+    function rememberWindow(key, payload) {{
+      windowCache.delete(key);
+      windowCache.set(key, payload);
+      while (windowCache.size > 3) {{
+        windowCache.delete(windowCache.keys().next().value);
+      }}
+    }}
+    function historyEndpoint(rangeValue, requestedEnd) {{
+      const params = new URLSearchParams({{ range: rangeValue }});
+      if (requestedEnd) {{
+        params.set("end", requestedEnd);
+      }}
+      return `${{serverEndpoint}}${{serverEndpoint.includes("?") ? "&" : "?"}}${{params.toString()}}`;
+    }}
+    function prefetchAdjacentWindows(payload, rangeValue) {{
+      const duration = rangeDurationMs(rangeValue);
+      const end = parseTime(payload?.window?.end);
+      if (duration === null || end === null) {{
+        return;
+      }}
+      if (payload.window.has_previous) {{
+        void loadServerWindow(
+          new Date(end - duration).toISOString(),
+          {{ prefetch: true, rangeValue }},
+        );
+      }}
+      if (payload.window.has_next) {{
+        void loadServerWindow(
+          new Date(end + duration).toISOString(),
+          {{ prefetch: true, rangeValue }},
+        );
+      }}
+    }}
+    async function loadServerWindow(
+      requestedEnd = "",
+      {{ prefetch = false, rangeValue = currentRange }} = {{}},
+    ) {{
+      const key = cacheKey(rangeValue, requestedEnd);
+      const cached = windowCache.get(key);
+      if (cached) {{
+        rememberWindow(key, cached);
+        if (!prefetch && rangeValue === currentRange) {{
+          serverWindow = cached;
+          allPoints = cached.points || [];
+          appliedRange = rangeValue;
+          render();
+          prefetchAdjacentWindows(cached, rangeValue);
+        }}
+        return;
+      }}
+      if (typeof fetch !== "function") {{
+        return;
+      }}
+      const requestId = prefetch ? 0 : activeRequest + 1;
+      let applied = false;
+      if (!prefetch) {{
+        activeRequest = requestId;
+        setLoading(true);
+      }}
+      try {{
+        const response = await fetch(historyEndpoint(rangeValue, requestedEnd), {{ cache: "no-store" }});
+        if (!response.ok) {{
+          return;
+        }}
+        const payload = await response.json();
+        if (!Array.isArray(payload.points) || !payload.window) {{
+          return;
+        }}
+        rememberWindow(key, payload);
+        if (prefetch || requestId !== activeRequest || rangeValue !== currentRange) {{
+          return;
+        }}
+        serverWindow = payload;
+        allPoints = payload.points;
+        appliedRange = rangeValue;
+        applied = true;
+        render();
+        prefetchAdjacentWindows(payload, rangeValue);
+      }} catch (_error) {{
+      }} finally {{
+        if (!prefetch && requestId === activeRequest) {{
+          if (!applied && serverWindow && currentRange === rangeValue) {{
+            currentRange = appliedRange;
+            updateActiveRangeButton();
+          }}
+          setLoading(false);
+        }}
+      }}
+    }}
     function render(focusClientX = null, focusClientY = null, focusPointerType = "") {{
       const filteredPoints = allPoints.filter((point) => visibleSeries.has(point.series || "Series"));
-      const windowState = pickRange(filteredPoints, currentRange, currentWindowEnd);
+      const windowState = serverWindowed
+        ? serverWindowState(filteredPoints)
+        : pickRange(filteredPoints, currentRange, currentWindowEnd);
       currentWindow = windowState;
-      currentWindowEnd = windowState.effectiveEnd;
+      if (!serverWindowed) {{
+        currentWindowEnd = windowState.effectiveEnd;
+      }}
       const points = windowState.points;
       const activeRangeButton = rangeButtons.find((button) => button.dataset.range === currentRange);
       const rangeLabel = activeRangeButton?.dataset.rangeLabel || currentRange;
       const windowLabel = describeWindow(currentRange, rangeLabel);
-      const displayPoints = compactPointsForDisplay(points, currentMetric, currentRange);
+      const displayPoints = serverWindowed
+        ? points
+        : compactPointsForDisplay(points, currentMetric, currentRange);
       const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);
       currentChart = chart;
       canvas.innerHTML = chart.svg;
       updateNavigationState();
       const usable = points.filter((point) => typeof point[currentMetric] === "number");
       const allUsable = filteredPoints.filter((point) => typeof point[currentMetric] === "number");
-      const coverageLabel = summarizeCoverage(filteredPoints, currentMetric);
+      const coverageLabel = serverWindowed
+        ? summarizeCoverageSpan(
+          parseTime(serverWindow?.window?.available_start),
+          parseTime(serverWindow?.window?.available_end),
+        )
+        : summarizeCoverage(filteredPoints, currentMetric);
       const visibleCount = visibleSeries.size;
       if (usable.length === 0) {{
         meta.innerHTML = [
@@ -664,7 +814,10 @@
       }}
       const values = usable.map((point) => point[currentMetric]);
       const average = values.reduce((sum, value) => sum + value, 0) / values.length;
-      const usesAllAvailable = currentRange !== "all" && currentRange !== "raw" && usable.length === allUsable.length;
+      const usesAllAvailable = !serverWindowed
+        && currentRange !== "all"
+        && currentRange !== "raw"
+        && usable.length === allUsable.length;
       const coverageSummary = usesAllAvailable
         ? `${{t("Showing all available history")}} (${{coverageLabel}})`
         : coverageLabel;
@@ -710,18 +863,25 @@
       if (!currentWindow || !currentWindow.pageable || currentWindow.duration === null) {{
         return;
       }}
-      currentWindowEnd = (currentWindow.effectiveEnd ?? 0) + (direction * currentWindow.duration);
-      requestRender();
+      const requestedEnd = (currentWindow.effectiveEnd ?? 0) + (direction * currentWindow.duration);
+      if (serverWindowed) {{
+        void loadServerWindow(new Date(requestedEnd).toISOString());
+      }} else {{
+        currentWindowEnd = requestedEnd;
+        requestRender();
+      }}
     }}
     for (const button of rangeButtons) {{
       button.addEventListener("click", () => {{
         currentRange = button.dataset.range || currentRange;
         currentWindowEnd = null;
-        for (const candidate of rangeButtons) {{
-          candidate.classList.toggle("active", candidate === button);
-        }}
+        updateActiveRangeButton();
         centerButtonInRail(button, "smooth");
-        requestRender();
+        if (serverWindowed) {{
+          void loadServerWindow();
+        }} else {{
+          requestRender();
+        }}
       }});
     }}
     for (const button of metricButtons) {{
@@ -782,6 +942,7 @@
       dragPointerId = event.pointerId;
       dragStartX = event.clientX;
       dragStartEnd = currentWindow.effectiveEnd;
+      dragTargetEnd = null;
       frame.classList.add("is-panning");
       frame.setPointerCapture?.(event.pointerId);
       const targetX = targetXFromClientX(event.clientX);
@@ -798,8 +959,13 @@
         }}
         const deltaX = event.clientX - dragStartX;
         const deltaMs = (deltaX / bounds.width) * currentWindow.duration;
-        currentWindowEnd = dragStartEnd - deltaMs;
-        requestRender(event.clientX, event.clientY, event.pointerType || "");
+        const requestedEnd = dragStartEnd - deltaMs;
+        if (serverWindowed) {{
+          dragTargetEnd = requestedEnd;
+        }} else {{
+          currentWindowEnd = requestedEnd;
+          requestRender(event.clientX, event.clientY, event.pointerType || "");
+        }}
         event.preventDefault();
         return;
       }}
@@ -834,6 +1000,11 @@
       if (event.pointerId !== undefined) {{
         frame.releasePointerCapture?.(event.pointerId);
       }}
+      if (serverWindowed && dragTargetEnd !== null) {{
+        void loadServerWindow(new Date(dragTargetEnd).toISOString());
+        dragTargetEnd = null;
+        return;
+      }}
       const targetX = targetXFromClientX(event.clientX);
       if (targetX !== null && currentChart) {{
         showTooltip(frame, currentChart, targetX, event);
@@ -849,7 +1020,11 @@
       }}
     }});
     updateLegendState();
-    render();
+    if (serverWindowed) {{
+      void loadServerWindow();
+    }} else {{
+      render();
+    }}
     const centerActiveControls = (behavior = "auto") => {{
       centerButtonInRail(
         rangeButtons.find((button) => button.classList.contains("active")),
