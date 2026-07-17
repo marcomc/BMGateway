@@ -699,11 +699,20 @@
       }}
       return `${{serverEndpoint}}${{serverEndpoint.includes("?") ? "&" : "?"}}${{params.toString()}}`;
     }}
-    function prefetchAdjacentWindows(payload, rangeValue) {{
+    function nextServerWindowEnd(payload, rangeValue) {{
       const duration = rangeDurationMs(rangeValue);
-      const start = parseTime(payload?.window?.start);
       const end = parseTime(payload?.window?.end);
-      if (duration === null || start === null || end === null) {{
+      if (duration === null || end === null) {{
+        return null;
+      }}
+      // Daily endpoints round the requested end to the local calendar day, so
+      // adding a millisecond would skip the immediately following day.
+      return end + duration + (payload?.resolution === "daily" ? 0 : 1);
+    }}
+    function prefetchAdjacentWindows(payload, rangeValue) {{
+      const start = parseTime(payload?.window?.start);
+      const nextEnd = nextServerWindowEnd(payload, rangeValue);
+      if (start === null) {{
         return;
       }}
       if (payload.window.has_previous) {{
@@ -712,9 +721,9 @@
           {{ prefetch: true, rangeValue }},
         );
       }}
-      if (payload.window.has_next) {{
+      if (payload.window.has_next && nextEnd !== null) {{
         void loadServerWindow(
-          new Date(end + duration + 1).toISOString(),
+          new Date(nextEnd).toISOString(),
           {{ prefetch: true, rangeValue }},
         );
       }}
@@ -880,7 +889,12 @@
       }}
       const requestedEnd = direction < 0
         ? (currentWindow.effectiveStart ?? 0) - 1
-        : (currentWindow.effectiveEnd ?? 0) + currentWindow.duration + 1;
+        : serverWindowed
+          ? nextServerWindowEnd(serverWindow, currentRange)
+          : (currentWindow.effectiveEnd ?? 0) + currentWindow.duration + 1;
+      if (requestedEnd === null) {{
+        return;
+      }}
       if (serverWindowed) {{
         void loadServerWindow(new Date(requestedEnd).toISOString());
       }} else {{

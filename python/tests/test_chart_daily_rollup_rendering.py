@@ -106,16 +106,17 @@ process.stdout.write(canvas.innerHTML.includes("<polyline") ? "line" : "empty");
     assert completed.stdout == "line"
 
 
-def test_server_window_chart_pages_from_cache_without_overlapping_daily_windows() -> None:
+def test_server_window_chart_keeps_daily_pages_contiguous_when_paging_forward() -> None:
     rendered_script = chart_script("history-chart")
     source = re.search(r"<script>(.*)</script>", rendered_script, re.DOTALL)
     assert source is not None
     current_payload = {
+        "resolution": "daily",
         "points": [
             {
-                "ts": "2026-07-17T23:58:00+02:00",
+                "ts": "2026-07-10T23:58:00+02:00",
                 "kind": "daily",
-                "voltage": 13.2,
+                "voltage": 12.8,
                 "soc": 80,
                 "temperature": 20.0,
                 "series": "Liberty LD13CZT",
@@ -123,20 +124,21 @@ def test_server_window_chart_pages_from_cache_without_overlapping_daily_windows(
             }
         ],
         "window": {
-            "start": "2026-07-11T00:00:00+02:00",
-            "end": "2026-07-17T23:59:59+02:00",
+            "start": "2026-07-04T00:00:00+02:00",
+            "end": "2026-07-10T23:59:59+02:00",
             "available_start": "2026-04-01T00:00:00+02:00",
             "available_end": "2026-07-17T23:59:59+02:00",
-            "has_previous": True,
-            "has_next": False,
+            "has_previous": False,
+            "has_next": True,
         },
     }
-    previous_payload = {
+    next_payload = {
+        "resolution": "daily",
         "points": [
             {
-                "ts": "2026-07-10T23:58:00+02:00",
+                "ts": "2026-07-17T23:58:00+02:00",
                 "kind": "daily",
-                "voltage": 12.8,
+                "voltage": 13.2,
                 "soc": 79,
                 "temperature": 19.0,
                 "series": "Liberty LD13CZT",
@@ -144,8 +146,8 @@ def test_server_window_chart_pages_from_cache_without_overlapping_daily_windows(
             }
         ],
         "window": {
-            "start": "2026-07-04T00:00:00+02:00",
-            "end": "2026-07-10T23:59:59+02:00",
+            "start": "2026-07-11T00:00:00+02:00",
+            "end": "2026-07-17T23:59:59+02:00",
             "available_start": "2026-04-01T00:00:00+02:00",
             "available_end": "2026-07-17T23:59:59+02:00",
             "has_previous": False,
@@ -226,20 +228,20 @@ global.window = {
 global.requestAnimationFrame = (callback) => callback();
 global.setTimeout = (callback) => callback();
 const currentPayload = __CURRENT_PAYLOAD__;
-const previousPayload = __PREVIOUS_PAYLOAD__;
+const nextPayload = __NEXT_PAYLOAD__;
 const requests = [];
 global.fetch = async (url) => {
   requests.push(url);
-  return { ok: true, json: async () => requests.length === 1 ? currentPayload : previousPayload };
+  return { ok: true, json: async () => requests.length === 1 ? currentPayload : nextPayload };
 };
 __SCRIPT__
 setImmediate(() => {
-  previous.listeners.click();
+  next.listeners.click();
   setImmediate(() => {
-    const previousEnd = new URLSearchParams(requests[1].split("?")[1]).get("end");
+    const nextEnd = new URLSearchParams(requests[1].split("?")[1]).get("end");
     process.stdout.write(JSON.stringify({
       requests: requests.length,
-      previousEnd,
+      nextEnd,
       meta: meta.innerHTML,
     }));
   });
@@ -247,7 +249,7 @@ setImmediate(() => {
 """
     harness = (
         harness.replace("__CURRENT_PAYLOAD__", json.dumps(current_payload))
-        .replace("__PREVIOUS_PAYLOAD__", json.dumps(previous_payload))
+        .replace("__NEXT_PAYLOAD__", json.dumps(next_payload))
         .replace("__SCRIPT__", source.group(1))
     )
 
@@ -260,8 +262,8 @@ setImmediate(() => {
     details = json.loads(completed.stdout)
 
     assert details["requests"] == 2
-    assert details["previousEnd"] == "2026-07-10T21:59:59.999Z"
-    assert "12.80 V" in details["meta"]
+    assert details["nextEnd"] == "2026-07-17T21:59:59.000Z"
+    assert "13.20 V" in details["meta"]
 
 
 def test_server_window_chart_shows_a_localized_error_when_loading_fails() -> None:
