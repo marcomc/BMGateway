@@ -653,7 +653,10 @@ def _chart_history_payload(
                 sample_count = row["samples"]
                 if isinstance(sample_count, int) and sample_count > 0:
                     day = str(row["day"])
-                    if sample_count > valid_raw_samples_by_day.get(day, 0):
+                    raw_history_complete = row.get("raw_history_complete", True)
+                    if not bool(
+                        raw_history_complete
+                    ) or sample_count > valid_raw_samples_by_day.get(day, 0):
                         daily_requires_rollup = True
                         break
             if raw_history and not daily_requires_rollup:

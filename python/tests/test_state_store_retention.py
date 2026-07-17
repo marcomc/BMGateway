@@ -264,6 +264,7 @@ def test_daily_window_rebuilds_days_retained_only_as_raw_samples(tmp_path: Path)
             "avg_temperature": None,
             "error_count": 0,
             "last_seen": timestamp,
+            "raw_history_complete": True,
         }
     ]
 
@@ -430,6 +431,15 @@ def test_archive_import_does_not_replace_retained_rollup_when_raw_counts_tie(
     )
 
     assert fetch_counts(database_path)["device_samples"] == 3
+    assert (
+        fetch_daily_history_window(
+            database_path,
+            device_id="bm200_house",
+            start_day="2026-07-15",
+            end_day="2026-07-15",
+        )[0]["raw_history_complete"]
+        is False
+    )
     assert fetch_daily_history(database_path, device_id="bm200_house", limit=1) == [
         {
             "device_id": "bm200_house",

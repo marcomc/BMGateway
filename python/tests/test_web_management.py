@@ -22,7 +22,13 @@ from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.models import DeviceReading, GatewaySnapshot
-from bm_gateway.state_store import fetch_recent_history, persist_snapshot, prune_history
+from bm_gateway.state_store import (
+    fetch_history_day_sample_counts,
+    fetch_recent_history,
+    import_archive_history,
+    persist_snapshot,
+    prune_history,
+)
 from bm_gateway.usb_otg_export import USBOTGExportResult
 from bm_gateway.web import (
     _add_device_form_html,
@@ -491,6 +497,108 @@ def test_chart_history_payload_pages_back_from_raw_to_earlier_daily_rollups(
     previous_window = cast(dict[str, object], previous_payload["window"])
     assert previous_window["available_start"] == "2026-07-01T00:00:00+02:00"
     assert previous_window["end"] == "2026-07-10T23:59:59+02:00"
+
+
+def test_chart_history_payload_uses_incomplete_rollup_when_raw_counts_tie(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    def persist_chart_sample(timestamp: str, voltage: float) -> None:
+        persist_snapshot(
+            database_path,
+            GatewaySnapshot(
+                generated_at=timestamp,
+                gateway_name="BMGateway",
+                active_adapter="hci0",
+                mqtt_enabled=True,
+                mqtt_connected=False,
+                devices_total=1,
+                devices_online=1,
+                poll_interval_seconds=300,
+                devices=[
+                    DeviceReading(
+                        id="bm200_house",
+                        type="bm200",
+                        name="BM200 House",
+                        mac="AA:BB:CC:DD:EE:01",
+                        enabled=True,
+                        connected=True,
+                        voltage=voltage,
+                        soc=58,
+                        temperature=None,
+                        rssi=-60,
+                        state="normal",
+                        error_code=None,
+                        error_detail=None,
+                        last_seen=timestamp,
+                        adapter="hci0",
+                        driver="bm200",
+                    )
+                ],
+            ),
+        )
+
+    persist_chart_sample("2026-07-15T00:00:00+02:00", 12.0)
+    persist_chart_sample("2026-07-15T18:00:00+02:00", 14.0)
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda _days: "2026-07-15T12:00:00+02:00",
+    )
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2026-07-15T21:00:00+02:00",
+                "voltage": 15.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            }
+        ],
+    )
+
+    assert fetch_history_day_sample_counts(
+        database_path,
+        device_id="bm200_house",
+        start_day="2026-07-15",
+        end_day="2026-07-15",
+    ) == {"2026-07-15": 2}
+
+    payload = _chart_history_payload(
+        database_path=database_path,
+        device_id="bm200_house",
+        range_value="1",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+
+    assert payload["resolution"] == "daily"
+    points = cast(list[dict[str, object]], payload["points"])
+    assert points == [
+        {
+            "ts": "2026-07-15T18:00:00+02:00",
+            "label": "07-15",
+            "kind": "daily",
+            "voltage": 13.0,
+            "soc": 58.0,
+            "temperature": None,
+            "series": "BM200 House",
+            "series_id": "bm200_house",
+            "series_color": "#17c45a",
+        }
+    ]
+    assert "raw_history_complete" not in points[0]
 
 
 def test_chart_history_window_api_returns_only_the_requested_raw_page(

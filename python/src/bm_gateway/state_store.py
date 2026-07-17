@@ -1917,7 +1917,8 @@ def fetch_daily_history_window(
                     avg_soc,
                     avg_temperature,
                     error_count,
-                    last_seen
+                    last_seen,
+                    raw_history_complete
                 FROM device_daily_rollups
                 WHERE device_id = ?
                   AND day >= ?
@@ -1932,7 +1933,8 @@ def fetch_daily_history_window(
                 avg_soc,
                 avg_temperature,
                 error_count,
-                last_seen
+                last_seen,
+                raw_history_complete
             FROM retained_daily
             UNION ALL
             SELECT
@@ -1944,7 +1946,8 @@ def fetch_daily_history_window(
                 raw_daily.avg_soc,
                 raw_daily.avg_temperature,
                 raw_daily.error_count,
-                raw_daily.last_seen
+                raw_daily.last_seen,
+                1 AS raw_history_complete
             FROM raw_daily
             WHERE NOT EXISTS (
                 SELECT 1
@@ -1969,6 +1972,7 @@ def fetch_daily_history_window(
             "avg_temperature": row[6],
             "error_count": row[7],
             "last_seen": row[8],
+            "raw_history_complete": bool(row[9]),
         }
         for row in rows
     ]
