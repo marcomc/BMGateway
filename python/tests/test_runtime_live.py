@@ -435,7 +435,7 @@ def _reading(
     )
 
 
-def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
+def test_live_timeout_recovery_tracker_counts_mixed_fleet_unreachable_cycles() -> None:
     all_real_failures_snapshot = _snapshot_with_readings(
         [
             _reading("bm200_house", connected=False, error_code="timeout"),
@@ -453,8 +453,7 @@ def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
             _reading(
                 "bm200_house",
                 connected=False,
-                error_code="device_not_found",
-                error_detail="No BLE advertisement seen during the scan window.",
+                error_code="timeout",
             ),
             _reading(
                 "spare_nlp20",
@@ -494,9 +493,8 @@ def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
 
     tracker = LiveTimeoutRecoveryTracker(consecutive_cycle_threshold=2)
     assert tracker.record_snapshot(all_real_failures_snapshot) is False
-    assert tracker.record_snapshot(real_failure_with_backoff_skip_snapshot) is False
-    assert tracker.consecutive_timeout_cycles == 1
-    assert tracker.record_snapshot(all_real_failures_snapshot) is True
+    assert tracker.record_snapshot(real_failure_with_backoff_skip_snapshot) is True
+    assert tracker.consecutive_timeout_cycles == 2
 
     backoff_tracker = LiveTimeoutRecoveryTracker(consecutive_cycle_threshold=2)
     assert backoff_tracker.record_snapshot(all_backoff_skip_snapshot) is False

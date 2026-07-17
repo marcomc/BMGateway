@@ -41,6 +41,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Raw chart navigation and prefetch now preserve microsecond page cursors.
 - Daily chart navigation now follows gateway calendar days across daylight-saving
   time changes.
+- Fleet-wide BLE recovery now continues across timeout and device-not-found
+  cycles that include individually backed-off devices.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

@@ -147,16 +147,13 @@ class LiveTimeoutRecoveryTracker:
         return max(self.consecutive_timeout_cycles, self.consecutive_backoff_only_cycles)
 
     def record_snapshot(self, snapshot: GatewaySnapshot) -> bool:
-        if snapshot_needs_timeout_recovery(snapshot):
-            self.consecutive_backoff_only_cycles = 0
-            self.consecutive_timeout_cycles += 1
-            return self.consecutive_timeout_cycles >= self._threshold
-        if _snapshot_has_only_backoff_skips(snapshot):
-            self.consecutive_backoff_only_cycles += 1
-            return self.consecutive_backoff_only_cycles >= self._threshold
         if _snapshot_has_fleet_unreachable_errors(snapshot):
-            self.consecutive_backoff_only_cycles = 0
-            return False
+            self.consecutive_timeout_cycles += 1
+            if _snapshot_has_only_backoff_skips(snapshot):
+                self.consecutive_backoff_only_cycles += 1
+            else:
+                self.consecutive_backoff_only_cycles = 0
+            return self.consecutive_timeout_cycles >= self._threshold
         self.consecutive_timeout_cycles = 0
         self.consecutive_backoff_only_cycles = 0
         return False
