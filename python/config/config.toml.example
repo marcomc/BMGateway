@@ -77,7 +77,8 @@ periodic_interval_seconds = 64800
 reconnect_min_gap_seconds = 28800
 # Request overlap around page boundaries to avoid small timestamp gaps.
 safety_margin_seconds = 7200
-# BM200/BM6 automatic recovery can request the full retained 85-page window.
+# Default to the full retained 85-page BM200/BM6 history window. Lower this to
+# cap each automatic or manual history sync.
 # One page is 256 records at 2-minute spacing, about 8h32m.
 bm200_max_pages_per_sync = 85
 # BM300 Pro/BM7 uses the validated byte-7 depth path. The current standard

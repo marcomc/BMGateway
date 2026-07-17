@@ -69,7 +69,7 @@
   "Bonjour/mDNS is advertising {advertised_hostname} instead of {expected_hostname}. This usually means another device is already using the expected name. See the Raspberry Pi mDNS hostname recovery runbook.": "Bonjour/mDNS 当前广播的是 {advertised_hostname}，而不是 {expected_hostname}。这通常意味着另一台设备已经在使用预期名称。请参阅 Raspberry Pi mDNS 主机名恢复 runbook。",
   "Browser / system language": "浏览器/系统语言",
   "Capacity (Ah)": "容量（Ah）",
-  "BM200/BM6 automatic recovery can request up to the full 85-page retained history. One page is about 8 hours and 32 minutes.": "BM200/BM6 自动恢复最多可请求完整保留的 85 页历史。一页约为 8 小时 32 分钟。",
+  "BM200/BM6 page cap for automatic and manual history sync. Defaults to the full 85-page retained history. One page is about 8 hours and 32 minutes.": "将 BM200/BM6 自动和手动历史同步限制为此页数。默认值为完整保留的 85 页历史。一页约为 8 小时 32 分钟。",
   "Caps each automatic or manual BM300 Pro/BM7 history sync. The configured maximum is based on the observed 883-record selector window and the advertised 72-day retention.": "限制每次自动或手动 BM300 Pro/BM7 历史同步。配置的最大值基于已观察到的 883 条记录选择器窗口和标称 72 天保留期。",
   "Charging": "正在充电",
   "Chart point markers": "图表点标记",

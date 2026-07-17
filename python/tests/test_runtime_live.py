@@ -409,6 +409,7 @@ def _reading(
     *,
     connected: bool,
     error_code: str | None,
+    error_detail: str | None = None,
     driver: str = "bm200",
     enabled: bool = True,
 ) -> DeviceReading:
@@ -425,7 +426,7 @@ def _reading(
         rssi=-60 if connected else None,
         state="normal" if connected else "error",
         error_code=error_code,
-        error_detail=error_code,
+        error_detail=error_detail if error_detail is not None else error_code,
         last_seen="2026-05-30T18:00:00+02:00",
         adapter="hci0",
         driver=driver,
@@ -433,23 +434,33 @@ def _reading(
     )
 
 
-def test_snapshot_needs_timeout_recovery_allows_backed_off_missing_devices() -> None:
-    timeout_snapshot = _snapshot_with_readings(
+def test_snapshot_needs_timeout_recovery_requires_real_fleet_failures() -> None:
+    all_real_failures_snapshot = _snapshot_with_readings(
         [
             _reading("bm200_house", connected=False, error_code="timeout"),
-            _reading("bm300_van", connected=False, error_code="timeout", driver="bm300pro"),
+            _reading(
+                "bm300_van",
+                connected=False,
+                error_code="device_not_found",
+                error_detail="No BLE advertisement seen during the scan window.",
+                driver="bm300pro",
+            ),
         ]
     )
-    timeout_with_missing_snapshot = _snapshot_with_readings(
+    real_failure_with_backoff_skip_snapshot = _snapshot_with_readings(
         [
-            _reading("bm200_house", connected=False, error_code="timeout"),
-            _reading("spare_nlp20", connected=False, error_code="device_not_found"),
-        ]
-    )
-    all_missing_snapshot = _snapshot_with_readings(
-        [
-            _reading("spare_nlp5", connected=False, error_code="device_not_found"),
-            _reading("spare_nlp20", connected=False, error_code="device_not_found"),
+            _reading(
+                "bm200_house",
+                connected=False,
+                error_code="device_not_found",
+                error_detail="No BLE advertisement seen during the scan window.",
+            ),
+            _reading(
+                "spare_nlp20",
+                connected=False,
+                error_code="device_not_found",
+                error_detail="Skipped BLE poll after repeated missing advertisements.",
+            ),
         ]
     )
     one_missing_while_others_online_snapshot = _snapshot_with_readings(
@@ -459,10 +470,15 @@ def test_snapshot_needs_timeout_recovery_allows_backed_off_missing_devices() -> 
         ]
     )
 
-    assert snapshot_needs_timeout_recovery(timeout_snapshot) is True
-    assert snapshot_needs_timeout_recovery(timeout_with_missing_snapshot) is True
-    assert snapshot_needs_timeout_recovery(all_missing_snapshot) is True
+    assert snapshot_needs_timeout_recovery(all_real_failures_snapshot) is True
+    assert snapshot_needs_timeout_recovery(real_failure_with_backoff_skip_snapshot) is False
     assert snapshot_needs_timeout_recovery(one_missing_while_others_online_snapshot) is False
+
+    tracker = LiveTimeoutRecoveryTracker(consecutive_cycle_threshold=2)
+    assert tracker.record_snapshot(all_real_failures_snapshot) is False
+    assert tracker.record_snapshot(real_failure_with_backoff_skip_snapshot) is False
+    assert tracker.consecutive_timeout_cycles == 1
+    assert tracker.record_snapshot(all_real_failures_snapshot) is True
 
 
 def test_live_timeout_recovery_tracker_requests_recovery_after_threshold() -> None:
@@ -473,10 +489,16 @@ def test_live_timeout_recovery_tracker_requests_recovery_after_threshold() -> No
     success_snapshot = _snapshot_with_readings(
         [_reading("bm200_house", connected=True, error_code=None)]
     )
+    non_backoff_failure_snapshot = _snapshot_with_readings(
+        [_reading("bm200_house", connected=False, error_code="protocol_error")]
+    )
 
     assert tracker.record_snapshot(timeout_snapshot) is False
     assert tracker.record_snapshot(timeout_snapshot) is True
     assert tracker.record_snapshot(success_snapshot) is False
+    assert tracker.consecutive_timeout_cycles == 0
+    assert tracker.record_snapshot(timeout_snapshot) is False
+    assert tracker.record_snapshot(non_backoff_failure_snapshot) is False
     assert tracker.consecutive_timeout_cycles == 0
 
 

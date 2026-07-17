@@ -32,7 +32,6 @@ from .subprocess_runner import run_in_subprocess_with_timeout
 
 BM200_ARCHIVE_PROFILE = "bm6_d15505_b7_v1"
 BM300_ARCHIVE_PROFILE = BM300_STANDARD_PROFILE
-BM200_FULL_HISTORY_PAGE_COUNT = 85
 BM200_HISTORY_PAGE_SECONDS = 256 * 2 * 60
 ArchiveSyncProgress = Callable[[int, int, str], None]
 
@@ -222,7 +221,7 @@ def _archive_sync_profile_for_reading(device_type: str, bm300_enabled: bool) -> 
 def _archive_sync_max_pages_for_reading(config: AppConfig, device_type: str) -> int:
     if device_driver_type(device_type) == "bm300pro":
         return max(1, config.archive_sync.bm300_max_pages_per_sync)
-    return max(BM200_FULL_HISTORY_PAGE_COUNT, config.archive_sync.bm200_max_pages_per_sync)
+    return max(1, config.archive_sync.bm200_max_pages_per_sync)
 
 
 def _archive_sync_pages_for_coverage_seconds(

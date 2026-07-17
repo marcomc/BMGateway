@@ -538,19 +538,31 @@ def test_plan_archive_backfill_flags_connected_devices_with_real_history_gap(
     assert candidates == {"bm200_house": 1}
 
 
-def test_plan_archive_backfill_allows_full_bm200_reconnect_history(
+@pytest.mark.parametrize(
+    ("configured_page_count", "expected_page_count"),
+    [(None, 85), (3, 3)],
+    ids=("default-full-history", "explicit-cap"),
+)
+def test_plan_archive_backfill_honors_bm200_reconnect_page_cap(
     tmp_path: Path,
+    configured_page_count: int | None,
+    expected_page_count: int,
 ) -> None:
     config_path = _write_example_files(tmp_path)
     config = load_config(config_path)
+    archive_sync = replace(
+        config.archive_sync,
+        reconnect_min_gap_seconds=3600,
+        safety_margin_seconds=0,
+    )
+    if configured_page_count is not None:
+        archive_sync = replace(
+            archive_sync,
+            bm200_max_pages_per_sync=configured_page_count,
+        )
     config = replace(
         config,
-        archive_sync=replace(
-            config.archive_sync,
-            reconnect_min_gap_seconds=3600,
-            safety_margin_seconds=0,
-            bm200_max_pages_per_sync=3,
-        ),
+        archive_sync=archive_sync,
     )
     database_path = tmp_path / "gateway.db"
     persist_snapshot(
@@ -624,7 +636,7 @@ def test_plan_archive_backfill_allows_full_bm200_reconnect_history(
         snapshot=snapshot,
     )
 
-    assert candidates == {"bm200_house": 85}
+    assert candidates == {"bm200_house": expected_page_count}
 
 
 def test_plan_archive_backfill_includes_bm300_when_bm7_archive_sync_is_enabled(

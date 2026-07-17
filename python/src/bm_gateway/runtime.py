@@ -94,7 +94,7 @@ class LiveDeviceBackoff:
         )
 
 
-def snapshot_needs_timeout_recovery(snapshot: GatewaySnapshot) -> bool:
+def _snapshot_has_fleet_unreachable_errors(snapshot: GatewaySnapshot) -> bool:
     live_readings = [
         reading
         for reading in snapshot.devices
@@ -104,6 +104,17 @@ def snapshot_needs_timeout_recovery(snapshot: GatewaySnapshot) -> bool:
         bool(live_readings)
         and snapshot.devices_online == 0
         and all(reading.error_code in {"timeout", "device_not_found"} for reading in live_readings)
+    )
+
+
+def snapshot_needs_timeout_recovery(snapshot: GatewaySnapshot) -> bool:
+    live_readings = [
+        reading
+        for reading in snapshot.devices
+        if reading.enabled and reading.driver in LIVE_DEVICE_TYPES
+    ]
+    return _snapshot_has_fleet_unreachable_errors(snapshot) and all(
+        reading.error_detail != BACKOFF_DEVICE_DETAIL for reading in live_readings
     )
 
 
@@ -122,6 +133,8 @@ class LiveTimeoutRecoveryTracker:
         if snapshot_needs_timeout_recovery(snapshot):
             self.consecutive_timeout_cycles += 1
             return self.consecutive_timeout_cycles >= self._threshold
+        if _snapshot_has_fleet_unreachable_errors(snapshot):
+            return False
         self.consecutive_timeout_cycles = 0
         return False
 

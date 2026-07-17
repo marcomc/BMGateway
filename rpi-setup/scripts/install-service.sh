@@ -208,7 +208,7 @@ usb_otg = dict(data.get("usb_otg", {}))
 archive_sync = dict(data.get("archive_sync", {}))
 self_healing = dict(data.get("self_healing", {}))
 retention = dict(data.get("retention", {}))
-bm200_max_pages_per_sync = max(85, int(archive_sync.get("bm200_max_pages_per_sync", 85)))
+bm200_max_pages_per_sync = max(1, int(archive_sync.get("bm200_max_pages_per_sync", 85)))
 
 if str(gateway.get("name", "")).startswith("__"):
     gateway["name"] = "BMGateway"
