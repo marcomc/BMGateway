@@ -80,6 +80,11 @@ longer has a daily row.
 after their canonical samples expire. A positive daily retention value can
 prune this long-range chart history more aggressively than raw retention.
 
+Archive-profile replacement and deletion require the affected daily rows to be
+fully reconstructable from retained raw samples. If raw retention has already
+made a daily aggregate the only complete record for a day, the operation fails
+before deleting anything rather than silently corrupting the retained history.
+
 ## Import Failure Behavior
 
 Archive imports do not stage data in a temporary measurement table. They insert

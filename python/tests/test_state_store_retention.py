@@ -306,7 +306,7 @@ def test_prune_history_removes_old_archive_rows_with_raw_retention(
     assert [row["ts"] for row in archive_rows] == [kept_ts]
 
 
-def test_archive_import_preserves_daily_rollup_when_raw_history_is_partial(
+def test_archive_profile_changes_preserve_daily_rollup_when_raw_history_is_partial(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -342,12 +342,41 @@ def test_archive_import_preserves_daily_rollup_when_raw_history_is_partial(
         ],
     )
 
+    with pytest.raises(ValueError, match="Cannot replace or delete archive history"):
+        delete_archive_history_profiles(
+            database_path,
+            device_id="bm200_house",
+            profiles=("legacy_bm2_history",),
+        )
+    with pytest.raises(ValueError, match="Cannot replace or delete archive history"):
+        replace_archive_history_profiles(
+            database_path,
+            device_id="bm200_house",
+            device_type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            adapter="hci0",
+            driver="bm200",
+            profile="replacement_history",
+            replace_profiles=("legacy_bm2_history",),
+            readings=[
+                {
+                    "ts": "2026-07-15T21:00:00+02:00",
+                    "voltage": 15.0,
+                    "min_crank_voltage": None,
+                    "event_type": 0,
+                }
+            ],
+        )
+
     daily = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+    archive = fetch_archive_history(database_path, device_id="bm200_house", limit=1)
 
     assert daily[0]["samples"] == 3
     assert daily[0]["min_voltage"] == 12.0
     assert daily[0]["max_voltage"] == 14.0
     assert daily[0]["avg_voltage"] == 13.0
+    assert archive[0]["profile"] == "legacy_bm2_history"
 
 
 def test_prune_history_removes_old_canonical_samples_with_raw_retention(

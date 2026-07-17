@@ -672,50 +672,86 @@ def _rebuild_daily_rollups(connection: sqlite3.Connection) -> None:
     _insert_daily_rollup_rows(connection, rows)
 
 
+def _daily_rollup_requires_retained_samples(
+    connection: sqlite3.Connection,
+    *,
+    device_id: str,
+    day: str,
+) -> bool:
+    retained_rollup = connection.execute(
+        """
+        SELECT samples, error_count
+        FROM device_daily_rollups
+        WHERE device_id = ? AND day = ?
+        """,
+        (device_id, day),
+    ).fetchone()
+    if retained_rollup is None:
+        return False
+    raw_counts = connection.execute(
+        """
+        WITH ranked_samples AS (
+            SELECT
+                voltage,
+                error_code,
+                ROW_NUMBER() OVER (
+                    PARTITION BY device_id, sample_ts
+                    ORDER BY source_priority DESC, imported_at DESC, id DESC
+                ) AS row_rank
+            FROM device_samples
+            WHERE device_id = ?
+              AND substr(sample_ts, 1, 10) = ?
+        )
+        SELECT
+            SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END)
+        FROM ranked_samples
+        WHERE row_rank = 1
+        """,
+        (device_id, day),
+    ).fetchone()
+    if raw_counts is None:
+        return False
+    retained_samples = int(retained_rollup[0] or 0)
+    retained_errors = int(retained_rollup[1] or 0)
+    raw_samples = int(raw_counts[0] or 0)
+    raw_errors = int(raw_counts[1] or 0)
+    return raw_samples < retained_samples or raw_errors < retained_errors
+
+
+def _require_complete_daily_raw_history(
+    connection: sqlite3.Connection,
+    device_days: set[tuple[str, str]],
+) -> None:
+    protected_days = [
+        f"{device_id}:{day}"
+        for device_id, day in sorted(device_days)
+        if _daily_rollup_requires_retained_samples(
+            connection,
+            device_id=device_id,
+            day=day,
+        )
+    ]
+    if protected_days:
+        raise ValueError(
+            "Cannot replace or delete archive history because retained daily history "
+            f"cannot be rebuilt from raw samples for: {', '.join(protected_days)}"
+        )
+
+
 def _rebuild_daily_rollups_for_device_days(
     connection: sqlite3.Connection,
     device_days: set[tuple[str, str]],
 ) -> None:
     for device_id, day in sorted(device_days):
-        retained_rollup = connection.execute(
-            """
-            SELECT samples, error_count
-            FROM device_daily_rollups
-            WHERE device_id = ? AND day = ?
-            """,
-            (device_id, day),
-        ).fetchone()
-        raw_counts = connection.execute(
-            """
-            WITH ranked_samples AS (
-                SELECT
-                    voltage,
-                    error_code,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY device_id, sample_ts
-                        ORDER BY source_priority DESC, imported_at DESC, id DESC
-                    ) AS row_rank
-                FROM device_samples
-                WHERE device_id = ?
-                  AND substr(sample_ts, 1, 10) = ?
-            )
-            SELECT
-                SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END),
-                SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END)
-            FROM ranked_samples
-            WHERE row_rank = 1
-            """,
-            (device_id, day),
-        ).fetchone()
-        if retained_rollup is not None and raw_counts is not None:
-            retained_samples = int(retained_rollup[0] or 0)
-            retained_errors = int(retained_rollup[1] or 0)
-            raw_samples = int(raw_counts[0] or 0)
-            raw_errors = int(raw_counts[1] or 0)
-            if raw_samples < retained_samples or raw_errors < retained_errors:
-                # Raw retention has already removed part of this day. Its rollup is
-                # the only complete aggregate, so replacing it would lose history.
-                continue
+        if _daily_rollup_requires_retained_samples(
+            connection,
+            device_id=device_id,
+            day=day,
+        ):
+            # Raw retention has already removed part of this day. Its rollup is
+            # the only complete aggregate, so replacing it would lose history.
+            continue
         connection.execute(
             "DELETE FROM device_daily_rollups WHERE device_id = ? AND day = ?",
             (device_id, day),
@@ -1413,14 +1449,6 @@ def replace_archive_history_profiles(
     connection = _connect_database(path)
     batch_id: int | None = None
     try:
-        batch_id = _start_archive_import_batch(
-            connection,
-            device_id=device_id,
-            profile=profile,
-            readings_count=len(readings),
-            replace_profiles=replace_profiles,
-        )
-        connection.commit()
         affected_device_days = _device_days_from_readings(
             device_id=device_id,
             readings=readings,
@@ -1433,6 +1461,16 @@ def replace_archive_history_profiles(
                     profiles=replace_profiles,
                 )
             )
+            _require_complete_daily_raw_history(connection, affected_device_days)
+        batch_id = _start_archive_import_batch(
+            connection,
+            device_id=device_id,
+            profile=profile,
+            readings_count=len(readings),
+            replace_profiles=replace_profiles,
+        )
+        connection.commit()
+        if replace_profiles:
             placeholders = ", ".join("?" for _ in replace_profiles)
             connection.execute(
                 f"""
@@ -1656,6 +1694,7 @@ def delete_archive_history_profiles(
             device_id=device_id,
             profiles=profiles,
         )
+        _require_complete_daily_raw_history(connection, affected_device_days)
         connection.execute(
             f"""
             DELETE FROM device_archive_readings

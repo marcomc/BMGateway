@@ -15,6 +15,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Removed the unbounded `All` chart range. The two-year range is now the
   largest page, and its arrows and drag navigation can traverse the complete
   retained history without loading it all into the browser.
+- Archive profile replace and delete operations now refuse a change that would
+  overwrite a retained daily aggregate with incomplete raw history.
 - Fixed daily-rollup-only history pages so consecutive daily points remain a
   visible chart line instead of disappearing after raw samples expire.
 
