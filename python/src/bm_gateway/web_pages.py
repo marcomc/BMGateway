@@ -76,7 +76,6 @@ VISIBLE_CHART_RANGE_OPTIONS: tuple[tuple[str, str], ...] = (
     ("90", "90 days"),
     ("365", "1 year"),
     ("730", "2 years"),
-    ("all", "All"),
 )
 
 RECENT_CHART_HISTORY_LIMIT = 6000
@@ -121,6 +120,8 @@ def _visible_chart_range_options() -> tuple[tuple[str, str], ...]:
 
 
 def _sanitize_default_chart_range(range_value: str) -> str:
+    if range_value == "all":
+        return "730"
     allowed = {value for value, _label in VISIBLE_CHART_RANGE_OPTIONS}
     return range_value if range_value in allowed else "7"
 

@@ -184,6 +184,7 @@ Primary JSON routes:
 | `/api/storage` | SQLite storage summary |
 | `/api/analytics?device_id=<id>` | degradation report for one device |
 | `/api/history?device_id=<id>&kind=<kind>` | raw, daily, monthly, or yearly history |
+| `/api/chart-history?device_id=<id>&range=<range>&end=<timestamp>` | one chart page (`1` through `730` days); raw samples for 30-day-or-shorter all-raw windows, daily rollups for pages that cross raw expiry and for wider ranges |
 | `/api/history-sync/status` | history sync progress |
 | `/api/usb-otg-export/status` | USB OTG image-export progress |
 
@@ -276,9 +277,10 @@ flowchart LR
 ```
 
 Raw history retention defaults to two years and applies to canonical
-`device_samples`. Daily rollups are rebuilt from retained samples and default
-to no extra rollup-only pruning. Audit logs are pruned automatically after
-90 days.
+`device_samples`. Daily rollups are finalized from canonical samples before
+raw pruning, then retained independently; they default to no extra
+rollup-only pruning. A page can aggregate still-retained raw samples when its
+daily row has been pruned. Audit logs are pruned automatically after 90 days.
 
 ## Raspberry Pi Services
 

@@ -258,17 +258,13 @@ def render_device_html(
             chart_id=chart_id,
             title="Historical Chart",
             subtitle="",
-            points=shared._chart_points(
-                raw_history,
-                daily_history,
-                series=device_name,
-                series_color=device_color,
-            ),
+            points=[],
             range_options=shared._visible_chart_range_options(),
             default_range=resolved_default_chart_range,
             default_metric=default_chart_metric,
             legend=[(device_name, device_color)],
             show_markers=show_chart_markers,
+            data_endpoint=f"/api/chart-history?device_id={quote(device_id)}",
         )
         + section_card(
             title="Trend Windows",
@@ -368,18 +364,14 @@ def render_history_html(
             chart_id=chart_id,
             title="History Chart",
             subtitle="",
-            points=shared._chart_points(
-                raw_history,
-                daily_history,
-                series=history_series,
-                series_color=history_color,
-            ),
+            points=[],
             range_options=shared._visible_chart_range_options(),
             default_range=resolved_default_chart_range,
             default_metric=default_chart_metric,
             legend=[(history_series, history_color)],
             show_markers=show_chart_markers,
             actions_html=history_sync_action,
+            data_endpoint=f"/api/chart-history?device_id={quote(device_id)}",
         )
         + sections
     )

@@ -105,8 +105,9 @@ whether an archive import is running, completed, or failed, but it is not an
 intermediate measurement store.
 
 Raw history retention defaults to two years and applies to `device_samples`.
-Daily rollups default to no extra rollup-only pruning; after samples are
-pruned, rollups are rebuilt from the retained canonical samples.
+Daily rollups are finalized from canonical samples before raw pruning and
+default to no extra rollup-only pruning, so long-range charts remain available
+after detailed samples expire.
 
 The audit log is newline-delimited JSON intended for machine correlation during
 operations debugging. It records automatic polling cycles, per-device poll

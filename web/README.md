@@ -93,9 +93,19 @@ and to the hidden picture-frame screenshot routes. The shared behavior is:
 - the compact picture-frame chart still sets `data-chart-compact="true"` and
   uses the same downsampling path before Chromium screenshots it.
 
-The History page has one extra page-specific optimization: its diagnostic raw
-table renders only the latest 300 rows. Summary cards and chart data still use
-the full history payload fetched for the page.
+History and Device Detail charts use a separate server-backed window endpoint.
+The initial HTML contains no chart history payload. A 1 to 30-day selection
+loads retained raw samples exactly when its whole page is raw; a page crossing
+raw expiry and wider selections use daily rollups. `2 years` is the largest
+selection: arrow navigation and drag panning load further pages on demand, so
+the user can traverse the complete retained history without an unbounded
+`All` request. The browser retains only the current window plus up to two
+adjacent cached windows, shows a lightweight spinner for non-cached windows,
+and keeps the current page visible with an error message if loading fails.
+
+The diagnostic raw table renders only the latest 300 rows and the daily table
+renders the latest 90 rows, independently of the chart's retained-history
+coverage.
 
 Validation on `bmgateway.local` for `battery_alpha` after dense archive import:
 

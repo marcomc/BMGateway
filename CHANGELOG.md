@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-07-17 - Windowed History Charts
+
+### Fixed
+
+- History and Device Detail charts now request one navigated time window at a
+  time: 1 to 30-day views render their retained raw samples exactly when the
+  whole page is still raw; pages that cross raw expiry and wider views use
+  daily rollups without putting the full raw retention period in the browser.
+- Removed the unbounded `All` chart range. The two-year range is now the
+  largest page, and its arrows and drag navigation can traverse the complete
+  retained history without loading it all into the browser.
+- Archive profile replace and delete operations now refuse a change that would
+  overwrite a retained daily aggregate with incomplete raw history.
+- Fixed daily-rollup-only history pages so consecutive daily points remain a
+  visible chart line instead of disappearing after raw samples expire.
+
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 
 ### Fixed

@@ -5,9 +5,11 @@ from __future__ import annotations
 import gzip
 import json
 import threading
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
+from zoneinfo import ZoneInfo
 
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
@@ -16,7 +18,12 @@ from .localization import resolve_locale_preference, translation_for
 from .runtime import database_file_path, recover_adapter, state_file_path
 from .state_store import (
     fetch_daily_history,
+    fetch_daily_history_bounds,
+    fetch_daily_history_window,
     fetch_degradation_report,
+    fetch_history_bounds,
+    fetch_history_day_sample_counts,
+    fetch_history_window,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_storage_summary,
@@ -60,11 +67,11 @@ from .web_assets import (
     web_manifest_source,
 )
 from .web_pages import (
-    RECENT_CHART_HISTORY_LIMIT,
     _add_device_form_html,
     _battery_form_script,
     _bool_from_form,
     _chart_points,
+    _device_accent_color,
     _discover_bluetooth_adapters,
     _fleet_chart_points,
     _merge_snapshot_devices,
@@ -471,6 +478,166 @@ def _usb_otg_fleet_trend_device_ids_from_form(
     return selected_ids
 
 
+_CHART_HISTORY_RANGES = frozenset({"1", "3", "5", "7", "30", "90", "365", "730"})
+_CHART_HISTORY_RAW_MAX_DAYS = 30
+
+
+def _parse_chart_history_timestamp(value: str, *, timezone: ZoneInfo) -> datetime:
+    parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        return parsed.replace(tzinfo=timezone)
+    return parsed.astimezone(timezone)
+
+
+def _empty_chart_history_payload(*, range_value: str) -> dict[str, object]:
+    return {
+        "points": [],
+        "resolution": "raw" if int(range_value) <= _CHART_HISTORY_RAW_MAX_DAYS else "daily",
+        "window": {
+            "start": None,
+            "end": None,
+            "available_start": None,
+            "available_end": None,
+            "has_previous": False,
+            "has_next": False,
+        },
+    }
+
+
+def _daily_chart_window(
+    *,
+    available_start: datetime,
+    available_end: datetime,
+    requested_end: datetime,
+    duration: timedelta,
+) -> tuple[datetime, datetime]:
+    """Use non-overlapping calendar days when a chart page is backed by rollups."""
+    available_start_day = available_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_requested_day = requested_end.replace(
+        hour=23,
+        minute=59,
+        second=59,
+        microsecond=0,
+    )
+    window_end = min(available_end, end_of_requested_day)
+    window_start = window_end.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=duration.days - 1
+    )
+    return (max(available_start_day, window_start), window_end)
+
+
+def _chart_history_payload(
+    *,
+    database_path: Path,
+    device_id: str,
+    range_value: str,
+    end_value: str,
+    series: str,
+    series_color: str,
+    timezone_name: str,
+) -> dict[str, object]:
+    raw_bounds = fetch_history_bounds(database_path, device_id=device_id)
+    daily_bounds = fetch_daily_history_bounds(database_path, device_id=device_id)
+    bound_values = [value for bounds in (raw_bounds, daily_bounds) if bounds for value in bounds]
+    if not bound_values:
+        return _empty_chart_history_payload(range_value=range_value)
+    chart_timezone = ZoneInfo(timezone_name)
+    try:
+        parsed_bounds = [
+            _parse_chart_history_timestamp(value, timezone=chart_timezone) for value in bound_values
+        ]
+    except ValueError:
+        return _empty_chart_history_payload(range_value=range_value)
+    available_start = min(parsed_bounds)
+    available_end = max(parsed_bounds)
+
+    duration = timedelta(days=int(range_value))
+    requested_end = available_end
+    if end_value.strip():
+        try:
+            requested_end = _parse_chart_history_timestamp(
+                end_value,
+                timezone=chart_timezone,
+            )
+        except ValueError:
+            requested_end = available_end
+    requested_end = min(available_end, max(available_start, requested_end))
+    window_end = requested_end
+    window_start = max(available_start, window_end - duration)
+
+    resolution = "raw" if duration.days <= _CHART_HISTORY_RAW_MAX_DAYS else "daily"
+    if resolution == "raw":
+        raw_history = fetch_history_window(
+            database_path,
+            device_id=device_id,
+            start_ts=window_start.isoformat(timespec="seconds"),
+            end_ts=window_end.isoformat(timespec="seconds"),
+        )
+        daily_history = fetch_daily_history_window(
+            database_path,
+            device_id=device_id,
+            start_day=window_start.date().isoformat(),
+            end_day=window_end.date().isoformat(),
+        )
+        valid_raw_samples_by_day = fetch_history_day_sample_counts(
+            database_path,
+            device_id=device_id,
+            start_day=window_start.date().isoformat(),
+            end_day=window_end.date().isoformat(),
+        )
+        daily_requires_rollup = False
+        for row in daily_history:
+            sample_count = row["samples"]
+            if isinstance(sample_count, int) and sample_count > 0:
+                day = str(row["day"])
+                if sample_count > valid_raw_samples_by_day.get(day, 0):
+                    daily_requires_rollup = True
+                    break
+        if raw_history and not daily_requires_rollup:
+            points = _chart_points(
+                raw_history,
+                [],
+                series=series,
+                series_id=device_id,
+                series_color=series_color,
+            )
+        else:
+            resolution = "daily"
+    if resolution == "daily":
+        window_start, window_end = _daily_chart_window(
+            available_start=available_start,
+            available_end=available_end,
+            requested_end=requested_end,
+            duration=duration,
+        )
+        daily_history = fetch_daily_history_window(
+            database_path,
+            device_id=device_id,
+            start_day=window_start.date().isoformat(),
+            end_day=window_end.date().isoformat(),
+        )
+        points = _chart_points(
+            [],
+            daily_history,
+            series=series,
+            series_id=device_id,
+            series_color=series_color,
+        )
+
+    return {
+        "points": points,
+        "resolution": resolution,
+        "window": {
+            "start": window_start.isoformat(timespec="seconds"),
+            "end": window_end.isoformat(timespec="seconds"),
+            "available_start": available_start.isoformat(timespec="seconds"),
+            "available_end": available_end.isoformat(timespec="seconds"),
+            "has_previous": window_start > available_start,
+            "has_next": window_end < available_end,
+        },
+    }
+
+
 def serve_snapshot(*, host: str, port: int, snapshot_path: Path) -> None:
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self) -> None:  # noqa: N802
@@ -703,6 +870,36 @@ def serve_management(
                     )
                 return
 
+            if parsed.path == "/api/chart-history":
+                params = parse_qs(parsed.query)
+                device_id = params.get("device_id", [""])[0]
+                range_value = params.get("range", ["7"])[0]
+                if range_value not in _CHART_HISTORY_RANGES:
+                    self._send_json({"error": "invalid_range"}, status=400)
+                    return
+                selected_device = next(
+                    (
+                        device
+                        for device in serialized_devices
+                        if str(device.get("id", "")) == device_id
+                    ),
+                    None,
+                )
+                if selected_device is None:
+                    selected_device = {"id": device_id, "name": device_id}
+                self._send_json(
+                    _chart_history_payload(
+                        database_path=database_path,
+                        device_id=device_id,
+                        range_value=range_value,
+                        end_value=params.get("end", [""])[0],
+                        series=str(selected_device.get("name") or device_id),
+                        series_color=_device_accent_color(selected_device),
+                        timezone_name=config.gateway.timezone,
+                    )
+                )
+                return
+
             if parsed.path == "/usb-otg-export/progress":
                 self._send_html(
                     render_usb_otg_export_pending_html(
@@ -751,12 +948,12 @@ def serve_management(
                     raw_history=fetch_recent_history(
                         database_path,
                         device_id=device_id,
-                        limit=RECENT_CHART_HISTORY_LIMIT,
+                        limit=300,
                     ),
                     daily_history=fetch_daily_history(
                         database_path,
                         device_id=device_id,
-                        limit=730,
+                        limit=90,
                     ),
                     monthly_history=fetch_monthly_history(
                         database_path,
@@ -800,7 +997,7 @@ def serve_management(
                         fetch_recent_history(
                             database_path,
                             device_id=device_id,
-                            limit=RECENT_CHART_HISTORY_LIMIT,
+                            limit=300,
                         )
                         if device_id
                         else []
@@ -809,7 +1006,7 @@ def serve_management(
                         fetch_daily_history(
                             database_path,
                             device_id=device_id,
-                            limit=730,
+                            limit=90,
                         )
                         if device_id
                         else []
