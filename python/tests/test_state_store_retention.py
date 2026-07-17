@@ -12,6 +12,7 @@ from bm_gateway.state_store import (
     fetch_archive_history,
     fetch_counts,
     fetch_daily_history,
+    fetch_daily_history_window,
     fetch_degradation_report,
     fetch_history_bounds,
     fetch_history_window,
@@ -216,6 +217,55 @@ def test_prune_history_removes_old_raw_rows_and_retains_daily_rollups(
     assert daily_count == (1,)
     daily = fetch_daily_history(database_path, device_id="bm200_house", limit=30)
     assert daily[0]["day"] == "2024-01-01"
+
+
+def test_prune_history_applies_daily_rollup_retention_independently_of_raw_retention(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    now = datetime.now(tz=timezone.utc).astimezone()
+    expired_day = (now - timedelta(days=20)).isoformat(timespec="seconds")
+    retained_day = (now - timedelta(days=2)).isoformat(timespec="seconds")
+    persist_snapshot(database_path, _snapshot(expired_day))
+    persist_snapshot(database_path, _snapshot(retained_day))
+
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=10)
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=30)
+
+    assert [row["day"] for row in daily] == [retained_day[:10]]
+
+
+def test_daily_window_rebuilds_days_retained_only_as_raw_samples(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    timestamp = (datetime.now(tz=timezone.utc).astimezone() - timedelta(days=3)).isoformat(
+        timespec="seconds"
+    )
+    persist_snapshot(database_path, _snapshot(timestamp))
+
+    prune_history(database_path, raw_retention_days=30, daily_retention_days=1)
+
+    daily = fetch_daily_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_day=timestamp[:10],
+        end_day=timestamp[:10],
+    )
+
+    assert daily == [
+        {
+            "device_id": "bm200_house",
+            "day": timestamp[:10],
+            "samples": 1,
+            "min_voltage": 12.73,
+            "max_voltage": 12.73,
+            "avg_voltage": 12.73,
+            "avg_soc": 58.0,
+            "avg_temperature": None,
+            "error_count": 0,
+            "last_seen": timestamp,
+        }
+    ]
 
 
 def test_prune_history_removes_old_archive_rows_with_raw_retention(

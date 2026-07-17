@@ -478,7 +478,7 @@ def _usb_otg_fleet_trend_device_ids_from_form(
     return selected_ids
 
 
-_CHART_HISTORY_RANGES = frozenset({"1", "3", "5", "7", "30", "90", "365", "730", "all"})
+_CHART_HISTORY_RANGES = frozenset({"1", "3", "5", "7", "30", "90", "365", "730"})
 _CHART_HISTORY_RAW_MAX_DAYS = 30
 
 
@@ -492,7 +492,7 @@ def _parse_chart_history_timestamp(value: str, *, timezone: ZoneInfo) -> datetim
 def _empty_chart_history_payload(*, range_value: str) -> dict[str, object]:
     return {
         "points": [],
-        "resolution": "daily" if range_value == "all" else "raw",
+        "resolution": "raw" if int(range_value) <= _CHART_HISTORY_RAW_MAX_DAYS else "daily",
         "window": {
             "start": None,
             "end": None,
@@ -502,6 +502,28 @@ def _empty_chart_history_payload(*, range_value: str) -> dict[str, object]:
             "has_next": False,
         },
     }
+
+
+def _daily_chart_window(
+    *,
+    available_start: datetime,
+    available_end: datetime,
+    requested_end: datetime,
+    duration: timedelta,
+) -> tuple[datetime, datetime]:
+    """Use non-overlapping calendar days when a chart page is backed by rollups."""
+    available_start_day = available_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_of_requested_day = requested_end.replace(
+        hour=23,
+        minute=59,
+        second=59,
+        microsecond=0,
+    )
+    window_end = min(available_end, end_of_requested_day)
+    window_start = window_end.replace(hour=0, minute=0, second=0, microsecond=0) - timedelta(
+        days=duration.days - 1
+    )
+    return (max(available_start_day, window_start), window_end)
 
 
 def _chart_history_payload(
@@ -529,26 +551,21 @@ def _chart_history_payload(
     available_start = min(parsed_bounds)
     available_end = max(parsed_bounds)
 
-    duration = None if range_value == "all" else timedelta(days=int(range_value))
-    if duration is None:
-        window_start = available_start
-        window_end = available_end
-    else:
-        requested_end = available_end
-        if end_value.strip():
-            try:
-                requested_end = _parse_chart_history_timestamp(
-                    end_value,
-                    timezone=chart_timezone,
-                )
-            except ValueError:
-                requested_end = available_end
-        window_end = min(available_end, max(available_start, requested_end))
-        window_start = max(available_start, window_end - duration)
+    duration = timedelta(days=int(range_value))
+    requested_end = available_end
+    if end_value.strip():
+        try:
+            requested_end = _parse_chart_history_timestamp(
+                end_value,
+                timezone=chart_timezone,
+            )
+        except ValueError:
+            requested_end = available_end
+    requested_end = min(available_end, max(available_start, requested_end))
+    window_end = requested_end
+    window_start = max(available_start, window_end - duration)
 
-    resolution = (
-        "raw" if duration is not None and duration.days <= _CHART_HISTORY_RAW_MAX_DAYS else "daily"
-    )
+    resolution = "raw" if duration.days <= _CHART_HISTORY_RAW_MAX_DAYS else "daily"
     if resolution == "raw":
         raw_history = fetch_history_window(
             database_path,
@@ -586,14 +603,13 @@ def _chart_history_payload(
             )
         else:
             resolution = "daily"
-            points = _chart_points(
-                [],
-                daily_history,
-                series=series,
-                series_id=device_id,
-                series_color=series_color,
-            )
-    else:
+    if resolution == "daily":
+        window_start, window_end = _daily_chart_window(
+            available_start=available_start,
+            available_end=available_end,
+            requested_end=requested_end,
+            duration=duration,
+        )
         daily_history = fetch_daily_history_window(
             database_path,
             device_id=device_id,
@@ -616,8 +632,8 @@ def _chart_history_payload(
             "end": window_end.isoformat(timespec="seconds"),
             "available_start": available_start.isoformat(timespec="seconds"),
             "available_end": available_end.isoformat(timespec="seconds"),
-            "has_previous": duration is not None and window_start > available_start,
-            "has_next": duration is not None and window_end < available_end,
+            "has_previous": window_start > available_start,
+            "has_next": window_end < available_end,
         },
     }
 

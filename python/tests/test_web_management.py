@@ -334,6 +334,11 @@ def test_chart_history_window_api_returns_only_the_requested_raw_page(
         encoding="utf-8",
     )
     database_path = tmp_path / "runtime" / "gateway.db"
+    fixed_now = datetime(2026, 7, 17, 12, tzinfo=timezone(timedelta(hours=2)))
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda days: (fixed_now - timedelta(days=days)).isoformat(timespec="seconds"),
+    )
 
     def persist_chart_sample(timestamp: str, voltage: float) -> None:
         persist_snapshot(
@@ -448,16 +453,22 @@ def test_chart_history_window_api_returns_only_the_requested_raw_page(
         daily_payload = json.loads(response.read().decode("utf-8"))
 
     assert daily_payload["resolution"] == "daily"
-    assert len(daily_payload["points"]) == 91
+    assert len(daily_payload["points"]) == 90
     assert {point["kind"] for point in daily_payload["points"]} == {"daily"}
     assert daily_payload["window"]["has_previous"] is True
     assert daily_payload["window"]["has_next"] is True
+    assert all(
+        daily_payload["window"]["start"] <= point["ts"] <= daily_payload["window"]["end"]
+        for point in daily_payload["points"]
+    )
 
     previous_daily_query = urllib.parse.urlencode(
         {
             "device_id": "bm200_house",
             "range": "90",
-            "end": daily_payload["window"]["start"],
+            "end": (
+                datetime.fromisoformat(daily_payload["window"]["start"]) - timedelta(milliseconds=1)
+            ).isoformat(timespec="milliseconds"),
         }
     )
     with _urlopen_with_retry(
@@ -467,30 +478,40 @@ def test_chart_history_window_api_returns_only_the_requested_raw_page(
         previous_daily_payload = json.loads(response.read().decode("utf-8"))
 
     assert previous_daily_payload["resolution"] == "daily"
-    assert previous_daily_payload["points"][-1]["ts"] == daily_payload["points"][0]["ts"]
-    assert previous_daily_payload["points"][0]["ts"] < daily_payload["points"][0]["ts"]
+    assert previous_daily_payload["points"][-1]["ts"] < daily_payload["points"][0]["ts"]
 
     all_query = urllib.parse.urlencode({"device_id": "bm200_house", "range": "all"})
+    with pytest.raises(urllib.error.HTTPError) as invalid_range:
+        _urlopen_with_retry(
+            f"http://{host}:{port}/api/chart-history?{all_query}",
+            timeout=5.0,
+        )
+
+    assert invalid_range.value.code == 400
+    assert json.loads(invalid_range.value.read().decode("utf-8")) == {"error": "invalid_range"}
+
+    two_year_query = urllib.parse.urlencode({"device_id": "bm200_house", "range": "730"})
     with _urlopen_with_retry(
-        f"http://{host}:{port}/api/chart-history?{all_query}",
+        f"http://{host}:{port}/api/chart-history?{two_year_query}",
         timeout=5.0,
     ) as response:
-        all_payload = json.loads(response.read().decode("utf-8"))
+        two_year_payload = json.loads(response.read().decode("utf-8"))
 
-    assert all_payload["resolution"] == "daily"
-    assert len(all_payload["points"]) == 731
+    assert two_year_payload["resolution"] == "daily"
+    assert len(two_year_payload["points"]) == 730
+    assert two_year_payload["window"]["has_previous"] is True
 
     prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
     assert fetch_recent_history(database_path, device_id="bm200_house", limit=10) == []
 
     with _urlopen_with_retry(
-        f"http://{host}:{port}/api/chart-history?{all_query}",
+        f"http://{host}:{port}/api/chart-history?{two_year_query}",
         timeout=5.0,
     ) as response:
         retained_daily_payload = json.loads(response.read().decode("utf-8"))
 
     assert retained_daily_payload["resolution"] == "daily"
-    assert len(retained_daily_payload["points"]) == 731
+    assert len(retained_daily_payload["points"]) == 730
     assert retained_daily_payload["window"]["available_start"].startswith("2024-07-13")
 
     retained_short_query = urllib.parse.urlencode(
@@ -509,9 +530,7 @@ def test_chart_history_window_api_returns_only_the_requested_raw_page(
     assert retained_short_payload["resolution"] == "daily"
     assert retained_short_payload["points"]
 
-    recent_timestamp = (datetime.now(tz=timezone.utc).astimezone() - timedelta(hours=12)).isoformat(
-        timespec="seconds"
-    )
+    recent_timestamp = (fixed_now - timedelta(hours=12)).isoformat(timespec="seconds")
     persist_chart_sample(recent_timestamp, 13.1)
     mixed_boundary_query = urllib.parse.urlencode(
         {
@@ -3872,6 +3891,7 @@ def test_render_settings_html_edit_mode_shows_chart_default_options() -> None:
     assert '<option value="7" selected>' in html
     assert '<option value="3"' in html
     assert '<option value="5"' in html
+    assert '<option value="all"' not in html
     assert '<option value="raw"' not in html
     assert '<option value="soc" selected>' in html
 
@@ -4000,7 +4020,7 @@ def test_render_home_html_renders_device_icon() -> None:
     assert "home-overview-orb" in html
     assert "home-orb-layout" in html
     assert "Open device" not in html
-    assert "All" in html
+    assert "All" not in html
     assert "home-overview-scroller" in html
     assert 'aria-label="Show previous home cards"' in html
     assert 'aria-label="Show next home cards"' in html
@@ -4704,6 +4724,20 @@ def test_render_history_html_respects_saved_chart_defaults() -> None:
     assert 'data-metric="temperature" class="active"' in html
 
 
+def test_render_history_html_maps_legacy_all_default_to_two_year_window() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+        default_chart_range="all",
+    )
+
+    assert 'data-range="730" data-range-label="2 years" class="active"' in html
+    assert 'data-range="all"' not in html
+
+
 def test_render_history_html_reserves_second_badge_slot_for_non_vehicle_devices() -> None:
     html = render_history_html(
         device_id="bench_battery",
@@ -5380,7 +5414,7 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "5 days" in html
     assert "7 days" in html
     assert "2 years" in html
-    assert "All" in html
+    assert "All" not in html
     assert 'data-range="raw"' not in html
     assert "Valid samples" in html
     assert "Error count" in html

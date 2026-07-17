@@ -660,6 +660,7 @@ def chart_script(*chart_ids: str, language: str = "en") -> str:
                 "samples",
                 "Average",
                 "Range",
+                "Unable to load chart history. Try again.",
             )
         },
         ensure_ascii=False,

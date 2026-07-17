@@ -417,6 +417,7 @@
   "Turn point markers back on if you prefer exact sample dots over the cleaner default BM-style lines.": "如果您更喜欢精确的样本点而不是更清晰的默认 BM 样式线，请重新打开点标记。",
   "Turn this off if you only want CLI and MQTT behavior without the local web UI.": "如果您只需要 CLI 和 MQTT 行为而不需要本地 Web UI，请关闭此选项。",
   "Turn this on to publish gateway and device updates to an MQTT broker.": "打开此选项可将网关和设备更新发布到 MQTT 代理。",
+  "Unable to load chart history. Try again.": "无法加载图表历史记录。请重试。",
   "USB OTG Image Export": "USB OTG 图像导出",
   "USB OTG boot mode prepared; reboot required": "USB OTG 启动模式已准备；需要重启",
   "USB OTG device controller": "USB OTG 设备控制器",

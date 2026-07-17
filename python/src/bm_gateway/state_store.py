@@ -1248,23 +1248,32 @@ def fetch_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | Non
 
 
 def fetch_daily_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | None:
-    """Return calendar bounds for retained valid daily rollups."""
+    """Return calendar bounds for every valid day retained for chart history."""
     connection = _connect_database(path)
     try:
         row = connection.execute(
             """
             SELECT MIN(day), MAX(day)
-            FROM device_daily_rollups
-            WHERE device_id = ?
-              AND samples > 0
+            FROM (
+                SELECT day
+                FROM device_daily_rollups
+                WHERE device_id = ?
+                  AND samples > 0
+                UNION
+                SELECT substr(sample_ts, 1, 10) AS day
+                FROM device_samples
+                WHERE device_id = ?
+                  AND error_code IS NULL
+                  AND voltage > 0
+            )
             """,
-            (device_id,),
+            (device_id, device_id),
         ).fetchone()
     finally:
         connection.close()
     if row is None or row[0] is None or row[1] is None:
         return None
-    return (f"{row[0]}T00:00:00", f"{row[1]}T00:00:00")
+    return (f"{row[0]}T00:00:00", f"{row[1]}T23:59:59")
 
 
 def _dedupe_sample_history_rows(
@@ -1736,11 +1745,64 @@ def fetch_daily_history_window(
     start_day: str,
     end_day: str,
 ) -> list[dict[str, object]]:
-    """Return daily rollups for one inclusive calendar-date window."""
+    """Return one daily window, rebuilding only daily rows absent from retained rollups."""
     connection = _connect_database(path)
     try:
         rows = connection.execute(
             """
+            WITH ranked_samples AS (
+                SELECT
+                    sample_ts,
+                    voltage,
+                    soc,
+                    temperature,
+                    error_code,
+                    last_seen,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY device_id, sample_ts
+                        ORDER BY source_priority DESC, imported_at DESC, id DESC
+                    ) AS row_rank
+                FROM device_samples
+                WHERE device_id = ?
+                  AND substr(sample_ts, 1, 10) >= ?
+                  AND substr(sample_ts, 1, 10) <= ?
+            ),
+            raw_daily AS (
+                SELECT
+                    substr(sample_ts, 1, 10) AS day,
+                    SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END)
+                        AS samples,
+                    MIN(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                        AS min_voltage,
+                    MAX(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                        AS max_voltage,
+                    AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                        AS avg_voltage,
+                    AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN soc END) AS avg_soc,
+                    AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END)
+                        AS avg_temperature,
+                    SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
+                    MAX(last_seen) AS last_seen
+                FROM ranked_samples
+                WHERE row_rank = 1
+                GROUP BY day
+            ),
+            retained_daily AS (
+                SELECT
+                    day,
+                    samples,
+                    min_voltage,
+                    max_voltage,
+                    avg_voltage,
+                    avg_soc,
+                    avg_temperature,
+                    error_count,
+                    last_seen
+                FROM device_daily_rollups
+                WHERE device_id = ?
+                  AND day >= ?
+                  AND day <= ?
+            )
             SELECT
                 day,
                 samples,
@@ -1751,13 +1813,27 @@ def fetch_daily_history_window(
                 avg_temperature,
                 error_count,
                 last_seen
-            FROM device_daily_rollups
-            WHERE device_id = ?
-              AND day >= ?
-              AND day <= ?
+            FROM retained_daily
+            UNION ALL
+            SELECT
+                raw_daily.day,
+                raw_daily.samples,
+                raw_daily.min_voltage,
+                raw_daily.max_voltage,
+                raw_daily.avg_voltage,
+                raw_daily.avg_soc,
+                raw_daily.avg_temperature,
+                raw_daily.error_count,
+                raw_daily.last_seen
+            FROM raw_daily
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM retained_daily
+                WHERE retained_daily.day = raw_daily.day
+            )
             ORDER BY day ASC
             """,
-            (device_id, start_day, end_day),
+            (device_id, start_day, end_day, device_id, start_day, end_day),
         ).fetchall()
     finally:
         connection.close()

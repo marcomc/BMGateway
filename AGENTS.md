@@ -64,6 +64,9 @@ At the start of every new AI agent chat for this repository, read:
 - Test historical chart navigation and SVG rendering independently with
   daily-rollup-only fixtures; downsampled points must remain visible after raw
   samples expire.
+- For server-backed daily history pages, use disjoint calendar windows, keep
+  every returned point inside the advertised window, and test cached arrow
+  navigation plus a visible loading-failure state.
 - When hardware or support checks disable settings fields, keep disable and
   teardown paths available and preserve disabled-field values on submit.
 - For interface-specific recovery or diagnostics, probe through the configured
@@ -148,3 +151,6 @@ When cutting a release, update the version consistently in:
 - `python/src/bm_gateway/__init__.py`
 - `CHANGELOG.md`
 - tests that assert the version string
+
+Use the release-preflight-compatible headings exactly: `## [Unreleased]` for
+pending work, or `## [X.Y.Z] - YYYY-MM-DD - Title` for a release candidate.

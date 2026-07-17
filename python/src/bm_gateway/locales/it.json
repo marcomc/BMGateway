@@ -480,6 +480,7 @@
   "Turn this off if you only want CLI and MQTT behavior without the local web UI.": "Disattivalo se vuoi solo CLI e MQTT senza l'interfaccia web locale.",
   "Turn this on to publish gateway and device updates to an MQTT broker.": "Attivalo per pubblicare aggiornamenti gateway e dispositivi su un broker MQTT.",
   "Type": "Tipo",
+  "Unable to load chart history. Try again.": "Impossibile caricare lo storico del grafico. Riprova.",
   "USB OTG Image Export": "Esportazione immagini USB OTG",
   "USB OTG boot mode prepared; reboot required": "Modalita boot USB OTG preparata; riavvio richiesto",
   "USB OTG device controller": "Controller dispositivo USB OTG",

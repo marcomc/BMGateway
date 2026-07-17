@@ -610,6 +610,7 @@
     let pendingFocusPointerType = "";
     let serverWindow = null;
     let isLoading = false;
+    let loadError = false;
     let activeRequest = 0;
     let dragTargetEnd = null;
     const windowCache = new Map();
@@ -700,19 +701,20 @@
     }}
     function prefetchAdjacentWindows(payload, rangeValue) {{
       const duration = rangeDurationMs(rangeValue);
+      const start = parseTime(payload?.window?.start);
       const end = parseTime(payload?.window?.end);
-      if (duration === null || end === null) {{
+      if (duration === null || start === null || end === null) {{
         return;
       }}
       if (payload.window.has_previous) {{
         void loadServerWindow(
-          new Date(end - duration).toISOString(),
+          new Date(start - 1).toISOString(),
           {{ prefetch: true, rangeValue }},
         );
       }}
       if (payload.window.has_next) {{
         void loadServerWindow(
-          new Date(end + duration).toISOString(),
+          new Date(end + duration + 1).toISOString(),
           {{ prefetch: true, rangeValue }},
         );
       }}
@@ -729,6 +731,7 @@
           serverWindow = cached;
           allPoints = cached.points || [];
           appliedRange = rangeValue;
+          loadError = false;
           render();
           prefetchAdjacentWindows(cached, rangeValue);
         }}
@@ -739,6 +742,7 @@
       }}
       const requestId = prefetch ? 0 : activeRequest + 1;
       let applied = false;
+      let failed = false;
       if (!prefetch) {{
         activeRequest = requestId;
         setLoading(true);
@@ -746,11 +750,11 @@
       try {{
         const response = await fetch(historyEndpoint(rangeValue, requestedEnd), {{ cache: "no-store" }});
         if (!response.ok) {{
-          return;
+          throw new Error("chart history request failed");
         }}
         const payload = await response.json();
         if (!Array.isArray(payload.points) || !payload.window) {{
-          return;
+          throw new Error("invalid chart history payload");
         }}
         rememberWindow(key, payload);
         if (prefetch || requestId !== activeRequest || rangeValue !== currentRange) {{
@@ -759,15 +763,21 @@
         serverWindow = payload;
         allPoints = payload.points;
         appliedRange = rangeValue;
+        loadError = false;
         applied = true;
         render();
         prefetchAdjacentWindows(payload, rangeValue);
       }} catch (_error) {{
+        failed = true;
       }} finally {{
         if (!prefetch && requestId === activeRequest) {{
           if (!applied && serverWindow && currentRange === rangeValue) {{
             currentRange = appliedRange;
             updateActiveRangeButton();
+          }}
+          if (failed && currentRange === (serverWindow ? appliedRange : rangeValue)) {{
+            loadError = true;
+            render();
           }}
           setLoading(false);
         }}
@@ -802,12 +812,16 @@
         )
         : summarizeCoverage(filteredPoints, currentMetric);
       const visibleCount = visibleSeries.size;
+      const loadErrorSummary = loadError
+        ? `<span class="chart-load-error" role="alert">${{t("Unable to load chart history. Try again.")}}</span>`
+        : "";
       if (usable.length === 0) {{
         meta.innerHTML = [
           `<span>${{t("Window")}}: ${{windowLabel}}</span>`,
           `<span>${{t("Visible devices")}}: ${{visibleCount}}</span>`,
           `<span>${{t("No usable")}} ${{METRICS[currentMetric].label.toLowerCase()}} ${{t("samples in this range")}}</span>`,
-          `<span>${{coverageLabel}}</span>`
+          `<span>${{coverageLabel}}</span>`,
+          loadErrorSummary,
         ].join("");
         hideTooltip(frame);
         return;
@@ -827,7 +841,8 @@
         `<span>${{METRICS[currentMetric].label}} ${{t("samples")}}: ${{usable.length}}</span>`,
         `<span>${{t("Average")}}: ${{METRICS[currentMetric].format(average)}}</span>`,
         `<span>${{t("Range")}}: ${{METRICS[currentMetric].format(Math.min(...values))}} - ${{METRICS[currentMetric].format(Math.max(...values))}}</span>`,
-        `<span>${{coverageSummary}}</span>`
+        `<span>${{coverageSummary}}</span>`,
+        loadErrorSummary,
       ].join("");
       if (chart.coords.length > 0) {{
         if (focusClientX !== null) {{
@@ -863,7 +878,9 @@
       if (!currentWindow || !currentWindow.pageable || currentWindow.duration === null) {{
         return;
       }}
-      const requestedEnd = (currentWindow.effectiveEnd ?? 0) + (direction * currentWindow.duration);
+      const requestedEnd = direction < 0
+        ? (currentWindow.effectiveStart ?? 0) - 1
+        : (currentWindow.effectiveEnd ?? 0) + currentWindow.duration + 1;
       if (serverWindowed) {{
         void loadServerWindow(new Date(requestedEnd).toISOString());
       }} else {{

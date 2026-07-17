@@ -96,10 +96,12 @@ and to the hidden picture-frame screenshot routes. The shared behavior is:
 History and Device Detail charts use a separate server-backed window endpoint.
 The initial HTML contains no chart history payload. A 1 to 30-day selection
 loads retained raw samples exactly when its whole page is raw; a page crossing
-raw expiry, wider selections, and all-history use daily rollups. Arrow
-navigation and drag panning load the requested window on demand, retain only
-the current window plus up to two adjacent cached windows, and show a
-lightweight spinner while a non-cached window is loading.
+raw expiry and wider selections use daily rollups. `2 years` is the largest
+selection: arrow navigation and drag panning load further pages on demand, so
+the user can traverse the complete retained history without an unbounded
+`All` request. The browser retains only the current window plus up to two
+adjacent cached windows, shows a lightweight spinner for non-cached windows,
+and keeps the current page visible with an error message if loading fails.
 
 The diagnostic raw table renders only the latest 300 rows and the daily table
 renders the latest 90 rows, independently of the chart's retained-history

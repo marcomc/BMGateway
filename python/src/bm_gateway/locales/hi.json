@@ -417,6 +417,7 @@
   "Turn point markers back on if you prefer exact sample dots over the cleaner default BM-style lines.": "Turn point markers back on if you prefer exact sample dots over the cleaner default BM-style lines.",
   "Turn this off if you only want CLI and MQTT behavior without the local web UI.": "Turn this off if you only want CLI and MQTT behavior without the local web UI.",
   "Turn this on to publish gateway and device updates to an MQTT broker.": "Turn this on to publish gateway and device updates to an MQTT broker.",
+  "Unable to load chart history. Try again.": "चार्ट इतिहास लोड नहीं किया जा सका। फिर से प्रयास करें।",
   "USB OTG Image Export": "USB OTG छवि निर्यात",
   "USB OTG boot mode prepared; reboot required": "USB OTG बूट मोड तैयार; रीबूट आवश्यक",
   "USB OTG device controller": "USB OTG device controller",

@@ -70,14 +70,15 @@ upgrade inputs. On database open, their existing rows are copied into
 
 ## Retention
 
-Raw retention applies to `device_samples`. After old samples are removed,
-`device_daily_rollups` is rebuilt from the retained samples. This keeps cleanup
-separate from import and prevents stale rollup-only data from pretending that a
-sample still exists.
+Raw retention applies to `device_samples`. Before old samples are removed,
+`device_daily_rollups` is rebuilt from the canonical rows, then the retained
+daily rows preserve long-range chart coverage after raw samples expire. A
+daily chart page aggregates raw samples only when a still-retained day no
+longer has a daily row.
 
-`daily_retention_days = 0` means no extra rollup-only pruning beyond the
-canonical sample retention. A positive daily retention value can still prune
-the derived cache more aggressively.
+`daily_retention_days = 0` means daily rows are retained indefinitely even
+after their canonical samples expire. A positive daily retention value can
+prune this long-range chart history more aggressively than raw retention.
 
 ## Import Failure Behavior
 

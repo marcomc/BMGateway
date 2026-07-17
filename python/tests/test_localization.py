@@ -399,6 +399,19 @@ def test_chart_script_uses_selected_language_for_generated_summary_text() -> Non
     assert '"All retained history":"Tutta la cronologia conservata"' in script
     assert '"Recent raw":"Grezzi recenti"' in script
     assert '"Selected range":"Intervallo selezionato"' in script
+    assert (
+        '"Unable to load chart history. Try again.":'
+        '"Impossibile caricare lo storico del grafico. Riprova."'
+    ) in script
+
+
+def test_chart_loading_error_is_translated_in_all_supported_locales() -> None:
+    message_key = "Unable to load chart history. Try again."
+
+    for locale in SUPPORTED_LOCALES:
+        if locale.code == "en":
+            continue
+        assert translation_for(locale.code).gettext(message_key) != message_key
 
 
 def test_mqtt_anonymous_placeholders_are_translated_to_italian() -> None:

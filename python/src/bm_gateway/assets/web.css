@@ -1868,6 +1868,10 @@ details summary::-webkit-details-marker { display: none; }
   animation: chart-loading-spin 0.75s linear infinite;
   transform: translate(-50%, -50%);
 }
+.chart-load-error {
+  color: var(--danger);
+  font-weight: 700;
+}
 .chart-canvas svg {
   display: block;
   width: 100%;
