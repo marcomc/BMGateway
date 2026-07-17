@@ -489,6 +489,16 @@ def _parse_chart_history_timestamp(value: str, *, timezone: ZoneInfo) -> datetim
     return parsed.astimezone(timezone)
 
 
+def _format_chart_history_timestamp(value: datetime) -> str:
+    if value.microsecond == 0:
+        timespec = "seconds"
+    elif value.microsecond % 1_000 == 0:
+        timespec = "milliseconds"
+    else:
+        timespec = "microseconds"
+    return value.isoformat(timespec=timespec)
+
+
 def _empty_chart_history_payload(*, range_value: str) -> dict[str, object]:
     return {
         "points": [],
@@ -573,8 +583,8 @@ def _chart_history_payload(
         raw_history = fetch_history_window(
             database_path,
             device_id=device_id,
-            start_ts=window_start.isoformat(timespec="seconds"),
-            end_ts=window_end.isoformat(timespec="seconds"),
+            start_ts=_format_chart_history_timestamp(window_start),
+            end_ts=_format_chart_history_timestamp(window_end),
         )
         daily_history = fetch_daily_history_window(
             database_path,
@@ -631,10 +641,10 @@ def _chart_history_payload(
         "points": points,
         "resolution": resolution,
         "window": {
-            "start": window_start.isoformat(timespec="seconds"),
-            "end": window_end.isoformat(timespec="seconds"),
-            "available_start": available_start.isoformat(timespec="seconds"),
-            "available_end": available_end.isoformat(timespec="seconds"),
+            "start": _format_chart_history_timestamp(window_start),
+            "end": _format_chart_history_timestamp(window_end),
+            "available_start": _format_chart_history_timestamp(available_start),
+            "available_end": _format_chart_history_timestamp(available_end),
             "has_previous": window_start > available_start,
             "has_next": window_end < available_end,
         },

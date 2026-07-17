@@ -481,6 +481,30 @@ def test_chart_history_window_api_returns_only_the_requested_raw_page(
         "2026-07-11T06:00:00+02:00",
         "2026-07-11T12:00:00+02:00",
     ]
+    assert mid_day_payload["window"]["end"] == "2026-07-11T12:00:00+02:00"
+
+    next_raw_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "1",
+            "end": (
+                datetime.fromisoformat(mid_day_payload["window"]["end"])
+                + timedelta(days=1, milliseconds=1)
+            ).isoformat(timespec="milliseconds"),
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{next_raw_query}",
+        timeout=5.0,
+    ) as response:
+        next_raw_payload = json.loads(response.read().decode("utf-8"))
+
+    assert next_raw_payload["resolution"] == "raw"
+    assert next_raw_payload["window"]["start"] == "2026-07-11T12:00:00.001+02:00"
+    assert [point["ts"] for point in next_raw_payload["points"]] == ["2026-07-12T00:00:00+02:00"]
+    assert {point["ts"] for point in mid_day_payload["points"]}.isdisjoint(
+        point["ts"] for point in next_raw_payload["points"]
+    )
 
     daily_query = urllib.parse.urlencode(
         {

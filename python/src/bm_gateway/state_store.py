@@ -1241,8 +1241,8 @@ def fetch_history_window(
                     source_priority
                 FROM device_samples
                 WHERE device_id = ?
-                  AND unixepoch(sample_ts) >= unixepoch(?)
-                  AND unixepoch(sample_ts) <= unixepoch(?)
+                  AND julianday(sample_ts) >= julianday(?)
+                  AND julianday(sample_ts) <= julianday(?)
                 ORDER BY unixepoch(sample_ts) ASC, source_priority DESC
                 """,
                 (device_id, start_ts, end_ts),

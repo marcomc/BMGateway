@@ -24,6 +24,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Invalid IANA gateway timezones are now rejected during config validation, and
   chart history safely returns an empty response if an internal caller supplies
   an invalid timezone.
+- Fixed raw-history page boundaries at millisecond precision so moving between
+  pages cannot repeat a sample at the shared edge.
+- The service installer now preserves an explicitly configured three-page
+  BM200 archive-sync cap instead of converting it to the new default.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

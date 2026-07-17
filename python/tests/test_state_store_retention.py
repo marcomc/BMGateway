@@ -1866,6 +1866,30 @@ def test_history_window_uses_chronological_order_across_dst_offset_change(tmp_pa
     assert [row["ts"] for row in rows] == [before_fallback, after_fallback]
 
 
+def test_history_window_preserves_millisecond_boundaries_between_raw_pages(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    previous_page_end = "2026-07-11T12:00:00.000+00:00"
+    next_page_start = "2026-07-11T12:00:00.001+00:00"
+    persist_snapshot(database_path, _snapshot(previous_page_end, voltage=12.61))
+    persist_snapshot(database_path, _snapshot(next_page_start, voltage=12.72))
+
+    previous_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T00:00:00+00:00",
+        end_ts=previous_page_end,
+    )
+    next_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts=next_page_start,
+        end_ts="2026-07-11T23:59:59+00:00",
+    )
+
+    assert [row["ts"] for row in previous_page] == [previous_page_end]
+    assert [row["ts"] for row in next_page] == [next_page_start]
+
+
 def test_fetch_daily_history_merges_archive_only_days(tmp_path: Path) -> None:
     database_path = tmp_path / "gateway.db"
     persist_snapshot(database_path, _snapshot("2024-01-02T00:00:00+00:00"))
