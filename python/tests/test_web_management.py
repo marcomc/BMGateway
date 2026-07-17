@@ -10,8 +10,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import parse_qs, urlencode, urlparse
 from urllib.request import urlopen as _stdlib_urlopen
 
@@ -21,10 +22,17 @@ from bm_gateway import __version__
 from bm_gateway.config import load_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.models import DeviceReading, GatewaySnapshot
-from bm_gateway.state_store import fetch_recent_history, persist_snapshot
+from bm_gateway.state_store import (
+    fetch_history_day_sample_counts,
+    fetch_recent_history,
+    import_archive_history,
+    persist_snapshot,
+    prune_history,
+)
 from bm_gateway.usb_otg_export import USBOTGExportResult
 from bm_gateway.web import (
     _add_device_form_html,
+    _chart_history_payload,
     _chart_points,
     _discover_bluetooth_adapters,
     add_device_from_form,
@@ -224,21 +232,30 @@ def test_chart_script_supports_range_paging_and_drag_panning() -> None:
     assert 'nextButton.addEventListener("click", () => pageRange(1));' in script
     assert 'frame.addEventListener("pointerdown", (event) => {' in script
     assert 'frame.addEventListener("pointermove", (event) => {' in script
-    assert "currentWindowEnd = dragStartEnd - deltaMs;" in script
+    assert "const requestedEnd = dragStartEnd - deltaMs;" in script
+    assert "dragTargetEnd = requestedEnd;" in script
+    assert "void loadServerWindow(new Date(dragTargetEnd).toISOString());" in script
     assert 'frame.classList.add("is-panning");' in script
 
 
-def test_chart_script_compacts_dense_ranges_before_svg_rendering() -> None:
+def test_chart_script_keeps_server_window_samples_exact_before_svg_rendering() -> None:
     script = chart_script("history-chart")
 
     assert "function displayPointLimit(rangeValue)" in script
     assert "function compactPointsForDisplay(points, metric, rangeValue)" in script
     assert 'const dataScript = document.getElementById(id + "-data");' in script
     assert 'JSON.parse(dataScript?.textContent || frame.dataset.chartPoints || "[]");' in script
-    assert (
-        "const displayPoints = compactPointsForDisplay(points, currentMetric, currentRange);"
-        in script
+    assert "const serverWindowed = Boolean(serverEndpoint);" in script
+    assert "const windowCache = new Map();" in script
+    assert "while (windowCache.size > 3)" in script
+    assert "function nextServerWindowEnd(payload, rangeValue)" in script
+    assert "function shiftIsoTimestampByMicroseconds(value, offsetMicroseconds)" in script
+    assert "return shiftIsoTimestampByMicroseconds(start, -1);" in script
+    assert "return shiftIsoTimestampByMicroseconds(end, (duration * 1000) + 1);" in script
+    exact_window_render = (
+        "? points\n        : compactPointsForDisplay(points, currentMetric, currentRange);"
     )
+    assert exact_window_render in script
     assert (
         "const chart = buildSvg(displayPoints, currentMetric, id, showMarkers, windowLabel);"
         in script
@@ -302,6 +319,579 @@ def test_chart_script_keeps_compact_frame_chart_inside_edges() -> None:
     assert "const padRight = isCompact ? 14 : 18;" in script
     assert "const padBottom = isCompact ? 20 : 44;" in script
     assert 'rx="${isCompact ? 12 : 22}"' in script
+
+
+def test_chart_history_payload_handles_invalid_timezone(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-16T12:00:00+02:00",
+            "2026-07-17T12:00:00+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_bounds",
+        lambda _database_path, *, device_id: None,
+    )
+
+    payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Not/A_Real_Timezone",
+    )
+
+    assert payload == {
+        "points": [],
+        "resolution": "raw",
+        "window": {
+            "start": None,
+            "end": None,
+            "available_start": None,
+            "available_end": None,
+            "has_previous": False,
+            "has_next": False,
+        },
+    }
+
+
+def test_chart_history_payload_uses_raw_bounds_for_short_raw_ranges(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-01T12:00:00+02:00",
+            "2026-07-17T12:00:00+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-01T00:00:00+02:00",
+            "2026-07-17T23:59:59+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_window",
+        lambda _database_path, **_kwargs: [
+            {
+                "ts": "2026-07-17T12:00:00+02:00",
+                "voltage": 13.2,
+                "soc": 80,
+                "temperature": 24.0,
+                "error_code": None,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_window",
+        lambda _database_path, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_day_sample_counts",
+        lambda _database_path, **_kwargs: {},
+    )
+
+    payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+
+    assert payload["resolution"] == "raw"
+    points = cast(list[dict[str, object]], payload["points"])
+    assert points[-1]["ts"] == "2026-07-17T12:00:00+02:00"
+    assert payload["window"] == {
+        "start": "2026-07-10T12:00:00+02:00",
+        "end": "2026-07-17T12:00:00+02:00",
+        "available_start": "2026-07-01T12:00:00+02:00",
+        "available_end": "2026-07-17T12:00:00+02:00",
+        "has_previous": True,
+        "has_next": False,
+    }
+
+
+def test_chart_history_payload_pages_back_from_raw_to_earlier_daily_rollups(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-10T12:00:00+02:00",
+            "2026-07-17T12:00:00+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-01T00:00:00+02:00",
+            "2026-07-17T23:59:59+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_window",
+        lambda _database_path, **_kwargs: [
+            {
+                "ts": "2026-07-17T12:00:00+02:00",
+                "voltage": 13.2,
+                "soc": 80,
+                "temperature": 24.0,
+                "error_code": None,
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_window",
+        lambda _database_path, **_kwargs: [
+            {
+                "day": "2026-07-10",
+                "samples": 1,
+                "avg_voltage": 13.1,
+                "avg_soc": 79.0,
+                "avg_temperature": 23.5,
+                "last_seen": "2026-07-10T23:58:00+02:00",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_day_sample_counts",
+        lambda _database_path, **_kwargs: {"2026-07-10": 1},
+    )
+
+    raw_payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+    previous_payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="2026-07-10T11:59:59.999+02:00",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+
+    assert raw_payload["resolution"] == "raw"
+    raw_window = cast(dict[str, object], raw_payload["window"])
+    assert raw_window["end"] == "2026-07-17T12:00:00+02:00"
+    assert raw_window["has_previous"] is True
+    assert raw_window["has_next"] is False
+    assert previous_payload["resolution"] == "daily"
+    previous_window = cast(dict[str, object], previous_payload["window"])
+    assert previous_window["available_start"] == "2026-07-01T00:00:00+02:00"
+    assert previous_window["end"] == "2026-07-10T23:59:59+02:00"
+
+
+def test_chart_history_payload_uses_incomplete_rollup_when_raw_counts_tie(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+
+    def persist_chart_sample(timestamp: str, voltage: float) -> None:
+        persist_snapshot(
+            database_path,
+            GatewaySnapshot(
+                generated_at=timestamp,
+                gateway_name="BMGateway",
+                active_adapter="hci0",
+                mqtt_enabled=True,
+                mqtt_connected=False,
+                devices_total=1,
+                devices_online=1,
+                poll_interval_seconds=300,
+                devices=[
+                    DeviceReading(
+                        id="bm200_house",
+                        type="bm200",
+                        name="BM200 House",
+                        mac="AA:BB:CC:DD:EE:01",
+                        enabled=True,
+                        connected=True,
+                        voltage=voltage,
+                        soc=58,
+                        temperature=None,
+                        rssi=-60,
+                        state="normal",
+                        error_code=None,
+                        error_detail=None,
+                        last_seen=timestamp,
+                        adapter="hci0",
+                        driver="bm200",
+                    )
+                ],
+            ),
+        )
+
+    persist_chart_sample("2026-07-15T00:00:00+02:00", 12.0)
+    persist_chart_sample("2026-07-15T18:00:00+02:00", 14.0)
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda _days: "2026-07-15T12:00:00+02:00",
+    )
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2026-07-15T21:00:00+02:00",
+                "voltage": 15.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            }
+        ],
+    )
+
+    assert fetch_history_day_sample_counts(
+        database_path,
+        device_id="bm200_house",
+        start_day="2026-07-15",
+        end_day="2026-07-15",
+    ) == {"2026-07-15": 2}
+
+    payload = _chart_history_payload(
+        database_path=database_path,
+        device_id="bm200_house",
+        range_value="1",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Europe/Rome",
+    )
+
+    assert payload["resolution"] == "daily"
+    points = cast(list[dict[str, object]], payload["points"])
+    assert points == [
+        {
+            "ts": "2026-07-15T18:00:00+02:00",
+            "label": "07-15",
+            "kind": "daily",
+            "voltage": 13.0,
+            "soc": 58.0,
+            "temperature": None,
+            "series": "BM200 House",
+            "series_id": "bm200_house",
+            "series_color": "#17c45a",
+        }
+    ]
+    assert "raw_history_complete" not in points[0]
+
+
+def test_chart_history_window_api_returns_only_the_requested_raw_page(
+    tmp_path: Path,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    (tmp_path / "devices.toml").write_text(
+        "\n".join(
+            [
+                "[[devices]]",
+                'id = "bm200_house"',
+                'type = "bm200"',
+                'name = "BM200 House"',
+                'mac = "AA:BB:CC:DD:EE:01"',
+                'color_key = "green"',
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    database_path = tmp_path / "runtime" / "gateway.db"
+    fixed_now = datetime(2026, 7, 17, 12, tzinfo=timezone(timedelta(hours=2)))
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda days: (fixed_now - timedelta(days=days)).isoformat(timespec="seconds"),
+    )
+
+    def persist_chart_sample(timestamp: str, voltage: float) -> None:
+        persist_snapshot(
+            database_path,
+            GatewaySnapshot(
+                generated_at=timestamp,
+                gateway_name="BMGateway",
+                active_adapter="hci0",
+                mqtt_enabled=True,
+                mqtt_connected=False,
+                devices_total=1,
+                devices_online=1,
+                poll_interval_seconds=300,
+                devices=[
+                    DeviceReading(
+                        id="bm200_house",
+                        type="bm200",
+                        name="BM200 House",
+                        mac="AA:BB:CC:DD:EE:01",
+                        enabled=True,
+                        connected=True,
+                        voltage=voltage,
+                        soc=80,
+                        temperature=24.0,
+                        rssi=-60,
+                        state="normal",
+                        error_code=None,
+                        error_detail=None,
+                        last_seen=timestamp,
+                        adapter="hci0",
+                        driver="bm200",
+                    )
+                ],
+            ),
+        )
+
+    first_sample = datetime(2024, 7, 13, tzinfo=timezone(timedelta(hours=2)))
+    for day_offset in range(731):
+        timestamp = (first_sample + timedelta(days=day_offset)).isoformat(timespec="seconds")
+        persist_chart_sample(timestamp, 13.1 + (day_offset * 0.01))
+
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={
+            "host": host,
+            "port": port,
+            "config_path": config_path,
+            "state_dir": tmp_path,
+        },
+        daemon=True,
+    ).start()
+
+    query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "1",
+            "end": "2026-07-11T00:00:00+02:00",
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{query}",
+        timeout=5.0,
+    ) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+
+    assert payload["resolution"] == "raw"
+    assert [point["ts"] for point in payload["points"]] == [
+        "2026-07-10T00:00:00+02:00",
+        "2026-07-11T00:00:00+02:00",
+    ]
+    assert payload["window"]["has_previous"] is True
+    assert payload["window"]["has_next"] is True
+
+    persist_chart_sample("2026-07-11T06:00:00+02:00", 13.2)
+    persist_chart_sample("2026-07-11T12:00:00+02:00", 13.3)
+    mid_day_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "1",
+            "end": "2026-07-11T12:00:00+02:00",
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{mid_day_query}",
+        timeout=5.0,
+    ) as response:
+        mid_day_payload = json.loads(response.read().decode("utf-8"))
+
+    assert mid_day_payload["resolution"] == "raw"
+    assert [point["ts"] for point in mid_day_payload["points"]] == [
+        "2026-07-11T00:00:00+02:00",
+        "2026-07-11T06:00:00+02:00",
+        "2026-07-11T12:00:00+02:00",
+    ]
+    assert mid_day_payload["window"]["end"] == "2026-07-11T12:00:00+02:00"
+
+    next_raw_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "1",
+            "end": (
+                datetime.fromisoformat(mid_day_payload["window"]["end"])
+                + timedelta(days=1, milliseconds=1)
+            ).isoformat(timespec="milliseconds"),
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{next_raw_query}",
+        timeout=5.0,
+    ) as response:
+        next_raw_payload = json.loads(response.read().decode("utf-8"))
+
+    assert next_raw_payload["resolution"] == "raw"
+    assert next_raw_payload["window"]["start"] == "2026-07-11T12:00:00.001+02:00"
+    assert [point["ts"] for point in next_raw_payload["points"]] == ["2026-07-12T00:00:00+02:00"]
+    assert {point["ts"] for point in mid_day_payload["points"]}.isdisjoint(
+        point["ts"] for point in next_raw_payload["points"]
+    )
+
+    daily_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "90",
+            "end": "2026-07-11T00:00:00+02:00",
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{daily_query}",
+        timeout=5.0,
+    ) as response:
+        daily_payload = json.loads(response.read().decode("utf-8"))
+
+    assert daily_payload["resolution"] == "daily"
+    assert len(daily_payload["points"]) == 90
+    assert {point["kind"] for point in daily_payload["points"]} == {"daily"}
+    assert daily_payload["window"]["has_previous"] is True
+    assert daily_payload["window"]["has_next"] is True
+    assert all(
+        daily_payload["window"]["start"] <= point["ts"] <= daily_payload["window"]["end"]
+        for point in daily_payload["points"]
+    )
+
+    previous_daily_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "90",
+            "end": (
+                datetime.fromisoformat(daily_payload["window"]["start"]) - timedelta(milliseconds=1)
+            ).isoformat(timespec="milliseconds"),
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{previous_daily_query}",
+        timeout=5.0,
+    ) as response:
+        previous_daily_payload = json.loads(response.read().decode("utf-8"))
+
+    assert previous_daily_payload["resolution"] == "daily"
+    assert previous_daily_payload["points"][-1]["ts"] < daily_payload["points"][0]["ts"]
+
+    all_query = urllib.parse.urlencode({"device_id": "bm200_house", "range": "all"})
+    with pytest.raises(urllib.error.HTTPError) as invalid_range:
+        _urlopen_with_retry(
+            f"http://{host}:{port}/api/chart-history?{all_query}",
+            timeout=5.0,
+        )
+
+    assert invalid_range.value.code == 400
+    assert json.loads(invalid_range.value.read().decode("utf-8")) == {"error": "invalid_range"}
+
+    two_year_query = urllib.parse.urlencode({"device_id": "bm200_house", "range": "730"})
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{two_year_query}",
+        timeout=5.0,
+    ) as response:
+        two_year_payload = json.loads(response.read().decode("utf-8"))
+
+    assert two_year_payload["resolution"] == "daily"
+    assert len(two_year_payload["points"]) == 730
+    assert two_year_payload["window"]["has_previous"] is True
+
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+    assert fetch_recent_history(database_path, device_id="bm200_house", limit=10) == []
+
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{two_year_query}",
+        timeout=5.0,
+    ) as response:
+        retained_daily_payload = json.loads(response.read().decode("utf-8"))
+
+    assert retained_daily_payload["resolution"] == "daily"
+    assert len(retained_daily_payload["points"]) == 730
+    assert retained_daily_payload["window"]["available_start"].startswith("2024-07-13")
+
+    retained_short_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "7",
+            "end": "2024-07-20T23:59:59+02:00",
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{retained_short_query}",
+        timeout=5.0,
+    ) as response:
+        retained_short_payload = json.loads(response.read().decode("utf-8"))
+
+    assert retained_short_payload["resolution"] == "daily"
+    assert retained_short_payload["points"]
+
+    recent_timestamp = (fixed_now - timedelta(hours=12)).isoformat(timespec="seconds")
+    persist_chart_sample(recent_timestamp, 13.1)
+    mixed_boundary_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "7",
+            "end": recent_timestamp,
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{mixed_boundary_query}",
+        timeout=5.0,
+    ) as response:
+        mixed_boundary_payload = json.loads(response.read().decode("utf-8"))
+
+    assert mixed_boundary_payload["resolution"] == "daily"
+    assert mixed_boundary_payload["points"]
+    assert {point["kind"] for point in mixed_boundary_payload["points"]} == {"daily"}
+    assert any(
+        str(point["ts"]).startswith("2026-07-13") for point in mixed_boundary_payload["points"]
+    )
+
+    persist_chart_sample("2026-07-16T09:00:00+02:00", 13.1)
+    persist_chart_sample("2026-07-16T18:00:00+02:00", 13.2)
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda _days: "2026-07-16T12:00:00+02:00",
+    )
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+
+    partial_day_query = urllib.parse.urlencode(
+        {
+            "device_id": "bm200_house",
+            "range": "1",
+            "end": "2026-07-16T18:00:00+02:00",
+        }
+    )
+    with _urlopen_with_retry(
+        f"http://{host}:{port}/api/chart-history?{partial_day_query}",
+        timeout=5.0,
+    ) as response:
+        partial_day_payload = json.loads(response.read().decode("utf-8"))
+
+    assert partial_day_payload["resolution"] == "daily"
+    assert any(str(point["ts"]).startswith("2026-07-16") for point in partial_day_payload["points"])
 
 
 def test_chart_card_markup_includes_side_navigation_buttons() -> None:
@@ -1612,6 +2202,11 @@ def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Pa
     assert config.archive_sync.bm200_max_pages_per_sync == 6
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 9
+    audit_files = list((tmp_path / "data" / "runtime" / "audit").glob("*.jsonl"))
+    assert len(audit_files) == 1
+    audit_payload = json.loads(audit_files[0].read_text(encoding="utf-8").splitlines()[-1])
+    assert audit_payload["action"] == "archive_sync_preferences_update"
+    assert audit_payload["details"]["bm200_max_pages_per_sync"] == 6
 
 
 def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
@@ -1692,11 +2287,19 @@ def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
     assert payloads[-1]["action"] == "history_sync_batch_completed"
     assert payloads[-1]["trigger"] == "manual"
     assert payloads[-1]["details"]["requested"] == 2
+    assert payloads[-1]["details"]["device_pages"] == {"bm200_house": 2, "bm300_doc": 5}
 
 
-def test_sync_device_history_now_requests_full_bm200_retention(
+@pytest.mark.parametrize(
+    ("configured_page_count", "expected_page_count"),
+    [(None, 85), (4, 4)],
+    ids=("default-full-history", "explicit-cap"),
+)
+def test_sync_device_history_now_honors_bm200_page_cap(
     tmp_path: Path,
     monkeypatch: MonkeyPatch,
+    configured_page_count: int | None,
+    expected_page_count: int,
 ) -> None:
     (tmp_path / "devices.toml").write_text(
         "\n".join(
@@ -1713,8 +2316,14 @@ def test_sync_device_history_now_requests_full_bm200_retention(
         encoding="utf-8",
     )
     config_path = tmp_path / "config.toml"
+    config_text = Path("python/config/config.toml.example").read_text(encoding="utf-8")
+    if configured_page_count is not None:
+        config_text = config_text.replace(
+            "bm200_max_pages_per_sync = 85",
+            f"bm200_max_pages_per_sync = {configured_page_count}",
+        )
     config_path.write_text(
-        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        config_text,
         encoding="utf-8",
     )
     captured: dict[str, object] = {}
@@ -1752,7 +2361,7 @@ def test_sync_device_history_now_requests_full_bm200_retention(
     assert payload["synced"] is True
     assert payload["fetched"] == 512
     assert payload["inserted"] == 64
-    assert captured == {"device_id": "bm200_house", "page_count": 85}
+    assert captured == {"device_id": "bm200_house", "page_count": expected_page_count}
 
 
 def test_sync_device_history_now_rejects_bm300_when_archive_sync_is_disabled(
@@ -3599,6 +4208,7 @@ def test_render_settings_html_edit_mode_shows_chart_default_options() -> None:
     assert '<option value="7" selected>' in html
     assert '<option value="3"' in html
     assert '<option value="5"' in html
+    assert '<option value="all"' not in html
     assert '<option value="raw"' not in html
     assert '<option value="soc" selected>' in html
 
@@ -3727,7 +4337,7 @@ def test_render_home_html_renders_device_icon() -> None:
     assert "home-overview-orb" in html
     assert "home-orb-layout" in html
     assert "Open device" not in html
-    assert "All" in html
+    assert "All" not in html
     assert "home-overview-scroller" in html
     assert 'aria-label="Show previous home cards"' in html
     assert 'aria-label="Show next home cards"' in html
@@ -4431,6 +5041,20 @@ def test_render_history_html_respects_saved_chart_defaults() -> None:
     assert 'data-metric="temperature" class="active"' in html
 
 
+def test_render_history_html_maps_legacy_all_default_to_two_year_window() -> None:
+    html = render_history_html(
+        device_id="bm200_house",
+        configured_devices=[],
+        raw_history=[],
+        daily_history=[],
+        monthly_history=[],
+        default_chart_range="all",
+    )
+
+    assert 'data-range="730" data-range-label="2 years" class="active"' in html
+    assert 'data-range="all"' not in html
+
+
 def test_render_history_html_reserves_second_badge_slot_for_non_vehicle_devices() -> None:
     html = render_history_html(
         device_id="bench_battery",
@@ -5049,7 +5673,8 @@ def test_render_device_html_escapes_history_values_and_renders_chart() -> None:
     assert "hero-shell" in html
     assert "chart-tooltip" in html
     assert "chart-overlay" in html
-    assert '"series":"BM200 House"' in html
+    assert 'data-chart-endpoint="/api/chart-history?device_id=bm200_house"' in html
+    assert 'id="device-chart-bm200_house-data">[]</script>' in html
 
 
 def test_redirect_message_query_round_trips_special_characters() -> None:
@@ -5106,7 +5731,7 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "5 days" in html
     assert "7 days" in html
     assert "2 years" in html
-    assert "All" in html
+    assert "All" not in html
     assert 'data-range="raw"' not in html
     assert "Valid samples" in html
     assert "Error count" in html
@@ -5118,7 +5743,9 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert '<a class="secondary-button" href="/">Battery</a>' not in html
     assert "Device Detail" not in html
     assert 'aria-current="page"' in html
-    assert '"series":"bm200_house' in html
+    assert 'id="history-chart-' in html
+    assert 'data">[]</script>' in html
+    assert "data-chart-endpoint=" in html
 
 
 def test_render_history_html_shows_device_selector_and_quick_switch_links() -> None:

@@ -1252,8 +1252,8 @@ def render_settings_html(
                     'inputmode="numeric" autocomplete="off">'
                 ),
                 help_text=(
-                    "Caps each automatic or manual BM200/BM6 history sync. One page is about "
-                    "8 hours and 32 minutes."
+                    "BM200/BM6 page cap for automatic and manual history sync. Defaults to the "
+                    "full 85-page retained history. One page is about 8 hours and 32 minutes."
                 ),
             )
             + settings_control_row(

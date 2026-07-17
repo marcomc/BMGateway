@@ -549,6 +549,7 @@ def chart_card(
     legend: list[tuple[str, str]],
     show_markers: bool = False,
     actions_html: str = "",
+    data_endpoint: str = "",
 ) -> str:
     points_json = json.dumps(points, separators=(",", ":")).replace("</", "<\\/")
     legend_html = "".join(
@@ -589,6 +590,9 @@ def chart_card(
         if actions_html
         else ""
     )
+    data_endpoint_attr = (
+        f' data-chart-endpoint="{html.escape(data_endpoint, quote=True)}"' if data_endpoint else ""
+    )
     return (
         '<section class="chart-card">'
         '<div class="chart-card-header">'
@@ -612,7 +616,7 @@ def chart_card(
         f'data-chart-nav="previous" data-chart-id="{html.escape(chart_id)}" '
         'aria-label="Show previous range">‹</button>'
         f'<div class="chart-frame" id="{html.escape(chart_id)}" '
-        f'data-show-markers="{str(show_markers).lower()}">'
+        f'data-show-markers="{str(show_markers).lower()}"{data_endpoint_attr}>'
         '<div class="chart-canvas"></div>'
         '<div class="chart-tooltip" aria-hidden="true"></div>'
         "</div>"
@@ -656,6 +660,7 @@ def chart_script(*chart_ids: str, language: str = "en") -> str:
                 "samples",
                 "Average",
                 "Range",
+                "Unable to load chart history. Try again.",
             )
         },
         ensure_ascii=False,

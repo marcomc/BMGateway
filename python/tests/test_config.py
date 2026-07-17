@@ -81,7 +81,7 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.archive_sync.periodic_interval_seconds == 64800
     assert config.archive_sync.reconnect_min_gap_seconds == 28800
     assert config.archive_sync.safety_margin_seconds == 7200
-    assert config.archive_sync.bm200_max_pages_per_sync == 3
+    assert config.archive_sync.bm200_max_pages_per_sync == 85
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 3
     assert config.bluetooth.live_hard_timeout_seconds == 0
@@ -127,7 +127,7 @@ def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path
     assert config.archive_sync.periodic_interval_seconds == 64800
     assert config.archive_sync.reconnect_min_gap_seconds == 28800
     assert config.archive_sync.safety_margin_seconds == 7200
-    assert config.archive_sync.bm200_max_pages_per_sync == 3
+    assert config.archive_sync.bm200_max_pages_per_sync == 85
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 3
     assert config.retention.raw_retention_days == 730
@@ -204,6 +204,15 @@ def test_validate_config_caps_usb_otg_image_size_to_helper_limit() -> None:
     oversized = replace(config, usb_otg=replace(config.usb_otg, size_mb=4097))
 
     assert "usb_otg.size_mb must be less than or equal to 4096" in validate_config(oversized)
+
+
+def test_validate_config_rejects_invalid_timezone() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+
+    for timezone_name in ("Not/A_Real_Timezone", "/etc/localtime"):
+        invalid = replace(config, gateway=replace(config.gateway, timezone=timezone_name))
+
+        assert "gateway.timezone must be a valid IANA timezone" in validate_config(invalid)
 
 
 def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:

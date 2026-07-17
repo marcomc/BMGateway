@@ -77,8 +77,10 @@ periodic_interval_seconds = 64800
 reconnect_min_gap_seconds = 28800
 # Request overlap around page boundaries to avoid small timestamp gaps.
 safety_margin_seconds = 7200
-# One BM200/BM6 page is 256 records at 2-minute spacing, about 8h32m.
-bm200_max_pages_per_sync = 3
+# Default to the full retained 85-page BM200/BM6 history window. Lower this to
+# cap each automatic or manual history sync.
+# One page is 256 records at 2-minute spacing, about 8h32m.
+bm200_max_pages_per_sync = 85
 # BM300 Pro/BM7 uses the validated byte-7 depth path. The current standard
 # import requests selectors 01, 02, and 03, which reached 769 records in live
 # validation, about 25h38m at 2-minute cadence.

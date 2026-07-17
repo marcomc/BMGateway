@@ -30,6 +30,21 @@ _REQUIRED_SCHEMA_TABLES = frozenset(
     }
 )
 _SCHEMA_READY_PATHS: set[Path] = set()
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _timestamp_microseconds(value: str | None) -> int | None:
+    """Return an ISO timestamp as exact UTC microseconds for SQLite comparisons."""
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = parsed - _UNIX_EPOCH
+    return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
 
 
 def write_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
@@ -71,6 +86,12 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
     path.parent.mkdir(parents=True, exist_ok=True)
     schema_key = path.resolve(strict=False)
     connection = sqlite3.connect(path, timeout=30)
+    connection.create_function(
+        "bm_timestamp_microseconds",
+        1,
+        _timestamp_microseconds,
+        deterministic=True,
+    )
     connection.execute("PRAGMA busy_timeout = 30000")
     if migrate_legacy:
         connection.execute("PRAGMA journal_mode = WAL")
@@ -135,6 +156,7 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
             avg_temperature REAL,
             error_count INTEGER NOT NULL,
             last_seen TEXT NOT NULL,
+            raw_history_complete INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (device_id, day)
         )
         """
@@ -244,6 +266,12 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
     )
     connection.execute(
         """
+        CREATE INDEX IF NOT EXISTS idx_device_samples_device_epoch
+        ON device_samples (device_id, unixepoch(sample_ts) DESC)
+        """
+    )
+    connection.execute(
+        """
         CREATE INDEX IF NOT EXISTS idx_device_samples_device_source_ts
         ON device_samples (device_id, source, source_profile, sample_ts DESC)
         """
@@ -261,6 +289,7 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
         ("min_temperature", "REAL"),
         ("max_temperature", "REAL"),
         ("avg_temperature", "REAL"),
+        ("raw_history_complete", "INTEGER NOT NULL DEFAULT 1"),
     ):
         if column_name not in existing_columns:
             connection.execute(
@@ -326,6 +355,7 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
             avg_temperature REAL,
             error_count INTEGER NOT NULL,
             last_seen TEXT NOT NULL,
+            raw_history_complete INTEGER NOT NULL DEFAULT 1,
             PRIMARY KEY (device_id, day)
         )
         """
@@ -348,7 +378,8 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
             max_temperature,
             avg_temperature,
             error_count,
-            last_seen
+            last_seen,
+            raw_history_complete
         )
         SELECT
             device_id,
@@ -362,7 +393,8 @@ def _ensure_nullable_daily_avg_soc(connection: sqlite3.Connection) -> None:
             {legacy_column("max_temperature", "NULL")},
             {legacy_column("avg_temperature", "NULL")},
             error_count,
-            last_seen
+            last_seen,
+            {legacy_column("raw_history_complete", "1")}
         FROM device_daily_rollups_legacy
         """
     )
@@ -663,15 +695,98 @@ def _rebuild_daily_rollups(connection: sqlite3.Connection) -> None:
         ORDER BY device_id, day
         """
     ).fetchall()
-    connection.execute("DELETE FROM device_daily_rollups")
     _insert_daily_rollup_rows(connection, rows)
+
+
+def _daily_rollup_requires_retained_samples(
+    connection: sqlite3.Connection,
+    *,
+    device_id: str,
+    day: str,
+) -> bool:
+    retained_rollup = connection.execute(
+        """
+        SELECT samples, error_count, raw_history_complete
+        FROM device_daily_rollups
+        WHERE device_id = ? AND day = ?
+        """,
+        (device_id, day),
+    ).fetchone()
+    if retained_rollup is None:
+        return False
+    if not bool(retained_rollup[2]):
+        return True
+    raw_counts = connection.execute(
+        """
+        WITH ranked_samples AS (
+            SELECT
+                voltage,
+                error_code,
+                ROW_NUMBER() OVER (
+                    PARTITION BY device_id, sample_ts
+                    ORDER BY source_priority DESC, imported_at DESC, id DESC
+                ) AS row_rank
+            FROM device_samples
+            WHERE device_id = ?
+              AND substr(sample_ts, 1, 10) = ?
+        )
+        SELECT
+            SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END),
+            SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END)
+        FROM ranked_samples
+        WHERE row_rank = 1
+        """,
+        (device_id, day),
+    ).fetchone()
+    if raw_counts is None:
+        return False
+    retained_samples = int(retained_rollup[0] or 0)
+    retained_errors = int(retained_rollup[1] or 0)
+    raw_samples = int(raw_counts[0] or 0)
+    raw_errors = int(raw_counts[1] or 0)
+    return raw_samples < retained_samples or raw_errors < retained_errors
+
+
+def _require_complete_daily_raw_history(
+    connection: sqlite3.Connection,
+    device_days: set[tuple[str, str]],
+) -> None:
+    protected_days = [
+        f"{device_id}:{day}"
+        for device_id, day in sorted(device_days)
+        if _daily_rollup_requires_retained_samples(
+            connection,
+            device_id=device_id,
+            day=day,
+        )
+    ]
+    if protected_days:
+        raise ValueError(
+            "Cannot replace or delete archive history because retained daily history "
+            f"cannot be rebuilt from raw samples for: {', '.join(protected_days)}"
+        )
 
 
 def _rebuild_daily_rollups_for_device_days(
     connection: sqlite3.Connection,
     device_days: set[tuple[str, str]],
+    *,
+    replace_retained_rollups: bool = False,
 ) -> None:
+    """Rebuild selected daily rows from canonical samples.
+
+    Callers may replace retained rollups only after checking that the pre-mutation
+    raw rows completely cover every affected day.
+    """
     for device_id, day in sorted(device_days):
+        if not replace_retained_rollups and _daily_rollup_requires_retained_samples(
+            connection,
+            device_id=device_id,
+            day=day,
+        ):
+            # Raw retention has already removed part of this day. Its rollup is
+            # the only complete aggregate, so replacing it would lose history.
+            continue
         connection.execute(
             "DELETE FROM device_daily_rollups WHERE device_id = ? AND day = ?",
             (device_id, day),
@@ -738,6 +853,18 @@ def _insert_daily_rollup_rows(
             error_count,
             last_seen
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(device_id, day) DO UPDATE SET
+            samples = excluded.samples,
+            min_voltage = excluded.min_voltage,
+            max_voltage = excluded.max_voltage,
+            avg_voltage = excluded.avg_voltage,
+            avg_soc = excluded.avg_soc,
+            min_temperature = excluded.min_temperature,
+            max_temperature = excluded.max_temperature,
+            avg_temperature = excluded.avg_temperature,
+            error_count = excluded.error_count,
+            last_seen = excluded.last_seen
+        WHERE device_daily_rollups.raw_history_complete = 1
         """,
         [
             (
@@ -759,6 +886,40 @@ def _insert_daily_rollup_rows(
     )
 
 
+def _device_days_from_readings(
+    *,
+    device_id: str,
+    readings: list[dict[str, object]],
+) -> set[tuple[str, str]]:
+    return {
+        (device_id, str(reading["ts"])[:10])
+        for reading in readings
+        if str(reading.get("ts", ""))[:10]
+    }
+
+
+def _device_days_for_archive_profiles(
+    connection: sqlite3.Connection,
+    *,
+    device_id: str,
+    profiles: tuple[str, ...],
+) -> set[tuple[str, str]]:
+    if not profiles:
+        return set()
+    placeholders = ", ".join("?" for _ in profiles)
+    rows = connection.execute(
+        f"""
+        SELECT DISTINCT substr(sample_ts, 1, 10)
+        FROM device_samples
+        WHERE device_id = ?
+          AND source = 'device_archive'
+          AND source_profile IN ({placeholders})
+        """,
+        (device_id, *profiles),
+    ).fetchall()
+    return {(device_id, str(row[0])) for row in rows if row[0]}
+
+
 def _cutoff_iso(days: int) -> str:
     return (datetime.now(tz=timezone.utc).astimezone() - timedelta(days=days)).isoformat(
         timespec="seconds"
@@ -768,7 +929,29 @@ def _cutoff_iso(days: int) -> str:
 def prune_history(path: Path, *, raw_retention_days: int, daily_retention_days: int) -> None:
     connection = _connect_database(path)
     try:
+        # Finalize daily summaries while the canonical raw rows still exist.
+        # Thereafter daily retention, rather than raw retention, controls their lifetime.
+        _rebuild_daily_rollups(connection)
         raw_cutoff = _cutoff_iso(raw_retention_days)
+        # A retained rollup becomes authoritative as soon as pruning removes any
+        # raw rows for its day. Later imports can happen to restore the same row
+        # count without restoring the pruned samples, so only the explicit
+        # coverage marker can determine whether a rebuild is safe.
+        connection.execute(
+            """
+            UPDATE device_daily_rollups
+            SET raw_history_complete = 0
+            WHERE raw_history_complete = 1
+              AND EXISTS (
+                  SELECT 1
+                  FROM device_samples
+                  WHERE device_samples.device_id = device_daily_rollups.device_id
+                    AND substr(device_samples.sample_ts, 1, 10) = device_daily_rollups.day
+                    AND device_samples.sample_ts < ?
+              )
+            """,
+            (raw_cutoff,),
+        )
         connection.execute(
             "DELETE FROM device_readings WHERE snapshot_generated_at < ?",
             (raw_cutoff,),
@@ -785,7 +968,6 @@ def prune_history(path: Path, *, raw_retention_days: int, daily_retention_days: 
             "DELETE FROM device_samples WHERE sample_ts < ?",
             (raw_cutoff,),
         )
-        _rebuild_daily_rollups(connection)
         if daily_retention_days > 0:
             daily_cutoff = _cutoff_iso(daily_retention_days)[:10]
             connection.execute(
@@ -1081,6 +1263,149 @@ def fetch_recent_history_since(
     return _sample_history_dicts(rows)
 
 
+def fetch_history_window(
+    path: Path,
+    *,
+    device_id: str,
+    start_ts: str,
+    end_ts: str,
+) -> list[dict[str, object]]:
+    """Return canonical raw samples for one inclusive history window."""
+    connection = _connect_database(path)
+    try:
+        sample_rows = cast(
+            list[tuple[Any, ...]],
+            connection.execute(
+                """
+                SELECT
+                    sample_ts AS ts,
+                    voltage,
+                    soc,
+                    temperature,
+                    state,
+                    error_code,
+                    error_detail,
+                    source AS sample_source,
+                    source_priority
+                FROM device_samples
+                WHERE device_id = ?
+                  AND bm_timestamp_microseconds(sample_ts) >= bm_timestamp_microseconds(?)
+                  AND bm_timestamp_microseconds(sample_ts) <= bm_timestamp_microseconds(?)
+                ORDER BY bm_timestamp_microseconds(sample_ts) ASC, source_priority DESC
+                """,
+                (device_id, start_ts, end_ts),
+            ).fetchall(),
+        )
+    finally:
+        connection.close()
+    rows = _dedupe_sample_history_rows(sample_rows)
+    return _sample_history_dicts(rows)
+
+
+def fetch_history_day_sample_counts(
+    path: Path,
+    *,
+    device_id: str,
+    start_day: str,
+    end_day: str,
+) -> dict[str, int]:
+    """Return canonical valid raw-sample counts for complete calendar days."""
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            WITH ranked_samples AS (
+                SELECT
+                    sample_ts,
+                    voltage,
+                    error_code,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY device_id, sample_ts
+                        ORDER BY source_priority DESC, imported_at DESC, id DESC
+                    ) AS row_rank
+                FROM device_samples
+                WHERE device_id = ?
+                  AND substr(sample_ts, 1, 10) >= ?
+                  AND substr(sample_ts, 1, 10) <= ?
+            )
+            SELECT substr(sample_ts, 1, 10) AS day, COUNT(*)
+            FROM ranked_samples
+            WHERE row_rank = 1
+              AND error_code IS NULL
+              AND voltage > 0
+            GROUP BY day
+            """,
+            (device_id, start_day, end_day),
+        ).fetchall()
+    finally:
+        connection.close()
+    return {str(day): int(count) for day, count in rows}
+
+
+def fetch_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | None:
+    """Return the first and latest valid canonical sample timestamps for a device."""
+    connection = _connect_database(path)
+    try:
+        earliest_row = connection.execute(
+            """
+            SELECT sample_ts
+            FROM device_samples
+            WHERE device_id = ?
+              AND error_code IS NULL
+              AND voltage > 0
+            ORDER BY bm_timestamp_microseconds(sample_ts) ASC, source_priority DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+        latest_row = connection.execute(
+            """
+            SELECT sample_ts
+            FROM device_samples
+            WHERE device_id = ?
+              AND error_code IS NULL
+              AND voltage > 0
+            ORDER BY bm_timestamp_microseconds(sample_ts) DESC, source_priority DESC
+            LIMIT 1
+            """,
+            (device_id,),
+        ).fetchone()
+    finally:
+        connection.close()
+    if earliest_row is None or latest_row is None:
+        return None
+    return (str(earliest_row[0]), str(latest_row[0]))
+
+
+def fetch_daily_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | None:
+    """Return calendar bounds for every valid day retained for chart history."""
+    connection = _connect_database(path)
+    try:
+        row = connection.execute(
+            """
+            SELECT MIN(day), MAX(day)
+            FROM (
+                SELECT day
+                FROM device_daily_rollups
+                WHERE device_id = ?
+                  AND samples > 0
+                UNION
+                SELECT substr(sample_ts, 1, 10) AS day
+                FROM device_samples
+                WHERE device_id = ?
+                  AND error_code IS NULL
+                  AND voltage > 0
+            )
+            """,
+            (device_id, device_id),
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None or row[0] is None or row[1] is None:
+        return None
+    return (f"{row[0]}T00:00:00", f"{row[1]}T23:59:59")
+
+
 def _dedupe_sample_history_rows(
     sample_rows: list[tuple[Any, ...]],
 ) -> list[tuple[Any, ...]]:
@@ -1126,6 +1451,7 @@ def import_archive_history(
 ) -> int:
     connection = _connect_database(path)
     batch_id: int | None = None
+    affected_device_days = _device_days_from_readings(device_id=device_id, readings=readings)
     try:
         batch_id = _start_archive_import_batch(
             connection,
@@ -1147,7 +1473,7 @@ def import_archive_history(
             readings=readings,
             progress=progress,
         )
-        _rebuild_daily_rollups(connection)
+        _rebuild_daily_rollups_for_device_days(connection, affected_device_days)
         _finish_archive_import_batch(connection, batch_id=batch_id, inserted_count=inserted)
         connection.commit()
     except Exception as exc:
@@ -1178,6 +1504,19 @@ def replace_archive_history_profiles(
     connection = _connect_database(path)
     batch_id: int | None = None
     try:
+        affected_device_days = _device_days_from_readings(
+            device_id=device_id,
+            readings=readings,
+        )
+        if replace_profiles:
+            affected_device_days.update(
+                _device_days_for_archive_profiles(
+                    connection,
+                    device_id=device_id,
+                    profiles=replace_profiles,
+                )
+            )
+            _require_complete_daily_raw_history(connection, affected_device_days)
         batch_id = _start_archive_import_batch(
             connection,
             device_id=device_id,
@@ -1216,7 +1555,11 @@ def replace_archive_history_profiles(
             readings=readings,
             progress=progress,
         )
-        _rebuild_daily_rollups(connection)
+        _rebuild_daily_rollups_for_device_days(
+            connection,
+            affected_device_days,
+            replace_retained_rollups=True,
+        )
         _finish_archive_import_batch(connection, batch_id=batch_id, inserted_count=inserted)
         connection.commit()
         return inserted
@@ -1405,6 +1748,12 @@ def delete_archive_history_profiles(
     connection = _connect_database(path)
     try:
         placeholders = ", ".join("?" for _ in profiles)
+        affected_device_days = _device_days_for_archive_profiles(
+            connection,
+            device_id=device_id,
+            profiles=profiles,
+        )
+        _require_complete_daily_raw_history(connection, affected_device_days)
         connection.execute(
             f"""
             DELETE FROM device_archive_readings
@@ -1421,7 +1770,11 @@ def delete_archive_history_profiles(
             """,
             (device_id, *profiles),
         )
-        _rebuild_daily_rollups(connection)
+        _rebuild_daily_rollups_for_device_days(
+            connection,
+            affected_device_days,
+            replace_retained_rollups=True,
+        )
         connection.commit()
         return int(cursor.rowcount or 0)
     finally:
@@ -1521,6 +1874,126 @@ def fetch_daily_history(path: Path, *, device_id: str, limit: int = 365) -> list
             "avg_temperature": row[6],
             "error_count": row[7],
             "last_seen": row[8],
+        }
+        for row in rows
+    ]
+
+
+def fetch_daily_history_window(
+    path: Path,
+    *,
+    device_id: str,
+    start_day: str,
+    end_day: str,
+) -> list[dict[str, object]]:
+    """Return one daily window, rebuilding only daily rows absent from retained rollups."""
+    connection = _connect_database(path)
+    try:
+        rows = connection.execute(
+            """
+            WITH ranked_samples AS (
+                SELECT
+                    sample_ts,
+                    voltage,
+                    soc,
+                    temperature,
+                    error_code,
+                    last_seen,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY device_id, sample_ts
+                        ORDER BY source_priority DESC, imported_at DESC, id DESC
+                    ) AS row_rank
+                FROM device_samples
+                WHERE device_id = ?
+                  AND substr(sample_ts, 1, 10) >= ?
+                  AND substr(sample_ts, 1, 10) <= ?
+            ),
+            raw_daily AS (
+                SELECT
+                    substr(sample_ts, 1, 10) AS day,
+                    SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END)
+                        AS samples,
+                    MIN(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                        AS min_voltage,
+                    MAX(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                        AS max_voltage,
+                    AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN voltage END)
+                        AS avg_voltage,
+                    AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN soc END) AS avg_soc,
+                    AVG(CASE WHEN error_code IS NULL AND voltage > 0 THEN temperature END)
+                        AS avg_temperature,
+                    SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END) AS error_count,
+                    MAX(last_seen) AS last_seen
+                FROM ranked_samples
+                WHERE row_rank = 1
+                GROUP BY day
+            ),
+            retained_daily AS (
+                SELECT
+                    day,
+                    samples,
+                    min_voltage,
+                    max_voltage,
+                    avg_voltage,
+                    avg_soc,
+                    avg_temperature,
+                    error_count,
+                    last_seen,
+                    raw_history_complete
+                FROM device_daily_rollups
+                WHERE device_id = ?
+                  AND day >= ?
+                  AND day <= ?
+            )
+            SELECT
+                day,
+                samples,
+                min_voltage,
+                max_voltage,
+                avg_voltage,
+                avg_soc,
+                avg_temperature,
+                error_count,
+                last_seen,
+                raw_history_complete
+            FROM retained_daily
+            UNION ALL
+            SELECT
+                raw_daily.day,
+                raw_daily.samples,
+                raw_daily.min_voltage,
+                raw_daily.max_voltage,
+                raw_daily.avg_voltage,
+                raw_daily.avg_soc,
+                raw_daily.avg_temperature,
+                raw_daily.error_count,
+                raw_daily.last_seen,
+                1 AS raw_history_complete
+            FROM raw_daily
+            WHERE NOT EXISTS (
+                SELECT 1
+                FROM retained_daily
+                WHERE retained_daily.day = raw_daily.day
+            )
+            ORDER BY day ASC
+            """,
+            (device_id, start_day, end_day, device_id, start_day, end_day),
+        ).fetchall()
+    finally:
+        connection.close()
+    return [
+        {
+            "device_id": device_id,
+            "day": row[0],
+            "samples": row[1],
+            "min_voltage": row[2],
+            "max_voltage": row[3],
+            "avg_voltage": row[4],
+            "avg_soc": row[5],
+            "avg_temperature": row[6],
+            "error_count": row[7],
+            "last_seen": row[8],
+            "raw_history_complete": bool(row[9]),
         }
         for row in rows
     ]

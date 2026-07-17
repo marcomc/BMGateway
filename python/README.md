@@ -71,6 +71,8 @@ The web UI route and API reference is maintained in
 - service-friendly Raspberry Pi deployment shape
 - modular web UI localization selected through `web.language`
 - optional self-healing for scheduled host reboots and Wi-Fi recovery
+- live BLE backoff for devices that stop advertising and recovery after two
+  fleet-wide timeout cycles
 
 BM200/BM6-family and BM300 Pro/BM7-family live polling now share the same BLE
 scan, connect, notify, retry, and cleanup control flow. The protocol-specific
@@ -103,8 +105,9 @@ whether an archive import is running, completed, or failed, but it is not an
 intermediate measurement store.
 
 Raw history retention defaults to two years and applies to `device_samples`.
-Daily rollups default to no extra rollup-only pruning; after samples are
-pruned, rollups are rebuilt from the retained canonical samples.
+Daily rollups are finalized from canonical samples before raw pruning and
+default to no extra rollup-only pruning, so long-range charts remain available
+after detailed samples expire.
 
 The audit log is newline-delimited JSON intended for machine correlation during
 operations debugging. It records automatic polling cycles, per-device poll

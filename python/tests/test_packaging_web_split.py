@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 import tomllib
 from pathlib import Path
 
@@ -94,9 +95,57 @@ def test_install_service_script_preserves_archive_sync_preferences() -> None:
     assert 'archive_sync.get("periodic_interval_seconds", 64800)' in payload
     assert 'archive_sync.get("reconnect_min_gap_seconds", 28800)' in payload
     assert 'archive_sync.get("safety_margin_seconds", 7200)' in payload
-    assert 'archive_sync.get("bm200_max_pages_per_sync", 3)' in payload
+    assert 'archive_sync.get("bm200_max_pages_per_sync", 85)' in payload
+    assert "bm200_page_cap_marker" not in payload
     assert 'archive_sync.get("bm300_enabled", True)' in payload
     assert 'archive_sync.get("bm300_max_pages_per_sync", 3)' in payload
+
+
+def test_install_service_preserves_explicit_bm200_archive_page_cap(tmp_path: Path) -> None:
+    project_root = Path(__file__).resolve().parents[2]
+    script_path = project_root / "rpi-setup" / "scripts" / "install-service.sh"
+    payload = script_path.read_text(encoding="utf-8")
+    command = (
+        'python3 - <<\'PY\' "${config_path}" "${state_dir}" "${web_host}" "${web_port}" '
+        '"${enable_home_assistant}" "${enable_web}"\n'
+    )
+    start = payload.index(command) + len(command)
+    rewrite_config = payload[start : payload.index("\nPY\n", start)]
+    config_path = tmp_path / "config.toml"
+    state_dir = tmp_path / "state"
+    config_path.write_text(
+        "[archive_sync]\nbm200_max_pages_per_sync = 3\n",
+        encoding="utf-8",
+    )
+
+    def rewrite() -> None:
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                rewrite_config,
+                str(config_path),
+                str(state_dir),
+                "0.0.0.0",
+                "80",
+                "1",
+                "1",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+        assert result.returncode == 0, result.stderr
+
+    rewrite()
+    with config_path.open("rb") as handle:
+        assert tomllib.load(handle)["archive_sync"]["bm200_max_pages_per_sync"] == 3
+
+    rewrite()
+
+    with config_path.open("rb") as handle:
+        assert tomllib.load(handle)["archive_sync"]["bm200_max_pages_per_sync"] == 3
 
 
 def test_install_service_script_preserves_runtime_recovery_preferences() -> None:

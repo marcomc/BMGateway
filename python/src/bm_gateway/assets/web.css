@@ -1852,6 +1852,26 @@ details summary::-webkit-details-marker { display: none; }
 .chart-canvas {
   min-height: 0;
 }
+.chart-frame.is-loading .chart-canvas {
+  opacity: 0.42;
+}
+.chart-frame.is-loading::after {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1.7rem;
+  height: 1.7rem;
+  border: 0.2rem solid color-mix(in srgb, var(--text-secondary) 28%, transparent);
+  border-top-color: var(--accent-green);
+  border-radius: 50%;
+  animation: chart-loading-spin 0.75s linear infinite;
+  transform: translate(-50%, -50%);
+}
+.chart-load-error {
+  color: var(--danger);
+  font-weight: 700;
+}
 .chart-canvas svg {
   display: block;
   width: 100%;
@@ -1865,6 +1885,11 @@ details summary::-webkit-details-marker { display: none; }
 }
 .chart-frame.is-panning {
   cursor: grabbing;
+}
+@keyframes chart-loading-spin {
+  to {
+    transform: translate(-50%, -50%) rotate(360deg);
+  }
 }
 .chart-nav-arrow {
   position: absolute;

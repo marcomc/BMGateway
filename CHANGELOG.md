@@ -4,6 +4,73 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.3] - 2026-07-17 - Windowed History Charts
+
+### Fixed
+
+- History and Device Detail charts now request one navigated time window at a
+  time: 1 to 30-day views render their retained raw samples exactly when the
+  whole page is still raw; pages that cross raw expiry and wider views use
+  daily rollups without putting the full raw retention period in the browser.
+- Removed the unbounded `All` chart range. The two-year range is now the
+  largest page, and its arrows and drag navigation can traverse the complete
+  retained history without loading it all into the browser.
+- Archive profile replace and delete operations now refuse a change that would
+  overwrite a retained daily aggregate with incomplete raw history.
+- Fixed daily-rollup-only history pages so consecutive daily points remain a
+  visible chart line instead of disappearing after raw samples expire.
+- BM200/BM6 archive sync timeouts now scale with the configured page cap, so a
+  full retained-history recovery is not cut short by the former fixed deadline.
+- Invalid IANA gateway timezones are now rejected during config validation, and
+  chart history safely returns an empty response if an internal caller supplies
+  an invalid timezone.
+- Fixed raw-history page boundaries at millisecond precision so moving between
+  pages cannot repeat a sample at the shared edge.
+- The service installer now preserves an explicitly configured three-page
+  BM200 archive-sync cap instead of converting it to the new default.
+- Daily rollups now remain authoritative after raw retention prunes a day, even
+  when a later archive import happens to restore the same raw-sample count.
+- Raw samples recorded within the same second now retain chronological order
+  and precise chart-history availability bounds.
+- Short raw chart ranges now end at the newest raw sample and can page back
+  into retained daily history without leaving an empty future interval.
+- Short charts now honor an authoritative retained daily rollup after raw
+  pruning, even if a later import restores the same raw-sample count.
+- Raw chart page predicates and availability bounds now preserve microsecond
+  timestamp precision.
+- Raw chart navigation and prefetch now preserve microsecond page cursors.
+- Daily chart navigation now follows gateway calendar days across daylight-saving
+  time changes.
+- Fleet-wide BLE recovery now continues across timeout and device-not-found
+  cycles that include individually backed-off devices.
+
+## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
+
+### Fixed
+
+- Removed the effective 3-page cap from automatic BM200/BM6 archive recovery, so
+  reconnect backfill can request the full 85-page retained history window when a
+  multi-day outage needs more than the routine sync depth.
+- Migrated the old generated 3-page BM200/BM6 default to 85 pages during the
+  first service refresh, while preserving any page cap set after that migration.
+- Made CLI-triggered manual BM200/BM6 archive syncs use the configured page cap
+  when `--page-count` is omitted.
+
+## [0.3.1] - 2026-05-30 - BLE Timeout Recovery and Missing Device Backoff
+
+### Fixed
+
+- Added live BLE recovery after two consecutive polling cycles where no enabled
+  live device comes online and every live device is either timed out or missing,
+  so a degraded BlueZ or adapter state is restarted automatically instead of
+  staying stuck indefinitely.
+- Added per-device backoff for devices that are not advertising, so one missing
+  spare monitor no longer forces repeated long BLE scan windows before the
+  runtime can continue with the rest of the fleet.
+- Kept fleet-level BLE recovery active when every live device remains in
+  per-device backoff for a sustained run, without counting an individual skip
+  as a fresh BLE probe failure.
+
 ## [0.3.0] - Unreachable Device Status Split and Raspberry Pi Compatibility and Self-Healing Improvements
 
 ### Changed

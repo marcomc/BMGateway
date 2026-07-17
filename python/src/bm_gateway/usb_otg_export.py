@@ -278,6 +278,8 @@ def _compact_frame_chart_points(
     range_value: str,
     limit: int = _FRAME_CHART_POINT_LIMIT,
 ) -> list[dict[str, object]]:
+    if range_value == "all":
+        range_value = "730"
     timestamped = [
         (timestamp, point)
         for point in chart_points

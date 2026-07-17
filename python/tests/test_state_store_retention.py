@@ -12,7 +12,10 @@ from bm_gateway.state_store import (
     fetch_archive_history,
     fetch_counts,
     fetch_daily_history,
+    fetch_daily_history_window,
     fetch_degradation_report,
+    fetch_history_bounds,
+    fetch_history_window,
     fetch_monthly_history,
     fetch_recent_history,
     fetch_recent_history_since,
@@ -195,7 +198,7 @@ def test_persist_snapshot_averages_temperature_over_non_null_values(
     assert daily[0]["avg_temperature"] == 21.0
 
 
-def test_prune_history_removes_old_raw_rows_and_rebuilds_daily_rollups(
+def test_prune_history_removes_old_raw_rows_and_retains_daily_rollups(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "gateway.db"
@@ -211,8 +214,59 @@ def test_prune_history_removes_old_raw_rows_and_rebuilds_daily_rollups(
         connection.close()
 
     assert raw_count == (0,)
-    assert daily_count == (0,)
-    assert fetch_daily_history(database_path, device_id="bm200_house", limit=30) == []
+    assert daily_count == (1,)
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=30)
+    assert daily[0]["day"] == "2024-01-01"
+
+
+def test_prune_history_applies_daily_rollup_retention_independently_of_raw_retention(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    now = datetime.now(tz=timezone.utc).astimezone()
+    expired_day = (now - timedelta(days=20)).isoformat(timespec="seconds")
+    retained_day = (now - timedelta(days=2)).isoformat(timespec="seconds")
+    persist_snapshot(database_path, _snapshot(expired_day))
+    persist_snapshot(database_path, _snapshot(retained_day))
+
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=10)
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=30)
+
+    assert [row["day"] for row in daily] == [retained_day[:10]]
+
+
+def test_daily_window_rebuilds_days_retained_only_as_raw_samples(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    timestamp = (datetime.now(tz=timezone.utc).astimezone() - timedelta(days=3)).isoformat(
+        timespec="seconds"
+    )
+    persist_snapshot(database_path, _snapshot(timestamp))
+
+    prune_history(database_path, raw_retention_days=30, daily_retention_days=1)
+
+    daily = fetch_daily_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_day=timestamp[:10],
+        end_day=timestamp[:10],
+    )
+
+    assert daily == [
+        {
+            "device_id": "bm200_house",
+            "day": timestamp[:10],
+            "samples": 1,
+            "min_voltage": 12.73,
+            "max_voltage": 12.73,
+            "avg_voltage": 12.73,
+            "avg_soc": 58.0,
+            "avg_temperature": None,
+            "error_count": 0,
+            "last_seen": timestamp,
+            "raw_history_complete": True,
+        }
+    ]
 
 
 def test_prune_history_removes_old_archive_rows_with_raw_retention(
@@ -251,6 +305,228 @@ def test_prune_history_removes_old_archive_rows_with_raw_retention(
 
     archive_rows = fetch_archive_history(database_path, device_id="bm200_house", limit=10)
     assert [row["ts"] for row in archive_rows] == [kept_ts]
+
+
+def test_archive_profile_changes_preserve_daily_rollup_when_raw_history_is_partial(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    for timestamp, voltage in (
+        ("2026-07-15T00:00:00+02:00", 12.0),
+        ("2026-07-15T06:00:00+02:00", 13.0),
+        ("2026-07-15T18:00:00+02:00", 14.0),
+    ):
+        persist_snapshot(database_path, _snapshot(timestamp, voltage=voltage))
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda _days: "2026-07-15T12:00:00+02:00",
+    )
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+    connection = sqlite3.connect(database_path)
+    try:
+        # Existing databases receive the new marker with its complete-history
+        # default, so the retained-versus-raw count fallback remains necessary.
+        connection.execute("UPDATE device_daily_rollups SET raw_history_complete = 1")
+        connection.commit()
+    finally:
+        connection.close()
+
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2026-07-15T20:00:00+02:00",
+                "voltage": 14.5,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            }
+        ],
+    )
+
+    with pytest.raises(ValueError, match="Cannot replace or delete archive history"):
+        delete_archive_history_profiles(
+            database_path,
+            device_id="bm200_house",
+            profiles=("legacy_bm2_history",),
+        )
+    with pytest.raises(ValueError, match="Cannot replace or delete archive history"):
+        replace_archive_history_profiles(
+            database_path,
+            device_id="bm200_house",
+            device_type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            adapter="hci0",
+            driver="bm200",
+            profile="replacement_history",
+            replace_profiles=("legacy_bm2_history",),
+            readings=[
+                {
+                    "ts": "2026-07-15T21:00:00+02:00",
+                    "voltage": 15.0,
+                    "min_crank_voltage": None,
+                    "event_type": 0,
+                }
+            ],
+        )
+
+    daily = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+    archive = fetch_archive_history(database_path, device_id="bm200_house", limit=1)
+
+    assert daily[0]["samples"] == 3
+    assert daily[0]["min_voltage"] == 12.0
+    assert daily[0]["max_voltage"] == 14.0
+    assert daily[0]["avg_voltage"] == 13.0
+    assert archive[0]["profile"] == "legacy_bm2_history"
+
+
+def test_archive_import_does_not_replace_retained_rollup_when_raw_counts_tie(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    for timestamp, voltage in (
+        ("2026-07-15T00:00:00+02:00", 12.0),
+        ("2026-07-15T06:00:00+02:00", 13.0),
+        ("2026-07-15T18:00:00+02:00", 14.0),
+    ):
+        persist_snapshot(database_path, _snapshot(timestamp, voltage=voltage))
+    monkeypatch.setattr(
+        "bm_gateway.state_store._cutoff_iso",
+        lambda _days: "2026-07-15T12:00:00+02:00",
+    )
+    prune_history(database_path, raw_retention_days=1, daily_retention_days=0)
+
+    import_archive_history(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="legacy_bm2_history",
+        readings=[
+            {
+                "ts": "2026-07-15T20:00:00+02:00",
+                "voltage": 14.5,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+            {
+                "ts": "2026-07-15T21:00:00+02:00",
+                "voltage": 15.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            },
+        ],
+    )
+
+    assert fetch_counts(database_path)["device_samples"] == 3
+    assert (
+        fetch_daily_history_window(
+            database_path,
+            device_id="bm200_house",
+            start_day="2026-07-15",
+            end_day="2026-07-15",
+        )[0]["raw_history_complete"]
+        is False
+    )
+    assert fetch_daily_history(database_path, device_id="bm200_house", limit=1) == [
+        {
+            "device_id": "bm200_house",
+            "day": "2026-07-15",
+            "samples": 3,
+            "min_voltage": 12.0,
+            "max_voltage": 14.0,
+            "avg_voltage": 13.0,
+            "avg_soc": 58.0,
+            "avg_temperature": None,
+            "error_count": 0,
+            "last_seen": "2026-07-15T18:00:00+02:00",
+        }
+    ]
+
+
+def test_archive_profile_changes_rebuild_daily_rollups_from_complete_raw_history(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    for profile, timestamp, voltage in (
+        ("legacy_bm2_history", "2026-07-15T00:00:00+02:00", 12.0),
+        ("secondary_history", "2026-07-15T06:00:00+02:00", 13.0),
+    ):
+        import_archive_history(
+            database_path,
+            device_id="bm200_house",
+            device_type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            adapter="hci0",
+            driver="bm200",
+            profile=profile,
+            readings=[
+                {
+                    "ts": timestamp,
+                    "voltage": voltage,
+                    "min_crank_voltage": None,
+                    "event_type": 0,
+                }
+            ],
+        )
+
+    deleted = delete_archive_history_profiles(
+        database_path,
+        device_id="bm200_house",
+        profiles=("legacy_bm2_history",),
+    )
+    daily_after_delete = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+
+    replaced = replace_archive_history_profiles(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="replacement_history",
+        replace_profiles=("secondary_history",),
+        readings=[
+            {
+                "ts": "2026-07-15T12:00:00+02:00",
+                "voltage": 15.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            }
+        ],
+    )
+    daily_after_replace = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+
+    assert deleted == 1
+    assert len(daily_after_delete) == 1
+    assert daily_after_delete[0]["day"] == "2026-07-15"
+    assert daily_after_delete[0]["samples"] == 1
+    assert daily_after_delete[0]["min_voltage"] == 13.0
+    assert daily_after_delete[0]["max_voltage"] == 13.0
+    assert daily_after_delete[0]["avg_voltage"] == 13.0
+    assert daily_after_delete[0]["last_seen"] == "2026-07-15T06:00:00+02:00"
+    assert replaced == 1
+    assert len(daily_after_replace) == 1
+    assert daily_after_replace[0]["day"] == "2026-07-15"
+    assert daily_after_replace[0]["samples"] == 1
+    assert daily_after_replace[0]["min_voltage"] == 15.0
+    assert daily_after_replace[0]["max_voltage"] == 15.0
+    assert daily_after_replace[0]["avg_voltage"] == 15.0
+    assert daily_after_replace[0]["last_seen"] == "2026-07-15T12:00:00+02:00"
 
 
 def test_prune_history_removes_old_canonical_samples_with_raw_retention(
@@ -1644,6 +1920,124 @@ def test_fetch_recent_history_since_reads_time_window_without_recent_count_limit
     ]
     assert rows[0]["sample_source"] == "live"
     assert rows[0]["soc"] == 60
+
+
+def test_history_window_uses_chronological_order_across_dst_offset_change(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    before_fallback = "2025-10-26T02:30:00+02:00"
+    after_fallback = "2025-10-26T02:00:00+01:00"
+    persist_snapshot(database_path, _snapshot(before_fallback, voltage=12.61))
+    persist_snapshot(database_path, _snapshot(after_fallback, voltage=12.72))
+
+    assert fetch_history_bounds(database_path, device_id="bm200_house") == (
+        before_fallback,
+        after_fallback,
+    )
+    rows = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2025-10-26T00:00:00+00:00",
+        end_ts="2025-10-26T02:00:00+00:00",
+    )
+
+    assert [row["ts"] for row in rows] == [before_fallback, after_fallback]
+
+
+def test_history_window_preserves_millisecond_boundaries_between_raw_pages(tmp_path: Path) -> None:
+    database_path = tmp_path / "gateway.db"
+    previous_page_end = "2026-07-11T12:00:00.000+00:00"
+    next_page_start = "2026-07-11T12:00:00.001+00:00"
+    persist_snapshot(database_path, _snapshot(previous_page_end, voltage=12.61))
+    persist_snapshot(database_path, _snapshot(next_page_start, voltage=12.72))
+
+    previous_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T00:00:00+00:00",
+        end_ts=previous_page_end,
+    )
+    next_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts=next_page_start,
+        end_ts="2026-07-11T23:59:59+00:00",
+    )
+
+    assert [row["ts"] for row in previous_page] == [previous_page_end]
+    assert [row["ts"] for row in next_page] == [next_page_start]
+
+
+def test_history_window_preserves_microsecond_boundaries_between_raw_pages(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    previous_page_end = "2026-07-11T12:00:00.123456+00:00"
+    next_page_start = "2026-07-11T12:00:00.123457+00:00"
+    persist_snapshot(database_path, _snapshot(previous_page_end, voltage=12.61))
+    persist_snapshot(database_path, _snapshot(next_page_start, voltage=12.72))
+
+    previous_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T00:00:00+00:00",
+        end_ts=previous_page_end,
+    )
+    next_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts=next_page_start,
+        end_ts="2026-07-11T23:59:59+00:00",
+    )
+
+    assert [row["ts"] for row in previous_page] == [previous_page_end]
+    assert [row["ts"] for row in next_page] == [next_page_start]
+    assert {row["ts"] for row in previous_page}.isdisjoint(row["ts"] for row in next_page)
+
+
+def test_history_window_and_bounds_order_millisecond_samples_across_offsets(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    first_sample = "2026-07-11T14:00:00.000+02:00"
+    second_sample = "2026-07-11T12:00:00.001+00:00"
+    persist_snapshot(database_path, _snapshot(second_sample, voltage=12.72))
+    persist_snapshot(database_path, _snapshot(first_sample, voltage=12.61))
+
+    assert fetch_history_bounds(database_path, device_id="bm200_house") == (
+        first_sample,
+        second_sample,
+    )
+    rows = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T12:00:00.000+00:00",
+        end_ts=second_sample,
+    )
+
+    assert [row["ts"] for row in rows] == [first_sample, second_sample]
+
+
+def test_history_window_and_bounds_order_microsecond_samples_across_offsets(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    first_sample = "2026-07-11T14:00:00.123456+02:00"
+    second_sample = "2026-07-11T12:00:00.123457+00:00"
+    persist_snapshot(database_path, _snapshot(second_sample, voltage=12.72))
+    persist_snapshot(database_path, _snapshot(first_sample, voltage=12.61))
+
+    assert fetch_history_bounds(database_path, device_id="bm200_house") == (
+        first_sample,
+        second_sample,
+    )
+    rows = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T12:00:00.123456+00:00",
+        end_ts=second_sample,
+    )
+
+    assert [row["ts"] for row in rows] == [first_sample, second_sample]
 
 
 def test_fetch_daily_history_merges_archive_only_days(tmp_path: Path) -> None:
