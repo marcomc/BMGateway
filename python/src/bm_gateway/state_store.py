@@ -30,6 +30,21 @@ _REQUIRED_SCHEMA_TABLES = frozenset(
     }
 )
 _SCHEMA_READY_PATHS: set[Path] = set()
+_UNIX_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+def _timestamp_microseconds(value: str | None) -> int | None:
+    """Return an ISO timestamp as exact UTC microseconds for SQLite comparisons."""
+    if value is None:
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    delta = parsed - _UNIX_EPOCH
+    return ((delta.days * 86_400) + delta.seconds) * 1_000_000 + delta.microseconds
 
 
 def write_snapshot(path: Path, snapshot: GatewaySnapshot) -> None:
@@ -71,6 +86,12 @@ def _connect_database(path: Path, *, migrate_legacy: bool = True) -> sqlite3.Con
     path.parent.mkdir(parents=True, exist_ok=True)
     schema_key = path.resolve(strict=False)
     connection = sqlite3.connect(path, timeout=30)
+    connection.create_function(
+        "bm_timestamp_microseconds",
+        1,
+        _timestamp_microseconds,
+        deterministic=True,
+    )
     connection.execute("PRAGMA busy_timeout = 30000")
     if migrate_legacy:
         connection.execute("PRAGMA journal_mode = WAL")
@@ -1268,9 +1289,9 @@ def fetch_history_window(
                     source_priority
                 FROM device_samples
                 WHERE device_id = ?
-                  AND julianday(sample_ts) >= julianday(?)
-                  AND julianday(sample_ts) <= julianday(?)
-                ORDER BY julianday(sample_ts) ASC, source_priority DESC
+                  AND bm_timestamp_microseconds(sample_ts) >= bm_timestamp_microseconds(?)
+                  AND bm_timestamp_microseconds(sample_ts) <= bm_timestamp_microseconds(?)
+                ORDER BY bm_timestamp_microseconds(sample_ts) ASC, source_priority DESC
                 """,
                 (device_id, start_ts, end_ts),
             ).fetchall(),
@@ -1332,7 +1353,7 @@ def fetch_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | Non
             WHERE device_id = ?
               AND error_code IS NULL
               AND voltage > 0
-            ORDER BY julianday(sample_ts) ASC, source_priority DESC
+            ORDER BY bm_timestamp_microseconds(sample_ts) ASC, source_priority DESC
             LIMIT 1
             """,
             (device_id,),
@@ -1344,7 +1365,7 @@ def fetch_history_bounds(path: Path, *, device_id: str) -> tuple[str, str] | Non
             WHERE device_id = ?
               AND error_code IS NULL
               AND voltage > 0
-            ORDER BY julianday(sample_ts) DESC, source_priority DESC
+            ORDER BY bm_timestamp_microseconds(sample_ts) DESC, source_priority DESC
             LIMIT 1
             """,
             (device_id,),

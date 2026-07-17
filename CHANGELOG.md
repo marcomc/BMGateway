@@ -36,6 +36,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   into retained daily history without leaving an empty future interval.
 - Short charts now honor an authoritative retained daily rollup after raw
   pruning, even if a later import restores the same raw-sample count.
+- Raw chart page predicates and availability bounds now preserve microsecond
+  timestamp precision.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

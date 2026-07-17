@@ -1967,6 +1967,33 @@ def test_history_window_preserves_millisecond_boundaries_between_raw_pages(tmp_p
     assert [row["ts"] for row in next_page] == [next_page_start]
 
 
+def test_history_window_preserves_microsecond_boundaries_between_raw_pages(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    previous_page_end = "2026-07-11T12:00:00.123456+00:00"
+    next_page_start = "2026-07-11T12:00:00.123457+00:00"
+    persist_snapshot(database_path, _snapshot(previous_page_end, voltage=12.61))
+    persist_snapshot(database_path, _snapshot(next_page_start, voltage=12.72))
+
+    previous_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T00:00:00+00:00",
+        end_ts=previous_page_end,
+    )
+    next_page = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts=next_page_start,
+        end_ts="2026-07-11T23:59:59+00:00",
+    )
+
+    assert [row["ts"] for row in previous_page] == [previous_page_end]
+    assert [row["ts"] for row in next_page] == [next_page_start]
+    assert {row["ts"] for row in previous_page}.isdisjoint(row["ts"] for row in next_page)
+
+
 def test_history_window_and_bounds_order_millisecond_samples_across_offsets(
     tmp_path: Path,
 ) -> None:
@@ -1984,6 +2011,29 @@ def test_history_window_and_bounds_order_millisecond_samples_across_offsets(
         database_path,
         device_id="bm200_house",
         start_ts="2026-07-11T12:00:00.000+00:00",
+        end_ts=second_sample,
+    )
+
+    assert [row["ts"] for row in rows] == [first_sample, second_sample]
+
+
+def test_history_window_and_bounds_order_microsecond_samples_across_offsets(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    first_sample = "2026-07-11T14:00:00.123456+02:00"
+    second_sample = "2026-07-11T12:00:00.123457+00:00"
+    persist_snapshot(database_path, _snapshot(second_sample, voltage=12.72))
+    persist_snapshot(database_path, _snapshot(first_sample, voltage=12.61))
+
+    assert fetch_history_bounds(database_path, device_id="bm200_house") == (
+        first_sample,
+        second_sample,
+    )
+    rows = fetch_history_window(
+        database_path,
+        device_id="bm200_house",
+        start_ts="2026-07-11T12:00:00.123456+00:00",
         end_ts=second_sample,
     )
 
