@@ -86,7 +86,7 @@
   "Bus": "Bus",
   "Camper": "Camper",
   "Capacity (Ah)": "Capacita (Ah)",
-  "Caps each automatic or manual BM200/BM6 history sync. One page is about 8 hours and 32 minutes.": "Limita ogni sincronizzazione automatica o manuale dello storico BM200/BM6. Una pagina dura circa 8 ore e 32 minuti.",
+  "BM200/BM6 automatic recovery can request up to the full 85-page retained history. One page is about 8 hours and 32 minutes.": "Il recupero automatico BM200/BM6 puo richiedere fino all'intero storico conservato di 85 pagine. Una pagina dura circa 8 ore e 32 minuti.",
   "Caps each automatic or manual BM300 Pro/BM7 history sync. The configured maximum is based on the observed 883-record selector window and the advertised 72-day retention.": "Limita ogni sincronizzazione automatica o manuale dello storico BM300 Pro/BM7. Il massimo configurato si basa sulla finestra osservata di 883 record e sulla conservazione pubblicizzata di 72 giorni.",
   "Car": "Auto",
   "Charging": "In carica",

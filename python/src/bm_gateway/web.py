@@ -1437,7 +1437,7 @@ def serve_management(
                         form.get("reconnect_min_gap_seconds", ["28800"])[0]
                     )
                     safety_margin_seconds = int(form.get("safety_margin_seconds", ["7200"])[0])
-                    bm200_max_pages_per_sync = int(form.get("bm200_max_pages_per_sync", ["3"])[0])
+                    bm200_max_pages_per_sync = int(form.get("bm200_max_pages_per_sync", ["85"])[0])
                     bm300_max_pages_per_sync = int(form.get("bm300_max_pages_per_sync", ["1"])[0])
                 except ValueError:
                     configured_devices = load_device_registry(config.device_registry_path)

@@ -1609,7 +1609,7 @@ def test_update_archive_sync_preferences_persists_backfill_settings(tmp_path: Pa
     assert config.archive_sync.periodic_interval_seconds == 43200
     assert config.archive_sync.reconnect_min_gap_seconds == 14400
     assert config.archive_sync.safety_margin_seconds == 1800
-    assert config.archive_sync.bm200_max_pages_per_sync == 6
+    assert config.archive_sync.bm200_max_pages_per_sync == 85
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 9
 
@@ -1683,7 +1683,7 @@ def test_sync_history_now_includes_bm300_when_bm7_import_is_enabled(
 
     assert payload["requested"] == 2
     assert payload["synced"] == 2
-    assert captured_pages == {"bm200_house": 2, "bm300_doc": 5}
+    assert captured_pages == {"bm200_house": 85, "bm300_doc": 5}
     audit_files = list((tmp_path / "state" / "runtime" / "audit").glob("*.jsonl"))
     assert len(audit_files) == 1
     payloads = [
@@ -1900,7 +1900,7 @@ def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> No
     assert config.archive_sync.periodic_interval_seconds == 43200
     assert config.archive_sync.reconnect_min_gap_seconds == 14400
     assert config.archive_sync.safety_margin_seconds == 1800
-    assert config.archive_sync.bm200_max_pages_per_sync == 6
+    assert config.archive_sync.bm200_max_pages_per_sync == 85
     assert config.archive_sync.bm300_enabled is True
     assert config.archive_sync.bm300_max_pages_per_sync == 9
 

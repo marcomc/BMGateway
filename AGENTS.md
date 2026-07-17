@@ -58,6 +58,12 @@ At the start of every new AI agent chat for this repository, read:
 - When adding derived persistence such as rollups or summaries, rebuild or
   validate it from the canonical source rows and timestamps rather than
   incrementing a second source of truth independently.
+- For history charts, derive all-range coverage from the configured retention
+  policy rather than a fixed display cap, and test retention beyond every
+  paging limit.
+- Test historical chart navigation and SVG rendering independently with
+  daily-rollup-only fixtures; downsampled points must remain visible after raw
+  samples expire.
 - When hardware or support checks disable settings fields, keep disable and
   teardown paths available and preserve disabled-field values on submit.
 - For interface-specific recovery or diagnostics, probe through the configured

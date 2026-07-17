@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
+
+### Fixed
+
+- Removed the effective 3-page cap from automatic BM200/BM6 archive recovery, so
+  reconnect backfill can request the full 85-page retained history window when a
+  multi-day outage needs more than the routine sync depth.
+
 ## [0.3.1] - 2026-05-30 - BLE Timeout Recovery and Missing Device Backoff
 
 ### Fixed

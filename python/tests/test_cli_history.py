@@ -538,6 +538,95 @@ def test_plan_archive_backfill_flags_connected_devices_with_real_history_gap(
     assert candidates == {"bm200_house": 1}
 
 
+def test_plan_archive_backfill_allows_full_bm200_reconnect_history(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_example_files(tmp_path)
+    config = load_config(config_path)
+    config = replace(
+        config,
+        archive_sync=replace(
+            config.archive_sync,
+            reconnect_min_gap_seconds=3600,
+            safety_margin_seconds=0,
+            bm200_max_pages_per_sync=3,
+        ),
+    )
+    database_path = tmp_path / "gateway.db"
+    persist_snapshot(
+        database_path,
+        GatewaySnapshot(
+            generated_at="2024-01-01T00:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=True,
+            mqtt_connected=False,
+            devices_total=1,
+            devices_online=1,
+            poll_interval_seconds=600,
+            devices=[
+                DeviceReading(
+                    id="bm200_house",
+                    type="bm200",
+                    name="BM200 House",
+                    mac="AA:BB:CC:DD:EE:01",
+                    enabled=True,
+                    connected=True,
+                    voltage=12.73,
+                    soc=58,
+                    temperature=None,
+                    rssi=None,
+                    state="normal",
+                    error_code=None,
+                    error_detail=None,
+                    last_seen="2024-01-01T00:00:00+00:00",
+                    adapter="hci0",
+                    driver="bm200",
+                )
+            ],
+        ),
+    )
+
+    snapshot = GatewaySnapshot(
+        generated_at="2024-01-31T00:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=True,
+        mqtt_connected=False,
+        devices_total=1,
+        devices_online=1,
+        poll_interval_seconds=600,
+        devices=[
+            DeviceReading(
+                id="bm200_house",
+                type="bm200",
+                name="BM200 House",
+                mac="AA:BB:CC:DD:EE:01",
+                enabled=True,
+                connected=True,
+                voltage=12.81,
+                soc=61,
+                temperature=None,
+                rssi=-60,
+                state="normal",
+                error_code=None,
+                error_detail=None,
+                last_seen="2024-01-31T00:00:00+00:00",
+                adapter="hci0",
+                driver="bm200",
+            )
+        ],
+    )
+
+    candidates = plan_archive_backfill(
+        config=config,
+        database_path=database_path,
+        snapshot=snapshot,
+    )
+
+    assert candidates == {"bm200_house": 85}
+
+
 def test_plan_archive_backfill_includes_bm300_when_bm7_archive_sync_is_enabled(
     tmp_path: Path,
 ) -> None:

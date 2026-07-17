@@ -89,7 +89,7 @@ class ArchiveSyncConfig:
     periodic_interval_seconds: int = 64800
     reconnect_min_gap_seconds: int = 28800
     safety_margin_seconds: int = 7200
-    bm200_max_pages_per_sync: int = 3
+    bm200_max_pages_per_sync: int = 85
     bm300_enabled: bool = True
     bm300_max_pages_per_sync: int = 3
 
@@ -489,7 +489,7 @@ def load_config(path: Path) -> AppConfig:
         periodic_interval_seconds=int(archive_sync_table.get("periodic_interval_seconds", 64800)),
         reconnect_min_gap_seconds=int(archive_sync_table.get("reconnect_min_gap_seconds", 28800)),
         safety_margin_seconds=int(archive_sync_table.get("safety_margin_seconds", 7200)),
-        bm200_max_pages_per_sync=int(archive_sync_table.get("bm200_max_pages_per_sync", 3)),
+        bm200_max_pages_per_sync=int(archive_sync_table.get("bm200_max_pages_per_sync", 85)),
         bm300_enabled=bool(archive_sync_table.get("bm300_enabled", True)),
         bm300_max_pages_per_sync=int(archive_sync_table.get("bm300_max_pages_per_sync", 3)),
     )

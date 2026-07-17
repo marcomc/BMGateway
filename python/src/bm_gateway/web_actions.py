@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Callable
 
 from .archive_sync import (
+    BM200_FULL_HISTORY_PAGE_COUNT,
     sync_archive_backfill_candidates,
     sync_bm200_device_archive,
     sync_bm300_device_archive,
@@ -40,7 +41,6 @@ from .usb_otg import USB_OTG_FRAME_RENDERER_ENABLE_ERROR, usb_otg_frame_renderer
 from .usb_otg_export import mark_usb_otg_exported, update_usb_otg_drive
 from .web_support import default_curve_pairs, read_text
 
-BM200_FULL_HISTORY_PAGE_COUNT = 85
 HistorySyncProgress = Callable[[int, int, str], None]
 
 
@@ -626,6 +626,10 @@ def update_archive_sync_preferences(
     bm300_max_pages_per_sync: int,
 ) -> list[str]:
     config = load_config(config_path)
+    effective_bm200_max_pages_per_sync = max(
+        BM200_FULL_HISTORY_PAGE_COUNT,
+        bm200_max_pages_per_sync,
+    )
     updated = replace(
         config,
         archive_sync=replace(
@@ -634,7 +638,7 @@ def update_archive_sync_preferences(
             periodic_interval_seconds=periodic_interval_seconds,
             reconnect_min_gap_seconds=reconnect_min_gap_seconds,
             safety_margin_seconds=safety_margin_seconds,
-            bm200_max_pages_per_sync=bm200_max_pages_per_sync,
+            bm200_max_pages_per_sync=effective_bm200_max_pages_per_sync,
             bm300_enabled=bm300_enabled,
             bm300_max_pages_per_sync=bm300_max_pages_per_sync,
         ),
@@ -657,7 +661,7 @@ def update_archive_sync_preferences(
         status="completed",
         details={
             "enabled": enabled,
-            "bm200_max_pages_per_sync": bm200_max_pages_per_sync,
+            "bm200_max_pages_per_sync": effective_bm200_max_pages_per_sync,
             "bm300_enabled": bm300_enabled,
             "bm300_max_pages_per_sync": bm300_max_pages_per_sync,
         },
