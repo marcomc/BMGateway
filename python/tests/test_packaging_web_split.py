@@ -96,16 +96,12 @@ def test_install_service_script_preserves_archive_sync_preferences() -> None:
     assert 'archive_sync.get("reconnect_min_gap_seconds", 28800)' in payload
     assert 'archive_sync.get("safety_margin_seconds", 7200)' in payload
     assert 'archive_sync.get("bm200_max_pages_per_sync", 85)' in payload
-    assert "legacy_bm200_max_pages_per_sync = int(" in payload
-    assert (
-        "if legacy_bm200_max_pages_per_sync == 3 and not bm200_page_cap_marker.exists():" in payload
-    )
-    assert "bm200_page_cap_marker.touch(exist_ok=True)" in payload
+    assert "bm200_page_cap_marker" not in payload
     assert 'archive_sync.get("bm300_enabled", True)' in payload
     assert 'archive_sync.get("bm300_max_pages_per_sync", 3)' in payload
 
 
-def test_install_service_migrates_the_legacy_bm200_default_once(tmp_path: Path) -> None:
+def test_install_service_preserves_explicit_bm200_archive_page_cap(tmp_path: Path) -> None:
     project_root = Path(__file__).resolve().parents[2]
     script_path = project_root / "rpi-setup" / "scripts" / "install-service.sh"
     payload = script_path.read_text(encoding="utf-8")
@@ -144,15 +140,8 @@ def test_install_service_migrates_the_legacy_bm200_default_once(tmp_path: Path) 
 
     rewrite()
     with config_path.open("rb") as handle:
-        assert tomllib.load(handle)["archive_sync"]["bm200_max_pages_per_sync"] == 85
+        assert tomllib.load(handle)["archive_sync"]["bm200_max_pages_per_sync"] == 3
 
-    config_path.write_text(
-        config_path.read_text(encoding="utf-8").replace(
-            "bm200_max_pages_per_sync = 85",
-            "bm200_max_pages_per_sync = 3",
-        ),
-        encoding="utf-8",
-    )
     rewrite()
 
     with config_path.open("rb") as handle:
