@@ -677,6 +677,45 @@ def _rebuild_daily_rollups_for_device_days(
     device_days: set[tuple[str, str]],
 ) -> None:
     for device_id, day in sorted(device_days):
+        retained_rollup = connection.execute(
+            """
+            SELECT samples, error_count
+            FROM device_daily_rollups
+            WHERE device_id = ? AND day = ?
+            """,
+            (device_id, day),
+        ).fetchone()
+        raw_counts = connection.execute(
+            """
+            WITH ranked_samples AS (
+                SELECT
+                    voltage,
+                    error_code,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY device_id, sample_ts
+                        ORDER BY source_priority DESC, imported_at DESC, id DESC
+                    ) AS row_rank
+                FROM device_samples
+                WHERE device_id = ?
+                  AND substr(sample_ts, 1, 10) = ?
+            )
+            SELECT
+                SUM(CASE WHEN error_code IS NULL AND voltage > 0 THEN 1 ELSE 0 END),
+                SUM(CASE WHEN error_code IS NOT NULL THEN 1 ELSE 0 END)
+            FROM ranked_samples
+            WHERE row_rank = 1
+            """,
+            (device_id, day),
+        ).fetchone()
+        if retained_rollup is not None and raw_counts is not None:
+            retained_samples = int(retained_rollup[0] or 0)
+            retained_errors = int(retained_rollup[1] or 0)
+            raw_samples = int(raw_counts[0] or 0)
+            raw_errors = int(raw_counts[1] or 0)
+            if raw_samples < retained_samples or raw_errors < retained_errors:
+                # Raw retention has already removed part of this day. Its rollup is
+                # the only complete aggregate, so replacing it would lose history.
+                continue
         connection.execute(
             "DELETE FROM device_daily_rollups WHERE device_id = ? AND day = ?",
             (device_id, day),
