@@ -742,9 +742,16 @@ def _require_complete_daily_raw_history(
 def _rebuild_daily_rollups_for_device_days(
     connection: sqlite3.Connection,
     device_days: set[tuple[str, str]],
+    *,
+    replace_retained_rollups: bool = False,
 ) -> None:
+    """Rebuild selected daily rows from canonical samples.
+
+    Callers may replace retained rollups only after checking that the pre-mutation
+    raw rows completely cover every affected day.
+    """
     for device_id, day in sorted(device_days):
-        if _daily_rollup_requires_retained_samples(
+        if not replace_retained_rollups and _daily_rollup_requires_retained_samples(
             connection,
             device_id=device_id,
             day=day,
@@ -1500,7 +1507,11 @@ def replace_archive_history_profiles(
             readings=readings,
             progress=progress,
         )
-        _rebuild_daily_rollups_for_device_days(connection, affected_device_days)
+        _rebuild_daily_rollups_for_device_days(
+            connection,
+            affected_device_days,
+            replace_retained_rollups=True,
+        )
         _finish_archive_import_batch(connection, batch_id=batch_id, inserted_count=inserted)
         connection.commit()
         return inserted
@@ -1711,7 +1722,11 @@ def delete_archive_history_profiles(
             """,
             (device_id, *profiles),
         )
-        _rebuild_daily_rollups_for_device_days(connection, affected_device_days)
+        _rebuild_daily_rollups_for_device_days(
+            connection,
+            affected_device_days,
+            replace_retained_rollups=True,
+        )
         connection.commit()
         return int(cursor.rowcount or 0)
     finally:

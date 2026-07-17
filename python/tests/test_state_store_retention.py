@@ -379,6 +379,79 @@ def test_archive_profile_changes_preserve_daily_rollup_when_raw_history_is_parti
     assert archive[0]["profile"] == "legacy_bm2_history"
 
 
+def test_archive_profile_changes_rebuild_daily_rollups_from_complete_raw_history(
+    tmp_path: Path,
+) -> None:
+    database_path = tmp_path / "gateway.db"
+    for profile, timestamp, voltage in (
+        ("legacy_bm2_history", "2026-07-15T00:00:00+02:00", 12.0),
+        ("secondary_history", "2026-07-15T06:00:00+02:00", 13.0),
+    ):
+        import_archive_history(
+            database_path,
+            device_id="bm200_house",
+            device_type="bm200",
+            name="BM200 House",
+            mac="AA:BB:CC:DD:EE:01",
+            adapter="hci0",
+            driver="bm200",
+            profile=profile,
+            readings=[
+                {
+                    "ts": timestamp,
+                    "voltage": voltage,
+                    "min_crank_voltage": None,
+                    "event_type": 0,
+                }
+            ],
+        )
+
+    deleted = delete_archive_history_profiles(
+        database_path,
+        device_id="bm200_house",
+        profiles=("legacy_bm2_history",),
+    )
+    daily_after_delete = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+
+    replaced = replace_archive_history_profiles(
+        database_path,
+        device_id="bm200_house",
+        device_type="bm200",
+        name="BM200 House",
+        mac="AA:BB:CC:DD:EE:01",
+        adapter="hci0",
+        driver="bm200",
+        profile="replacement_history",
+        replace_profiles=("secondary_history",),
+        readings=[
+            {
+                "ts": "2026-07-15T12:00:00+02:00",
+                "voltage": 15.0,
+                "min_crank_voltage": None,
+                "event_type": 0,
+            }
+        ],
+    )
+    daily_after_replace = fetch_daily_history(database_path, device_id="bm200_house", limit=1)
+
+    assert deleted == 1
+    assert len(daily_after_delete) == 1
+    assert daily_after_delete[0]["day"] == "2026-07-15"
+    assert daily_after_delete[0]["samples"] == 1
+    assert daily_after_delete[0]["min_voltage"] == 13.0
+    assert daily_after_delete[0]["max_voltage"] == 13.0
+    assert daily_after_delete[0]["avg_voltage"] == 13.0
+    assert daily_after_delete[0]["last_seen"] == "2026-07-15T06:00:00+02:00"
+    assert replaced == 1
+    assert len(daily_after_replace) == 1
+    assert daily_after_replace[0]["day"] == "2026-07-15"
+    assert daily_after_replace[0]["samples"] == 1
+    assert daily_after_replace[0]["min_voltage"] == 15.0
+    assert daily_after_replace[0]["max_voltage"] == 15.0
+    assert daily_after_replace[0]["avg_voltage"] == 15.0
+    assert daily_after_replace[0]["last_seen"] == "2026-07-15T12:00:00+02:00"
+
+
 def test_prune_history_removes_old_canonical_samples_with_raw_retention(
     tmp_path: Path,
 ) -> None:
