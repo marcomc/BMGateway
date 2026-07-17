@@ -1104,9 +1104,16 @@ def test_plan_archive_backfill_skips_when_archive_and_live_history_are_recent(
     assert candidates == {}
 
 
-def test_sync_bm200_device_archive_uses_extended_history_timeout(
+@pytest.mark.parametrize(
+    ("page_count", "expected_timeout_seconds"),
+    [(1, 180.0), (3, 540.0), (85, 15300.0)],
+    ids=("single-page", "routine-sync", "full-history"),
+)
+def test_sync_bm200_device_archive_scales_history_timeout_by_page_count(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    page_count: int,
+    expected_timeout_seconds: float,
 ) -> None:
     config_path = _write_example_files(tmp_path)
     config = load_config(config_path)
@@ -1135,11 +1142,12 @@ def test_sync_bm200_device_archive_uses_extended_history_timeout(
         config=config,
         device=devices[0],
         database_path=database_path,
+        page_count=page_count,
     )
 
     assert payload["fetched"] == 0
-    assert captured["timeout_seconds"] == 180.0
-    assert captured["page_count"] == 3.0
+    assert captured["timeout_seconds"] == expected_timeout_seconds
+    assert captured["page_count"] == float(page_count)
     assert payload["profile"] == "bm6_d15505_b7_v1"
 
 

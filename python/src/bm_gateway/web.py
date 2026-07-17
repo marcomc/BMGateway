@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlencode, urlparse
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .config import AppConfig, load_config
 from .contract import build_contract, build_discovery_payloads
@@ -541,7 +541,10 @@ def _chart_history_payload(
     bound_values = [value for bounds in (raw_bounds, daily_bounds) if bounds for value in bounds]
     if not bound_values:
         return _empty_chart_history_payload(range_value=range_value)
-    chart_timezone = ZoneInfo(timezone_name)
+    try:
+        chart_timezone = ZoneInfo(timezone_name)
+    except (ValueError, ZoneInfoNotFoundError):
+        return _empty_chart_history_payload(range_value=range_value)
     try:
         parsed_bounds = [
             _parse_chart_history_timestamp(value, timezone=chart_timezone) for value in bound_values

@@ -6,6 +6,7 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from .localization import allowed_language_codes, is_supported_language_preference
 
@@ -526,6 +527,10 @@ def validate_config(config: AppConfig) -> list[str]:
     errors: list[str] = []
     if not config.gateway.name.strip():
         errors.append("gateway.name must not be empty")
+    try:
+        ZoneInfo(config.gateway.timezone)
+    except (ValueError, ZoneInfoNotFoundError):
+        errors.append("gateway.timezone must be a valid IANA timezone")
     if config.gateway.poll_interval_seconds <= 0:
         errors.append("gateway.poll_interval_seconds must be greater than zero")
     if config.gateway.reader_mode not in {"fake", "live"}:

@@ -50,7 +50,11 @@ def sync_bm200_device_archive(
         )
 
     adapter = _active_adapter(config)
-    history_timeout_seconds = max(float(config.bluetooth.connect_timeout_seconds) * 4.0, 180.0)
+    history_timeout_per_page_seconds = max(
+        float(config.bluetooth.connect_timeout_seconds) * 4.0,
+        180.0,
+    )
+    history_timeout_seconds = history_timeout_per_page_seconds * max(1, page_count)
     state_dir = database_path.parent.parent
     if progress is not None:
         progress(0, max(1, page_count * 256), "Downloading history records")

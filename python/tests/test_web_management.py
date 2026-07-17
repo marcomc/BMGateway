@@ -26,6 +26,7 @@ from bm_gateway.state_store import fetch_recent_history, persist_snapshot, prune
 from bm_gateway.usb_otg_export import USBOTGExportResult
 from bm_gateway.web import (
     _add_device_form_html,
+    _chart_history_payload,
     _chart_points,
     _discover_bluetooth_adapters,
     add_device_from_form,
@@ -310,6 +311,46 @@ def test_chart_script_keeps_compact_frame_chart_inside_edges() -> None:
     assert "const padRight = isCompact ? 14 : 18;" in script
     assert "const padBottom = isCompact ? 20 : 44;" in script
     assert 'rx="${isCompact ? 12 : 22}"' in script
+
+
+def test_chart_history_payload_handles_invalid_timezone(
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_history_bounds",
+        lambda _database_path, *, device_id: (
+            "2026-07-16T12:00:00+02:00",
+            "2026-07-17T12:00:00+02:00",
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.web.fetch_daily_history_bounds",
+        lambda _database_path, *, device_id: None,
+    )
+
+    payload = _chart_history_payload(
+        database_path=tmp_path / "gateway.db",
+        device_id="bm200_house",
+        range_value="7",
+        end_value="",
+        series="BM200 House",
+        series_color="#17c45a",
+        timezone_name="Not/A_Real_Timezone",
+    )
+
+    assert payload == {
+        "points": [],
+        "resolution": "raw",
+        "window": {
+            "start": None,
+            "end": None,
+            "available_start": None,
+            "available_end": None,
+            "has_previous": False,
+            "has_next": False,
+        },
+    }
 
 
 def test_chart_history_window_api_returns_only_the_requested_raw_page(

@@ -19,6 +19,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   overwrite a retained daily aggregate with incomplete raw history.
 - Fixed daily-rollup-only history pages so consecutive daily points remain a
   visible chart line instead of disappearing after raw samples expire.
+- BM200/BM6 archive sync timeouts now scale with the configured page cap, so a
+  full retained-history recovery is not cut short by the former fixed deadline.
+- Invalid IANA gateway timezones are now rejected during config validation, and
+  chart history safely returns an empty response if an internal caller supplies
+  an invalid timezone.
 
 ## [0.3.2] - 2026-05-30 - BM200 Full History Recovery
 

@@ -206,6 +206,15 @@ def test_validate_config_caps_usb_otg_image_size_to_helper_limit() -> None:
     assert "usb_otg.size_mb must be less than or equal to 4096" in validate_config(oversized)
 
 
+def test_validate_config_rejects_invalid_timezone() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+
+    for timezone_name in ("Not/A_Real_Timezone", "/etc/localtime"):
+        invalid = replace(config, gateway=replace(config.gateway, timezone=timezone_name))
+
+        assert "gateway.timezone must be a valid IANA timezone" in validate_config(invalid)
+
+
 def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
     config = load_config(Path("python/config/config.toml.example"))
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
