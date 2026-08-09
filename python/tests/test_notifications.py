@@ -102,6 +102,27 @@ def test_corrupt_outbox_is_not_silently_discarded(tmp_path: Path) -> None:
     assert path.read_text(encoding="utf-8") == "{not valid JSON"
 
 
+def test_delivery_prunes_events_that_expire_after_queueing(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", offline_retention_days=1
+    )
+    queued_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    queue_notification_event(
+        path=path, config=config, action="wifi", detail="offline", now=queued_at
+    )
+
+    delivered, detail = deliver_notification_outbox(
+        path=path,
+        config=config,
+        now=queued_at + timedelta(days=2),
+    )
+
+    assert delivered is True
+    assert detail == "No pending notifications"
+    assert not path.exists()
+
+
 def test_individual_and_drop_delivery_modes(tmp_path: Path) -> None:
     path = tmp_path / "notification_outbox.json"
     config = NotificationsConfig(
@@ -193,3 +214,6 @@ def test_test_notification_requires_enabled_recipient_and_uses_sendmail() -> Non
     assert sent is True
     assert detail == "Test email sent"
     assert "To: operator@example.test" in payloads[0]
+    assert send_test_notification(
+        config=NotificationsConfig(enabled=True, recipient="one@example.test, two@example.test")
+    ) == (False, "Notification recipient is invalid")

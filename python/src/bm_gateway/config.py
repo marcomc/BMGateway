@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,6 +14,16 @@ from .localization import allowed_language_codes, is_supported_language_preferen
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "bm-gateway" / "config.toml"
 DEFAULT_RAW_RETENTION_DAYS = 730
 DEFAULT_DAILY_RETENTION_DAYS = 0
+_NOTIFICATION_RECIPIENT_PATTERN = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
+
+
+def is_valid_notification_recipient(value: str) -> bool:
+    """Return whether value is one mailbox suitable for a mail header."""
+    return bool(_NOTIFICATION_RECIPIENT_PATTERN.fullmatch(value))
 
 
 @dataclass(frozen=True)
@@ -666,13 +677,7 @@ def validate_config(config: AppConfig) -> list[str]:
     notification_recipient = config.notifications.recipient.strip()
     if config.notifications.enabled and not notification_recipient:
         errors.append("notifications.recipient must not be empty when notifications are enabled")
-    if notification_recipient and (
-        "\r" in notification_recipient
-        or "\n" in notification_recipient
-        or notification_recipient.count("@") != 1
-        or notification_recipient.startswith("@")
-        or notification_recipient.endswith("@")
-    ):
+    if notification_recipient and not is_valid_notification_recipient(notification_recipient):
         errors.append("notifications.recipient must be a single email address")
     if config.notifications.offline_delivery not in {"summary", "individual", "drop"}:
         errors.append("notifications.offline_delivery must be one of: summary, individual, drop")

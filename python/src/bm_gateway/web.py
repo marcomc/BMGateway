@@ -1837,7 +1837,7 @@ def serve_management(
                 return
 
             if parsed.path == "/settings/notifications/test":
-                sent, detail = send_test_notification_from_settings(config_path=config_path)
+                sent, _detail = send_test_notification_from_settings(config_path=config_path)
                 self.send_response(303)
                 self.send_header(
                     "Location",
@@ -1845,7 +1845,7 @@ def serve_management(
                     + urlencode(
                         {
                             "edit": "1",
-                            "message": detail if sent else f"Notification test failed: {detail}",
+                            "message": "Test email sent" if sent else "Notification test failed",
                         }
                     ),
                 )

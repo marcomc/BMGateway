@@ -2485,6 +2485,34 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
     assert config.web.default_chart_metric == "temperature"
 
 
+def test_notification_test_post_does_not_expose_transport_detail(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={"host": host, "port": port, "config_path": config_path, "state_dir": None},
+        daemon=True,
+    ).start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/notifications/test", data=b"", method="POST"
+    )
+    with _urlopen_with_retry(request, timeout=5.0) as response:
+        document = response.read().decode("utf-8")
+
+    assert "Notification test failed" in document
+    assert "Notifications are disabled" not in document
+
+
 def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.toml"

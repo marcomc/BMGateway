@@ -385,3 +385,18 @@ def test_validate_config_rejects_notification_header_injection() -> None:
     )
 
     assert "notifications.recipient must be a single email address" in validate_config(invalid)
+
+
+def test_validate_config_rejects_multiple_or_malformed_notification_recipients() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    for recipient in (
+        "one@example.test, two@example.test",
+        "operator@localhost",
+        "operator @example.test",
+    ):
+        invalid = replace(
+            config,
+            notifications=replace(config.notifications, enabled=True, recipient=recipient),
+        )
+
+        assert "notifications.recipient must be a single email address" in validate_config(invalid)

@@ -13,7 +13,7 @@ from email.message import EmailMessage
 from pathlib import Path
 from typing import Callable
 
-from .config import NotificationsConfig
+from .config import NotificationsConfig, is_valid_notification_recipient
 
 SendmailRunner = Callable[[str], subprocess.CompletedProcess[str]]
 SYSTEM_SENDMAIL_PATH = "/usr/sbin/sendmail"
@@ -96,6 +96,20 @@ def persist_notification_outbox(path: Path, events: list[NotificationEvent]) -> 
         raise NotificationOutboxError(f"Cannot persist notification outbox: {error}") from error
 
 
+def _retained_events(
+    *, path: Path, config: NotificationsConfig, now: datetime
+) -> list[NotificationEvent]:
+    events = load_notification_outbox(path)
+    cutoff = now - timedelta(days=config.offline_retention_days)
+    retained = [event for event in events if event.occurred_at >= cutoff]
+    if len(retained) != len(events):
+        if retained:
+            persist_notification_outbox(path, retained)
+        else:
+            path.unlink(missing_ok=True)
+    return retained
+
+
 def queue_notification_event(
     *,
     path: Path,
@@ -107,8 +121,7 @@ def queue_notification_event(
     if not config.enabled or config.offline_delivery == "drop":
         return
     current = now or datetime.now(timezone.utc)
-    cutoff = current - timedelta(days=config.offline_retention_days)
-    events = [event for event in load_notification_outbox(path) if event.occurred_at >= cutoff]
+    events = _retained_events(path=path, config=config, now=current)
     events.append(NotificationEvent(action=action, detail=detail, occurred_at=current))
     persist_notification_outbox(path, events[-config.offline_max_events :])
 
@@ -136,6 +149,8 @@ def send_test_notification(
         return False, "Notifications are disabled"
     if not config.recipient.strip():
         return False, "Notification recipient is not configured"
+    if not is_valid_notification_recipient(config.recipient.strip()):
+        return False, "Notification recipient is invalid"
     try:
         payload = _message(
             recipient=config.recipient,
@@ -155,15 +170,18 @@ def deliver_notification_outbox(
     path: Path,
     config: NotificationsConfig,
     runner: SendmailRunner = _default_sendmail,
+    now: datetime | None = None,
 ) -> tuple[bool, str]:
     try:
-        events = load_notification_outbox(path)
+        events = _retained_events(path=path, config=config, now=now or datetime.now(timezone.utc))
     except NotificationOutboxError as error:
         return False, str(error)
     if not events:
         return True, "No pending notifications"
     if not config.enabled or not config.recipient.strip():
         return False, "Notification delivery is not configured"
+    if not is_valid_notification_recipient(config.recipient.strip()):
+        return False, "Notification recipient is invalid"
     if config.offline_delivery == "drop":
         path.unlink(missing_ok=True)
         return True, "Pending notifications dropped"
