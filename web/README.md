@@ -168,9 +168,10 @@ can re-enumerate it.
 
 Settings also includes optional system-mail notifications. The appliance uses
 the operating system's `sendmail` interface supplied by `msmtp-mta`; SMTP
-credentials remain in the operator-managed system mail configuration. Pending
-events can be delivered as one `summary`, as `individual` emails, or dropped.
-The selector is intentionally a fixed choice rather than a free-text field.
+credentials remain in the operator-managed system mail configuration. The
+foundation stores the fixed delivery mode that later lifecycle and watchdog
+producers will use: one `summary`, `individual` emails, or `drop`. The selector
+is intentionally a fixed choice rather than a free-text field.
 
 Settings also exposes `Diagnostics` for internal validation pages. The
 Diagnostics page contains a `Frame Preview` section that embeds hidden

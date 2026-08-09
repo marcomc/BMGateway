@@ -169,6 +169,9 @@ def test_install_service_script_preserves_runtime_recovery_preferences() -> None
     assert 'self_healing.get("wifi_reboot_after_minutes", 15)' in payload
     assert "[notifications]" in payload
     assert 'notifications.get("offline_delivery", "summary")' in payload
+    assert "dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp" in payload
+    assert "chown root:msmtp /etc/msmtprc" in payload
+    assert "chmod 0640 /etc/msmtprc" in payload
 
 
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:

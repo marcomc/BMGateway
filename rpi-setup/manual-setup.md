@@ -143,8 +143,10 @@ Package purpose:
 
 The installer provides `msmtp` and its `sendmail` compatibility wrapper, but it
 does not create mail credentials. Configure `/etc/msmtprc` separately with the
-mail provider credentials and permissions appropriate to the appliance, then
-enable Notifications in Settings. The page offers bounded offline delivery:
+mail provider credentials; the installer hardens an existing regular file to
+`root:msmtp` and mode `0640`, and applies the matching `msmtp` setgid override.
+Then enable Notifications in Settings. It also prepares the fixed bounded
+offline-delivery mode for upcoming lifecycle and watchdog notifications:
 `summary`, `individual`, or `drop`; `summary` is the default and avoids a long
 outage producing a burst of individual emails.
 

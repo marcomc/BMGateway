@@ -88,6 +88,20 @@ def test_failed_delivery_keeps_outbox(tmp_path: Path) -> None:
     assert [event.action for event in load_notification_outbox(path)] == ["wifi"]
 
 
+def test_corrupt_outbox_is_not_silently_discarded(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    path.write_text("{not valid JSON", encoding="utf-8")
+
+    delivered, detail = deliver_notification_outbox(
+        path=path,
+        config=NotificationsConfig(enabled=True, recipient="operator@example.test"),
+    )
+
+    assert delivered is False
+    assert detail == "Notification outbox contains invalid JSON"
+    assert path.read_text(encoding="utf-8") == "{not valid JSON"
+
+
 def test_individual_and_drop_delivery_modes(tmp_path: Path) -> None:
     path = tmp_path / "notification_outbox.json"
     config = NotificationsConfig(
@@ -111,6 +125,32 @@ def test_individual_and_drop_delivery_modes(tmp_path: Path) -> None:
 
     assert delivered is True
     assert len(payloads) == 2
+
+    queue_notification_event(path=path, config=config, action="wifi", detail="offline")
+    queue_notification_event(path=path, config=config, action="usb", detail="unavailable")
+    attempts: list[str] = []
+
+    def fail_second(payload: str) -> subprocess.CompletedProcess[str]:
+        attempts.append(payload)
+        return _success(payload) if len(attempts) == 1 else _failure(payload)
+
+    delivered, detail = deliver_notification_outbox(path=path, config=config, runner=fail_second)
+
+    assert delivered is False
+    assert detail == "temporary failure"
+    assert [event.action for event in load_notification_outbox(path)] == ["usb"]
+
+    retry_payloads: list[str] = []
+
+    def retry(payload: str) -> subprocess.CompletedProcess[str]:
+        retry_payloads.append(payload)
+        return _success(payload)
+
+    delivered, _ = deliver_notification_outbox(path=path, config=config, runner=retry)
+
+    assert delivered is True
+    assert len(retry_payloads) == 1
+    assert "[BMGateway] usb" in retry_payloads[0]
 
     queue_notification_event(
         path=path,

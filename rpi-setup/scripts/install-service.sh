@@ -144,6 +144,18 @@ if [[ "${#missing_notification_packages[@]}" -gt 0 ]]; then
   apt-get update
   apt-get install -y "${missing_notification_packages[@]}"
 fi
+msmtp_statoverride_expected="root msmtp 2755 /usr/bin/msmtp"
+msmtp_statoverride_current="$(dpkg-statoverride --list /usr/bin/msmtp 2>/dev/null || true)"
+if [[ "${msmtp_statoverride_current}" != "${msmtp_statoverride_expected}" ]]; then
+  if [[ -n "${msmtp_statoverride_current}" ]]; then
+    dpkg-statoverride --remove /usr/bin/msmtp
+  fi
+  dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp
+fi
+if [[ -f /etc/msmtprc ]]; then
+  chown root:msmtp /etc/msmtprc
+  chmod 0640 /etc/msmtprc
+fi
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   usb_otg_packages=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
   missing_usb_otg_packages=()

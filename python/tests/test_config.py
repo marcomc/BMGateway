@@ -371,3 +371,17 @@ def test_validate_config_rejects_invalid_notification_preferences() -> None:
     assert "notifications.offline_delivery must be one of: summary, individual, drop" in errors
     assert "notifications.offline_retention_days must be between 1 and 30" in errors
     assert "notifications.offline_max_events must be between 1 and 1000" in errors
+
+
+def test_validate_config_rejects_notification_header_injection() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    invalid = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            enabled=True,
+            recipient="operator@example.test\nBcc: attacker@example.test",
+        ),
+    )
+
+    assert "notifications.recipient must be a single email address" in validate_config(invalid)

@@ -663,8 +663,17 @@ def validate_config(config: AppConfig) -> list[str]:
             "self_healing.wifi_reboot_after_minutes must be greater than "
             "wifi_reconnect_after_minutes when both actions are enabled"
         )
-    if config.notifications.enabled and not config.notifications.recipient.strip():
+    notification_recipient = config.notifications.recipient.strip()
+    if config.notifications.enabled and not notification_recipient:
         errors.append("notifications.recipient must not be empty when notifications are enabled")
+    if notification_recipient and (
+        "\r" in notification_recipient
+        or "\n" in notification_recipient
+        or notification_recipient.count("@") != 1
+        or notification_recipient.startswith("@")
+        or notification_recipient.endswith("@")
+    ):
+        errors.append("notifications.recipient must be a single email address")
     if config.notifications.offline_delivery not in {"summary", "individual", "drop"}:
         errors.append("notifications.offline_delivery must be one of: summary, individual, drop")
     if not 1 <= config.notifications.offline_retention_days <= 30:

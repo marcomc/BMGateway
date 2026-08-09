@@ -11,9 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added an optional system-mail notification foundation using the host
   `sendmail` compatibility interface from `msmtp-mta`, with Settings controls,
   a test-email action, and no SMTP credentials stored in the repository.
-- Added a bounded persistent offline notification outbox. Operators select a
-  fixed `summary`, `individual`, or `drop` delivery mode; the default summary
-  prevents a long offline period from generating an unbounded mail burst.
+- Added bounded offline-delivery primitives for upcoming lifecycle and watchdog
+  notification producers. Operators select a fixed `summary`, `individual`, or
+  `drop` mode; the default summary prevents a long offline period from
+  generating an unbounded mail burst.
 
 ## [0.3.3] - 2026-07-17 - Windowed History Charts
 
