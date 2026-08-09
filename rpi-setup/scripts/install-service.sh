@@ -19,6 +19,7 @@ Options:
   --disable-web                Do not enable/start the web service
   --disable-home-assistant     Disable MQTT and Home Assistant in the installed config
   --skip-usb-otg-tools         Do not install USB OTG helper commands or sudoers entries
+  --skip-apt                   Do not install system packages
   --skip-start                 Enable services but do not start or restart them
   --help                       Show this help text
 EOF
@@ -43,6 +44,7 @@ enable_web=1
 enable_home_assistant=1
 install_usb_otg_tools=1
 start_services=1
+skip_apt=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -94,6 +96,10 @@ while [[ "$#" -gt 0 ]]; do
       install_usb_otg_tools=0
       shift
       ;;
+    --skip-apt)
+      skip_apt=1
+      shift
+      ;;
     --skip-start)
       start_services=0
       shift
@@ -140,7 +146,7 @@ for package in "${notification_packages[@]}"; do
     missing_notification_packages+=("${package}")
   fi
 done
-if [[ "${#missing_notification_packages[@]}" -gt 0 ]]; then
+if [[ "${#missing_notification_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; then
   apt-get update
   apt-get install -y "${missing_notification_packages[@]}"
 fi
@@ -164,7 +170,7 @@ if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
       missing_usb_otg_packages+=("${package}")
     fi
   done
-  if [[ "${#missing_usb_otg_packages[@]}" -gt 0 ]]; then
+  if [[ "${#missing_usb_otg_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; then
     apt-get update
     apt-get install -y "${missing_usb_otg_packages[@]}"
   fi

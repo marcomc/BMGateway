@@ -328,6 +328,9 @@ if [[ "${install_services}" -eq 1 ]]; then
   if [[ "${install_usb_otg_tools}" -eq 0 ]]; then
     service_args+=(--skip-usb-otg-tools)
   fi
+  if [[ "${skip_apt}" -eq 1 ]]; then
+    service_args+=(--skip-apt)
+  fi
   sudo bash "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"
 fi
 

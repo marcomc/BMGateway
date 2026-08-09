@@ -651,7 +651,12 @@ def render_settings_html(
             "Notification recipient",
             config.notifications.recipient or "Not configured",
         )
-        + settings_row("Offline delivery", config.notifications.offline_delivery)
+        + settings_row(
+            "Offline delivery",
+            {"summary": "Summary", "individual": "Individual", "drop": "Drop"}.get(
+                config.notifications.offline_delivery, config.notifications.offline_delivery
+            ),
+        )
         + settings_row(
             "Offline notification retention",
             f"{config.notifications.offline_retention_days} days",

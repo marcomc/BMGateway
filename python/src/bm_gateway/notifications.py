@@ -102,6 +102,7 @@ def _retained_events(
     events = load_notification_outbox(path)
     cutoff = now - timedelta(days=config.offline_retention_days)
     retained = [event for event in events if event.occurred_at >= cutoff]
+    retained = retained[-config.offline_max_events :]
     if len(retained) != len(events):
         if retained:
             persist_notification_outbox(path, retained)
