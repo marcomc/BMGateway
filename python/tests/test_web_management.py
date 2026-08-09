@@ -4337,7 +4337,7 @@ def test_render_home_html_renders_device_icon() -> None:
     assert "home-overview-orb" in html
     assert "home-orb-layout" in html
     assert "Open device" not in html
-    assert "All" not in html
+    assert 'data-range="all"' not in html
     assert "home-overview-scroller" in html
     assert 'aria-label="Show previous home cards"' in html
     assert 'aria-label="Show next home cards"' in html
@@ -5731,7 +5731,7 @@ def test_render_history_html_escapes_device_id_in_title() -> None:
     assert "5 days" in html
     assert "7 days" in html
     assert "2 years" in html
-    assert "All" not in html
+    assert 'data-range="all"' not in html
     assert 'data-range="raw"' not in html
     assert "Valid samples" in html
     assert "Error count" in html
