@@ -156,6 +156,7 @@ def test_install_service_script_preserves_runtime_recovery_preferences() -> None
 
     assert 'bluetooth.get("live_hard_timeout_seconds", 0)' in payload
     assert 'self_healing = dict(data.get("self_healing", {}))' in payload
+    assert 'notifications = dict(data.get("notifications", {}))' in payload
     assert "[self_healing]" in payload
     assert "self_healing.get('periodic_reboot_enabled', False)" in payload
     assert 'self_healing.get("periodic_reboot_hours", 24)' in payload
@@ -166,6 +167,8 @@ def test_install_service_script_preserves_runtime_recovery_preferences() -> None
     assert 'self_healing.get("wifi_reconnect_after_minutes", 5)' in payload
     assert "self_healing.get('wifi_reboot_enabled', False)" in payload
     assert 'self_healing.get("wifi_reboot_after_minutes", 15)' in payload
+    assert "[notifications]" in payload
+    assert 'notifications.get("offline_delivery", "summary")' in payload
 
 
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:

@@ -94,6 +94,11 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.self_healing.wifi_reconnect_after_minutes == 5
     assert config.self_healing.wifi_reboot_enabled is False
     assert config.self_healing.wifi_reboot_after_minutes == 15
+    assert config.notifications.enabled is False
+    assert config.notifications.recipient == ""
+    assert config.notifications.offline_delivery == "summary"
+    assert config.notifications.offline_retention_days == 7
+    assert config.notifications.offline_max_events == 100
 
 
 def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path) -> None:
@@ -177,6 +182,7 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     usb_otg_properties = schema["properties"]["usb_otg"]["properties"]
     archive_sync_properties = schema["properties"]["archive_sync"]["properties"]
     self_healing_properties = schema["properties"]["self_healing"]["properties"]
+    notification_properties = schema["properties"]["notifications"]["properties"]
     retention_properties = schema["properties"]["retention"]["properties"]
     bluetooth_properties = schema["properties"]["bluetooth"]["properties"]
 
@@ -194,6 +200,8 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     assert self_healing_properties["periodic_reboot_hours"]["minimum"] == 1
     assert self_healing_properties["periodic_reboot_hours"]["maximum"] == 48
     assert self_healing_properties["wifi_reconnect_after_minutes"]["minimum"] == 1
+    assert notification_properties["offline_delivery"]["enum"] == ["summary", "individual", "drop"]
+    assert notification_properties["offline_retention_days"]["maximum"] == 30
     assert retention_properties["raw_retention_days"]["default"] == 730
     assert retention_properties["daily_retention_days"]["default"] == 0
     assert bluetooth_properties["live_hard_timeout_seconds"]["minimum"] == 0
@@ -250,6 +258,14 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
             wifi_reboot_enabled=True,
             wifi_reboot_after_minutes=20,
         ),
+        notifications=replace(
+            config.notifications,
+            enabled=True,
+            recipient="operator@example.test",
+            offline_delivery="individual",
+            offline_retention_days=14,
+            offline_max_events=200,
+        ),
     )
 
     write_config(target, updated)
@@ -271,6 +287,11 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
     assert loaded.self_healing.wifi_reconnect_after_minutes == 7
     assert loaded.self_healing.wifi_reboot_enabled is True
     assert loaded.self_healing.wifi_reboot_after_minutes == 20
+    assert loaded.notifications.enabled is True
+    assert loaded.notifications.recipient == "operator@example.test"
+    assert loaded.notifications.offline_delivery == "individual"
+    assert loaded.notifications.offline_retention_days == 14
+    assert loaded.notifications.offline_max_events == 200
 
 
 def test_validate_config_bounds_archive_sync_page_count() -> None:
@@ -328,3 +349,25 @@ def test_validate_config_bounds_self_healing_values() -> None:
     assert "self_healing.connectivity_check_host must not be empty" in errors
     assert "self_healing.wifi_reconnect_after_minutes must be at least 1" in errors
     assert "self_healing.wifi_reboot_after_minutes must be at least 1" in errors
+
+
+def test_validate_config_rejects_invalid_notification_preferences() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    invalid = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            enabled=True,
+            recipient="",
+            offline_delivery="all",
+            offline_retention_days=31,
+            offline_max_events=0,
+        ),
+    )
+
+    errors = validate_config(invalid)
+
+    assert "notifications.recipient must not be empty when notifications are enabled" in errors
+    assert "notifications.offline_delivery must be one of: summary, individual, drop" in errors
+    assert "notifications.offline_retention_days must be between 1 and 30" in errors
+    assert "notifications.offline_max_events must be between 1 and 1000" in errors

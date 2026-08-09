@@ -645,6 +645,22 @@ def render_settings_html(
         + settings_row("Home Assistant status topic", config.home_assistant.status_topic)
         + settings_row("Home Assistant gateway device id", config.home_assistant.gateway_device_id)
     )
+    notifications_section_body = (
+        settings_row("Notifications", "Enabled" if config.notifications.enabled else "Disabled")
+        + settings_row(
+            "Notification recipient",
+            config.notifications.recipient or "Not configured",
+        )
+        + settings_row("Offline delivery", config.notifications.offline_delivery)
+        + settings_row(
+            "Offline notification retention",
+            f"{config.notifications.offline_retention_days} days",
+        )
+        + settings_row(
+            "Maximum pending notifications",
+            str(config.notifications.offline_max_events),
+        )
+    )
     if edit_mode:
         reader_mode_options = "".join(
             _option_html(value, value, config.gateway.reader_mode) for value in ("fake", "live")
@@ -675,6 +691,14 @@ def render_settings_html(
         )
         language_options = "".join(
             _option_html(value, label, config.web.language) for value, label in locale_options()
+        )
+        offline_delivery_options = "".join(
+            _option_html(value, label, config.notifications.offline_delivery)
+            for value, label in (
+                ("summary", "Summary"),
+                ("individual", "Individual"),
+                ("drop", "Drop"),
+            )
         )
         timezone_choices = _available_timezone_options()
         timezone_options = (
@@ -1193,6 +1217,72 @@ def render_settings_html(
             + "</div>"
             + "</form>"
         )
+        notifications_section_body = (
+            '<form method="post" action="/settings/notifications">'
+            + settings_control_row(
+                "Notifications",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="notifications_enabled"'
+                    f"{shared._checked_attr(config.notifications.enabled)}>"
+                    "<span>Enable system-mail notifications</span></label>"
+                ),
+                help_text="Uses the operator-managed msmtp system sendmail transport.",
+            )
+            + settings_control_row(
+                "Notification recipient",
+                (
+                    '<input id="notification-recipient-input" type="email" '
+                    'name="notification_recipient" '
+                    f'value="{html.escape(config.notifications.recipient)}" autocomplete="email">'
+                ),
+                help_text="Set the email address that receives gateway notifications.",
+            )
+            + settings_control_row(
+                "Offline delivery",
+                (
+                    '<select id="offline-delivery-input" name="offline_delivery" '
+                    'autocomplete="off">'
+                    f"{offline_delivery_options}"
+                    "</select>"
+                ),
+                help_text=(
+                    "Choose summary, individual, or drop for events queued while mail is "
+                    "unavailable."
+                ),
+            )
+            + settings_control_row(
+                "Offline notification retention",
+                (
+                    '<input id="offline-retention-days-input" type="text" '
+                    'name="offline_retention_days" '
+                    f'value="{config.notifications.offline_retention_days}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Keep pending notification events for 1 to 30 days.",
+            )
+            + settings_control_row(
+                "Maximum pending notifications",
+                (
+                    '<input id="offline-max-events-input" type="text" '
+                    'name="offline_max_events" '
+                    f'value="{config.notifications.offline_max_events}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Limit pending events to prevent a prolonged outage from creating an "
+                    "unbounded queue."
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save notification settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+            + '<form method="post" action="/settings/notifications/test" '
+            'style="margin-top:0.75rem">'
+            + f"{button('Send test email', kind='secondary')}"
+            + "</form>"
+        )
         archive_sync_section_body = (
             '<form method="post" action="/settings/archive-sync">'
             + settings_control_row(
@@ -1559,6 +1649,10 @@ def render_settings_html(
         + section_card(
             title="Self-Healing",
             body=self_healing_section_body,
+        )
+        + section_card(
+            title="Notifications",
+            body=notifications_section_body,
         )
         + section_card(
             title="USB OTG Image Export",

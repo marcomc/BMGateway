@@ -46,6 +46,7 @@ from .web_actions import (
     run_once_via_cli,
     schedule_host_reboot,
     schedule_host_shutdown,
+    send_test_notification_from_settings,
     start_run_once_via_cli,
     sync_device_history_now,
     update_archive_sync_preferences,
@@ -56,6 +57,7 @@ from .web_actions import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_notification_preferences,
     update_self_healing_preferences,
     update_usb_otg_preferences,
     update_web_preferences,
@@ -136,6 +138,7 @@ __all__ = [
     "update_gateway_preferences",
     "update_home_assistant_preferences",
     "update_mqtt_preferences",
+    "update_notification_preferences",
     "update_self_healing_preferences",
     "update_usb_otg_preferences",
     "update_web_preferences",
@@ -1757,6 +1760,94 @@ def serve_management(
                 self.send_response(303)
                 self.send_header(
                     "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/notifications":
+                config, snapshot, current_database_path = self._load_current()
+                try:
+                    offline_retention_days = int(
+                        form.get(
+                            "offline_retention_days",
+                            [str(config.notifications.offline_retention_days)],
+                        )[0]
+                    )
+                    offline_max_events = int(
+                        form.get(
+                            "offline_max_events",
+                            [str(config.notifications.offline_max_events)],
+                        )[0]
+                    )
+                except ValueError:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: notification values must be numeric",
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                errors = update_notification_preferences(
+                    config_path=config_path,
+                    enabled=_bool_from_form(form, "notifications_enabled"),
+                    recipient=form.get("notification_recipient", [config.notifications.recipient])[
+                        0
+                    ],
+                    offline_delivery=form.get(
+                        "offline_delivery", [config.notifications.offline_delivery]
+                    )[0],
+                    offline_retention_days=offline_retention_days,
+                    offline_max_events=offline_max_events,
+                )
+                if errors:
+                    configured_devices = load_device_registry(config.device_registry_path)
+                    self._send_html(
+                        render_settings_html(
+                            snapshot=snapshot,
+                            config=config,
+                            devices=[device.to_dict() for device in configured_devices],
+                            edit_mode=True,
+                            storage_summary=fetch_storage_summary(current_database_path),
+                            config_text=read_text(config_path),
+                            devices_text=read_text(config.device_registry_path),
+                            contract=build_contract(config, configured_devices),
+                            message="Validation failed: " + "; ".join(errors),
+                            theme_preference=config.web.appearance,
+                            language=self._request_language(config),
+                        ),
+                        status=400,
+                    )
+                    return
+                self.send_response(303)
+                self.send_header(
+                    "Location", "/settings?" + urlencode({"edit": "1", "message": "Settings saved"})
+                )
+                self.end_headers()
+                return
+
+            if parsed.path == "/settings/notifications/test":
+                sent, detail = send_test_notification_from_settings(config_path=config_path)
+                self.send_response(303)
+                self.send_header(
+                    "Location",
+                    "/settings?"
+                    + urlencode(
+                        {
+                            "edit": "1",
+                            "message": detail if sent else f"Notification test failed: {detail}",
+                        }
+                    ),
                 )
                 self.end_headers()
                 return

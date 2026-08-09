@@ -83,6 +83,18 @@
 
 ## Propositions
 
+- [ ] Repair the localization-safe range-selector test assertions.
+  Two rendering tests currently reject the literal text `All` anywhere in a
+  complete HTML document, even though the embedded client-side translation data
+  legitimately includes `All retained history`. Narrow the assertions to the
+  visible range selector so the full quality gate can distinguish a real UI
+  regression from bundled localization data.
+  Actions:
+  - create `feat/fix-range-selector-test-assertions` from `release/0.4.0`
+  - update the two assertions to target the rendered range-control markup
+  - run `make check` and review the test-only pull request independently
+  - merge it into `release/0.4.0` before rebasing the notification foundation
+
 - [ ] Add a non-Chromium USB OTG frame export renderer for ARMv6 boards.
   Raspberry Pi `Zero` and `Zero W` can expose USB OTG mass-storage devices but
   cannot run current ARM Chromium builds because their ARMv6/BCM2835 CPUs lack

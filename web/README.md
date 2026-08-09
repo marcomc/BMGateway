@@ -166,6 +166,12 @@ regenerates the images and reattaches the drive, and `Refresh USB OTG Drive`, wh
 only detaches and reattaches the existing backing disk image so a picture frame
 can re-enumerate it.
 
+Settings also includes optional system-mail notifications. The appliance uses
+the operating system's `sendmail` interface supplied by `msmtp-mta`; SMTP
+credentials remain in the operator-managed system mail configuration. Pending
+events can be delivered as one `summary`, as `individual` emails, or dropped.
+The selector is intentionally a fixed choice rather than a free-text field.
+
 Settings also exposes `Diagnostics` for internal validation pages. The
 Diagnostics page contains a `Frame Preview` section that embeds hidden
 frame-render routes such as `/frame/fleet-trend` and

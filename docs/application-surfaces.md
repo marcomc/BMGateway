@@ -192,7 +192,8 @@ State-changing routes live in `python/src/bm_gateway/web.py` and delegate to
 helpers in `python/src/bm_gateway/web_actions.py`. They cover device edits,
 settings edits, one-shot polling, Home Assistant discovery republish, runtime
 restart, Bluetooth recovery, host reboot/shutdown, history pruning, and USB OTG
-image-export actions.
+image-export actions. Notification preferences and the test-email action use
+the same settings surface and the host `sendmail` transport.
 
 The web UI settings are grouped by real config ownership:
 
@@ -204,6 +205,7 @@ The web UI settings are grouped by real config ownership:
 - Bluetooth settings
 - Web display and binding settings
 - USB OTG image-export settings
+- System-mail notification settings, including bounded offline delivery mode
 
 ## Home Assistant and MQTT
 

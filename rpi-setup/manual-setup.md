@@ -113,6 +113,8 @@ sudo apt install -y \
   kmod \
   libjpeg-dev \
   make \
+  msmtp \
+  msmtp-mta \
   python3 \
   python3-dev \
   python3-venv \
@@ -135,6 +137,20 @@ Package purpose:
 | `kmod` | `modprobe libcomposite` for USB gadget setup |
 | `libjpeg-dev`, `python3-dev`, `zlib1g-dev` | Native build headers for optional image dependencies |
 | `util-linux` | `findmnt`, `mount`, and `umount` used by USB OTG helpers |
+| `msmtp`, `msmtp-mta` | System `sendmail` compatibility transport used by optional gateway notifications |
+
+## System Mail Notifications
+
+The installer provides `msmtp` and its `sendmail` compatibility wrapper, but it
+does not create mail credentials. Configure `/etc/msmtprc` separately with the
+mail provider credentials and permissions appropriate to the appliance, then
+enable Notifications in Settings. The page offers bounded offline delivery:
+`summary`, `individual`, or `drop`; `summary` is the default and avoids a long
+outage producing a burst of individual emails.
+
+Use **Send test email** only after saving an enabled notification recipient and
+verifying the system mail configuration. The recipient is intentionally stored
+in BMGateway configuration, while SMTP credentials remain outside the checkout.
 
 Optional integrations install their own extra packages when enabled:
 

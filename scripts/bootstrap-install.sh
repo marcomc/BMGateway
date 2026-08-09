@@ -255,6 +255,8 @@ if [[ "${skip_apt}" -eq 0 ]]; then
     curl
     git
     make
+    msmtp
+    msmtp-mta
     python3
     rfkill
     python3-venv

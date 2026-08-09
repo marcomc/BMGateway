@@ -133,6 +133,17 @@ chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
+notification_packages=(msmtp msmtp-mta)
+missing_notification_packages=()
+for package in "${notification_packages[@]}"; do
+  if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -Fxq 'install ok installed'; then
+    missing_notification_packages+=("${package}")
+  fi
+done
+if [[ "${#missing_notification_packages[@]}" -gt 0 ]]; then
+  apt-get update
+  apt-get install -y "${missing_notification_packages[@]}"
+fi
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   usb_otg_packages=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
   missing_usb_otg_packages=()
@@ -207,6 +218,7 @@ web = dict(data.get("web", {}))
 usb_otg = dict(data.get("usb_otg", {}))
 archive_sync = dict(data.get("archive_sync", {}))
 self_healing = dict(data.get("self_healing", {}))
+notifications = dict(data.get("notifications", {}))
 retention = dict(data.get("retention", {}))
 legacy_bm200_max_pages_per_sync = int(archive_sync.get("bm200_max_pages_per_sync", 85))
 bm200_max_pages_per_sync = max(1, legacy_bm200_max_pages_per_sync)
@@ -322,6 +334,13 @@ payload = "\n".join(
             "wifi_reboot_after_minutes = "
             f'{int(self_healing.get("wifi_reboot_after_minutes", 15))}'
         ),
+        "",
+        "[notifications]",
+        f'enabled = {bool_to_toml(bool(notifications.get("enabled", False)))}',
+        f'recipient = {string_to_toml(notifications.get("recipient", ""))}',
+        f'offline_delivery = {string_to_toml(notifications.get("offline_delivery", "summary"))}',
+        f'offline_retention_days = {int(notifications.get("offline_retention_days", 7))}',
+        f'offline_max_events = {int(notifications.get("offline_max_events", 100))}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 730))}',
