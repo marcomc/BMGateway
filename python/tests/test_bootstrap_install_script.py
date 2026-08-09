@@ -112,7 +112,7 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     assert "apt-get update" in commands
     assert (
         "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
-        "make python3 rfkill python3-venv chromium dosfstools kmod libjpeg-dev "
+        "make msmtp msmtp-mta python3 rfkill python3-venv chromium dosfstools kmod libjpeg-dev "
         "python3-dev util-linux zlib1g-dev" in commands
     )
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
@@ -158,7 +158,7 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     commands = command_log.read_text(encoding="utf-8")
     assert (
         "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
-        "make python3 rfkill python3-venv" in commands
+        "make msmtp msmtp-mta python3 rfkill python3-venv" in commands
     )
     assert "chromium" not in commands
     assert "dosfstools" not in commands
