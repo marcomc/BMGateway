@@ -98,7 +98,7 @@ Gateway state topic:
   "mqtt_connected": true,
   "running": true,
   "uptime": 300,
-  "version": "0.3.3"
+  "version": "0.4.0"
 }
 ```
 

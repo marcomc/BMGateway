@@ -166,7 +166,7 @@ The default quality gate is `make check`.
 
 The current documented release is:
 
-- `0.3.3`
+- `0.4.0`
 
 Use [CHANGELOG.md](CHANGELOG.md) for release content and [TODO.md](TODO.md) for
 work that is not shipped yet.
