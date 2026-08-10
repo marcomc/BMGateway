@@ -10,7 +10,7 @@ from zoneinfo import available_timezones
 from . import display_version
 from . import web_pages as shared
 from .config import AppConfig
-from .localization import locale_options
+from .localization import fixed_locale_options, locale_options
 from .usb_otg import (
     usb_otg_boot_mode_prepared as detect_usb_otg_boot_mode_prepared,
 )
@@ -652,6 +652,12 @@ def render_settings_html(
             config.notifications.recipient or "Not configured",
         )
         + settings_row(
+            "Notification language",
+            dict(fixed_locale_options()).get(
+                config.notifications.locale, config.notifications.locale
+            ),
+        )
+        + settings_row(
             "Offline delivery",
             {"summary": "Summary", "individual": "Individual", "drop": "Drop"}.get(
                 config.notifications.offline_delivery, config.notifications.offline_delivery
@@ -659,7 +665,11 @@ def render_settings_html(
         )
         + settings_row(
             "Offline notification retention",
-            f"{config.notifications.offline_retention_days} days",
+            (
+                "1 day"
+                if config.notifications.offline_retention_days == 1
+                else f"{config.notifications.offline_retention_days} days"
+            ),
         )
         + settings_row(
             "Maximum pending notifications",
@@ -704,6 +714,10 @@ def render_settings_html(
                 ("individual", "Individual"),
                 ("drop", "Drop"),
             )
+        )
+        notification_locale_options = "".join(
+            _option_html(value, label, config.notifications.locale)
+            for value, label in fixed_locale_options()
         )
         timezone_choices = _available_timezone_options()
         timezone_options = (
@@ -1242,6 +1256,16 @@ def render_settings_html(
                     f'value="{html.escape(config.notifications.recipient)}" autocomplete="email">'
                 ),
                 help_text="Set the email address that receives gateway notifications.",
+            )
+            + settings_control_row(
+                "Notification language",
+                (
+                    '<select id="notification-locale-input" name="notification_locale" '
+                    'autocomplete="off">'
+                    f"{notification_locale_options}"
+                    "</select>"
+                ),
+                help_text="Choose the fixed language used for unattended notification emails.",
             )
             + settings_control_row(
                 "Offline delivery",

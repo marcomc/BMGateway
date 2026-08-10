@@ -171,7 +171,7 @@ def test_individual_and_drop_delivery_modes(tmp_path: Path) -> None:
 
     assert delivered is True
     assert len(retry_payloads) == 1
-    assert "[BMGateway] usb" in retry_payloads[0]
+    assert "[BMGateway] notification: usb" in retry_payloads[0]
 
     queue_notification_event(
         path=path,
@@ -217,3 +217,52 @@ def test_test_notification_requires_enabled_recipient_and_uses_sendmail() -> Non
     assert send_test_notification(
         config=NotificationsConfig(enabled=True, recipient="one@example.test, two@example.test")
     ) == (False, "Notification recipient is invalid")
+
+
+def test_notification_payloads_use_configured_locale(tmp_path: Path) -> None:
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        locale="it",
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert send_test_notification(config=config, runner=send)[0] is True
+    assert "test notifica" in payloads.pop()
+
+    path = tmp_path / "notification_outbox.json"
+    queue_notification_event(path=path, config=config, action="usb", detail="offline")
+    assert deliver_notification_outbox(path=path, config=config, runner=send)[0] is True
+    assert "riepilogo notifiche" in payloads.pop()
+
+    individual = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        locale="it",
+        offline_delivery="individual",
+    )
+    queue_notification_event(path=path, config=individual, action="usb", detail="offline")
+    assert deliver_notification_outbox(path=path, config=individual, runner=send)[0] is True
+    payload = payloads.pop()
+    assert "notifica: usb" in payload
+    assert "Evento: usb" in payload
+    assert "Dettaglio: offline" in payload
+
+
+def test_sendmail_timeout_is_a_controlled_failure_and_retains_outbox(tmp_path: Path) -> None:
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    def timeout(payload: str) -> subprocess.CompletedProcess[str]:
+        raise subprocess.TimeoutExpired(["sendmail"], 30)
+
+    assert send_test_notification(config=config, runner=timeout)[0] is False
+
+    path = tmp_path / "notification_outbox.json"
+    queue_notification_event(path=path, config=config, action="usb", detail="offline")
+    delivered, _ = deliver_notification_outbox(path=path, config=config, runner=timeout)
+    assert delivered is False
+    assert [event.action for event in load_notification_outbox(path)] == ["usb"]

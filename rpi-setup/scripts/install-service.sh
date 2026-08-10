@@ -150,17 +150,19 @@ if [[ "${#missing_notification_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; th
   apt-get update
   apt-get install -y "${missing_notification_packages[@]}"
 fi
-msmtp_statoverride_expected="root msmtp 2755 /usr/bin/msmtp"
-msmtp_statoverride_current="$(dpkg-statoverride --list /usr/bin/msmtp 2>/dev/null || true)"
-if [[ "${msmtp_statoverride_current}" != "${msmtp_statoverride_expected}" ]]; then
-  if [[ -n "${msmtp_statoverride_current}" ]]; then
-    dpkg-statoverride --remove /usr/bin/msmtp
+if [[ -x /usr/bin/msmtp ]] && getent group msmtp >/dev/null; then
+  msmtp_statoverride_expected="root msmtp 2755 /usr/bin/msmtp"
+  msmtp_statoverride_current="$(dpkg-statoverride --list /usr/bin/msmtp 2>/dev/null || true)"
+  if [[ "${msmtp_statoverride_current}" != "${msmtp_statoverride_expected}" ]]; then
+    if [[ -n "${msmtp_statoverride_current}" ]]; then
+      dpkg-statoverride --remove /usr/bin/msmtp
+    fi
+    dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp
   fi
-  dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp
-fi
-if [[ -f /etc/msmtprc ]]; then
-  chown root:msmtp /etc/msmtprc
-  chmod 0640 /etc/msmtprc
+  if [[ -f /etc/msmtprc ]]; then
+    chown root:msmtp /etc/msmtprc
+    chmod 0640 /etc/msmtprc
+  fi
 fi
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   usb_otg_packages=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
@@ -356,6 +358,7 @@ payload = "\n".join(
         "[notifications]",
         f'enabled = {bool_to_toml(bool(notifications.get("enabled", False)))}',
         f'recipient = {string_to_toml(notifications.get("recipient", ""))}',
+        f'locale = {string_to_toml(notifications.get("locale", "en"))}',
         f'offline_delivery = {string_to_toml(notifications.get("offline_delivery", "summary"))}',
         f'offline_retention_days = {int(notifications.get("offline_retention_days", 7))}',
         f'offline_max_events = {int(notifications.get("offline_max_events", 100))}',

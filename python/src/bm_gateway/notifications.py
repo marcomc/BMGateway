@@ -14,10 +14,12 @@ from pathlib import Path
 from typing import Callable
 
 from .config import NotificationsConfig, is_valid_notification_recipient
+from .localization import translation_for
 
 SendmailRunner = Callable[[str], subprocess.CompletedProcess[str]]
 SYSTEM_SENDMAIL_PATH = "/usr/sbin/sendmail"
 OFFLINE_DELIVERY_MODES = ("summary", "individual", "drop")
+SENDMAIL_TIMEOUT_SECONDS = 30
 
 
 class NotificationOutboxError(RuntimeError):
@@ -129,7 +131,12 @@ def queue_notification_event(
 
 def _default_sendmail(payload: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [SYSTEM_SENDMAIL_PATH, "-t"], input=payload, text=True, capture_output=True, check=False
+        [SYSTEM_SENDMAIL_PATH, "-t"],
+        input=payload,
+        text=True,
+        capture_output=True,
+        check=False,
+        timeout=SENDMAIL_TIMEOUT_SECONDS,
     )
 
 
@@ -139,6 +146,10 @@ def _message(*, recipient: str, subject: str, body: str) -> str:
     message["Subject"] = subject
     message.set_content(body)
     return message.as_string()
+
+
+def _text(config: NotificationsConfig, key: str, **values: object) -> str:
+    return translation_for(config.locale).gettext(key).format(**values)
 
 
 def send_test_notification(
@@ -155,11 +166,15 @@ def send_test_notification(
     try:
         payload = _message(
             recipient=config.recipient,
-            subject=f"[BMGateway] notification test: {socket.gethostname()}",
-            body="BMGateway system-mail notification delivery is working.\n",
+            subject=_text(
+                config,
+                "[BMGateway] notification test: {hostname}",
+                hostname=socket.gethostname(),
+            ),
+            body=_text(config, "BMGateway system-mail notification delivery is working.") + "\n",
         )
         completed = runner(payload)
-    except (OSError, ValueError) as error:
+    except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         return False, str(error)
     if completed.returncode == 0:
         return True, "Test email sent"
@@ -189,11 +204,19 @@ def deliver_notification_outbox(
     if config.offline_delivery == "summary":
         body = "\n".join(
             [
-                f"BMGateway recovered notification delivery on {socket.gethostname()}.",
+                _text(
+                    config,
+                    "BMGateway recovered notification delivery on {hostname}.",
+                    hostname=socket.gethostname(),
+                ),
                 "",
-                f"Events retained: {len(events)}",
-                f"First event: {events[0].occurred_at.isoformat()}",
-                f"Last event: {events[-1].occurred_at.isoformat()}",
+                _text(config, "Events retained: {count}", count=len(events)),
+                _text(
+                    config, "First event: {timestamp}", timestamp=events[0].occurred_at.isoformat()
+                ),
+                _text(
+                    config, "Last event: {timestamp}", timestamp=events[-1].occurred_at.isoformat()
+                ),
                 "",
                 *[
                     f"- {event.occurred_at.isoformat()} {event.action}: {event.detail}"
@@ -205,7 +228,7 @@ def deliver_notification_outbox(
             payloads = [
                 _message(
                     recipient=config.recipient,
-                    subject="[BMGateway] notification summary",
+                    subject=_text(config, "[BMGateway] notification summary"),
                     body=body,
                 )
             ]
@@ -216,11 +239,24 @@ def deliver_notification_outbox(
             try:
                 payload = _message(
                     recipient=config.recipient,
-                    subject=f"[BMGateway] {event.action}",
-                    body=f"{event.occurred_at.isoformat()}\n\n{event.detail}\n",
+                    subject=_text(
+                        config, "[BMGateway] notification: {action}", action=event.action
+                    ),
+                    body="\n".join(
+                        [
+                            _text(
+                                config,
+                                "Occurred at: {timestamp}",
+                                timestamp=event.occurred_at.isoformat(),
+                            ),
+                            _text(config, "Event: {action}", action=event.action),
+                            _text(config, "Detail: {detail}", detail=event.detail),
+                            "",
+                        ]
+                    ),
                 )
                 completed = runner(payload)
-            except (OSError, ValueError) as error:
+            except (OSError, ValueError, subprocess.TimeoutExpired) as error:
                 return False, str(error)
             if completed.returncode != 0:
                 return (
@@ -239,7 +275,7 @@ def deliver_notification_outbox(
     for payload in payloads:
         try:
             completed = runner(payload)
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, subprocess.TimeoutExpired) as error:
             return False, str(error)
         if completed.returncode != 0:
             return False, completed.stderr.strip() or completed.stdout.strip() or "sendmail failed"

@@ -106,6 +106,7 @@ wifi_reboot_after_minutes = 15
 # Uses the operator-managed system sendmail/msmtp transport when installed.
 enabled = false
 recipient = ""
+locale = "en"
 # Choose one of: summary, individual, drop.
 offline_delivery = "summary"
 offline_retention_days = 7

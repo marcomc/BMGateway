@@ -14,7 +14,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Added bounded offline-delivery primitives for upcoming lifecycle and watchdog
   notification producers. Operators select a fixed `summary`, `individual`, or
   `drop` mode; the default summary prevents a long offline period from
-  generating an unbounded mail burst.
+  generating an unbounded mail burst. Notification emails use an explicit
+  fixed locale and bounded system-mail execution.
 
 ## [0.3.3] - 2026-07-17 - Windowed History Charts
 

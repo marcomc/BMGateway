@@ -6,6 +6,18 @@ import tomllib
 from pathlib import Path
 
 
+def _install_service_rewrite_payload() -> str:
+    payload = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    ).read_text(encoding="utf-8")
+    command = (
+        'python3 - <<\'PY\' "${config_path}" "${state_dir}" "${web_host}" "${web_port}" '
+        '"${enable_home_assistant}" "${enable_web}"\n'
+    )
+    start = payload.index(command) + len(command)
+    return payload[start : payload.index("\nPY\n", start)]
+
+
 def test_pyproject_declares_dedicated_web_console_script() -> None:
     pyproject_path = Path(__file__).resolve().parents[2] / "pyproject.toml"
 
@@ -102,15 +114,7 @@ def test_install_service_script_preserves_archive_sync_preferences() -> None:
 
 
 def test_install_service_preserves_explicit_bm200_archive_page_cap(tmp_path: Path) -> None:
-    project_root = Path(__file__).resolve().parents[2]
-    script_path = project_root / "rpi-setup" / "scripts" / "install-service.sh"
-    payload = script_path.read_text(encoding="utf-8")
-    command = (
-        'python3 - <<\'PY\' "${config_path}" "${state_dir}" "${web_host}" "${web_port}" '
-        '"${enable_home_assistant}" "${enable_web}"\n'
-    )
-    start = payload.index(command) + len(command)
-    rewrite_config = payload[start : payload.index("\nPY\n", start)]
+    rewrite_config = _install_service_rewrite_payload()
     config_path = tmp_path / "config.toml"
     state_dir = tmp_path / "state"
     config_path.write_text(
@@ -148,6 +152,55 @@ def test_install_service_preserves_explicit_bm200_archive_page_cap(tmp_path: Pat
         assert tomllib.load(handle)["archive_sync"]["bm200_max_pages_per_sync"] == 3
 
 
+def test_install_service_rewrite_preserves_notification_preferences(tmp_path: Path) -> None:
+    rewrite_config = _install_service_rewrite_payload()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[notifications]",
+                "enabled = true",
+                'recipient = "operator@example.test"',
+                'locale = "it"',
+                'offline_delivery = "individual"',
+                "offline_retention_days = 14",
+                "offline_max_events = 200",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            rewrite_config,
+            str(config_path),
+            str(tmp_path / "state"),
+            "0.0.0.0",
+            "80",
+            "1",
+            "1",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    with config_path.open("rb") as handle:
+        assert tomllib.load(handle)["notifications"] == {
+            "enabled": True,
+            "recipient": "operator@example.test",
+            "locale": "it",
+            "offline_delivery": "individual",
+            "offline_retention_days": 14,
+            "offline_max_events": 200,
+        }
+
+
 def test_install_service_script_preserves_runtime_recovery_preferences() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
@@ -168,10 +221,31 @@ def test_install_service_script_preserves_runtime_recovery_preferences() -> None
     assert "self_healing.get('wifi_reboot_enabled', False)" in payload
     assert 'self_healing.get("wifi_reboot_after_minutes", 15)' in payload
     assert "[notifications]" in payload
+    assert 'notifications.get("locale", "en")' in payload
     assert 'notifications.get("offline_delivery", "summary")' in payload
     assert "dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp" in payload
     assert "chown root:msmtp /etc/msmtprc" in payload
     assert "chmod 0640 /etc/msmtprc" in payload
+
+
+def test_install_service_script_only_hardens_an_available_msmtp_installation() -> None:
+    script_path = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    )
+    payload = script_path.read_text(encoding="utf-8")
+    hardening_block = payload.split(
+        "if [[ -x /usr/bin/msmtp ]] && getent group msmtp >/dev/null; then", maxsplit=1
+    )[1].split('if [[ "${install_usb_otg_tools}" -eq 1 ]]; then', maxsplit=1)[0]
+
+    hardening_commands = (
+        "dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp",
+        "chown root:msmtp /etc/msmtprc",
+        "chmod 0640 /etc/msmtprc",
+    )
+    for command in hardening_commands:
+        assert command in hardening_block
+        assert payload.count(command) == 1
+    assert hardening_block.rstrip().endswith("fi")
 
 
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:

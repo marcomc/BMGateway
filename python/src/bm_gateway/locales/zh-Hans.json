@@ -507,5 +507,10 @@
   "العربية (Arabic)": "阿拉伯语",
   "हिन्दी (Hindi)": "हिन्दी（印地语）",
   "বাংলা (Bengali)": "বাংলা（孟加拉语）",
-  "简体中文 (Chinese (Simplified))": "简体中文（中文（简体））"
+  "简体中文 (Chinese (Simplified))": "简体中文（中文（简体））",
+  "1 day": "1 天", "{days} days": "{days} 天", "Notification language": "通知语言",
+  "Choose the fixed language used for unattended notification emails.": "选择自动通知邮件使用的固定语言。",
+  "[BMGateway] notification test: {hostname}": "[BMGateway] 通知测试：{hostname}", "BMGateway system-mail notification delivery is working.": "BMGateway 系统邮件通知发送正常。",
+  "BMGateway recovered notification delivery on {hostname}.": "BMGateway 已在 {hostname} 恢复通知发送。", "Events retained: {count}": "保留的事件：{count}", "First event: {timestamp}": "首个事件：{timestamp}", "Last event: {timestamp}": "最后事件：{timestamp}",
+  "[BMGateway] notification summary": "[BMGateway] 通知摘要", "[BMGateway] notification: {action}": "[BMGateway] 通知：{action}", "Occurred at: {timestamp}": "发生时间：{timestamp}", "Event: {action}": "事件：{action}", "Detail: {detail}": "详情：{detail}"
 }

@@ -171,7 +171,9 @@ the operating system's `sendmail` interface supplied by `msmtp-mta`; SMTP
 credentials remain in the operator-managed system mail configuration. The
 foundation stores the fixed delivery mode that later lifecycle and watchdog
 producers will use: one `summary`, `individual` emails, or `drop`. The selector
-is intentionally a fixed choice rather than a free-text field.
+is intentionally a fixed choice rather than a free-text field. Notification
+emails also use an explicit fixed language so unattended messages never depend
+on a browser locale.
 
 Settings also exposes `Diagnostics` for internal validation pages. The
 Diagnostics page contains a `Frame Preview` section that embeds hidden

@@ -1804,6 +1804,7 @@ def serve_management(
                     recipient=form.get("notification_recipient", [config.notifications.recipient])[
                         0
                     ],
+                    locale=form.get("notification_locale", [config.notifications.locale])[0],
                     offline_delivery=form.get(
                         "offline_delivery", [config.notifications.offline_delivery]
                     )[0],

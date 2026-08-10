@@ -148,7 +148,9 @@ mail provider credentials; the installer hardens an existing regular file to
 Then enable Notifications in Settings. It also prepares the fixed bounded
 offline-delivery mode for upcoming lifecycle and watchdog notifications:
 `summary`, `individual`, or `drop`; `summary` is the default and avoids a long
-outage producing a burst of individual emails.
+outage producing a burst of individual emails. Select a fixed notification
+language for unattended email; this setting intentionally does not inherit the
+browser-dependent `auto` web language.
 
 Use **Send test email** only after saving an enabled notification recipient and
 verifying the system mail configuration. The recipient is intentionally stored

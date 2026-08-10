@@ -107,6 +107,7 @@ _DYNAMIC_TRANSLATION_SUFFIXES: Final = (
 _DYNAMIC_TRANSLATION_TEMPLATES: Final = (
     (re.compile(r"^Every (?P<hours>\d+) hours$"), "Every {hours} hours"),
     (re.compile(r"^After (?P<minutes>\d+) minutes$"), "After {minutes} minutes"),
+    (re.compile(r"^(?P<days>\d+) days$"), "{days} days"),
 )
 _IGNORED_TEXT_PATTERNS: Final = (
     re.compile(r"^/[-A-Za-z0-9._:/?=&%#<>]+$"),
@@ -197,6 +198,13 @@ def allowed_language_codes() -> tuple[str, ...]:
 
 def locale_options() -> tuple[tuple[str, str], ...]:
     return ((AUTO_LOCALE, "Browser / system language"),) + tuple(
+        (locale.code, f"{locale.native_name} ({locale.name})") for locale in SUPPORTED_LOCALES
+    )
+
+
+def fixed_locale_options() -> tuple[tuple[str, str], ...]:
+    """Return deterministic locale choices for unattended output."""
+    return tuple(
         (locale.code, f"{locale.native_name} ({locale.name})") for locale in SUPPORTED_LOCALES
     )
 

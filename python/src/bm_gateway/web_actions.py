@@ -725,6 +725,7 @@ def update_notification_preferences(
     config_path: Path,
     enabled: bool,
     recipient: str,
+    locale: str,
     offline_delivery: str,
     offline_retention_days: int,
     offline_max_events: int,
@@ -736,6 +737,7 @@ def update_notification_preferences(
             config.notifications,
             enabled=enabled,
             recipient=recipient.strip(),
+            locale=locale,
             offline_delivery=offline_delivery,
             offline_retention_days=offline_retention_days,
             offline_max_events=offline_max_events,
@@ -759,6 +761,7 @@ def update_notification_preferences(
         status="completed",
         details={
             "enabled": enabled,
+            "locale": locale,
             "offline_delivery": offline_delivery,
             "offline_retention_days": offline_retention_days,
             "offline_max_events": offline_max_events,

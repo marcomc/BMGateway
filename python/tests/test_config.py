@@ -96,6 +96,7 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.self_healing.wifi_reboot_after_minutes == 15
     assert config.notifications.enabled is False
     assert config.notifications.recipient == ""
+    assert config.notifications.locale == "en"
     assert config.notifications.offline_delivery == "summary"
     assert config.notifications.offline_retention_days == 7
     assert config.notifications.offline_max_events == 100
@@ -262,6 +263,7 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
             config.notifications,
             enabled=True,
             recipient="operator@example.test",
+            locale="it",
             offline_delivery="individual",
             offline_retention_days=14,
             offline_max_events=200,
@@ -289,6 +291,7 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
     assert loaded.self_healing.wifi_reboot_after_minutes == 20
     assert loaded.notifications.enabled is True
     assert loaded.notifications.recipient == "operator@example.test"
+    assert loaded.notifications.locale == "it"
     assert loaded.notifications.offline_delivery == "individual"
     assert loaded.notifications.offline_retention_days == 14
     assert loaded.notifications.offline_max_events == 200
@@ -359,6 +362,7 @@ def test_validate_config_rejects_invalid_notification_preferences() -> None:
             config.notifications,
             enabled=True,
             recipient="",
+            locale="auto",
             offline_delivery="all",
             offline_retention_days=31,
             offline_max_events=0,
@@ -368,6 +372,7 @@ def test_validate_config_rejects_invalid_notification_preferences() -> None:
     errors = validate_config(invalid)
 
     assert "notifications.recipient must not be empty when notifications are enabled" in errors
+    assert "notifications.locale must be a supported locale" in errors
     assert "notifications.offline_delivery must be one of: summary, individual, drop" in errors
     assert "notifications.offline_retention_days must be between 1 and 30" in errors
     assert "notifications.offline_max_events must be between 1 and 1000" in errors

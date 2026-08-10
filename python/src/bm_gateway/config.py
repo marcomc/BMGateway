@@ -9,7 +9,11 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .localization import allowed_language_codes, is_supported_language_preference
+from .localization import (
+    allowed_language_codes,
+    is_supported_language_preference,
+    is_supported_locale,
+)
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "bm-gateway" / "config.toml"
 DEFAULT_RAW_RETENTION_DAYS = 730
@@ -123,6 +127,7 @@ class SelfHealingConfig:
 class NotificationsConfig:
     enabled: bool = False
     recipient: str = ""
+    locale: str = "en"
     offline_delivery: str = "summary"
     offline_retention_days: int = 7
     offline_max_events: int = 100
@@ -253,6 +258,7 @@ class AppConfig:
             "notifications": {
                 "enabled": self.notifications.enabled,
                 "recipient": self.notifications.recipient,
+                "locale": self.notifications.locale,
                 "offline_delivery": self.notifications.offline_delivery,
                 "offline_retention_days": self.notifications.offline_retention_days,
                 "offline_max_events": self.notifications.offline_max_events,
@@ -409,6 +415,7 @@ def write_config(path: Path, config: AppConfig) -> None:
             "[notifications]",
             f"enabled = {_bool_to_toml(config.notifications.enabled)}",
             f"recipient = {_string_to_toml(config.notifications.recipient)}",
+            f"locale = {_string_to_toml(config.notifications.locale)}",
             f"offline_delivery = {_string_to_toml(config.notifications.offline_delivery)}",
             f"offline_retention_days = {config.notifications.offline_retention_days}",
             f"offline_max_events = {config.notifications.offline_max_events}",
@@ -545,6 +552,7 @@ def load_config(path: Path) -> AppConfig:
     notifications = NotificationsConfig(
         enabled=bool(notifications_table.get("enabled", False)),
         recipient=str(notifications_table.get("recipient", "")),
+        locale=str(notifications_table.get("locale", "en")),
         offline_delivery=str(notifications_table.get("offline_delivery", "summary")),
         offline_retention_days=int(notifications_table.get("offline_retention_days", 7)),
         offline_max_events=int(notifications_table.get("offline_max_events", 100)),
@@ -679,6 +687,8 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("notifications.recipient must not be empty when notifications are enabled")
     if notification_recipient and not is_valid_notification_recipient(notification_recipient):
         errors.append("notifications.recipient must be a single email address")
+    if not is_supported_locale(config.notifications.locale):
+        errors.append("notifications.locale must be a supported locale")
     if config.notifications.offline_delivery not in {"summary", "individual", "drop"}:
         errors.append("notifications.offline_delivery must be one of: summary, individual, drop")
     if not 1 <= config.notifications.offline_retention_days <= 30:

@@ -507,5 +507,10 @@
   "العربية (Arabic)": "العربية (Arabic)",
   "हिन्दी (Hindi)": "हिन्दी (Hindi)",
   "বাংলা (Bengali)": "বাংলা (Bengali)",
-  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))"
+  "简体中文 (Chinese (Simplified))": "简体中文 (Chinese (Simplified))",
+  "1 day": "1 день", "{days} days": "{days} дней", "Notification language": "Язык уведомлений",
+  "Choose the fixed language used for unattended notification emails.": "Выберите фиксированный язык автоматических писем с уведомлениями.",
+  "[BMGateway] notification test: {hostname}": "[BMGateway] проверка уведомлений: {hostname}", "BMGateway system-mail notification delivery is working.": "Доставка уведомлений BMGateway через системную почту работает.",
+  "BMGateway recovered notification delivery on {hostname}.": "BMGateway восстановил доставку уведомлений на {hostname}.", "Events retained: {count}": "Сохранено событий: {count}", "First event: {timestamp}": "Первое событие: {timestamp}", "Last event: {timestamp}": "Последнее событие: {timestamp}",
+  "[BMGateway] notification summary": "[BMGateway] сводка уведомлений", "[BMGateway] notification: {action}": "[BMGateway] уведомление: {action}", "Occurred at: {timestamp}": "Произошло: {timestamp}", "Event: {action}": "Событие: {action}", "Detail: {detail}": "Подробности: {detail}"
 }
