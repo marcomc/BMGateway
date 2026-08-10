@@ -90,6 +90,28 @@ def test_failed_delivery_keeps_outbox(tmp_path: Path) -> None:
     assert [event.action for event in load_notification_outbox(path)] == ["wifi"]
 
 
+def test_summary_delivery_reports_outbox_deletion_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+    queue_notification_event(path=path, config=config, action="wifi", detail="offline")
+    original_unlink = Path.unlink
+
+    def fail_outbox_unlink(target: Path, *, missing_ok: bool = False) -> None:
+        if target == path:
+            raise OSError("read-only outbox")
+        original_unlink(target, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_outbox_unlink)
+
+    delivered, detail = deliver_notification_outbox(path=path, config=config, runner=_success)
+
+    assert delivered is False
+    assert detail == "read-only outbox"
+    assert path.exists()
+
+
 def test_corrupt_outbox_is_not_silently_discarded(tmp_path: Path) -> None:
     path = tmp_path / "notification_outbox.json"
     path.write_text("{not valid JSON", encoding="utf-8")

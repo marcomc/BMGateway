@@ -133,22 +133,25 @@ unit_path="/etc/systemd/system/bm-gateway.service"
 web_unit_path="/etc/systemd/system/bm-gateway-web.service"
 glances_unit_path="/etc/systemd/system/glances-web.service"
 sudoers_path="/etc/sudoers.d/bm-gateway-web"
+system_sendmail_path="${BM_GATEWAY_SENDMAIL_PATH:-/usr/sbin/sendmail}"
 
 install -d -m 0755 "${config_dir}" "${state_dir}" /usr/local/bin
 chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
-notification_packages=(msmtp msmtp-mta)
-missing_notification_packages=()
-for package in "${notification_packages[@]}"; do
-  if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -Fxq 'install ok installed'; then
-    missing_notification_packages+=("${package}")
+if [[ ! -x "${system_sendmail_path}" ]]; then
+  notification_packages=(msmtp msmtp-mta)
+  missing_notification_packages=()
+  for package in "${notification_packages[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -Fxq 'install ok installed'; then
+      missing_notification_packages+=("${package}")
+    fi
+  done
+  if [[ "${#missing_notification_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; then
+    apt-get update
+    apt-get install -y "${missing_notification_packages[@]}"
   fi
-done
-if [[ "${#missing_notification_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; then
-  apt-get update
-  apt-get install -y "${missing_notification_packages[@]}"
 fi
 if [[ -x /usr/bin/msmtp ]] && getent group msmtp >/dev/null; then
   msmtp_statoverride_expected="root msmtp 2755 /usr/bin/msmtp"

@@ -230,6 +230,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 export PATH="${HOME}/.local/bin:${PATH}"
+system_sendmail_path="${BM_GATEWAY_SENDMAIL_PATH:-/usr/sbin/sendmail}"
 
 script_repo_dir_is_checkout="$(looks_like_checkout "${script_repo_dir}")"
 repo_dir_is_checkout="$(looks_like_checkout "${repo_dir}")"
@@ -255,12 +256,13 @@ if [[ "${skip_apt}" -eq 0 ]]; then
     curl
     git
     make
-    msmtp
-    msmtp-mta
     python3
     rfkill
     python3-venv
   )
+  if [[ ! -x "${system_sendmail_path}" ]]; then
+    apt_packages+=(msmtp msmtp-mta)
+  fi
   if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
     apt_packages+=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
   fi

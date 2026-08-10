@@ -90,6 +90,7 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     env = os.environ.copy()
     env["HOME"] = str(tmp_path / "home")
     env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    env["BM_GATEWAY_SENDMAIL_PATH"] = str(tmp_path / "missing-sendmail")
 
     result = subprocess.run(
         [
@@ -112,7 +113,7 @@ def test_bootstrap_install_script_clones_and_installs(tmp_path: Path) -> None:
     assert "apt-get update" in commands
     assert (
         "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
-        "make msmtp msmtp-mta python3 rfkill python3-venv chromium dosfstools kmod libjpeg-dev "
+        "make python3 rfkill python3-venv msmtp msmtp-mta chromium dosfstools kmod libjpeg-dev "
         "python3-dev util-linux zlib1g-dev" in commands
     )
     assert "curl -fsSL https://astral.sh/uv/install.sh -o" in commands
@@ -136,6 +137,7 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     env = os.environ.copy()
     env["HOME"] = str(tmp_path / "home")
     env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    env["BM_GATEWAY_SENDMAIL_PATH"] = str(tmp_path / "missing-sendmail")
 
     result = subprocess.run(
         [
@@ -158,7 +160,7 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     commands = command_log.read_text(encoding="utf-8")
     assert (
         "apt-get install -y avahi-daemon bluetooth bluez ca-certificates curl git "
-        "make msmtp msmtp-mta python3 rfkill python3-venv" in commands
+        "make python3 rfkill python3-venv msmtp msmtp-mta" in commands
     )
     assert "chromium" not in commands
     assert "dosfstools" not in commands
@@ -169,6 +171,42 @@ def test_bootstrap_install_script_can_skip_usb_otg_tools(tmp_path: Path) -> None
     assert "zlib1g-dev" not in commands
     assert f"make install PYTHON_VERSION={fake_bin / 'python3'} INSTALL_EXTRAS=" in commands
     assert "--skip-usb-otg-tools" in commands
+
+
+def test_bootstrap_preserves_existing_sendmail_transport(tmp_path: Path) -> None:
+    script_path = Path("scripts/bootstrap-install.sh").resolve()
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+    sendmail = tmp_path / "sendmail"
+    _write_executable(sendmail, "#!/bin/sh\nexit 0\n")
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    env["BM_GATEWAY_SENDMAIL_PATH"] = str(sendmail)
+
+    result = subprocess.run(
+        [
+            str(script_path),
+            "--repo-url",
+            "https://example.invalid/BMGateway.git",
+            "--repo-dir",
+            str(tmp_path / "BMGateway"),
+            "--skip-usb-otg-tools",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    apt_install = next(
+        line
+        for line in command_log.read_text(encoding="utf-8").splitlines()
+        if "apt-get install" in line
+    )
+    assert "msmtp" not in apt_install
 
 
 def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> None:

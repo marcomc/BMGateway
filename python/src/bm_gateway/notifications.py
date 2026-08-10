@@ -286,5 +286,8 @@ def deliver_notification_outbox(
             return False, str(error)
         if completed.returncode != 0:
             return False, completed.stderr.strip() or completed.stdout.strip() or "sendmail failed"
-    path.unlink(missing_ok=True)
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        return False, str(error)
     return True, "Pending notifications delivered"

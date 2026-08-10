@@ -144,6 +144,13 @@ def test_load_config_defaults_archive_sync_when_section_is_absent(tmp_path: Path
     assert config.self_healing.wifi_watchdog_enabled is False
 
 
+def test_shipped_config_examples_share_notification_defaults() -> None:
+    standard = load_config(Path("python/config/config.toml.example"))
+    gateway = load_config(Path("python/config/gateway.toml.example"))
+
+    assert gateway.notifications == standard.notifications
+
+
 def test_load_config_accepts_legacy_per_driver_live_hard_timeout_keys(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     devices_path = tmp_path / "devices.toml"
