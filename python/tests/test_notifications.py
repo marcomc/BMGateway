@@ -4,8 +4,10 @@ import subprocess
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
 from bm_gateway.config import NotificationsConfig
 from bm_gateway.notifications import (
+    NotificationOutboxError,
     deliver_notification_outbox,
     load_notification_outbox,
     queue_notification_event,
@@ -100,6 +102,28 @@ def test_corrupt_outbox_is_not_silently_discarded(tmp_path: Path) -> None:
     assert delivered is False
     assert detail == "Notification outbox contains invalid JSON"
     assert path.read_text(encoding="utf-8") == "{not valid JSON"
+
+
+def test_offset_naive_timestamps_are_rejected_as_controlled_outbox_errors(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    path.write_text(
+        '[{"action":"usb","detail":"offline","occurred_at":"2026-08-10T06:00:00"}]\n',
+        encoding="utf-8",
+    )
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    delivered, detail = deliver_notification_outbox(path=path, config=config)
+
+    assert delivered is False
+    assert detail == "Notification timestamps must include a UTC offset"
+    with pytest.raises(NotificationOutboxError, match="must include a UTC offset"):
+        queue_notification_event(
+            path=tmp_path / "other.json",
+            config=config,
+            action="usb",
+            detail="offline",
+            now=datetime(2026, 8, 10, 6),
+        )
 
 
 def test_delivery_prunes_events_that_expire_after_queueing(tmp_path: Path) -> None:

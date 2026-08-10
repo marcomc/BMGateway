@@ -1823,7 +1823,7 @@ def serve_management(
                             config_text=read_text(config_path),
                             devices_text=read_text(config.device_registry_path),
                             contract=build_contract(config, configured_devices),
-                            message="Validation failed",
+                            message="Validation failed: " + "; ".join(errors),
                             theme_preference=config.web.appearance,
                             language=self._request_language(config),
                         ),

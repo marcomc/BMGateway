@@ -2552,6 +2552,48 @@ def test_notification_settings_post_persists_fixed_locale(tmp_path: Path) -> Non
     assert load_config(config_path).notifications.locale == "it"
 
 
+def test_notification_settings_post_localizes_semantic_validation_reason(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={"host": host, "port": port, "config_path": config_path, "state_dir": None},
+        daemon=True,
+    ).start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/notifications",
+        data=urllib.parse.urlencode(
+            {
+                "notification_recipient": "operator@example.test",
+                "notification_locale": "it",
+                "offline_delivery": "summary",
+                "offline_retention_days": "31",
+                "offline_max_events": "100",
+            }
+        ).encode("utf-8"),
+        headers={"Accept-Language": "it"},
+        method="POST",
+    )
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        _urlopen_with_retry(request, timeout=5.0)
+    document = caught.value.read().decode("utf-8")
+
+    assert caught.value.code == 400
+    assert "La conservazione offline deve essere compresa tra 1 e 30 giorni" in document
+    assert "notifications.offline_retention_days" not in document
+
+
 def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.toml"

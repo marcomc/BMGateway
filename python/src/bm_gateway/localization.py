@@ -332,6 +332,9 @@ def _is_translation_candidate(value: str) -> bool:
 
 
 def _has_translated_dynamic_affix(value: str, catalog: dict[str, str]) -> bool:
+    if value.startswith("Validation failed: "):
+        reasons = value.removeprefix("Validation failed: ").split("; ")
+        return "Validation failed" in catalog and all(reason in catalog for reason in reasons)
     return any(
         value.startswith(prefix) and key in catalog for prefix, key in _DYNAMIC_TRANSLATION_PREFIXES
     ) or any(
@@ -352,6 +355,12 @@ def _has_translated_dynamic_template(value: str, catalog: dict[str, str]) -> boo
 
 
 def _translated_dynamic_text(value: str, catalog: dict[str, str]) -> str:
+    if value.startswith("Validation failed: "):
+        reasons = value.removeprefix("Validation failed: ").split("; ")
+        if "Validation failed" in catalog and all(reason in catalog for reason in reasons):
+            return f"{catalog['Validation failed']}: " + "; ".join(
+                catalog[reason] for reason in reasons
+            )
     for prefix, catalog_key in _DYNAMIC_TRANSLATION_PREFIXES:
         if value.startswith(prefix) and catalog_key in catalog:
             translated_prefix = catalog[catalog_key]

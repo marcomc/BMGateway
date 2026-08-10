@@ -512,5 +512,6 @@
   "Choose the fixed language used for unattended notification emails.": "选择自动通知邮件使用的固定语言。",
   "[BMGateway] notification test: {hostname}": "[BMGateway] 通知测试：{hostname}", "BMGateway system-mail notification delivery is working.": "BMGateway 系统邮件通知发送正常。",
   "BMGateway recovered notification delivery on {hostname}.": "BMGateway 已在 {hostname} 恢复通知发送。", "Events retained: {count}": "保留的事件：{count}", "First event: {timestamp}": "首个事件：{timestamp}", "Last event: {timestamp}": "最后事件：{timestamp}",
-  "[BMGateway] notification summary": "[BMGateway] 通知摘要", "[BMGateway] notification: {action}": "[BMGateway] 通知：{action}", "Occurred at: {timestamp}": "发生时间：{timestamp}", "Event: {action}": "事件：{action}", "Detail: {detail}": "详情：{detail}"
+  "[BMGateway] notification summary": "[BMGateway] 通知摘要", "[BMGateway] notification: {action}": "[BMGateway] 通知：{action}", "Occurred at: {timestamp}": "发生时间：{timestamp}", "Event: {action}": "事件：{action}", "Detail: {detail}": "详情：{detail}",
+  "notifications.recipient must not be empty when notifications are enabled": "启用通知时必须填写收件人", "notifications.recipient must be a single email address": "收件人必须是单个电子邮件地址", "notifications.locale must be a supported locale": "通知语言必须受支持", "notifications.offline_delivery must be one of: summary, individual, drop": "离线发送必须为摘要、单独或丢弃", "notifications.offline_retention_days must be between 1 and 30": "离线保留时间必须在 1 到 30 天之间", "notifications.offline_max_events must be between 1 and 1000": "待处理通知上限必须在 1 到 1000 之间"
 }

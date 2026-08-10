@@ -248,6 +248,23 @@ def test_install_service_script_only_hardens_an_available_msmtp_installation() -
     assert hardening_block.rstrip().endswith("fi")
 
 
+def test_install_service_skip_apt_blocks_optional_package_installation() -> None:
+    payload = (
+        Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
+    ).read_text(encoding="utf-8")
+    glances_block = payload.split('if [[ "${enable_glances}" -eq 1 ]]; then', 1)[1].split(
+        'if [[ "${enable_cockpit}" -eq 1 ]]', 1
+    )[0]
+    cockpit_block = payload.split('if [[ "${enable_cockpit}" -eq 1 ]]', 1)[1].split(
+        "systemctl daemon-reload", 1
+    )[0]
+
+    for block, package in ((glances_block, "Glances"), (cockpit_block, "Cockpit")):
+        assert 'if [[ "${skip_apt}" -eq 1 ]]; then' in block
+        assert f"{package} is required" in block
+        assert block.index('if [[ "${skip_apt}" -eq 1 ]]; then') < block.index("apt-get update")
+
+
 def test_install_service_script_does_not_write_removed_visible_device_limit() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"

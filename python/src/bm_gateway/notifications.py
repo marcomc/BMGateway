@@ -44,6 +44,12 @@ def notification_outbox_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "notification_outbox.json"
 
 
+def _aware_utc(value: datetime) -> datetime:
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise NotificationOutboxError("Notification timestamps must include a UTC offset")
+    return value.astimezone(timezone.utc)
+
+
 def load_notification_outbox(path: Path) -> list[NotificationEvent]:
     try:
         raw_payload = path.read_text(encoding="utf-8")
@@ -62,7 +68,7 @@ def load_notification_outbox(path: Path) -> list[NotificationEvent]:
         if not isinstance(item, dict):
             raise NotificationOutboxError("Notification outbox contains an invalid event")
         try:
-            occurred_at = datetime.fromisoformat(str(item["occurred_at"]))
+            occurred_at = _aware_utc(datetime.fromisoformat(str(item["occurred_at"])))
         except (KeyError, TypeError, ValueError):
             raise NotificationOutboxError(
                 "Notification outbox contains an invalid timestamp"
@@ -101,6 +107,7 @@ def persist_notification_outbox(path: Path, events: list[NotificationEvent]) -> 
 def _retained_events(
     *, path: Path, config: NotificationsConfig, now: datetime
 ) -> list[NotificationEvent]:
+    now = _aware_utc(now)
     events = load_notification_outbox(path)
     cutoff = now - timedelta(days=config.offline_retention_days)
     retained = [event for event in events if event.occurred_at >= cutoff]
@@ -123,7 +130,7 @@ def queue_notification_event(
 ) -> None:
     if not config.enabled or config.offline_delivery == "drop":
         return
-    current = now or datetime.now(timezone.utc)
+    current = _aware_utc(now or datetime.now(timezone.utc))
     events = _retained_events(path=path, config=config, now=current)
     events.append(NotificationEvent(action=action, detail=detail, occurred_at=current))
     persist_notification_outbox(path, events[-config.offline_max_events :])

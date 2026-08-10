@@ -588,5 +588,11 @@
   "[BMGateway] notification: {action}": "[BMGateway] notifica: {action}",
   "Occurred at: {timestamp}": "Avvenuto il: {timestamp}",
   "Event: {action}": "Evento: {action}",
-  "Detail: {detail}": "Dettaglio: {detail}"
+  "Detail: {detail}": "Dettaglio: {detail}",
+  "notifications.recipient must not be empty when notifications are enabled": "Il destinatario è obbligatorio quando le notifiche sono abilitate",
+  "notifications.recipient must be a single email address": "Il destinatario deve essere un singolo indirizzo email",
+  "notifications.locale must be a supported locale": "La lingua delle notifiche deve essere supportata",
+  "notifications.offline_delivery must be one of: summary, individual, drop": "La consegna offline deve essere: riepilogo, individuale o scarta",
+  "notifications.offline_retention_days must be between 1 and 30": "La conservazione offline deve essere compresa tra 1 e 30 giorni",
+  "notifications.offline_max_events must be between 1 and 1000": "Il numero massimo di notifiche in attesa deve essere compreso tra 1 e 1000"
 }

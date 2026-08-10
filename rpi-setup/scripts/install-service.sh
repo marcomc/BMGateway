@@ -462,6 +462,10 @@ fi
 
 if [[ "${enable_glances}" -eq 1 ]]; then
   if ! command -v glances >/dev/null 2>&1; then
+    if [[ "${skip_apt}" -eq 1 ]]; then
+      printf 'Glances is required by --enable-glances but is not installed (--skip-apt).\n' >&2
+      exit 1
+    fi
     apt-get update
     apt-get install -y glances
   fi
@@ -487,6 +491,10 @@ else
 fi
 
 if [[ "${enable_cockpit}" -eq 1 ]] && ! dpkg -s cockpit >/dev/null 2>&1; then
+  if [[ "${skip_apt}" -eq 1 ]]; then
+    printf 'Cockpit is required by --enable-cockpit but is not installed (--skip-apt).\n' >&2
+    exit 1
+  fi
   apt-get update
   apt-get install -y cockpit
 fi

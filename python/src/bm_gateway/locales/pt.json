@@ -515,5 +515,6 @@
   "BMGateway recovered notification delivery on {hostname}.": "O BMGateway restaurou o envio de notificações em {hostname}.",
   "Events retained: {count}": "Eventos retidos: {count}", "First event: {timestamp}": "Primeiro evento: {timestamp}", "Last event: {timestamp}": "Último evento: {timestamp}",
   "[BMGateway] notification summary": "[BMGateway] resumo de notificações", "[BMGateway] notification: {action}": "[BMGateway] notificação: {action}",
-  "Occurred at: {timestamp}": "Ocorreu em: {timestamp}", "Event: {action}": "Evento: {action}", "Detail: {detail}": "Detalhe: {detail}"
+  "Occurred at: {timestamp}": "Ocorreu em: {timestamp}", "Event: {action}": "Evento: {action}", "Detail: {detail}": "Detalhe: {detail}",
+  "notifications.recipient must not be empty when notifications are enabled": "O destinatário é obrigatório quando as notificações estão ativadas", "notifications.recipient must be a single email address": "O destinatário deve ser um único endereço de e-mail", "notifications.locale must be a supported locale": "O idioma das notificações deve ser compatível", "notifications.offline_delivery must be one of: summary, individual, drop": "A entrega offline deve ser resumo, individual ou descartar", "notifications.offline_retention_days must be between 1 and 30": "A retenção offline deve ficar entre 1 e 30 dias", "notifications.offline_max_events must be between 1 and 1000": "O máximo de notificações pendentes deve ficar entre 1 e 1000"
 }
