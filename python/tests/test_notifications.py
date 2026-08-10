@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import os
 import subprocess
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import bm_gateway.notifications as notifications_module
 import pytest
 from bm_gateway.config import NotificationsConfig
 from bm_gateway.notifications import (
     NotificationOutboxError,
     deliver_notification_outbox,
     load_notification_outbox,
+    persist_notification_outbox,
     queue_notification_event,
     send_test_notification,
 )
@@ -108,8 +112,101 @@ def test_summary_delivery_reports_outbox_deletion_failure(
     delivered, detail = deliver_notification_outbox(path=path, config=config, runner=_success)
 
     assert delivered is False
-    assert detail == "read-only outbox"
+    assert detail == "Cannot remove notification outbox: read-only outbox"
     assert path.exists()
+
+
+@pytest.mark.parametrize("mode", ["drop", "individual"])
+def test_delivery_modes_report_final_outbox_deletion_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        offline_delivery=mode,
+    )
+    queue_notification_event(
+        path=path,
+        config=replace(config, offline_delivery="summary"),
+        action="wifi",
+        detail="offline",
+    )
+
+    def fail_unlink(target: Path, *, missing_ok: bool = False) -> None:
+        raise OSError("read-only outbox")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    delivered, detail = deliver_notification_outbox(path=path, config=config, runner=_success)
+
+    assert delivered is False
+    assert detail == "Cannot remove notification outbox: read-only outbox"
+
+
+def test_retention_prune_reports_outbox_deletion_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        offline_retention_days=1,
+    )
+    queued_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    queue_notification_event(
+        path=path, config=config, action="wifi", detail="offline", now=queued_at
+    )
+
+    def fail_unlink(target: Path, *, missing_ok: bool = False) -> None:
+        raise OSError("read-only outbox")
+
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    delivered, detail = deliver_notification_outbox(
+        path=path,
+        config=config,
+        runner=_success,
+        now=queued_at + timedelta(days=2),
+    )
+
+    assert delivered is False
+    assert detail == "Cannot remove notification outbox: read-only outbox"
+    with pytest.raises(NotificationOutboxError, match="Cannot remove notification outbox"):
+        queue_notification_event(
+            path=path,
+            config=config,
+            action="usb",
+            detail="offline",
+            now=queued_at + timedelta(days=2),
+        )
+
+
+def test_temporary_cleanup_failure_does_not_mask_persistence_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+
+    def fail_replace(source: Path, target: Path) -> None:
+        raise OSError("replace failed")
+
+    def fail_unlink(target: Path, *, missing_ok: bool = False) -> None:
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(os, "replace", fail_replace)
+    monkeypatch.setattr(Path, "unlink", fail_unlink)
+
+    with pytest.raises(NotificationOutboxError, match="replace failed"):
+        persist_notification_outbox(
+            path,
+            [
+                notifications_module.NotificationEvent(
+                    action="usb",
+                    detail="offline",
+                    occurred_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+                )
+            ],
+        )
 
 
 def test_corrupt_outbox_is_not_silently_discarded(tmp_path: Path) -> None:
@@ -260,9 +357,17 @@ def test_test_notification_requires_enabled_recipient_and_uses_sendmail() -> Non
     assert sent is True
     assert detail == "Test email sent"
     assert "To: operator@example.test" in payloads[0]
-    assert send_test_notification(
-        config=NotificationsConfig(enabled=True, recipient="one@example.test, two@example.test")
-    ) == (False, "Notification recipient is invalid")
+    for recipient in (
+        "one@example.test, two@example.test",
+        ".operator@example.test",
+        "operator..name@example.test",
+        "operator.@example.test",
+        "Operator <operator@example.test>",
+        " operator@example.test",
+    ):
+        assert send_test_notification(
+            config=NotificationsConfig(enabled=True, recipient=recipient)
+        ) == (False, "Notification recipient is invalid")
 
 
 def test_notification_payloads_use_configured_locale(tmp_path: Path) -> None:

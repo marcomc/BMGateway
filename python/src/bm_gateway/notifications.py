@@ -44,6 +44,13 @@ def notification_outbox_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "notification_outbox.json"
 
 
+def _remove_notification_outbox(path: Path) -> None:
+    try:
+        path.unlink(missing_ok=True)
+    except OSError as error:
+        raise NotificationOutboxError(f"Cannot remove notification outbox: {error}") from error
+
+
 def _aware_utc(value: datetime) -> datetime:
     if value.tzinfo is None or value.utcoffset() is None:
         raise NotificationOutboxError("Notification timestamps must include a UTC offset")
@@ -100,7 +107,10 @@ def persist_notification_outbox(path: Path, events: list[NotificationEvent]) -> 
         os.replace(temporary_path, path)
     except OSError as error:
         if temporary_path is not None:
-            temporary_path.unlink(missing_ok=True)
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
         raise NotificationOutboxError(f"Cannot persist notification outbox: {error}") from error
 
 
@@ -116,7 +126,7 @@ def _retained_events(
         if retained:
             persist_notification_outbox(path, retained)
         else:
-            path.unlink(missing_ok=True)
+            _remove_notification_outbox(path)
     return retained
 
 
@@ -168,7 +178,7 @@ def send_test_notification(
         return False, "Notifications are disabled"
     if not config.recipient.strip():
         return False, "Notification recipient is not configured"
-    if not is_valid_notification_recipient(config.recipient.strip()):
+    if not is_valid_notification_recipient(config.recipient):
         return False, "Notification recipient is invalid"
     try:
         payload = _message(
@@ -203,10 +213,13 @@ def deliver_notification_outbox(
         return True, "No pending notifications"
     if not config.enabled or not config.recipient.strip():
         return False, "Notification delivery is not configured"
-    if not is_valid_notification_recipient(config.recipient.strip()):
+    if not is_valid_notification_recipient(config.recipient):
         return False, "Notification recipient is invalid"
     if config.offline_delivery == "drop":
-        path.unlink(missing_ok=True)
+        try:
+            _remove_notification_outbox(path)
+        except NotificationOutboxError as error:
+            return False, str(error)
         return True, "Pending notifications dropped"
     if config.offline_delivery == "summary":
         body = "\n".join(
@@ -275,8 +288,8 @@ def deliver_notification_outbox(
                 if remaining:
                     persist_notification_outbox(path, remaining)
                 else:
-                    path.unlink(missing_ok=True)
-            except (NotificationOutboxError, OSError) as error:
+                    _remove_notification_outbox(path)
+            except NotificationOutboxError as error:
                 return False, str(error)
         return True, "Pending notifications delivered"
     for payload in payloads:
@@ -287,7 +300,7 @@ def deliver_notification_outbox(
         if completed.returncode != 0:
             return False, completed.stderr.strip() or completed.stdout.strip() or "sendmail failed"
     try:
-        path.unlink(missing_ok=True)
-    except OSError as error:
+        _remove_notification_outbox(path)
+    except NotificationOutboxError as error:
         return False, str(error)
     return True, "Pending notifications delivered"

@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from dataclasses import dataclass, field
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -27,7 +28,26 @@ _NOTIFICATION_RECIPIENT_PATTERN = re.compile(
 
 def is_valid_notification_recipient(value: str) -> bool:
     """Return whether value is one mailbox suitable for a mail header."""
-    return bool(_NOTIFICATION_RECIPIENT_PATTERN.fullmatch(value))
+    if value != value.strip() or not _NOTIFICATION_RECIPIENT_PATTERN.fullmatch(value):
+        return False
+    local_part, domain = value.rsplit("@", 1)
+    if len(value) > 254 or len(local_part) > 64 or len(domain) > 253:
+        return False
+    if local_part.startswith(".") or local_part.endswith(".") or ".." in local_part:
+        return False
+    try:
+        message = EmailMessage()
+        message["To"] = value
+        header = message["To"]
+        addresses = header.addresses
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return False
+    return (
+        len(addresses) == 1
+        and not header.defects
+        and not addresses[0].display_name
+        and addresses[0].addr_spec == value
+    )
 
 
 @dataclass(frozen=True)
@@ -682,8 +702,8 @@ def validate_config(config: AppConfig) -> list[str]:
             "self_healing.wifi_reboot_after_minutes must be greater than "
             "wifi_reconnect_after_minutes when both actions are enabled"
         )
-    notification_recipient = config.notifications.recipient.strip()
-    if config.notifications.enabled and not notification_recipient:
+    notification_recipient = config.notifications.recipient
+    if config.notifications.enabled and not notification_recipient.strip():
         errors.append("notifications.recipient must not be empty when notifications are enabled")
     if notification_recipient and not is_valid_notification_recipient(notification_recipient):
         errors.append("notifications.recipient must be a single email address")

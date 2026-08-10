@@ -4,7 +4,12 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from bm_gateway.config import load_config, validate_config, write_config
+from bm_gateway.config import (
+    is_valid_notification_recipient,
+    load_config,
+    validate_config,
+    write_config,
+)
 
 
 def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None:
@@ -403,8 +408,20 @@ def test_validate_config_rejects_multiple_or_malformed_notification_recipients()
     config = load_config(Path("python/config/config.toml.example"))
     for recipient in (
         "one@example.test, two@example.test",
+        ".operator@example.test",
+        "operator..name@example.test",
+        "operator.@example.test",
+        "Operator <operator@example.test>",
+        "operator(comment)@example.test",
+        " operator@example.test",
         "operator@localhost",
         "operator @example.test",
+        "operator@-example.test",
+        "operator@example-.test",
+        "operator@example_test.test",
+        f"{'a' * 65}@example.test",
+        f"operator@{'a' * 64}.test",
+        "operator@" + ".".join(["a" * 63] * 4),
     ):
         invalid = replace(
             config,
@@ -412,3 +429,8 @@ def test_validate_config_rejects_multiple_or_malformed_notification_recipients()
         )
 
         assert "notifications.recipient must be a single email address" in validate_config(invalid)
+
+
+def test_notification_recipient_accepts_plain_boundary_addr_specs() -> None:
+    assert is_valid_notification_recipient("operator+alerts@example.test")
+    assert is_valid_notification_recipient(f"{'a' * 64}@example.test")
