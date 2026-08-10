@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import fcntl
 import os
+import stat
 import subprocess
+import threading
+import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import bm_gateway.notifications as notifications_module
 import pytest
 from bm_gateway.config import NotificationsConfig
 from bm_gateway.notifications import (
+    NotificationEvent,
     NotificationOutboxError,
     deliver_notification_outbox,
     load_notification_outbox,
@@ -56,6 +60,64 @@ def test_queue_notification_event_prunes_by_retention_and_limit(tmp_path: Path) 
     )
 
     assert [event.action for event in load_notification_outbox(path)] == ["two", "three"]
+
+
+def test_persistence_normalizes_events_and_rejects_blank_actions(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    occurred_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
+    persist_notification_outbox(
+        path,
+        [NotificationEvent(action=" usb ", detail=" offline ", occurred_at=occurred_at)],
+    )
+
+    assert load_notification_outbox(path) == [
+        NotificationEvent(action="usb", detail="offline", occurred_at=occurred_at)
+    ]
+    with pytest.raises(NotificationOutboxError, match="without an action"):
+        persist_notification_outbox(
+            path,
+            [NotificationEvent(action="  ", detail="offline", occurred_at=occurred_at)],
+        )
+    with pytest.raises(NotificationOutboxError, match="without an action"):
+        queue_notification_event(
+            path=path,
+            config=NotificationsConfig(enabled=True),
+            action="  ",
+            detail="offline",
+            now=occurred_at,
+        )
+
+
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_concurrent_enqueue_survives_delivery_transaction(tmp_path: Path, mode: str) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        offline_delivery=mode,
+    )
+    queue_notification_event(path=path, config=config, action="old", detail="included")
+    producer_started = threading.Event()
+    producer: threading.Thread | None = None
+
+    def enqueue() -> None:
+        producer_started.set()
+        queue_notification_event(path=path, config=config, action="new", detail="pending")
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        nonlocal producer
+        producer = threading.Thread(target=enqueue)
+        producer.start()
+        assert producer_started.wait(timeout=1)
+        time.sleep(0.05)
+        assert producer.is_alive()
+        return _success(payload)
+
+    assert deliver_notification_outbox(path=path, config=config, runner=send)[0] is True
+    assert producer is not None
+    producer.join(timeout=2)
+    assert not producer.is_alive()
+    assert [event.action for event in load_notification_outbox(path)] == ["new"]
 
 
 def test_summary_delivery_sends_one_message_and_clears_outbox(tmp_path: Path) -> None:
@@ -193,20 +255,106 @@ def test_temporary_cleanup_failure_does_not_mask_persistence_error(
     def fail_unlink(target: Path, *, missing_ok: bool = False) -> None:
         raise OSError("cleanup failed")
 
-    monkeypatch.setattr(os, "replace", fail_replace)
-    monkeypatch.setattr(Path, "unlink", fail_unlink)
+    event = NotificationEvent(
+        action="usb",
+        detail="offline",
+        occurred_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+    )
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "replace", fail_replace)
+        patch.setattr(Path, "unlink", fail_unlink)
+        with pytest.raises(NotificationOutboxError, match="replace failed"):
+            persist_notification_outbox(path, [event])
 
-    with pytest.raises(NotificationOutboxError, match="replace failed"):
-        persist_notification_outbox(
-            path,
-            [
-                notifications_module.NotificationEvent(
-                    action="usb",
-                    detail="offline",
-                    occurred_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
-                )
-            ],
+    persist_notification_outbox(path, [event])
+    assert load_notification_outbox(path) == [event]
+
+
+def test_directory_and_lock_setup_failures_use_outbox_error_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "runtime" / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    def fail_mkdir(*args: object, **kwargs: object) -> None:
+        raise OSError("mkdir")
+
+    def fail_flock(*args: object, **kwargs: object) -> None:
+        raise OSError("flock")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "mkdir", fail_mkdir)
+        with pytest.raises(NotificationOutboxError, match="Cannot lock notification outbox"):
+            queue_notification_event(path=path, config=config, action="usb", detail="offline")
+        assert deliver_notification_outbox(path=path, config=config)[0] is False
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            fcntl,
+            "flock",
+            fail_flock,
         )
+        with pytest.raises(NotificationOutboxError, match="Cannot lock notification outbox"):
+            persist_notification_outbox(
+                path,
+                [
+                    NotificationEvent(
+                        action="usb",
+                        detail="offline",
+                        occurred_at=datetime(2026, 8, 10, tzinfo=timezone.utc),
+                    )
+                ],
+            )
+
+    queue_notification_event(path=path, config=config, action="usb", detail="offline")
+    assert [event.action for event in load_notification_outbox(path)] == ["usb"]
+
+
+def test_parent_directory_is_synced_after_replace_and_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+    original_fsync = os.fsync
+    synced_types: list[str] = []
+
+    def record_fsync(descriptor: int) -> None:
+        synced_types.append("directory" if stat.S_ISDIR(os.fstat(descriptor).st_mode) else "file")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(os, "fsync", record_fsync)
+
+    queue_notification_event(path=path, config=config, action="usb", detail="offline")
+    assert synced_types[-1] == "directory"
+    synced_types.clear()
+
+    assert deliver_notification_outbox(path=path, config=config, runner=_success)[0] is True
+    assert synced_types == ["directory"]
+
+
+def test_directory_sync_failure_uses_controlled_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+    original_fsync = os.fsync
+
+    def fail_directory_fsync(descriptor: int) -> None:
+        if stat.S_ISDIR(os.fstat(descriptor).st_mode):
+            raise OSError("directory fsync failed")
+        original_fsync(descriptor)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_directory_fsync)
+        with pytest.raises(NotificationOutboxError, match="Cannot sync notification outbox"):
+            queue_notification_event(path=path, config=config, action="usb", detail="offline")
+
+    assert [event.action for event in load_notification_outbox(path)] == ["usb"]
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_directory_fsync)
+        delivered, detail = deliver_notification_outbox(path=path, config=config, runner=_success)
+    assert delivered is False
+    assert "Cannot sync notification outbox directory" in detail
 
 
 def test_corrupt_outbox_is_not_silently_discarded(tmp_path: Path) -> None:
