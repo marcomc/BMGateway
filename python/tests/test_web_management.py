@@ -58,6 +58,7 @@ from bm_gateway.web import (
     update_gateway_preferences,
     update_home_assistant_preferences,
     update_mqtt_preferences,
+    update_notification_preferences,
     update_self_healing_preferences,
     update_usb_otg_preferences,
     update_web_preferences,
@@ -1288,6 +1289,31 @@ def test_update_self_healing_preferences_persists_recovery_settings(tmp_path: Pa
     assert config.self_healing.wifi_reboot_after_minutes == 18
 
 
+def test_update_notification_preferences_persists_bounded_delivery_settings(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+
+    errors = update_notification_preferences(
+        config_path=config_path,
+        enabled=True,
+        recipient="operator@example.test",
+        locale="it",
+        offline_delivery="individual",
+        offline_retention_days=14,
+        offline_max_events=200,
+    )
+
+    assert errors == []
+    config = load_config(config_path)
+    assert config.notifications.enabled is True
+    assert config.notifications.recipient == "operator@example.test"
+    assert config.notifications.locale == "it"
+    assert config.notifications.offline_delivery == "individual"
+    assert config.notifications.offline_retention_days == 14
+    assert config.notifications.offline_max_events == 200
+
+
 def test_update_gateway_preferences_rejects_invalid_numeric_values(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
@@ -2461,6 +2487,113 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
     assert config.web.default_chart_metric == "temperature"
 
 
+def test_notification_test_post_does_not_expose_transport_detail(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={"host": host, "port": port, "config_path": config_path, "state_dir": None},
+        daemon=True,
+    ).start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/notifications/test", data=b"", method="POST"
+    )
+    with _urlopen_with_retry(request, timeout=5.0) as response:
+        document = response.read().decode("utf-8")
+
+    assert "Notification test failed" in document
+    assert "Notifications are disabled" not in document
+
+
+def test_notification_settings_post_persists_fixed_locale(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={"host": host, "port": port, "config_path": config_path, "state_dir": None},
+        daemon=True,
+    ).start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/notifications",
+        data=urllib.parse.urlencode(
+            {
+                "notification_recipient": "operator@example.test",
+                "notification_locale": "it",
+                "offline_delivery": "summary",
+                "offline_retention_days": "14",
+                "offline_max_events": "100",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    with _urlopen_with_retry(request, timeout=5.0) as response:
+        assert response.status in {200, 303}
+
+    assert load_config(config_path).notifications.locale == "it"
+
+
+def test_notification_settings_post_localizes_semantic_validation_reason(tmp_path: Path) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={"host": host, "port": port, "config_path": config_path, "state_dir": None},
+        daemon=True,
+    ).start()
+
+    request = urllib.request.Request(
+        f"http://{host}:{port}/settings/notifications",
+        data=urllib.parse.urlencode(
+            {
+                "notification_recipient": "operator@example.test",
+                "notification_locale": "it",
+                "offline_delivery": "summary",
+                "offline_retention_days": "31",
+                "offline_max_events": "100",
+            }
+        ).encode("utf-8"),
+        headers={"Accept-Language": "it"},
+        method="POST",
+    )
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        _urlopen_with_retry(request, timeout=5.0)
+    document = caught.value.read().decode("utf-8")
+
+    assert caught.value.code == 400
+    assert "La conservazione offline deve essere compresa tra 1 e 30 giorni" in document
+    assert "notifications.offline_retention_days" not in document
+
+
 def test_settings_archive_sync_post_persists_import_policy(tmp_path: Path) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.toml"
@@ -3512,6 +3645,46 @@ def test_render_settings_html_shows_disabled_usb_otg_export_by_default() -> None
     assert "JPEG" in html
     assert "Devices per overview image" in html
     assert "Backing disk image" in html
+
+
+def test_render_settings_html_uses_fixed_offline_delivery_select() -> None:
+    html = render_settings_html(
+        config=load_config(Path("python/config/config.toml.example")),
+        snapshot={},
+        devices=[],
+        edit_mode=True,
+        usb_otg_support_installed=True,
+    )
+
+    assert '<select id="offline-delivery-input" name="offline_delivery"' in html
+    assert '<option value="summary" selected>Summary</option>' in html
+    assert '<option value="individual">Individual</option>' in html
+    assert '<option value="drop">Drop</option>' in html
+    assert 'name="offline_delivery" type="text"' not in html
+    assert '<select id="notification-locale-input" name="notification_locale"' in html
+    assert '<option value="en" selected>English (English)</option>' in html
+    notification_locale_select = html.split('id="notification-locale-input"', 1)[1].split(
+        "</select>", 1
+    )[0]
+    assert '<option value="auto"' not in notification_locale_select
+
+
+def test_render_settings_html_localizes_arbitrary_notification_retention() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        notifications=replace(config.notifications, offline_retention_days=14),
+    )
+
+    html = render_settings_html(
+        config=config,
+        snapshot={},
+        devices=[],
+        edit_mode=False,
+        language="it",
+    )
+
+    assert "14 giorni" in html
 
 
 def test_render_settings_html_warns_when_usb_otg_support_not_installed() -> None:

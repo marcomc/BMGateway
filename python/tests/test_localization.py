@@ -297,6 +297,53 @@ def test_dynamic_suffixes_do_not_require_device_value_specific_catalog_entries()
     assert missing_translations_for_html(source_html, "it") == ()
 
 
+@pytest.mark.parametrize("locale", [item.code for item in SUPPORTED_LOCALES if item.code != "en"])
+def test_arbitrary_day_template_is_translated_for_every_locale(locale: str) -> None:
+    assert translation_for(locale).gettext("14 days") != "14 days"
+
+
+@pytest.mark.parametrize("locale", [item.code for item in SUPPORTED_LOCALES if item.code != "en"])
+def test_notification_mail_templates_are_translated_for_every_locale(locale: str) -> None:
+    templates = (
+        "[BMGateway] notification test: {hostname}",
+        "BMGateway system-mail notification delivery is working.",
+        "BMGateway recovered notification delivery on {hostname}.",
+        "Events retained: {count}",
+        "First event: {timestamp}",
+        "Last event: {timestamp}",
+        "[BMGateway] notification summary",
+        "[BMGateway] notification: {action}",
+        "Occurred at: {timestamp}",
+        "Event: {action}",
+        "Detail: {detail}",
+    )
+
+    translation = translation_for(locale)
+    assert all(translation.gettext(template) != template for template in templates)
+
+
+@pytest.mark.parametrize("locale", [item.code for item in SUPPORTED_LOCALES if item.code != "en"])
+def test_notification_validation_reasons_are_translated_for_every_locale(locale: str) -> None:
+    reasons = (
+        "notifications.recipient must not be empty when notifications are enabled",
+        "notifications.recipient must be a single email address",
+        "notifications.locale must be a supported locale",
+        "notifications.offline_delivery must be one of: summary, individual, drop",
+        "notifications.offline_retention_days must be between 1 and 30",
+        "notifications.offline_max_events must be between 1 and 1000",
+    )
+    translation = translation_for(locale)
+    assert all(translation.gettext(reason) != reason for reason in reasons)
+
+
+def test_unknown_compound_validation_reason_is_reported_missing() -> None:
+    document = "<html><body><p>Validation failed: unknown semantic reason</p></body></html>"
+
+    assert missing_translations_for_html(document, "it") == (
+        "Validation failed: unknown semantic reason",
+    )
+
+
 def test_dynamic_error_messages_localize_stable_prefixes() -> None:
     source_html = (
         '<!doctype html><html lang="en"><body>'

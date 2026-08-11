@@ -119,6 +119,10 @@ sudo apt install -y \
   rfkill \
   util-linux \
   zlib1g-dev
+
+if [[ ! -x /usr/sbin/sendmail ]]; then
+  sudo apt install -y msmtp msmtp-mta
+fi
 ```
 
 Package purpose:
@@ -135,6 +139,25 @@ Package purpose:
 | `kmod` | `modprobe libcomposite` for USB gadget setup |
 | `libjpeg-dev`, `python3-dev`, `zlib1g-dev` | Native build headers for optional image dependencies |
 | `util-linux` | `findmnt`, `mount`, and `umount` used by USB OTG helpers |
+| `msmtp`, `msmtp-mta` | Fallback `sendmail` transport, installed only when the system has none |
+
+## System Mail Notifications
+
+When no system `sendmail` interface exists, the installer provides `msmtp` and
+its compatibility wrapper; an existing Postfix, Exim, or other transport is
+preserved. The installer does not create mail credentials. For `msmtp`,
+configure `/etc/msmtprc` separately; the installer hardens an existing regular
+file to `root:msmtp` and mode `0640`, and applies the matching setgid override.
+Then enable Notifications in Settings. It also prepares the fixed bounded
+offline-delivery mode for upcoming lifecycle and watchdog notifications:
+`summary`, `individual`, or `drop`; `summary` is the default and avoids a long
+outage producing a burst of individual emails. Select a fixed notification
+language for unattended email; this setting intentionally does not inherit the
+browser-dependent `auto` web language.
+
+Use **Send test email** only after saving an enabled notification recipient and
+verifying the system mail configuration. The recipient is intentionally stored
+in BMGateway configuration, while SMTP credentials remain outside the checkout.
 
 Optional integrations install their own extra packages when enabled:
 

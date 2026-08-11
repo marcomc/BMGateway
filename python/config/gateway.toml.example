@@ -83,6 +83,16 @@ bm200_max_pages_per_sync = 85
 bm300_enabled = true
 bm300_max_pages_per_sync = 3
 
+[notifications]
+# Uses an existing system sendmail transport, or msmtp when none is installed.
+enabled = false
+recipient = ""
+locale = "en"
+# Choose one of: summary, individual, drop.
+offline_delivery = "summary"
+offline_retention_days = 7
+offline_max_events = 100
+
 [retention]
 raw_retention_days = 730
 daily_retention_days = 0

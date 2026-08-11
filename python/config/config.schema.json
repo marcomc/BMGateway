@@ -169,6 +169,17 @@
         "wifi_reboot_after_minutes": { "type": "integer", "minimum": 1 }
       }
     },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "recipient": { "type": "string" },
+        "locale": { "type": "string", "enum": ["en", "zh-Hans", "hi", "es", "ar", "fr", "bn", "pt", "ru", "ur", "de", "it"], "default": "en" },
+        "offline_delivery": { "type": "string", "enum": ["summary", "individual", "drop"] },
+        "offline_retention_days": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "offline_max_events": { "type": "integer", "minimum": 1, "maximum": 1000 }
+      }
+    },
     "retention": {
       "type": "object",
       "properties": {

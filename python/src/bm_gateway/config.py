@@ -2,17 +2,52 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from dataclasses import dataclass, field
+from email.message import EmailMessage
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from .localization import allowed_language_codes, is_supported_language_preference
+from .localization import (
+    allowed_language_codes,
+    is_supported_language_preference,
+    is_supported_locale,
+)
 
 DEFAULT_CONFIG_PATH = Path.home() / ".config" / "bm-gateway" / "config.toml"
 DEFAULT_RAW_RETENTION_DAYS = 730
 DEFAULT_DAILY_RETENTION_DAYS = 0
+_NOTIFICATION_RECIPIENT_PATTERN = re.compile(
+    r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@"
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$"
+)
+
+
+def is_valid_notification_recipient(value: str) -> bool:
+    """Return whether value is one mailbox suitable for a mail header."""
+    if value != value.strip() or not _NOTIFICATION_RECIPIENT_PATTERN.fullmatch(value):
+        return False
+    local_part, domain = value.rsplit("@", 1)
+    if len(value) > 254 or len(local_part) > 64 or len(domain) > 253:
+        return False
+    if local_part.startswith(".") or local_part.endswith(".") or ".." in local_part:
+        return False
+    try:
+        message = EmailMessage()
+        message["To"] = value
+        header = message["To"]
+        addresses = header.addresses
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return False
+    return (
+        len(addresses) == 1
+        and not header.defects
+        and not addresses[0].display_name
+        and addresses[0].addr_spec == value
+    )
 
 
 @dataclass(frozen=True)
@@ -109,6 +144,16 @@ class SelfHealingConfig:
 
 
 @dataclass(frozen=True)
+class NotificationsConfig:
+    enabled: bool = False
+    recipient: str = ""
+    locale: str = "en"
+    offline_delivery: str = "summary"
+    offline_retention_days: int = 7
+    offline_max_events: int = 100
+
+
+@dataclass(frozen=True)
 class RetentionConfig:
     raw_retention_days: int = DEFAULT_RAW_RETENTION_DAYS
     daily_retention_days: int = DEFAULT_DAILY_RETENTION_DAYS
@@ -127,6 +172,7 @@ class AppConfig:
     usb_otg: USBOTGConfig = field(default_factory=USBOTGConfig)
     archive_sync: ArchiveSyncConfig = field(default_factory=ArchiveSyncConfig)
     self_healing: SelfHealingConfig = field(default_factory=SelfHealingConfig)
+    notifications: NotificationsConfig = field(default_factory=NotificationsConfig)
     verbose: bool = False
 
     def with_cli_overrides(self, *, verbose: bool) -> "AppConfig":
@@ -144,6 +190,7 @@ class AppConfig:
             usb_otg=self.usb_otg,
             archive_sync=self.archive_sync,
             self_healing=self.self_healing,
+            notifications=self.notifications,
             verbose=True,
         )
 
@@ -227,6 +274,14 @@ class AppConfig:
                 "wifi_reconnect_after_minutes": self.self_healing.wifi_reconnect_after_minutes,
                 "wifi_reboot_enabled": self.self_healing.wifi_reboot_enabled,
                 "wifi_reboot_after_minutes": self.self_healing.wifi_reboot_after_minutes,
+            },
+            "notifications": {
+                "enabled": self.notifications.enabled,
+                "recipient": self.notifications.recipient,
+                "locale": self.notifications.locale,
+                "offline_delivery": self.notifications.offline_delivery,
+                "offline_retention_days": self.notifications.offline_retention_days,
+                "offline_max_events": self.notifications.offline_max_events,
             },
             "retention": {
                 "raw_retention_days": self.retention.raw_retention_days,
@@ -377,6 +432,14 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"wifi_reboot_enabled = {_bool_to_toml(config.self_healing.wifi_reboot_enabled)}",
             f"wifi_reboot_after_minutes = {config.self_healing.wifi_reboot_after_minutes}",
             "",
+            "[notifications]",
+            f"enabled = {_bool_to_toml(config.notifications.enabled)}",
+            f"recipient = {_string_to_toml(config.notifications.recipient)}",
+            f"locale = {_string_to_toml(config.notifications.locale)}",
+            f"offline_delivery = {_string_to_toml(config.notifications.offline_delivery)}",
+            f"offline_retention_days = {config.notifications.offline_retention_days}",
+            f"offline_max_events = {config.notifications.offline_max_events}",
+            "",
             "[retention]",
             f"raw_retention_days = {config.retention.raw_retention_days}",
             f"daily_retention_days = {config.retention.daily_retention_days}",
@@ -396,6 +459,7 @@ def load_config(path: Path) -> AppConfig:
     usb_otg_table = _table_or_empty(data, "usb_otg")
     archive_sync_table = _table_or_empty(data, "archive_sync")
     self_healing_table = _table_or_empty(data, "self_healing")
+    notifications_table = _table_or_empty(data, "notifications")
     retention_table = _table_or_empty(data, "retention")
 
     gateway = GatewayConfig(
@@ -505,6 +569,14 @@ def load_config(path: Path) -> AppConfig:
         wifi_reboot_enabled=bool(self_healing_table.get("wifi_reboot_enabled", False)),
         wifi_reboot_after_minutes=int(self_healing_table.get("wifi_reboot_after_minutes", 15)),
     )
+    notifications = NotificationsConfig(
+        enabled=bool(notifications_table.get("enabled", False)),
+        recipient=str(notifications_table.get("recipient", "")),
+        locale=str(notifications_table.get("locale", "en")),
+        offline_delivery=str(notifications_table.get("offline_delivery", "summary")),
+        offline_retention_days=int(notifications_table.get("offline_retention_days", 7)),
+        offline_max_events=int(notifications_table.get("offline_max_events", 100)),
+    )
     source_path = path.resolve()
     device_registry_path = _resolve_registry_path(source_path, gateway.device_registry)
 
@@ -520,6 +592,7 @@ def load_config(path: Path) -> AppConfig:
         usb_otg=usb_otg,
         archive_sync=archive_sync,
         self_healing=self_healing,
+        notifications=notifications,
     )
 
 
@@ -629,6 +702,19 @@ def validate_config(config: AppConfig) -> list[str]:
             "self_healing.wifi_reboot_after_minutes must be greater than "
             "wifi_reconnect_after_minutes when both actions are enabled"
         )
+    notification_recipient = config.notifications.recipient
+    if config.notifications.enabled and not notification_recipient.strip():
+        errors.append("notifications.recipient must not be empty when notifications are enabled")
+    if notification_recipient and not is_valid_notification_recipient(notification_recipient):
+        errors.append("notifications.recipient must be a single email address")
+    if not is_supported_locale(config.notifications.locale):
+        errors.append("notifications.locale must be a supported locale")
+    if config.notifications.offline_delivery not in {"summary", "individual", "drop"}:
+        errors.append("notifications.offline_delivery must be one of: summary, individual, drop")
+    if not 1 <= config.notifications.offline_retention_days <= 30:
+        errors.append("notifications.offline_retention_days must be between 1 and 30")
+    if not 1 <= config.notifications.offline_max_events <= 1000:
+        errors.append("notifications.offline_max_events must be between 1 and 1000")
     if config.retention.raw_retention_days <= 0:
         errors.append("retention.raw_retention_days must be greater than zero")
     if config.retention.daily_retention_days < 0:

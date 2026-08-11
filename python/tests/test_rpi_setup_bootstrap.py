@@ -28,6 +28,8 @@ def test_bootstrap_installs_reproducible_raspberry_pi_dependencies() -> None:
         "dosfstools",
         "kmod",
         "libjpeg-dev",
+        "msmtp",
+        "msmtp-mta",
         "python3-dev",
         "util-linux",
         "zlib1g-dev",
@@ -43,11 +45,27 @@ def test_service_installer_installs_usb_otg_helper_dependencies() -> None:
         "dosfstools",
         "kmod",
         "libjpeg-dev",
+        "msmtp",
+        "msmtp-mta",
         "python3-dev",
         "util-linux",
         "zlib1g-dev",
     ):
         assert package in script
+
+
+def test_installers_preserve_an_existing_system_sendmail_transport() -> None:
+    bootstrap = Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8")
+    service_installer = Path("rpi-setup/scripts/install-service.sh").read_text(encoding="utf-8")
+
+    for script in (bootstrap, service_installer):
+        assert 'system_sendmail_path="${BM_GATEWAY_SENDMAIL_PATH:-/usr/sbin/sendmail}"' in script
+        assert 'if [[ ! -x "${system_sendmail_path}" ]]; then' in script
+    assert "apt_packages+=(msmtp msmtp-mta)" in bootstrap
+    assert "notification_packages=(msmtp msmtp-mta)" in service_installer
+    manual_setup = Path("rpi-setup/manual-setup.md").read_text(encoding="utf-8")
+    assert "if [[ ! -x /usr/sbin/sendmail ]]; then" in manual_setup
+    assert "sudo apt install -y msmtp msmtp-mta" in manual_setup
 
 
 def _service_installer_config_rewrite_program() -> str:

@@ -19,6 +19,7 @@ Options:
   --disable-web                Do not enable/start the web service
   --disable-home-assistant     Disable MQTT and Home Assistant in the installed config
   --skip-usb-otg-tools         Do not install USB OTG helper commands or sudoers entries
+  --skip-apt                   Do not install system packages
   --skip-start                 Enable services but do not start or restart them
   --help                       Show this help text
 EOF
@@ -43,6 +44,7 @@ enable_web=1
 enable_home_assistant=1
 install_usb_otg_tools=1
 start_services=1
+skip_apt=0
 
 while [[ "$#" -gt 0 ]]; do
   case "$1" in
@@ -94,6 +96,10 @@ while [[ "$#" -gt 0 ]]; do
       install_usb_otg_tools=0
       shift
       ;;
+    --skip-apt)
+      skip_apt=1
+      shift
+      ;;
     --skip-start)
       start_services=0
       shift
@@ -127,12 +133,40 @@ unit_path="/etc/systemd/system/bm-gateway.service"
 web_unit_path="/etc/systemd/system/bm-gateway-web.service"
 glances_unit_path="/etc/systemd/system/glances-web.service"
 sudoers_path="/etc/sudoers.d/bm-gateway-web"
+system_sendmail_path="${BM_GATEWAY_SENDMAIL_PATH:-/usr/sbin/sendmail}"
 
 install -d -m 0755 "${config_dir}" "${state_dir}" /usr/local/bin
 chown -R "${service_user}:${service_user}" "${config_dir}" "${state_dir}"
 
 ln -sfn "${cli_path}" /usr/local/bin/bm-gateway
 ln -sfn "${web_cli_path}" /usr/local/bin/bm-gateway-web
+if [[ ! -x "${system_sendmail_path}" ]]; then
+  notification_packages=(msmtp msmtp-mta)
+  missing_notification_packages=()
+  for package in "${notification_packages[@]}"; do
+    if ! dpkg-query -W -f='${Status}' "${package}" 2>/dev/null | grep -Fxq 'install ok installed'; then
+      missing_notification_packages+=("${package}")
+    fi
+  done
+  if [[ "${#missing_notification_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; then
+    apt-get update
+    apt-get install -y "${missing_notification_packages[@]}"
+  fi
+fi
+if [[ -x /usr/bin/msmtp ]] && getent group msmtp >/dev/null; then
+  msmtp_statoverride_expected="root msmtp 2755 /usr/bin/msmtp"
+  msmtp_statoverride_current="$(dpkg-statoverride --list /usr/bin/msmtp 2>/dev/null || true)"
+  if [[ "${msmtp_statoverride_current}" != "${msmtp_statoverride_expected}" ]]; then
+    if [[ -n "${msmtp_statoverride_current}" ]]; then
+      dpkg-statoverride --remove /usr/bin/msmtp
+    fi
+    dpkg-statoverride --add --update root msmtp 2755 /usr/bin/msmtp
+  fi
+  if [[ -f /etc/msmtprc ]]; then
+    chown root:msmtp /etc/msmtprc
+    chmod 0640 /etc/msmtprc
+  fi
+fi
 if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
   usb_otg_packages=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
   missing_usb_otg_packages=()
@@ -141,7 +175,7 @@ if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
       missing_usb_otg_packages+=("${package}")
     fi
   done
-  if [[ "${#missing_usb_otg_packages[@]}" -gt 0 ]]; then
+  if [[ "${#missing_usb_otg_packages[@]}" -gt 0 && "${skip_apt}" -eq 0 ]]; then
     apt-get update
     apt-get install -y "${missing_usb_otg_packages[@]}"
   fi
@@ -207,6 +241,7 @@ web = dict(data.get("web", {}))
 usb_otg = dict(data.get("usb_otg", {}))
 archive_sync = dict(data.get("archive_sync", {}))
 self_healing = dict(data.get("self_healing", {}))
+notifications = dict(data.get("notifications", {}))
 retention = dict(data.get("retention", {}))
 legacy_bm200_max_pages_per_sync = int(archive_sync.get("bm200_max_pages_per_sync", 85))
 bm200_max_pages_per_sync = max(1, legacy_bm200_max_pages_per_sync)
@@ -323,6 +358,14 @@ payload = "\n".join(
             f'{int(self_healing.get("wifi_reboot_after_minutes", 15))}'
         ),
         "",
+        "[notifications]",
+        f'enabled = {bool_to_toml(bool(notifications.get("enabled", False)))}',
+        f'recipient = {string_to_toml(notifications.get("recipient", ""))}',
+        f'locale = {string_to_toml(notifications.get("locale", "en"))}',
+        f'offline_delivery = {string_to_toml(notifications.get("offline_delivery", "summary"))}',
+        f'offline_retention_days = {int(notifications.get("offline_retention_days", 7))}',
+        f'offline_max_events = {int(notifications.get("offline_max_events", 100))}',
+        "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 730))}',
         f'daily_retention_days = {int(retention.get("daily_retention_days", 0))}',
@@ -422,6 +465,10 @@ fi
 
 if [[ "${enable_glances}" -eq 1 ]]; then
   if ! command -v glances >/dev/null 2>&1; then
+    if [[ "${skip_apt}" -eq 1 ]]; then
+      printf 'Glances is required by --enable-glances but is not installed (--skip-apt).\n' >&2
+      exit 1
+    fi
     apt-get update
     apt-get install -y glances
   fi
@@ -447,6 +494,10 @@ else
 fi
 
 if [[ "${enable_cockpit}" -eq 1 ]] && ! dpkg -s cockpit >/dev/null 2>&1; then
+  if [[ "${skip_apt}" -eq 1 ]]; then
+    printf 'Cockpit is required by --enable-cockpit but is not installed (--skip-apt).\n' >&2
+    exit 1
+  fi
   apt-get update
   apt-get install -y cockpit
 fi

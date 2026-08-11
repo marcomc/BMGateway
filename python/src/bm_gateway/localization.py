@@ -107,6 +107,7 @@ _DYNAMIC_TRANSLATION_SUFFIXES: Final = (
 _DYNAMIC_TRANSLATION_TEMPLATES: Final = (
     (re.compile(r"^Every (?P<hours>\d+) hours$"), "Every {hours} hours"),
     (re.compile(r"^After (?P<minutes>\d+) minutes$"), "After {minutes} minutes"),
+    (re.compile(r"^(?P<days>\d+) days$"), "{days} days"),
 )
 _IGNORED_TEXT_PATTERNS: Final = (
     re.compile(r"^/[-A-Za-z0-9._:/?=&%#<>]+$"),
@@ -197,6 +198,13 @@ def allowed_language_codes() -> tuple[str, ...]:
 
 def locale_options() -> tuple[tuple[str, str], ...]:
     return ((AUTO_LOCALE, "Browser / system language"),) + tuple(
+        (locale.code, f"{locale.native_name} ({locale.name})") for locale in SUPPORTED_LOCALES
+    )
+
+
+def fixed_locale_options() -> tuple[tuple[str, str], ...]:
+    """Return deterministic locale choices for unattended output."""
+    return tuple(
         (locale.code, f"{locale.native_name} ({locale.name})") for locale in SUPPORTED_LOCALES
     )
 
@@ -324,6 +332,9 @@ def _is_translation_candidate(value: str) -> bool:
 
 
 def _has_translated_dynamic_affix(value: str, catalog: dict[str, str]) -> bool:
+    if value.startswith("Validation failed: "):
+        reasons = value.removeprefix("Validation failed: ").split("; ")
+        return "Validation failed" in catalog and all(reason in catalog for reason in reasons)
     return any(
         value.startswith(prefix) and key in catalog for prefix, key in _DYNAMIC_TRANSLATION_PREFIXES
     ) or any(
@@ -344,6 +355,12 @@ def _has_translated_dynamic_template(value: str, catalog: dict[str, str]) -> boo
 
 
 def _translated_dynamic_text(value: str, catalog: dict[str, str]) -> str:
+    if value.startswith("Validation failed: "):
+        reasons = value.removeprefix("Validation failed: ").split("; ")
+        if "Validation failed" in catalog and all(reason in catalog for reason in reasons):
+            return f"{catalog['Validation failed']}: " + "; ".join(
+                catalog[reason] for reason in reasons
+            )
     for prefix, catalog_key in _DYNAMIC_TRANSLATION_PREFIXES:
         if value.startswith(prefix) and catalog_key in catalog:
             translated_prefix = catalog[catalog_key]

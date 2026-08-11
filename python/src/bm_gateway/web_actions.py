@@ -30,6 +30,7 @@ from .device_registry import (
     write_device_registry,
 )
 from .models import DeviceReading, GatewaySnapshot
+from .notifications import send_test_notification
 from .runtime import database_file_path, state_file_path
 from .state_store import (
     history_device_id_exists,
@@ -717,6 +718,68 @@ def update_self_healing_preferences(
         },
     )
     return []
+
+
+def update_notification_preferences(
+    *,
+    config_path: Path,
+    enabled: bool,
+    recipient: str,
+    locale: str,
+    offline_delivery: str,
+    offline_retention_days: int,
+    offline_max_events: int,
+) -> list[str]:
+    config = load_config(config_path)
+    updated = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            enabled=enabled,
+            recipient=recipient.strip(),
+            locale=locale,
+            offline_delivery=offline_delivery,
+            offline_retention_days=offline_retention_days,
+            offline_max_events=offline_max_events,
+        ),
+    )
+    from .config import validate_config
+
+    errors = validate_config(updated)
+    if errors:
+        _audit_manual_web_action(
+            config,
+            action="notification_preferences_update",
+            status="failed",
+            details={"errors": errors},
+        )
+        return errors
+    write_config(config_path, updated)
+    _audit_manual_web_action(
+        updated,
+        action="notification_preferences_update",
+        status="completed",
+        details={
+            "enabled": enabled,
+            "locale": locale,
+            "offline_delivery": offline_delivery,
+            "offline_retention_days": offline_retention_days,
+            "offline_max_events": offline_max_events,
+        },
+    )
+    return []
+
+
+def send_test_notification_from_settings(*, config_path: Path) -> tuple[bool, str]:
+    config = load_config(config_path)
+    sent, detail = send_test_notification(config=config.notifications)
+    _audit_manual_web_action(
+        config,
+        action="notification_test",
+        status="completed" if sent else "failed",
+        details={"detail": detail},
+    )
+    return sent, detail
 
 
 def update_gateway_preferences(
