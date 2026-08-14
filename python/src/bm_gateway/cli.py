@@ -37,6 +37,7 @@ from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
 from .notifications import (
     NotificationOutboxError,
     deliver_notification_outbox,
+    notification_outbox_has_idempotency_key,
     notification_outbox_path,
     queue_notification_event,
 )
@@ -97,6 +98,7 @@ def _queue_wifi_watchdog_notification(
     path: Path,
     config: AppConfig,
     event: SelfHealingEvent,
+    idempotency_key: str = "",
 ) -> None:
     details = event.details
     outage_value = details.get("outage_seconds", 0)
@@ -128,6 +130,7 @@ def _queue_wifi_watchdog_notification(
         config=config.notifications,
         action=event.action,
         detail=detail,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -873,6 +876,7 @@ def _handle_run(
                     wifi_recovery_outage_seconds=0,
                     wifi_recovery_interface="",
                     wifi_recovery_started_at=0.0,
+                    wifi_recovery_handoff_id="",
                 )
                 try:
                     persist_wifi_watchdog_state(
@@ -885,6 +889,7 @@ def _handle_run(
                     self_healing_state.wifi_recovery_outage_seconds = 0
                     self_healing_state.wifi_recovery_interface = ""
                     self_healing_state.wifi_recovery_started_at = 0.0
+                    self_healing_state.wifi_recovery_handoff_id = ""
             healing_config = config
             if usb_otg_state_error is not None:
                 healing_config = replace(
@@ -969,6 +974,7 @@ def _handle_run(
             wifi_reboot_requested = False
             usb_otg_reboot_requested = False
             periodic_reboot_requested = False
+            defer_notification_delivery = False
             for event in events:
                 append_audit_event(
                     config=config,
@@ -999,21 +1005,36 @@ def _handle_run(
                                 event: SelfHealingEvent = event,
                                 config: AppConfig = config,
                             ) -> None:
+                                outbox_path = notification_outbox_path(runtime_state_dir)
+                                idempotency_key = ""
+                                if recovery_state is not None:
+                                    idempotency_key = (
+                                        f"wifi-recovery:{recovery_state.wifi_recovery_handoff_id}"
+                                    )
+                                    if notification_outbox_has_idempotency_key(
+                                        outbox_path, idempotency_key
+                                    ):
+                                        return
                                 canonical_event = event
                                 if recovery_state is not None:
+                                    event_outage = event.details.get("outage_seconds", 0)
                                     canonical_event = replace(
                                         event,
                                         details={
                                             **event.details,
-                                            "outage_seconds": (
-                                                recovery_state.wifi_recovery_outage_seconds
+                                            "outage_seconds": max(
+                                                event_outage
+                                                if isinstance(event_outage, int)
+                                                else 0,
+                                                recovery_state.wifi_recovery_outage_seconds,
                                             ),
                                         },
                                     )
                                 _queue_wifi_watchdog_notification(
-                                    path=notification_outbox_path(runtime_state_dir),
+                                    path=outbox_path,
                                     config=config,
                                     event=canonical_event,
+                                    idempotency_key=idempotency_key,
                                 )
 
                             consumed = consume_wifi_recovery_notification(
@@ -1040,6 +1061,7 @@ def _handle_run(
                             details={"detail": str(error)},
                         )
                     except WiFiWatchdogStateError as error:
+                        defer_notification_delivery = True
                         append_audit_event(
                             config=config,
                             state_dir=state_dir,
@@ -1071,7 +1093,7 @@ def _handle_run(
                             status="failed",
                             details={"detail": str(error)},
                         )
-            if config.notifications.enabled:
+            if config.notifications.enabled and not defer_notification_delivery:
                 try:
                     delivered, detail = deliver_notification_outbox(
                         path=notification_outbox_path(runtime_state_dir),
@@ -1105,7 +1127,9 @@ def _handle_run(
                             details={"detail": str(error)},
                         )
                     notification_delivery_result = result
-            if periodic_reboot_requested or wifi_reboot_requested or usb_otg_reboot_requested:
+            if not defer_notification_delivery and (
+                periodic_reboot_requested or wifi_reboot_requested or usb_otg_reboot_requested
+            ):
                 default_schedule_reboot()
                 for action in (
                     "periodic_reboot_requested",

@@ -1,11 +1,18 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
 from _pytest.monkeypatch import MonkeyPatch
-from bm_gateway.config import load_config
+from bm_gateway.config import NotificationsConfig, load_config
+from bm_gateway.notifications import (
+    load_notification_outbox,
+    notification_outbox_path,
+    queue_notification_event,
+)
 from bm_gateway.self_healing import (
+    SelfHealingState,
     USBOTGHealth,
     USBOTGWatchdogStateError,
     consume_wifi_recovery_notification,
@@ -140,6 +147,39 @@ def test_wifi_reconnect_requires_a_successful_post_reconnect_probe() -> None:
     assert events[0].status == "failed"
 
 
+def test_successful_wifi_reconnect_does_not_request_a_same_cycle_reboot() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    connectivity_results = iter([False, True])
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=60.0,
+        connectivity_checker=lambda _host, _interface: next(connectivity_results),
+        reconnect_action=lambda _interface: True,
+    )
+
+    assert [event.action for event in events] == ["wifi_reconnect_attempted"]
+    assert events[0].status == "completed"
+
+
 def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(
@@ -235,6 +275,60 @@ def test_stale_wifi_state_write_preserves_a_concurrent_pending_recovery(tmp_path
 
     assert reloaded.wifi_recovery_pending is True
     assert reloaded.wifi_recovery_started_at == 1000.0
+
+
+def test_legacy_pending_wifi_handoff_gets_a_persisted_id_before_enqueue(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"recovery_pending": true, "outage_seconds": 60, "wifi_interface": "wlan0", '
+        '"recovery_started_at": 1000.0}\n',
+        encoding="utf-8",
+    )
+    state = new_self_healing_state()
+    load_wifi_watchdog_state(state_path, state)
+    observed_ids: list[str] = []
+
+    def enqueue(current: SelfHealingState) -> None:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        assert payload["recovery_handoff_id"] == current.wifi_recovery_handoff_id
+        observed_ids.append(current.wifi_recovery_handoff_id)
+
+    assert consume_wifi_recovery_notification(state_path, state, enqueue)
+    assert len(observed_ids) == 1
+    assert observed_ids[0]
+
+
+def test_distinct_wifi_handoffs_queue_distinct_outbox_events(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    outbox_path = notification_outbox_path(tmp_path)
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    def consume(handoff_id: str) -> None:
+        state = new_self_healing_state()
+        state.wifi_recovery_pending = True
+        state.wifi_recovery_handoff_id = handoff_id
+        persist_wifi_watchdog_state(state_path, state, preserve_pending=False)
+        loaded = new_self_healing_state()
+        load_wifi_watchdog_state(state_path, loaded)
+        assert consume_wifi_recovery_notification(
+            state_path,
+            loaded,
+            lambda current: queue_notification_event(
+                path=outbox_path,
+                config=config,
+                action="wifi_connectivity_restored",
+                detail=current.wifi_recovery_handoff_id,
+                idempotency_key=f"wifi-recovery:{current.wifi_recovery_handoff_id}",
+            ),
+        )
+
+    consume("handoff-a")
+    consume("handoff-b")
+    assert [event.idempotency_key for event in load_notification_outbox(outbox_path)] == [
+        "wifi-recovery:handoff-a",
+        "wifi-recovery:handoff-b",
+    ]
 
 
 def test_stale_pending_wifi_state_write_preserves_the_original_recovery(tmp_path: Path) -> None:

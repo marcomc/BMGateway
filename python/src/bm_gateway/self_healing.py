@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import tempfile
 import time
+import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
@@ -43,6 +44,7 @@ class SelfHealingState:
     wifi_recovery_outage_seconds: int = 0
     wifi_recovery_interface: str = ""
     wifi_recovery_started_at: float = 0.0
+    wifi_recovery_handoff_id: str = ""
     periodic_reboot_requested: bool = False
     usb_otg_rebind_attempted: bool = False
     usb_otg_reboot_attempts_used: int = 0
@@ -122,6 +124,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         outage_seconds = raw["outage_seconds"]
         wifi_interface = raw["wifi_interface"]
         recovery_started_at = raw.get("recovery_started_at", 0.0)
+        recovery_handoff_id = raw.get("recovery_handoff_id", "")
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
     if (
@@ -132,12 +135,14 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or isinstance(recovery_started_at, bool)
         or not isinstance(recovery_started_at, (int, float))
         or recovery_started_at < 0
+        or not isinstance(recovery_handoff_id, str)
     ):
         raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
     state.wifi_recovery_pending = recovery_pending
     state.wifi_recovery_outage_seconds = outage_seconds
     state.wifi_recovery_interface = wifi_interface
     state.wifi_recovery_started_at = float(recovery_started_at)
+    state.wifi_recovery_handoff_id = recovery_handoff_id
 
 
 def persist_wifi_watchdog_state(
@@ -156,6 +161,7 @@ def persist_wifi_watchdog_state(
             "outage_seconds": state.wifi_recovery_outage_seconds,
             "wifi_interface": state.wifi_recovery_interface,
             "recovery_started_at": state.wifi_recovery_started_at,
+            "recovery_handoff_id": state.wifi_recovery_handoff_id,
         }
         if preserve_pending:
             try:
@@ -195,7 +201,22 @@ def consume_wifi_recovery_notification(
             state.wifi_recovery_outage_seconds = 0
             state.wifi_recovery_interface = ""
             state.wifi_recovery_started_at = 0.0
+            state.wifi_recovery_handoff_id = ""
             return False
+        if not current.wifi_recovery_handoff_id:
+            current.wifi_recovery_handoff_id = uuid.uuid4().hex
+            _persist_watchdog_json(
+                path,
+                {
+                    "recovery_pending": True,
+                    "outage_seconds": current.wifi_recovery_outage_seconds,
+                    "wifi_interface": current.wifi_recovery_interface,
+                    "recovery_started_at": current.wifi_recovery_started_at,
+                    "recovery_handoff_id": current.wifi_recovery_handoff_id,
+                },
+                WiFiWatchdogStateError,
+                "Cannot persist Wi-Fi watchdog state",
+            )
         enqueue(current)
         acknowledged = replace(
             current,
@@ -203,6 +224,7 @@ def consume_wifi_recovery_notification(
             wifi_recovery_outage_seconds=0,
             wifi_recovery_interface="",
             wifi_recovery_started_at=0.0,
+            wifi_recovery_handoff_id="",
         )
         _persist_watchdog_json(
             path,
@@ -211,6 +233,7 @@ def consume_wifi_recovery_notification(
                 "outage_seconds": 0,
                 "wifi_interface": "",
                 "recovery_started_at": 0.0,
+                "recovery_handoff_id": "",
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -224,6 +247,7 @@ def consume_wifi_recovery_notification(
     state.wifi_recovery_outage_seconds = acknowledged.wifi_recovery_outage_seconds
     state.wifi_recovery_interface = acknowledged.wifi_recovery_interface
     state.wifi_recovery_started_at = acknowledged.wifi_recovery_started_at
+    state.wifi_recovery_handoff_id = acknowledged.wifi_recovery_handoff_id
     return True
 
 
@@ -412,6 +436,7 @@ def evaluate_self_healing(
         state.wifi_recovery_outage_seconds = 0
         state.wifi_recovery_interface = ""
         state.wifi_recovery_started_at = 0.0
+        state.wifi_recovery_handoff_id = ""
     else:
         if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
             if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
@@ -441,6 +466,7 @@ def evaluate_self_healing(
                 state.wifi_recovery_outage_seconds = 0
                 state.wifi_recovery_interface = ""
                 state.wifi_recovery_started_at = 0.0
+                state.wifi_recovery_handoff_id = ""
         else:
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
@@ -456,6 +482,7 @@ def evaluate_self_healing(
                 )
             else:
                 outage_duration = now - state.wifi_outage_started_monotonic
+                reconnected = False
                 if (
                     healing.wifi_reconnect_enabled
                     and not state.wifi_reconnect_attempted
@@ -482,6 +509,7 @@ def evaluate_self_healing(
                 if (
                     healing.wifi_reboot_enabled
                     and not state.wifi_reboot_requested
+                    and not reconnected
                     and outage_duration >= healing.wifi_reboot_after_minutes * 60
                 ):
                     was_recovery_pending = state.wifi_recovery_pending
@@ -491,6 +519,7 @@ def evaluate_self_healing(
                     state.wifi_recovery_interface = healing.wifi_interface
                     if not was_recovery_pending:
                         state.wifi_recovery_started_at = wall_time - outage_duration
+                        state.wifi_recovery_handoff_id = uuid.uuid4().hex
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reboot_requested",

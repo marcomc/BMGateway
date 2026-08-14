@@ -62,6 +62,44 @@ def test_queue_notification_event_prunes_by_retention_and_limit(tmp_path: Path) 
     assert [event.action for event in load_notification_outbox(path)] == ["two", "three"]
 
 
+def test_notification_outbox_keeps_distinct_idempotency_keys(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="wifi_connectivity_restored",
+        detail="first recovery",
+        idempotency_key="wifi-recovery:1000:wlan0",
+    )
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="wifi_connectivity_restored",
+        detail="second recovery",
+        idempotency_key="wifi-recovery:2000:wlan0",
+    )
+
+    assert [event.idempotency_key for event in load_notification_outbox(path)] == [
+        "wifi-recovery:1000:wlan0",
+        "wifi-recovery:2000:wlan0",
+    ]
+
+
+def test_legacy_outbox_event_without_idempotency_key_loads(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    path.write_text(
+        '[{"action": "wifi_connectivity_restored", "detail": "restored", '
+        '"occurred_at": "2026-08-15T00:00:00+00:00"}]\n',
+        encoding="utf-8",
+    )
+
+    assert load_notification_outbox(path)[0].idempotency_key == ""
+
+
 def test_persistence_normalizes_events_and_rejects_blank_actions(tmp_path: Path) -> None:
     path = tmp_path / "notification_outbox.json"
     occurred_at = datetime(2026, 8, 10, tzinfo=timezone.utc)

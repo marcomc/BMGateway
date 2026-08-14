@@ -5,6 +5,7 @@ import sys
 import tomllib
 from dataclasses import replace
 from pathlib import Path
+from typing import Callable
 
 import pytest
 from bm_gateway import __version__, cli
@@ -14,8 +15,10 @@ from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.notifications import load_notification_outbox, notification_outbox_path
 from bm_gateway.self_healing import (
     SelfHealingEvent,
+    SelfHealingState,
     USBOTGWatchdogStateError,
     WiFiWatchdogStateError,
+    consume_wifi_recovery_notification,
     load_wifi_watchdog_state,
     new_self_healing_state,
     persist_wifi_watchdog_state,
@@ -625,7 +628,7 @@ def test_run_uses_persisted_outage_duration_when_consuming_wifi_recovery_handoff
             SelfHealingEvent(
                 action="wifi_connectivity_restored",
                 status="completed",
-                details={"outage_seconds": 30},
+                details={"outage_seconds": 180},
             )
         ],
     )
@@ -638,7 +641,93 @@ def test_run_uses_persisted_outage_duration_when_consuming_wifi_recovery_handoff
         cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
         == 0
     )
-    assert details == ["Wi-Fi connectivity restored after 120 seconds."]
+    assert details == ["Wi-Fi connectivity restored after 180 seconds."]
+
+
+def test_run_defers_notification_delivery_when_wifi_recovery_acknowledgement_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[notifications]\n"
+        + "enabled = true\n"
+        + 'recipient = "operator@example.test"\n'
+        + "\n[self_healing]\n"
+        + "wifi_watchdog_enabled = true\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+    pending = new_self_healing_state()
+    pending.wifi_recovery_pending = True
+    pending.wifi_recovery_handoff_id = "handoff-a"
+    persist_wifi_watchdog_state(wifi_watchdog_state_path(state_dir), pending)
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+    deliveries: list[bool] = []
+    scheduled: list[bool] = []
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+    monkeypatch.setattr(
+        "bm_gateway.cli.evaluate_self_healing",
+        lambda **_kwargs: [
+            SelfHealingEvent(
+                action="wifi_connectivity_restored",
+                status="completed",
+                details={"outage_seconds": 60},
+            ),
+            SelfHealingEvent(
+                action="periodic_reboot_requested",
+                status="completed",
+                details={},
+            ),
+        ],
+    )
+
+    attempts = 0
+
+    def failed_ack(
+        path: Path, state: SelfHealingState, enqueue: Callable[[SelfHealingState], None]
+    ) -> bool:
+        nonlocal attempts
+        assert callable(enqueue)
+        attempts += 1
+        if attempts == 1:
+            enqueue(pending)
+            raise WiFiWatchdogStateError("cannot acknowledge")
+        return consume_wifi_recovery_notification(path, state, enqueue)
+
+    monkeypatch.setattr("bm_gateway.cli.consume_wifi_recovery_notification", failed_ack)
+
+    def record_delivery(**_kwargs: object) -> tuple[bool, str]:
+        deliveries.append(True)
+        return True, "Pending notifications delivered"
+
+    monkeypatch.setattr("bm_gateway.cli.deliver_notification_outbox", record_delivery)
+    monkeypatch.setattr("bm_gateway.cli.default_schedule_reboot", lambda: scheduled.append(True))
+
+    assert (
+        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
+        == 0
+    )
+    assert deliveries == []
+    assert scheduled == []
+    assert len(load_notification_outbox(notification_outbox_path(state_dir))) == 1
+    assert (
+        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
+        == 0
+    )
+    assert deliveries == [True]
+    assert len(load_notification_outbox(notification_outbox_path(state_dir))) == 1
 
 
 def test_run_reports_usb_watchdog_state_error_when_wifi_state_is_healthy(

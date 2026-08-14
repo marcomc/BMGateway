@@ -33,13 +33,17 @@ class NotificationEvent:
     action: str
     detail: str
     occurred_at: datetime
+    idempotency_key: str = ""
 
     def to_dict(self) -> dict[str, str]:
-        return {
+        payload = {
             "action": self.action,
             "detail": self.detail,
             "occurred_at": self.occurred_at.isoformat(),
         }
+        if self.idempotency_key:
+            payload["idempotency_key"] = self.idempotency_key
+        return payload
 
 
 def notification_outbox_path(state_dir: Path) -> Path:
@@ -94,7 +98,9 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _canonical_event(*, action: object, detail: object, occurred_at: datetime) -> NotificationEvent:
+def _canonical_event(
+    *, action: object, detail: object, occurred_at: datetime, idempotency_key: object = ""
+) -> NotificationEvent:
     normalized_action = str(action).strip()
     if not normalized_action:
         raise NotificationOutboxError("Notification outbox contains an event without an action")
@@ -102,6 +108,7 @@ def _canonical_event(*, action: object, detail: object, occurred_at: datetime) -
         action=normalized_action,
         detail=str(detail).strip(),
         occurred_at=_aware_utc(occurred_at),
+        idempotency_key=str(idempotency_key).strip(),
     )
 
 
@@ -133,6 +140,7 @@ def _load_notification_outbox_unlocked(path: Path) -> list[NotificationEvent]:
                 action=item.get("action", ""),
                 detail=item.get("detail", ""),
                 occurred_at=occurred_at,
+                idempotency_key=item.get("idempotency_key", ""),
             )
         )
     return events
@@ -143,6 +151,15 @@ def load_notification_outbox(path: Path) -> list[NotificationEvent]:
         return _load_notification_outbox_unlocked(path)
 
 
+def notification_outbox_has_idempotency_key(path: Path, idempotency_key: str) -> bool:
+    """Return whether an undelivered event with this stable identity exists."""
+    with _notification_outbox_lock(path):
+        return any(
+            event.idempotency_key == idempotency_key
+            for event in _load_notification_outbox_unlocked(path)
+        )
+
+
 def _persist_notification_outbox_unlocked(path: Path, events: list[NotificationEvent]) -> None:
     normalized_events: list[NotificationEvent] = []
     for event in events:
@@ -151,6 +168,7 @@ def _persist_notification_outbox_unlocked(path: Path, events: list[NotificationE
                 action=event.action,
                 detail=event.detail,
                 occurred_at=event.occurred_at,
+                idempotency_key=event.idempotency_key,
             )
         )
     payload = json.dumps([event.to_dict() for event in normalized_events], indent=2) + "\n"
@@ -205,6 +223,7 @@ def queue_notification_event(
     config: NotificationsConfig,
     action: str,
     detail: str,
+    idempotency_key: str = "",
     now: datetime | None = None,
 ) -> None:
     if not config.enabled or config.offline_delivery == "drop":
@@ -212,7 +231,14 @@ def queue_notification_event(
     with _notification_outbox_lock(path):
         current = _aware_utc(now or datetime.now(timezone.utc))
         events = _retained_events(path=path, config=config, now=current)
-        events.append(NotificationEvent(action=action, detail=detail, occurred_at=current))
+        events.append(
+            NotificationEvent(
+                action=action,
+                detail=detail,
+                occurred_at=current,
+                idempotency_key=idempotency_key,
+            )
+        )
         _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
 
 
