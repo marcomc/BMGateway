@@ -890,8 +890,10 @@ def _handle_run(
                 )
             if usb_otg_state_error is not None:
                 healing_config = replace(
-                    config,
-                    self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=False),
+                    healing_config,
+                    self_healing=replace(
+                        healing_config.self_healing, usb_otg_watchdog_enabled=False
+                    ),
                 )
             if wifi_state_error is not None:
                 healing_config = replace(
@@ -1146,6 +1148,8 @@ def _handle_run(
             if defer_notification_delivery:
                 if periodic_reboot_requested:
                     self_healing_state.periodic_reboot_requested = False
+                if wifi_reboot_requested:
+                    self_healing_state.wifi_reboot_requested = False
                 if usb_otg_reboot_requested:
                     self_healing_state.usb_otg_reboot_attempts_used = usb_otg_reboot_attempts_before
             if usb_otg_reboot_requested and not defer_notification_delivery:
@@ -1153,6 +1157,11 @@ def _handle_run(
                     persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
                 except USBOTGWatchdogStateError as error:
                     usb_otg_reboot_requested = False
+                    defer_notification_delivery = True
+                    if periodic_reboot_requested:
+                        self_healing_state.periodic_reboot_requested = False
+                    if wifi_reboot_requested:
+                        self_healing_state.wifi_reboot_requested = False
                     self_healing_state.usb_otg_reboot_attempts_used = usb_otg_reboot_attempts_before
                     append_audit_event(
                         config=config,

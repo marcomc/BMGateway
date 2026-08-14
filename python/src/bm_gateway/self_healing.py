@@ -194,7 +194,11 @@ def persist_wifi_watchdog_state(
                 current = json.loads(path.read_text(encoding="utf-8"))
             except FileNotFoundError:
                 current = None
-            if isinstance(current, dict) and current.get("recovery_pending") is True:
+            if (
+                isinstance(current, dict)
+                and current.get("recovery_pending") is True
+                and state.wifi_recovery_phase != "reboot_authorized"
+            ):
                 payload = current
         _persist_watchdog_json(
             path,
