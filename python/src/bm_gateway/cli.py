@@ -31,6 +31,7 @@ from .drivers.bm300 import (
     default_bm7_history_reference_ts,
     encode_bm7_history_request_for_byte,
 )
+from .localization import translation_for
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
 from .notifications import (
@@ -61,12 +62,16 @@ from .runtime import (
 from .self_healing import (
     SelfHealingEvent,
     USBOTGWatchdogStateError,
+    WiFiWatchdogStateError,
     default_schedule_reboot,
     evaluate_self_healing,
     load_usb_otg_watchdog_state,
+    load_wifi_watchdog_state,
     new_self_healing_state,
     persist_usb_otg_watchdog_state,
+    persist_wifi_watchdog_state,
     usb_otg_watchdog_state_path,
+    wifi_watchdog_state_path,
 )
 from .state_store import (
     fetch_archive_history,
@@ -83,6 +88,45 @@ from .state_store import (
     write_snapshot,
 )
 from .system_alerts import collect_gateway_alerts, describe_gateway_alert
+
+
+def _queue_wifi_watchdog_notification(
+    *,
+    path: Path,
+    config: AppConfig,
+    event: SelfHealingEvent,
+) -> None:
+    details = event.details
+    outage_value = details.get("outage_seconds", 0)
+    outage_seconds = outage_value if isinstance(outage_value, int) else 0
+    wifi_interface = str(details.get("wifi_interface", ""))
+    translate = translation_for(config.notifications.locale).gettext
+    if event.action == "wifi_reconnect_attempted":
+        key = (
+            "Wi-Fi reconnect succeeded after {outage_seconds} seconds on {wifi_interface}."
+            if event.status == "completed"
+            else "Wi-Fi reconnect failed after {outage_seconds} seconds on {wifi_interface}."
+        )
+        detail = translate(key).format(
+            outage_seconds=outage_seconds,
+            wifi_interface=wifi_interface,
+        )
+    elif event.action == "wifi_reboot_requested":
+        detail = translate(
+            "Wi-Fi reboot requested after {outage_seconds} seconds on {wifi_interface}."
+        ).format(outage_seconds=outage_seconds, wifi_interface=wifi_interface)
+    elif event.action == "wifi_connectivity_restored":
+        detail = translate("Wi-Fi connectivity restored after {outage_seconds} seconds.").format(
+            outage_seconds=outage_seconds
+        )
+    else:
+        return
+    queue_notification_event(
+        path=path,
+        config=config.notifications,
+        action=event.action,
+        detail=detail,
+    )
 
 
 def format_main_help() -> str:
@@ -745,13 +789,19 @@ def _handle_run(
     self_healing_state = new_self_healing_state()
     runtime_state_dir = database_file_path(config, state_dir=state_dir).parent.parent
     usb_otg_state_path = usb_otg_watchdog_state_path(runtime_state_dir)
+    wifi_state_path = wifi_watchdog_state_path(runtime_state_dir)
     usb_otg_state_error: str | None = None
+    wifi_state_error: str | None = None
     usb_otg_state_error_reported = False
     notification_delivery_result: tuple[bool, str] | None = None
     try:
         load_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
     except USBOTGWatchdogStateError as error:
         usb_otg_state_error = str(error)
+    try:
+        load_wifi_watchdog_state(wifi_state_path, self_healing_state)
+    except WiFiWatchdogStateError as error:
+        wifi_state_error = str(error)
     device_backoff = LiveDeviceBackoff()
     timeout_recovery = LiveTimeoutRecoveryTracker()
 
@@ -815,18 +865,39 @@ def _handle_run(
                     config,
                     self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=False),
                 )
+            if wifi_state_error is not None:
+                healing_config = replace(
+                    healing_config,
+                    self_healing=replace(healing_config.self_healing, wifi_reboot_enabled=False),
+                )
             usb_otg_state_checkpoint = None
             if config.self_healing.usb_otg_watchdog_enabled and usb_otg_state_error is None:
 
                 def usb_otg_state_checkpoint() -> None:
                     persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
 
+            wifi_state_checkpoint = None
+            if config.self_healing.wifi_watchdog_enabled and wifi_state_error is None:
+
+                def wifi_state_checkpoint() -> None:
+                    persist_wifi_watchdog_state(wifi_state_path, self_healing_state)
+
             try:
                 events = evaluate_self_healing(
                     config=healing_config,
                     state=self_healing_state,
                     usb_otg_state_checkpoint=usb_otg_state_checkpoint,
+                    wifi_state_checkpoint=wifi_state_checkpoint,
                 )
+            except WiFiWatchdogStateError as error:
+                wifi_state_error = str(error)
+                events = [
+                    SelfHealingEvent(
+                        action="wifi_watchdog_state_persist_failed",
+                        status="failed",
+                        details={"reason": wifi_state_error},
+                    )
+                ]
             except USBOTGWatchdogStateError as error:
                 usb_otg_state_error = str(error)
                 usb_otg_state_error_reported = True
@@ -849,6 +920,18 @@ def _handle_run(
                             details={"reason": usb_otg_state_error},
                         )
                     )
+            if config.self_healing.wifi_watchdog_enabled and wifi_state_error is None:
+                try:
+                    persist_wifi_watchdog_state(wifi_state_path, self_healing_state)
+                except WiFiWatchdogStateError as error:
+                    wifi_state_error = str(error)
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_watchdog_state_persist_failed",
+                            status="failed",
+                            details={"reason": wifi_state_error},
+                        )
+                    )
             elif usb_otg_state_error is not None and not usb_otg_state_error_reported:
                 events.append(
                     SelfHealingEvent(
@@ -858,6 +941,7 @@ def _handle_run(
                     )
                 )
                 usb_otg_state_error_reported = True
+            wifi_reboot_requested = False
             for event in events:
                 append_audit_event(
                     config=config,
@@ -868,11 +952,34 @@ def _handle_run(
                     status=event.status,
                     details=event.details,
                 )
-                if event.action in {"periodic_reboot_requested", "wifi_reboot_requested"}:
+                if event.action == "periodic_reboot_requested":
                     sys.stderr.write(f"Self-healing action requested: {event.action}\n")
+                if event.action == "wifi_reboot_requested":
+                    wifi_reboot_requested = True
                 if event.action == "usb_otg_reboot_requested":
                     default_schedule_reboot()
                     sys.stderr.write(f"Self-healing action requested: {event.action}\n")
+                if event.action in {
+                    "wifi_reconnect_attempted",
+                    "wifi_reboot_requested",
+                    "wifi_connectivity_restored",
+                }:
+                    try:
+                        _queue_wifi_watchdog_notification(
+                            path=notification_outbox_path(runtime_state_dir),
+                            config=config,
+                            event=event,
+                        )
+                    except NotificationOutboxError as error:
+                        append_audit_event(
+                            config=config,
+                            state_dir=state_dir,
+                            source="runtime",
+                            trigger="automatic",
+                            action="wifi_watchdog_notification_queue",
+                            status="failed",
+                            details={"detail": str(error)},
+                        )
                 if event.action == "usb_otg_recovery_exhausted":
                     try:
                         queue_notification_event(
@@ -929,6 +1036,9 @@ def _handle_run(
                             details={"detail": str(error)},
                         )
                     notification_delivery_result = result
+            if wifi_reboot_requested:
+                default_schedule_reboot()
+                sys.stderr.write("Self-healing action requested: wifi_reboot_requested\n")
         completed += 1
         if iteration_limit is not None and completed >= iteration_limit:
             break

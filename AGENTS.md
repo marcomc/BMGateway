@@ -58,6 +58,9 @@ At the start of every new AI agent chat for this repository, read:
 - When adding derived persistence such as rollups or summaries, rebuild or
   validate it from the canonical source rows and timestamps rather than
   incrementing a second source of truth independently.
+- When a recovery action can restart the process before its outcome is known,
+  persist the minimal pending recovery state before scheduling it and test the
+  first healthy cycle of a fresh process.
 - For history charts, derive all-range coverage from the configured retention
   policy rather than a fixed display cap, and test retention beyond every
   paging limit.

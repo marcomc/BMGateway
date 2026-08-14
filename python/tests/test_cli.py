@@ -3,12 +3,16 @@ from __future__ import annotations
 import json
 import sys
 import tomllib
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
 from bm_gateway import __version__, cli
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
+from bm_gateway.config import load_config
 from bm_gateway.models import DeviceReading, GatewaySnapshot
+from bm_gateway.notifications import load_notification_outbox, notification_outbox_path
+from bm_gateway.self_healing import SelfHealingEvent
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -105,6 +109,173 @@ def test_package_version_matches_project_metadata() -> None:
         pyproject = tomllib.load(handle)
 
     assert __version__ == pyproject["project"]["version"]
+
+
+def test_wifi_watchdog_notifications_queue_recovery_reboot_and_restoration(
+    tmp_path: Path,
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            enabled=True,
+            recipient="operator@example.test",
+        ),
+    )
+    outbox_path = notification_outbox_path(tmp_path)
+
+    for event in (
+        SelfHealingEvent(
+            action="wifi_reconnect_attempted",
+            status="failed",
+            details={"wifi_interface": "wlan0", "outage_seconds": 300},
+        ),
+        SelfHealingEvent(
+            action="wifi_reboot_requested",
+            status="completed",
+            details={"wifi_interface": "wlan0", "outage_seconds": 900},
+        ),
+        SelfHealingEvent(
+            action="wifi_connectivity_restored",
+            status="completed",
+            details={"outage_seconds": 960},
+        ),
+        SelfHealingEvent(action="wifi_connectivity_lost", status="failed", details={}),
+    ):
+        cli._queue_wifi_watchdog_notification(
+            path=outbox_path,
+            config=config,
+            event=event,
+        )
+
+    queued = load_notification_outbox(outbox_path)
+
+    assert [event.action for event in queued] == [
+        "wifi_reconnect_attempted",
+        "wifi_reboot_requested",
+        "wifi_connectivity_restored",
+    ]
+    assert queued[0].detail == "Wi-Fi reconnect failed after 300 seconds on wlan0."
+    assert queued[1].detail == "Wi-Fi reboot requested after 900 seconds on wlan0."
+    assert queued[2].detail == "Wi-Fi connectivity restored after 960 seconds."
+
+
+def test_wifi_watchdog_notification_uses_configured_locale(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            enabled=True,
+            recipient="operator@example.test",
+            locale="it",
+        ),
+    )
+
+    cli._queue_wifi_watchdog_notification(
+        path=notification_outbox_path(tmp_path),
+        config=config,
+        event=SelfHealingEvent(
+            action="wifi_connectivity_restored",
+            status="completed",
+            details={"outage_seconds": 960},
+        ),
+    )
+
+    assert load_notification_outbox(notification_outbox_path(tmp_path))[0].detail == (
+        "Connettivita Wi-Fi ripristinata dopo 960 secondi."
+    )
+
+
+def test_run_queues_wifi_watchdog_events_before_attempting_delivery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[notifications]\n"
+        + "enabled = true\n"
+        + 'recipient = "operator@example.test"\n',
+        encoding="utf-8",
+    )
+    queued: list[tuple[str, str]] = []
+    delivered_after_queue = False
+    event_order: list[str] = []
+
+    monkeypatch.setattr(
+        "bm_gateway.cli._run_cycle",
+        lambda **_kwargs: GatewaySnapshot(
+            generated_at="2026-08-14T20:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=False,
+            mqtt_connected=False,
+            devices_total=0,
+            devices_online=0,
+            poll_interval_seconds=15,
+            devices=[],
+        ),
+    )
+    monkeypatch.setattr(
+        "bm_gateway.cli.evaluate_self_healing",
+        lambda **_kwargs: [
+            SelfHealingEvent(
+                action="wifi_reconnect_attempted",
+                status="completed",
+                details={"wifi_interface": "wlan0", "outage_seconds": 300},
+            ),
+            SelfHealingEvent(
+                action="wifi_reboot_requested",
+                status="completed",
+                details={"wifi_interface": "wlan0", "outage_seconds": 900},
+            ),
+            SelfHealingEvent(
+                action="wifi_connectivity_restored",
+                status="completed",
+                details={"outage_seconds": 960},
+            ),
+        ],
+    )
+
+    def fake_queue(**kwargs: object) -> None:
+        action = str(kwargs["action"])
+        queued.append((action, str(kwargs["detail"])))
+        event_order.append(f"queue:{action}")
+
+    monkeypatch.setattr("bm_gateway.cli.queue_notification_event", fake_queue)
+
+    def fake_delivery(**_kwargs: object) -> tuple[bool, str]:
+        nonlocal delivered_after_queue
+        delivered_after_queue = True
+        event_order.append("deliver")
+        return True, "Pending notifications delivered"
+
+    monkeypatch.setattr("bm_gateway.cli.deliver_notification_outbox", fake_delivery)
+    monkeypatch.setattr(
+        "bm_gateway.cli.default_schedule_reboot", lambda: event_order.append("wifi_reboot")
+    )
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--state-dir",
+            str(tmp_path / "state"),
+        ]
+    )
+
+    assert result == 0
+    assert [action for action, _detail in queued] == [
+        "wifi_reconnect_attempted",
+        "wifi_reboot_requested",
+        "wifi_connectivity_restored",
+    ]
+    assert delivered_after_queue is True
+    assert event_order.index("deliver") < event_order.index("wifi_reboot")
 
 
 def test_cli_version_commands_emit_package_version(capsys: pytest.CaptureFixture[str]) -> None:

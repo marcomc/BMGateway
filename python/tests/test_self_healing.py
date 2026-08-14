@@ -14,9 +14,12 @@ from bm_gateway.self_healing import (
     default_wifi_reconnect,
     evaluate_self_healing,
     load_usb_otg_watchdog_state,
+    load_wifi_watchdog_state,
     new_self_healing_state,
     persist_usb_otg_watchdog_state,
+    persist_wifi_watchdog_state,
     usb_otg_watchdog_state_path,
+    wifi_watchdog_state_path,
 )
 
 
@@ -115,7 +118,7 @@ def test_self_healing_reconnects_wifi_before_rebooting() -> None:
     assert reconnect[0].status == "completed"
     assert [event.action for event in reboot] == ["wifi_reboot_requested"]
     assert reconnect_calls == ["wlan1"]
-    assert reboot_calls == 1
+    assert reboot_calls == 0
 
 
 def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
@@ -142,6 +145,52 @@ def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
     assert [event.action for event in lost] == ["wifi_connectivity_lost"]
     assert [event.action for event in restored] == ["wifi_connectivity_restored"]
     assert state.wifi_outage_started_monotonic is None
+
+
+def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
+    tmp_path: Path,
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    first = new_self_healing_state(now_monotonic=0.0)
+
+    evaluate_self_healing(
+        config=config,
+        state=first,
+        now_monotonic=10.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    reboot = evaluate_self_healing(
+        config=config,
+        state=first,
+        now_monotonic=70.0,
+        connectivity_checker=lambda _host, _interface: False,
+        wifi_state_checkpoint=lambda: persist_wifi_watchdog_state(state_path, first),
+    )
+
+    restarted = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, restarted)
+    restored = evaluate_self_healing(
+        config=config,
+        state=restarted,
+        now_monotonic=10.0,
+        connectivity_checker=lambda _host, _interface: True,
+    )
+
+    assert [event.action for event in reboot] == ["wifi_reboot_requested"]
+    assert [event.action for event in restored] == ["wifi_connectivity_restored"]
+    assert restored[0].details["outage_seconds"] == 60
+    assert restarted.wifi_recovery_pending is False
 
 
 def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:

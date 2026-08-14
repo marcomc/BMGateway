@@ -29,12 +29,19 @@ class USBOTGWatchdogStateError(RuntimeError):
     """The USB OTG watchdog recovery state cannot be safely used."""
 
 
+class WiFiWatchdogStateError(RuntimeError):
+    """The Wi-Fi watchdog recovery state cannot be safely used."""
+
+
 @dataclass
 class SelfHealingState:
     started_monotonic: float
     wifi_outage_started_monotonic: float | None = None
     wifi_reconnect_attempted: bool = False
     wifi_reboot_requested: bool = False
+    wifi_recovery_pending: bool = False
+    wifi_recovery_outage_seconds: int = 0
+    wifi_recovery_interface: str = ""
     periodic_reboot_requested: bool = False
     usb_otg_rebind_attempted: bool = False
     usb_otg_reboot_attempts_used: int = 0
@@ -64,6 +71,73 @@ def new_self_healing_state(now_monotonic: float | None = None) -> SelfHealingSta
 
 def usb_otg_watchdog_state_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "usb_otg_watchdog_state.json"
+
+
+def wifi_watchdog_state_path(state_dir: Path) -> Path:
+    return state_dir / "runtime" / "wifi_watchdog_state.json"
+
+
+def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot read Wi-Fi watchdog state") from error
+    try:
+        raw = json.loads(payload)
+        recovery_pending = raw["recovery_pending"]
+        outage_seconds = raw["outage_seconds"]
+        wifi_interface = raw["wifi_interface"]
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
+    if (
+        not isinstance(recovery_pending, bool)
+        or not isinstance(outage_seconds, int)
+        or outage_seconds < 0
+        or not isinstance(wifi_interface, str)
+    ):
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
+    state.wifi_recovery_pending = recovery_pending
+    state.wifi_recovery_outage_seconds = outage_seconds
+    state.wifi_recovery_interface = wifi_interface
+
+
+def persist_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    payload = (
+        json.dumps(
+            {
+                "recovery_pending": state.wifi_recovery_pending,
+                "outage_seconds": state.wifi_recovery_outage_seconds,
+                "wifi_interface": state.wifi_recovery_interface,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    temporary_path: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as temporary:
+            temporary.write(payload)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, path)
+        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError as error:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise WiFiWatchdogStateError("Cannot persist Wi-Fi watchdog state") from error
 
 
 def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -245,6 +319,7 @@ def evaluate_self_healing(
     usb_otg_health_checker: USBOTGHealthChecker = default_usb_otg_health_check,
     usb_otg_rebind_action: USBOTGRebindAction = default_usb_otg_rebind,
     usb_otg_state_checkpoint: USBOTGStateCheckpoint | None = None,
+    wifi_state_checkpoint: Callable[[], None] | None = None,
 ) -> list[SelfHealingEvent]:
     now = time.monotonic() if now_monotonic is None else now_monotonic
     events: list[SelfHealingEvent] = []
@@ -271,22 +346,32 @@ def evaluate_self_healing(
         state.wifi_outage_started_monotonic = None
         state.wifi_reconnect_attempted = False
         state.wifi_reboot_requested = False
+        state.wifi_recovery_pending = False
+        state.wifi_recovery_outage_seconds = 0
+        state.wifi_recovery_interface = ""
     else:
         if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
-            if state.wifi_outage_started_monotonic is not None:
+            if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
+                outage_seconds = state.wifi_recovery_outage_seconds
+                if not state.wifi_recovery_pending:
+                    assert state.wifi_outage_started_monotonic is not None
+                    outage_seconds = int(now - state.wifi_outage_started_monotonic)
                 events.append(
                     SelfHealingEvent(
                         action="wifi_connectivity_restored",
                         status="completed",
                         details={
                             "connectivity_check_host": healing.connectivity_check_host,
-                            "outage_seconds": int(now - state.wifi_outage_started_monotonic),
+                            "outage_seconds": outage_seconds,
                         },
                     )
                 )
             state.wifi_outage_started_monotonic = None
             state.wifi_reconnect_attempted = False
             state.wifi_reboot_requested = False
+            state.wifi_recovery_pending = False
+            state.wifi_recovery_outage_seconds = 0
+            state.wifi_recovery_interface = ""
         else:
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
@@ -301,11 +386,11 @@ def evaluate_self_healing(
                     )
                 )
             else:
-                outage_seconds = now - state.wifi_outage_started_monotonic
+                outage_duration = now - state.wifi_outage_started_monotonic
                 if (
                     healing.wifi_reconnect_enabled
                     and not state.wifi_reconnect_attempted
-                    and outage_seconds >= healing.wifi_reconnect_after_minutes * 60
+                    and outage_duration >= healing.wifi_reconnect_after_minutes * 60
                 ):
                     state.wifi_reconnect_attempted = True
                     reconnected = reconnect_action(healing.wifi_interface)
@@ -315,7 +400,7 @@ def evaluate_self_healing(
                             status="completed" if reconnected else "failed",
                             details={
                                 "wifi_interface": healing.wifi_interface,
-                                "outage_seconds": int(outage_seconds),
+                                "outage_seconds": int(outage_duration),
                             },
                         )
                     )
@@ -323,10 +408,14 @@ def evaluate_self_healing(
                 if (
                     healing.wifi_reboot_enabled
                     and not state.wifi_reboot_requested
-                    and outage_seconds >= healing.wifi_reboot_after_minutes * 60
+                    and outage_duration >= healing.wifi_reboot_after_minutes * 60
                 ):
                     state.wifi_reboot_requested = True
-                    reboot_action()
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_outage_seconds = int(outage_duration)
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    if wifi_state_checkpoint is not None:
+                        wifi_state_checkpoint()
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reboot_requested",
@@ -334,7 +423,7 @@ def evaluate_self_healing(
                             details={
                                 "wifi_interface": healing.wifi_interface,
                                 "connectivity_check_host": healing.connectivity_check_host,
-                                "outage_seconds": int(outage_seconds),
+                                "outage_seconds": int(outage_duration),
                             },
                         )
                     )
