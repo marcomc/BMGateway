@@ -149,7 +149,7 @@ preserved. The installer does not create mail credentials. For `msmtp`,
 configure `/etc/msmtprc` separately; the installer hardens an existing regular
 file to `root:msmtp` and mode `0640`, and applies the matching setgid override.
 Then enable Notifications in Settings. It also prepares the fixed bounded
-offline-delivery mode for upcoming lifecycle and watchdog notifications:
+offline-delivery mode for current watchdog and future lifecycle notifications:
 `summary`, `individual`, or `drop`; `summary` is the default and avoids a long
 outage producing a burst of individual emails. Select a fixed notification
 language for unattended email; this setting intentionally does not inherit the
@@ -541,6 +541,12 @@ For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 `self_healing.wifi_reboot_enabled = false`. Enable Wi-Fi reboot only if
 reconnect attempts do not restore the link reliably. The reboot delay must be
 longer than the reconnect delay when both actions are enabled.
+
+When system-mail Notifications are enabled, the Wi-Fi watchdog queues and
+attempts delivery for a reconnect attempt, a requested reboot, and the later
+connectivity restoration. `summary` and `individual` retain an undelivered
+alert in the bounded outbox; `drop` discards it. A requested reboot is queued
+and delivery is attempted before its reboot is scheduled.
 
 The USB OTG watchdog considers the frame enumerated only when the gadget is
 attached and its UDC state is `configured`. This is a useful host-side signal,
