@@ -1874,6 +1874,12 @@ def serve_management(
                             [str(config.self_healing.wifi_reboot_after_minutes)],
                         )[0]
                     )
+                    usb_otg_reboot_attempts = int(
+                        form.get(
+                            "usb_otg_reboot_attempts",
+                            [str(config.self_healing.usb_otg_reboot_attempts)],
+                        )[0]
+                    )
                 except ValueError:
                     configured_devices = load_device_registry(config.device_registry_path)
                     self._send_html(
@@ -1918,6 +1924,13 @@ def serve_management(
                         else config.self_healing.wifi_reboot_enabled
                     ),
                     wifi_reboot_after_minutes=wifi_reboot_after_minutes,
+                    usb_otg_watchdog_enabled=_bool_from_form(form, "usb_otg_watchdog_enabled"),
+                    usb_otg_reboot_enabled=(
+                        _bool_from_form(form, "usb_otg_reboot_enabled")
+                        if "usb_otg_reboot_enabled" in form
+                        else config.self_healing.usb_otg_reboot_enabled
+                    ),
+                    usb_otg_reboot_attempts=usb_otg_reboot_attempts,
                 )
                 if errors:
                     configured_devices = load_device_registry(config.device_registry_path)

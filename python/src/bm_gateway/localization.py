@@ -107,6 +107,7 @@ _DYNAMIC_TRANSLATION_SUFFIXES: Final = (
 _DYNAMIC_TRANSLATION_TEMPLATES: Final = (
     (re.compile(r"^Every (?P<hours>\d+) hours$"), "Every {hours} hours"),
     (re.compile(r"^After (?P<minutes>\d+) minutes$"), "After {minutes} minutes"),
+    (re.compile(r"^Up to (?P<attempts>\d+) reboot attempts$"), "Up to {attempts} reboot attempts"),
     (re.compile(r"^(?P<days>\d+) days$"), "{days} days"),
 )
 _IGNORED_TEXT_PATTERNS: Final = (

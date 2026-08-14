@@ -677,6 +677,9 @@ def update_self_healing_preferences(
     wifi_reconnect_after_minutes: int,
     wifi_reboot_enabled: bool,
     wifi_reboot_after_minutes: int,
+    usb_otg_watchdog_enabled: bool,
+    usb_otg_reboot_enabled: bool,
+    usb_otg_reboot_attempts: int,
 ) -> list[str]:
     config = load_config(config_path)
     updated = replace(
@@ -692,6 +695,9 @@ def update_self_healing_preferences(
             wifi_reconnect_after_minutes=wifi_reconnect_after_minutes,
             wifi_reboot_enabled=wifi_reboot_enabled,
             wifi_reboot_after_minutes=wifi_reboot_after_minutes,
+            usb_otg_watchdog_enabled=usb_otg_watchdog_enabled,
+            usb_otg_reboot_enabled=usb_otg_reboot_enabled,
+            usb_otg_reboot_attempts=usb_otg_reboot_attempts,
         ),
     )
     from .config import validate_config
@@ -715,6 +721,9 @@ def update_self_healing_preferences(
             "wifi_watchdog_enabled": wifi_watchdog_enabled,
             "wifi_reconnect_enabled": wifi_reconnect_enabled,
             "wifi_reboot_enabled": wifi_reboot_enabled,
+            "usb_otg_watchdog_enabled": usb_otg_watchdog_enabled,
+            "usb_otg_reboot_enabled": usb_otg_reboot_enabled,
+            "usb_otg_reboot_attempts": usb_otg_reboot_attempts,
         },
     )
     return []

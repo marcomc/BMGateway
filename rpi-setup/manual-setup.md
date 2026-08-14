@@ -521,13 +521,19 @@ and error-heavy history.
 Self-healing is disabled by default and can be configured from Settings or
 `config.toml`.
 
-There are two independent recovery paths:
+There are three independent recovery paths:
 
 - periodic reboot: set `self_healing.periodic_reboot_enabled = true` and choose
   `self_healing.periodic_reboot_hours` from `1` to `48`
 - Wi-Fi watchdog: set `self_healing.wifi_watchdog_enabled = true`, choose a
   reachable `self_healing.connectivity_check_host`, and tune the reconnect and
   reboot delays in minutes
+- USB OTG watchdog: enable USB OTG image export first, then set
+  `self_healing.usb_otg_watchdog_enabled = true` to monitor the USB device
+  controller. It first refreshes the virtual drive, can then reboot up to
+  `self_healing.usb_otg_reboot_attempts` times when
+  `self_healing.usb_otg_reboot_enabled = true`, and sends a system-mail
+  escalation after recovery is exhausted.
 
 For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 `self_healing.wifi_watchdog_enabled = true`,
@@ -535,6 +541,13 @@ For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 `self_healing.wifi_reboot_enabled = false`. Enable Wi-Fi reboot only if
 reconnect attempts do not restore the link reliably. The reboot delay must be
 longer than the reconnect delay when both actions are enabled.
+
+The USB OTG watchdog considers the frame enumerated only when the gadget is
+attached and its UDC state is `configured`. This is a useful host-side signal,
+but it does not prove that the picture-frame application is displaying the
+images. Recovery counters survive a Raspberry Pi reboot, preventing a reboot
+loop; configure `notifications` for an email escalation after the final
+attempt.
 
 ## Optional: Prepare USB OTG Image Export
 

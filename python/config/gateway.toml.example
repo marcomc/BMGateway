@@ -83,6 +83,20 @@ bm200_max_pages_per_sync = 85
 bm300_enabled = true
 bm300_max_pages_per_sync = 3
 
+[self_healing]
+periodic_reboot_enabled = false
+periodic_reboot_hours = 24
+wifi_watchdog_enabled = false
+wifi_interface = "wlan0"
+connectivity_check_host = "1.1.1.1"
+wifi_reconnect_enabled = true
+wifi_reconnect_after_minutes = 5
+wifi_reboot_enabled = false
+wifi_reboot_after_minutes = 15
+usb_otg_watchdog_enabled = false
+usb_otg_reboot_enabled = false
+usb_otg_reboot_attempts = 1
+
 [notifications]
 # Uses an existing system sendmail transport, or msmtp when none is installed.
 enabled = false

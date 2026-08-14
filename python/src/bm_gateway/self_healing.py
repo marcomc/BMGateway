@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import json
+import os
 import shutil
 import subprocess
+import tempfile
 import time
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Callable
 
 from .config import AppConfig
@@ -13,6 +17,16 @@ from .config import AppConfig
 ConnectivityChecker = Callable[[str, str], bool]
 ReconnectAction = Callable[[str], bool]
 RebootAction = Callable[[], None]
+USBOTGHealthChecker = Callable[[str, str], "USBOTGHealth"]
+USBOTGRebindAction = Callable[[str, str], bool]
+USBOTGStateCheckpoint = Callable[[], None]
+_USB_OTG_HELPER_PATH = "/usr/local/bin/bm-gateway-usb-otg-frame-test"
+_USB_OTG_CONFIGFS_ROOT = Path("/sys/kernel/config")
+_USB_OTG_UDC_ROOT = Path("/sys/class/udc")
+
+
+class USBOTGWatchdogStateError(RuntimeError):
+    """The USB OTG watchdog recovery state cannot be safely used."""
 
 
 @dataclass
@@ -22,6 +36,17 @@ class SelfHealingState:
     wifi_reconnect_attempted: bool = False
     wifi_reboot_requested: bool = False
     periodic_reboot_requested: bool = False
+    usb_otg_rebind_attempted: bool = False
+    usb_otg_reboot_attempts_used: int = 0
+    usb_otg_escalated: bool = False
+
+
+@dataclass(frozen=True)
+class USBOTGHealth:
+    healthy: bool
+    reason: str
+    udc_name: str | None
+    udc_state: str | None
 
 
 @dataclass(frozen=True)
@@ -35,6 +60,73 @@ def new_self_healing_state(now_monotonic: float | None = None) -> SelfHealingSta
     return SelfHealingState(
         started_monotonic=time.monotonic() if now_monotonic is None else now_monotonic
     )
+
+
+def usb_otg_watchdog_state_path(state_dir: Path) -> Path:
+    return state_dir / "runtime" / "usb_otg_watchdog_state.json"
+
+
+def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise USBOTGWatchdogStateError("Cannot read USB OTG watchdog state") from error
+    try:
+        raw = json.loads(payload)
+        rebind_attempted = raw["rebind_attempted"]
+        reboot_attempts_used = raw["reboot_attempts_used"]
+        escalated = raw["escalated"]
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise USBOTGWatchdogStateError("USB OTG watchdog state is invalid") from error
+    if (
+        not isinstance(rebind_attempted, bool)
+        or not isinstance(reboot_attempts_used, int)
+        or reboot_attempts_used < 0
+        or not isinstance(escalated, bool)
+    ):
+        raise USBOTGWatchdogStateError("USB OTG watchdog state has invalid values")
+    state.usb_otg_rebind_attempted = rebind_attempted
+    state.usb_otg_reboot_attempts_used = reboot_attempts_used
+    state.usb_otg_escalated = escalated
+
+
+def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    payload = (
+        json.dumps(
+            {
+                "rebind_attempted": state.usb_otg_rebind_attempted,
+                "reboot_attempts_used": state.usb_otg_reboot_attempts_used,
+                "escalated": state.usb_otg_escalated,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    )
+    temporary_path: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as temporary:
+            temporary.write(payload)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, path)
+        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError as error:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state") from error
 
 
 def default_connectivity_checker(host: str, interface: str) -> bool:
@@ -90,6 +182,58 @@ def default_schedule_reboot() -> None:
     )
 
 
+def default_usb_otg_health_check(
+    image_path: str,
+    gadget_name: str,
+    *,
+    configfs_root: Path = _USB_OTG_CONFIGFS_ROOT,
+    udc_root: Path = _USB_OTG_UDC_ROOT,
+) -> USBOTGHealth:
+    image = Path(image_path)
+    if not image.is_file():
+        return USBOTGHealth(False, "USB OTG backing image is missing", None, None)
+
+    gadget_path = configfs_root / "usb_gadget" / gadget_name
+    udc_path = gadget_path / "UDC"
+    if not udc_path.is_file():
+        return USBOTGHealth(False, "USB OTG gadget is not configured", None, None)
+
+    try:
+        udc_name = udc_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return USBOTGHealth(False, "USB OTG gadget status is unreadable", None, None)
+    if not udc_name:
+        return USBOTGHealth(False, "USB OTG gadget is detached", None, None)
+
+    state_path = udc_root / udc_name / "state"
+    try:
+        udc_state = state_path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return USBOTGHealth(False, "USB OTG controller state is unreadable", udc_name, None)
+    if udc_state != "configured":
+        return USBOTGHealth(False, "UDC state is not configured", udc_name, udc_state)
+    return USBOTGHealth(True, "", udc_name, udc_state)
+
+
+def default_usb_otg_rebind(image_path: str, gadget_name: str) -> bool:
+    completed = subprocess.run(
+        [
+            "sudo",
+            "-n",
+            _USB_OTG_HELPER_PATH,
+            "refresh",
+            "--image-path",
+            image_path,
+            "--gadget-name",
+            gadget_name,
+        ],
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return completed.returncode == 0
+
+
 def evaluate_self_healing(
     *,
     config: AppConfig,
@@ -98,6 +242,9 @@ def evaluate_self_healing(
     connectivity_checker: ConnectivityChecker = default_connectivity_checker,
     reconnect_action: ReconnectAction = default_wifi_reconnect,
     reboot_action: RebootAction = default_schedule_reboot,
+    usb_otg_health_checker: USBOTGHealthChecker = default_usb_otg_health_check,
+    usb_otg_rebind_action: USBOTGRebindAction = default_usb_otg_rebind,
+    usb_otg_state_checkpoint: USBOTGStateCheckpoint | None = None,
 ) -> list[SelfHealingEvent]:
     now = time.monotonic() if now_monotonic is None else now_monotonic
     events: list[SelfHealingEvent] = []
@@ -124,74 +271,140 @@ def evaluate_self_healing(
         state.wifi_outage_started_monotonic = None
         state.wifi_reconnect_attempted = False
         state.wifi_reboot_requested = False
+    else:
+        if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
+            if state.wifi_outage_started_monotonic is not None:
+                events.append(
+                    SelfHealingEvent(
+                        action="wifi_connectivity_restored",
+                        status="completed",
+                        details={
+                            "connectivity_check_host": healing.connectivity_check_host,
+                            "outage_seconds": int(now - state.wifi_outage_started_monotonic),
+                        },
+                    )
+                )
+            state.wifi_outage_started_monotonic = None
+            state.wifi_reconnect_attempted = False
+            state.wifi_reboot_requested = False
+        else:
+            if state.wifi_outage_started_monotonic is None:
+                state.wifi_outage_started_monotonic = now
+                events.append(
+                    SelfHealingEvent(
+                        action="wifi_connectivity_lost",
+                        status="failed",
+                        details={
+                            "connectivity_check_host": healing.connectivity_check_host,
+                            "wifi_interface": healing.wifi_interface,
+                        },
+                    )
+                )
+            else:
+                outage_seconds = now - state.wifi_outage_started_monotonic
+                if (
+                    healing.wifi_reconnect_enabled
+                    and not state.wifi_reconnect_attempted
+                    and outage_seconds >= healing.wifi_reconnect_after_minutes * 60
+                ):
+                    state.wifi_reconnect_attempted = True
+                    reconnected = reconnect_action(healing.wifi_interface)
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_reconnect_attempted",
+                            status="completed" if reconnected else "failed",
+                            details={
+                                "wifi_interface": healing.wifi_interface,
+                                "outage_seconds": int(outage_seconds),
+                            },
+                        )
+                    )
+
+                if (
+                    healing.wifi_reboot_enabled
+                    and not state.wifi_reboot_requested
+                    and outage_seconds >= healing.wifi_reboot_after_minutes * 60
+                ):
+                    state.wifi_reboot_requested = True
+                    reboot_action()
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_reboot_requested",
+                            status="completed",
+                            details={
+                                "wifi_interface": healing.wifi_interface,
+                                "connectivity_check_host": healing.connectivity_check_host,
+                                "outage_seconds": int(outage_seconds),
+                            },
+                        )
+                    )
+
+    if not healing.usb_otg_watchdog_enabled:
+        state.usb_otg_rebind_attempted = False
+        state.usb_otg_reboot_attempts_used = 0
+        state.usb_otg_escalated = False
         return events
 
-    if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
-        if state.wifi_outage_started_monotonic is not None:
+    health = usb_otg_health_checker(config.usb_otg.image_path, config.usb_otg.gadget_name)
+    if health.healthy:
+        if state.usb_otg_rebind_attempted or state.usb_otg_reboot_attempts_used:
             events.append(
                 SelfHealingEvent(
-                    action="wifi_connectivity_restored",
+                    action="usb_otg_enumeration_restored",
                     status="completed",
-                    details={
-                        "connectivity_check_host": healing.connectivity_check_host,
-                        "outage_seconds": int(now - state.wifi_outage_started_monotonic),
-                    },
+                    details={"udc_name": health.udc_name, "udc_state": health.udc_state},
                 )
             )
-        state.wifi_outage_started_monotonic = None
-        state.wifi_reconnect_attempted = False
-        state.wifi_reboot_requested = False
+        state.usb_otg_rebind_attempted = False
+        state.usb_otg_reboot_attempts_used = 0
+        state.usb_otg_escalated = False
         return events
 
-    if state.wifi_outage_started_monotonic is None:
-        state.wifi_outage_started_monotonic = now
-        events.append(
-            SelfHealingEvent(
-                action="wifi_connectivity_lost",
-                status="failed",
-                details={
-                    "connectivity_check_host": healing.connectivity_check_host,
-                    "wifi_interface": healing.wifi_interface,
-                },
-            )
+    details: dict[str, object] = {
+        "reason": health.reason,
+        "udc_name": health.udc_name,
+        "udc_state": health.udc_state,
+    }
+    if not state.usb_otg_rebind_attempted:
+        state.usb_otg_rebind_attempted = True
+        if usb_otg_state_checkpoint is not None:
+            usb_otg_state_checkpoint()
+        rebound = usb_otg_rebind_action(config.usb_otg.image_path, config.usb_otg.gadget_name)
+        events.extend(
+            [
+                SelfHealingEvent(action="usb_otg_not_enumerated", status="failed", details=details),
+                SelfHealingEvent(
+                    action="usb_otg_rebind_attempted",
+                    status="completed" if rebound else "failed",
+                    details=details,
+                ),
+            ]
         )
         return events
 
-    outage_seconds = now - state.wifi_outage_started_monotonic
     if (
-        healing.wifi_reconnect_enabled
-        and not state.wifi_reconnect_attempted
-        and outage_seconds >= healing.wifi_reconnect_after_minutes * 60
+        healing.usb_otg_reboot_enabled
+        and state.usb_otg_reboot_attempts_used < healing.usb_otg_reboot_attempts
     ):
-        state.wifi_reconnect_attempted = True
-        reconnected = reconnect_action(healing.wifi_interface)
+        state.usb_otg_reboot_attempts_used += 1
+        if usb_otg_state_checkpoint is not None:
+            usb_otg_state_checkpoint()
         events.append(
             SelfHealingEvent(
-                action="wifi_reconnect_attempted",
-                status="completed" if reconnected else "failed",
-                details={
-                    "wifi_interface": healing.wifi_interface,
-                    "outage_seconds": int(outage_seconds),
-                },
-            )
-        )
-
-    if (
-        healing.wifi_reboot_enabled
-        and not state.wifi_reboot_requested
-        and outage_seconds >= healing.wifi_reboot_after_minutes * 60
-    ):
-        state.wifi_reboot_requested = True
-        reboot_action()
-        events.append(
-            SelfHealingEvent(
-                action="wifi_reboot_requested",
+                action="usb_otg_reboot_requested",
                 status="completed",
-                details={
-                    "wifi_interface": healing.wifi_interface,
-                    "connectivity_check_host": healing.connectivity_check_host,
-                    "outage_seconds": int(outage_seconds),
-                },
+                details={**details, "attempt": state.usb_otg_reboot_attempts_used},
+            )
+        )
+        return events
+
+    if not state.usb_otg_escalated:
+        state.usb_otg_escalated = True
+        events.append(
+            SelfHealingEvent(
+                action="usb_otg_recovery_exhausted",
+                status="failed",
+                details={**details, "reboot_attempts": state.usb_otg_reboot_attempts_used},
             )
         )
 

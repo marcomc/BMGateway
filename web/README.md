@@ -169,8 +169,9 @@ can re-enumerate it.
 Settings also includes optional system-mail notifications. The appliance uses
 the operating system's `sendmail` interface supplied by `msmtp-mta`; SMTP
 credentials remain in the operator-managed system mail configuration. The
-foundation stores the fixed delivery mode that later lifecycle and watchdog
-producers will use: one `summary`, `individual` emails, or `drop`. The selector
+foundation stores the fixed delivery mode used by the USB OTG watchdog and
+reserved for later lifecycle producers: one `summary`, `individual` emails, or
+`drop`. The selector
 is intentionally a fixed choice rather than a free-text field. Notification
 emails also use an explicit fixed language so unattended messages never depend
 on a browser locale.

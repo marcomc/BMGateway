@@ -101,6 +101,9 @@ wifi_reconnect_enabled = true
 wifi_reconnect_after_minutes = 5
 wifi_reboot_enabled = false
 wifi_reboot_after_minutes = 15
+usb_otg_watchdog_enabled = false
+usb_otg_reboot_enabled = false
+usb_otg_reboot_attempts = 1
 
 [notifications]
 # Uses the operator-managed system sendmail/msmtp transport when installed.

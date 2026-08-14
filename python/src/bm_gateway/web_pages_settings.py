@@ -60,20 +60,22 @@ def _self_healing_settings_script() -> str:
     return """
 <script>
 (() => {
-  const watchdogToggle = document.getElementById("wifi-watchdog-enabled-input");
-  const dependentFields = document.getElementById("wifi-watchdog-dependent-fields");
-  const disabledHelp = document.getElementById("wifi-watchdog-disabled-help");
-  if (!watchdogToggle || !dependentFields) {
-    return;
-  }
-  const syncWatchdogFields = () => {
-    dependentFields.disabled = !watchdogToggle.checked;
-    if (disabledHelp) {
-      disabledHelp.hidden = watchdogToggle.checked;
+  for (const prefix of ["wifi-watchdog", "usb-otg-watchdog"]) {
+    const watchdogToggle = document.getElementById(`${prefix}-enabled-input`);
+    const dependentFields = document.getElementById(`${prefix}-dependent-fields`);
+    const disabledHelp = document.getElementById(`${prefix}-disabled-help`);
+    if (!watchdogToggle || !dependentFields) {
+      continue;
     }
-  };
-  watchdogToggle.addEventListener("change", syncWatchdogFields);
-  syncWatchdogFields();
+    const syncWatchdogFields = () => {
+      dependentFields.disabled = !watchdogToggle.checked;
+      if (disabledHelp) {
+        disabledHelp.hidden = watchdogToggle.checked;
+      }
+    };
+    watchdogToggle.addEventListener("change", syncWatchdogFields);
+    syncWatchdogFields();
+  }
 })();
 </script>
 """
@@ -465,6 +467,12 @@ def render_settings_html(
         if config.self_healing.wifi_watchdog_enabled and config.self_healing.wifi_reboot_enabled
         else "Disabled"
     )
+    usb_otg_reboot_summary = (
+        f"Up to {config.self_healing.usb_otg_reboot_attempts} reboot attempts"
+        if config.self_healing.usb_otg_watchdog_enabled
+        and config.self_healing.usb_otg_reboot_enabled
+        else "Disabled"
+    )
     self_healing_section_body = (
         settings_row(
             "Periodic reboot",
@@ -482,6 +490,11 @@ def render_settings_html(
         + settings_row("Connectivity check host", config.self_healing.connectivity_check_host)
         + settings_row("Wi-Fi reconnect", wifi_reconnect_summary)
         + settings_row("Wi-Fi reboot", wifi_reboot_summary)
+        + settings_row(
+            "USB OTG watchdog",
+            "Enabled" if config.self_healing.usb_otg_watchdog_enabled else "Disabled",
+        )
+        + settings_row("USB OTG recovery reboots", usb_otg_reboot_summary)
     )
     usb_otg_warning = (
         banner_strip(
@@ -1229,6 +1242,51 @@ def render_settings_html(
                     'inputmode="numeric" autocomplete="off">'
                 ),
                 help_text="Wait this many outage minutes before rebooting the Raspberry Pi.",
+            )
+            + "</fieldset>"
+            + settings_control_row(
+                "USB OTG watchdog",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input id="usb-otg-watchdog-enabled-input" type="checkbox" '
+                    'name="usb_otg_watchdog_enabled"'
+                    f"{shared._checked_attr(config.self_healing.usb_otg_watchdog_enabled)}>"
+                    "<span>Monitor USB OTG frame enumeration</span></label>"
+                ),
+                help_text=(
+                    "Checks that the configured USB device controller is in the configured "
+                    "state. It does not verify that the picture frame is displaying images."
+                ),
+            )
+            + (
+                '<fieldset id="usb-otg-watchdog-dependent-fields" '
+                'class="settings-dependent-fieldset" '
+                'aria-describedby="usb-otg-watchdog-disabled-help"'
+                f"{' disabled' if not config.self_healing.usb_otg_watchdog_enabled else ''}>"
+                '<div id="usb-otg-watchdog-disabled-help" class="inline-field-help"'
+                f"{'' if not config.self_healing.usb_otg_watchdog_enabled else ' hidden'}>"
+                "Enable USB OTG watchdog to edit these recovery options."
+                "</div>"
+            )
+            + settings_control_row(
+                "USB OTG reboot",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="usb_otg_reboot_enabled"'
+                    f"{shared._checked_attr(config.self_healing.usb_otg_reboot_enabled)}>"
+                    "<span>Reboot Raspberry Pi after failed USB OTG recovery</span></label>"
+                ),
+                help_text="A rebind is always attempted before this recovery action.",
+            )
+            + settings_control_row(
+                "Maximum reboot attempts",
+                (
+                    '<input id="usb-otg-reboot-attempts-input" type="text" '
+                    'name="usb_otg_reboot_attempts" '
+                    f'value="{config.self_healing.usb_otg_reboot_attempts}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Limit recovery reboots to a value from 0 to 5 before escalating.",
             )
             + "</fieldset>"
             + '<div style="margin-top:1rem">'

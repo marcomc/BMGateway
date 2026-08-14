@@ -357,6 +357,18 @@ payload = "\n".join(
             "wifi_reboot_after_minutes = "
             f'{int(self_healing.get("wifi_reboot_after_minutes", 15))}'
         ),
+        (
+            "usb_otg_watchdog_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('usb_otg_watchdog_enabled', False)))}"
+        ),
+        (
+            "usb_otg_reboot_enabled = "
+            f"{bool_to_toml(bool(self_healing.get('usb_otg_reboot_enabled', False)))}"
+        ),
+        (
+            "usb_otg_reboot_attempts = "
+            f'{int(self_healing.get("usb_otg_reboot_attempts", 1))}'
+        ),
         "",
         "[notifications]",
         f'enabled = {bool_to_toml(bool(notifications.get("enabled", False)))}',

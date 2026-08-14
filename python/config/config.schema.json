@@ -166,7 +166,10 @@
         "wifi_reconnect_enabled": { "type": "boolean" },
         "wifi_reconnect_after_minutes": { "type": "integer", "minimum": 1 },
         "wifi_reboot_enabled": { "type": "boolean" },
-        "wifi_reboot_after_minutes": { "type": "integer", "minimum": 1 }
+        "wifi_reboot_after_minutes": { "type": "integer", "minimum": 1 },
+        "usb_otg_watchdog_enabled": { "type": "boolean" },
+        "usb_otg_reboot_enabled": { "type": "boolean" },
+        "usb_otg_reboot_attempts": { "type": "integer", "minimum": 0, "maximum": 5 }
       }
     },
     "notifications": {

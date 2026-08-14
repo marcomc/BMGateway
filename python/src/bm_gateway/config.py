@@ -141,6 +141,9 @@ class SelfHealingConfig:
     wifi_reconnect_after_minutes: int = 5
     wifi_reboot_enabled: bool = False
     wifi_reboot_after_minutes: int = 15
+    usb_otg_watchdog_enabled: bool = False
+    usb_otg_reboot_enabled: bool = False
+    usb_otg_reboot_attempts: int = 1
 
 
 @dataclass(frozen=True)
@@ -274,6 +277,9 @@ class AppConfig:
                 "wifi_reconnect_after_minutes": self.self_healing.wifi_reconnect_after_minutes,
                 "wifi_reboot_enabled": self.self_healing.wifi_reboot_enabled,
                 "wifi_reboot_after_minutes": self.self_healing.wifi_reboot_after_minutes,
+                "usb_otg_watchdog_enabled": self.self_healing.usb_otg_watchdog_enabled,
+                "usb_otg_reboot_enabled": self.self_healing.usb_otg_reboot_enabled,
+                "usb_otg_reboot_attempts": self.self_healing.usb_otg_reboot_attempts,
             },
             "notifications": {
                 "enabled": self.notifications.enabled,
@@ -431,6 +437,15 @@ def write_config(path: Path, config: AppConfig) -> None:
             f"wifi_reconnect_after_minutes = {config.self_healing.wifi_reconnect_after_minutes}",
             f"wifi_reboot_enabled = {_bool_to_toml(config.self_healing.wifi_reboot_enabled)}",
             f"wifi_reboot_after_minutes = {config.self_healing.wifi_reboot_after_minutes}",
+            (
+                "usb_otg_watchdog_enabled = "
+                f"{_bool_to_toml(config.self_healing.usb_otg_watchdog_enabled)}"
+            ),
+            (
+                "usb_otg_reboot_enabled = "
+                f"{_bool_to_toml(config.self_healing.usb_otg_reboot_enabled)}"
+            ),
+            f"usb_otg_reboot_attempts = {config.self_healing.usb_otg_reboot_attempts}",
             "",
             "[notifications]",
             f"enabled = {_bool_to_toml(config.notifications.enabled)}",
@@ -568,6 +583,9 @@ def load_config(path: Path) -> AppConfig:
         wifi_reconnect_after_minutes=int(self_healing_table.get("wifi_reconnect_after_minutes", 5)),
         wifi_reboot_enabled=bool(self_healing_table.get("wifi_reboot_enabled", False)),
         wifi_reboot_after_minutes=int(self_healing_table.get("wifi_reboot_after_minutes", 15)),
+        usb_otg_watchdog_enabled=bool(self_healing_table.get("usb_otg_watchdog_enabled", False)),
+        usb_otg_reboot_enabled=bool(self_healing_table.get("usb_otg_reboot_enabled", False)),
+        usb_otg_reboot_attempts=int(self_healing_table.get("usb_otg_reboot_attempts", 1)),
     )
     notifications = NotificationsConfig(
         enabled=bool(notifications_table.get("enabled", False)),
@@ -692,6 +710,10 @@ def validate_config(config: AppConfig) -> list[str]:
         errors.append("self_healing.wifi_reconnect_after_minutes must be at least 1")
     if config.self_healing.wifi_reboot_after_minutes < 1:
         errors.append("self_healing.wifi_reboot_after_minutes must be at least 1")
+    if not 0 <= config.self_healing.usb_otg_reboot_attempts <= 5:
+        errors.append("self_healing.usb_otg_reboot_attempts must be between 0 and 5")
+    if config.self_healing.usb_otg_watchdog_enabled and not config.usb_otg.enabled:
+        errors.append("self_healing.usb_otg_watchdog_enabled requires usb_otg.enabled")
     if (
         config.self_healing.wifi_reboot_enabled
         and config.self_healing.wifi_reconnect_enabled
