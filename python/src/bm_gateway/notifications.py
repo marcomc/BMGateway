@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import Callable, Collection, Iterator
 
 from .config import NotificationsConfig, is_valid_notification_recipient
 from .localization import translation_for
@@ -265,6 +265,17 @@ def _text(config: NotificationsConfig, key: str, **values: object) -> str:
     return translation_for(config.locale).gettext(key).format(**values)
 
 
+def _action_label(config: NotificationsConfig, action: str) -> str:
+    keys = {
+        "wifi_reconnect_attempted": "Wi-Fi reconnect attempt",
+        "wifi_reboot_requested": "Wi-Fi reboot requested",
+        "wifi_connectivity_restored": "Wi-Fi connectivity restored",
+        "usb_otg_recovery_exhausted": "USB OTG recovery exhausted",
+    }
+    key = keys.get(action)
+    return _text(config, key) if key is not None else action
+
+
 def send_test_notification(
     *,
     config: NotificationsConfig,
@@ -300,6 +311,7 @@ def _deliver_notification_outbox_unlocked(
     config: NotificationsConfig,
     runner: SendmailRunner = _default_sendmail,
     now: datetime | None = None,
+    blocked_idempotency_keys: Collection[str] = (),
 ) -> tuple[bool, str]:
     try:
         events = _retained_events(path=path, config=config, now=now or datetime.now(timezone.utc))
@@ -317,6 +329,10 @@ def _deliver_notification_outbox_unlocked(
         except NotificationOutboxError as error:
             return False, str(error)
         return True, "Pending notifications dropped"
+    blocked_keys = set(blocked_idempotency_keys)
+    deliverable_events = [event for event in events if event.idempotency_key not in blocked_keys]
+    if not deliverable_events:
+        return True, "No deliverable pending notifications"
     if config.offline_delivery == "summary":
         body = "\n".join(
             [
@@ -326,17 +342,23 @@ def _deliver_notification_outbox_unlocked(
                     hostname=socket.gethostname(),
                 ),
                 "",
-                _text(config, "Events retained: {count}", count=len(events)),
+                _text(config, "Events retained: {count}", count=len(deliverable_events)),
                 _text(
-                    config, "First event: {timestamp}", timestamp=events[0].occurred_at.isoformat()
+                    config,
+                    "First event: {timestamp}",
+                    timestamp=deliverable_events[0].occurred_at.isoformat(),
                 ),
                 _text(
-                    config, "Last event: {timestamp}", timestamp=events[-1].occurred_at.isoformat()
+                    config,
+                    "Last event: {timestamp}",
+                    timestamp=deliverable_events[-1].occurred_at.isoformat(),
                 ),
                 "",
                 *[
-                    f"- {event.occurred_at.isoformat()} {event.action}: {event.detail}"
-                    for event in events[-20:]
+                    "- "
+                    f"{event.occurred_at.isoformat()} {_action_label(config, event.action)}: "
+                    f"{event.detail}"
+                    for event in deliverable_events[-20:]
                 ],
             ]
         )
@@ -351,12 +373,14 @@ def _deliver_notification_outbox_unlocked(
         except ValueError as error:
             return False, str(error)
     else:
-        for index, event in enumerate(events):
+        for index, event in enumerate(deliverable_events):
             try:
                 payload = _message(
                     recipient=config.recipient,
                     subject=_text(
-                        config, "[BMGateway] notification: {action}", action=event.action
+                        config,
+                        "[BMGateway] notification: {action}",
+                        action=_action_label(config, event.action),
                     ),
                     body="\n".join(
                         [
@@ -365,7 +389,11 @@ def _deliver_notification_outbox_unlocked(
                                 "Occurred at: {timestamp}",
                                 timestamp=event.occurred_at.isoformat(),
                             ),
-                            _text(config, "Event: {action}", action=event.action),
+                            _text(
+                                config,
+                                "Event: {action}",
+                                action=_action_label(config, event.action),
+                            ),
                             _text(config, "Detail: {detail}", detail=event.detail),
                             "",
                         ]
@@ -379,7 +407,8 @@ def _deliver_notification_outbox_unlocked(
                     False,
                     completed.stderr.strip() or completed.stdout.strip() or "sendmail failed",
                 )
-            remaining = events[index + 1 :]
+            delivered = set(deliverable_events[: index + 1])
+            remaining = [candidate for candidate in events if candidate not in delivered]
             try:
                 if remaining:
                     _persist_notification_outbox_unlocked(path, remaining)
@@ -396,7 +425,13 @@ def _deliver_notification_outbox_unlocked(
         if completed.returncode != 0:
             return False, completed.stderr.strip() or completed.stdout.strip() or "sendmail failed"
     try:
-        _remove_notification_outbox(path)
+        if blocked_keys:
+            _persist_notification_outbox_unlocked(
+                path,
+                [event for event in events if event.idempotency_key in blocked_keys],
+            )
+        else:
+            _remove_notification_outbox(path)
     except NotificationOutboxError as error:
         return False, str(error)
     return True, "Pending notifications delivered"
@@ -408,6 +443,7 @@ def deliver_notification_outbox(
     config: NotificationsConfig,
     runner: SendmailRunner = _default_sendmail,
     now: datetime | None = None,
+    blocked_idempotency_keys: Collection[str] = (),
 ) -> tuple[bool, str]:
     try:
         with _notification_outbox_lock(path):
@@ -416,6 +452,7 @@ def deliver_notification_outbox(
                 config=config,
                 runner=runner,
                 now=now,
+                blocked_idempotency_keys=blocked_idempotency_keys,
             )
     except NotificationOutboxError as error:
         return False, str(error)

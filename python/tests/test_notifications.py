@@ -502,6 +502,43 @@ def test_individual_and_drop_delivery_modes(tmp_path: Path) -> None:
     assert len(retry_payloads) == 1
     assert "[BMGateway] notification: usb" in retry_payloads[0]
 
+
+def test_delivery_defers_a_pending_wifi_recovery_handoff(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        offline_delivery="individual",
+    )
+    handoff_key = "wifi-recovery:handoff-a"
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="wifi_connectivity_restored",
+        detail="restored",
+        idempotency_key=handoff_key,
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    delivered, detail = deliver_notification_outbox(
+        path=path,
+        config=config,
+        runner=send,
+        blocked_idempotency_keys={handoff_key},
+    )
+
+    assert delivered is True
+    assert detail == "No deliverable pending notifications"
+    assert payloads == []
+    assert [event.idempotency_key for event in load_notification_outbox(path)] == [handoff_key]
+
+    assert deliver_notification_outbox(path=path, config=config, runner=send)[0] is True
+    assert len(payloads) == 1
+
     queue_notification_event(
         path=path,
         config=NotificationsConfig(

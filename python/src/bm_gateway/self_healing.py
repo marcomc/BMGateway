@@ -10,9 +10,10 @@ import subprocess
 import tempfile
 import time
 import uuid
+from contextlib import contextmanager
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from .config import AppConfig
 
@@ -45,6 +46,7 @@ class SelfHealingState:
     wifi_recovery_interface: str = ""
     wifi_recovery_started_at: float = 0.0
     wifi_recovery_handoff_id: str = ""
+    wifi_recovery_phase: str = ""
     periodic_reboot_requested: bool = False
     usb_otg_rebind_attempted: bool = False
     usb_otg_reboot_attempts_used: int = 0
@@ -78,6 +80,24 @@ def usb_otg_watchdog_state_path(state_dir: Path) -> Path:
 
 def wifi_watchdog_state_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "wifi_watchdog_state.json"
+
+
+@contextmanager
+def locked_wifi_recovery_state(path: Path) -> Iterator[SelfHealingState]:
+    """Yield the current durable recovery state while holding its exclusive lock."""
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = new_self_healing_state()
+        load_wifi_watchdog_state(path, current)
+        yield current
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
 
 
 def _persist_watchdog_json(
@@ -125,6 +145,9 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         wifi_interface = raw["wifi_interface"]
         recovery_started_at = raw.get("recovery_started_at", 0.0)
         recovery_handoff_id = raw.get("recovery_handoff_id", "")
+        recovery_phase = raw.get("recovery_phase", "")
+        if recovery_pending and not recovery_phase:
+            recovery_phase = "pending"
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
     if (
@@ -136,6 +159,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(recovery_started_at, (int, float))
         or recovery_started_at < 0
         or not isinstance(recovery_handoff_id, str)
+        or recovery_phase not in {"", "pending", "reboot_authorized"}
     ):
         raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
     state.wifi_recovery_pending = recovery_pending
@@ -143,6 +167,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.wifi_recovery_interface = wifi_interface
     state.wifi_recovery_started_at = float(recovery_started_at)
     state.wifi_recovery_handoff_id = recovery_handoff_id
+    state.wifi_recovery_phase = recovery_phase
 
 
 def persist_wifi_watchdog_state(
@@ -162,6 +187,7 @@ def persist_wifi_watchdog_state(
             "wifi_interface": state.wifi_recovery_interface,
             "recovery_started_at": state.wifi_recovery_started_at,
             "recovery_handoff_id": state.wifi_recovery_handoff_id,
+            "recovery_phase": state.wifi_recovery_phase,
         }
         if preserve_pending:
             try:
@@ -192,7 +218,7 @@ def clear_wifi_recovery_handoff(path: Path, state: SelfHealingState) -> bool:
         fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
         current = new_self_healing_state()
         load_wifi_watchdog_state(path, current)
-        if not current.wifi_recovery_pending:
+        if not current.wifi_recovery_pending or current.wifi_recovery_phase == "reboot_authorized":
             return False
         _persist_watchdog_json(
             path,
@@ -202,6 +228,7 @@ def clear_wifi_recovery_handoff(path: Path, state: SelfHealingState) -> bool:
                 "wifi_interface": "",
                 "recovery_started_at": 0.0,
                 "recovery_handoff_id": "",
+                "recovery_phase": "",
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -216,6 +243,7 @@ def clear_wifi_recovery_handoff(path: Path, state: SelfHealingState) -> bool:
     state.wifi_recovery_interface = ""
     state.wifi_recovery_started_at = 0.0
     state.wifi_recovery_handoff_id = ""
+    state.wifi_recovery_phase = ""
     return True
 
 
@@ -238,6 +266,7 @@ def consume_wifi_recovery_notification(
             state.wifi_recovery_interface = ""
             state.wifi_recovery_started_at = 0.0
             state.wifi_recovery_handoff_id = ""
+            state.wifi_recovery_phase = ""
             return False
         if not current.wifi_recovery_handoff_id:
             current.wifi_recovery_handoff_id = uuid.uuid4().hex
@@ -249,6 +278,7 @@ def consume_wifi_recovery_notification(
                     "wifi_interface": current.wifi_recovery_interface,
                     "recovery_started_at": current.wifi_recovery_started_at,
                     "recovery_handoff_id": current.wifi_recovery_handoff_id,
+                    "recovery_phase": current.wifi_recovery_phase,
                 },
                 WiFiWatchdogStateError,
                 "Cannot persist Wi-Fi watchdog state",
@@ -261,6 +291,7 @@ def consume_wifi_recovery_notification(
             wifi_recovery_interface="",
             wifi_recovery_started_at=0.0,
             wifi_recovery_handoff_id="",
+            wifi_recovery_phase="",
         )
         _persist_watchdog_json(
             path,
@@ -270,6 +301,7 @@ def consume_wifi_recovery_notification(
                 "wifi_interface": "",
                 "recovery_started_at": 0.0,
                 "recovery_handoff_id": "",
+                "recovery_phase": "",
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -284,6 +316,7 @@ def consume_wifi_recovery_notification(
     state.wifi_recovery_interface = acknowledged.wifi_recovery_interface
     state.wifi_recovery_started_at = acknowledged.wifi_recovery_started_at
     state.wifi_recovery_handoff_id = acknowledged.wifi_recovery_handoff_id
+    state.wifi_recovery_phase = acknowledged.wifi_recovery_phase
     return True
 
 
@@ -473,6 +506,7 @@ def evaluate_self_healing(
         state.wifi_recovery_interface = ""
         state.wifi_recovery_started_at = 0.0
         state.wifi_recovery_handoff_id = ""
+        state.wifi_recovery_phase = ""
     else:
         if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
             if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
@@ -503,6 +537,7 @@ def evaluate_self_healing(
                 state.wifi_recovery_interface = ""
                 state.wifi_recovery_started_at = 0.0
                 state.wifi_recovery_handoff_id = ""
+                state.wifi_recovery_phase = ""
         else:
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
@@ -556,6 +591,7 @@ def evaluate_self_healing(
                     if not was_recovery_pending:
                         state.wifi_recovery_started_at = wall_time - outage_duration
                         state.wifi_recovery_handoff_id = uuid.uuid4().hex
+                    state.wifi_recovery_phase = "reboot_authorized"
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reboot_requested",

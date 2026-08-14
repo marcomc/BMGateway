@@ -71,6 +71,7 @@ from .self_healing import (
     evaluate_self_healing,
     load_usb_otg_watchdog_state,
     load_wifi_watchdog_state,
+    locked_wifi_recovery_state,
     new_self_healing_state,
     persist_usb_otg_watchdog_state,
     persist_wifi_watchdog_state,
@@ -873,6 +874,20 @@ def _handle_run(
                 except WiFiWatchdogStateError as error:
                     wifi_state_error = str(error)
             healing_config = config
+            if (
+                not config.self_healing.wifi_watchdog_enabled
+                and self_healing_state.wifi_recovery_pending
+                and self_healing_state.wifi_recovery_phase == "reboot_authorized"
+            ):
+                healing_config = replace(
+                    healing_config,
+                    self_healing=replace(
+                        healing_config.self_healing,
+                        wifi_watchdog_enabled=True,
+                        wifi_reconnect_enabled=False,
+                        wifi_reboot_enabled=False,
+                    ),
+                )
             if usb_otg_state_error is not None:
                 healing_config = replace(
                     config,
@@ -1089,10 +1104,17 @@ def _handle_run(
                         )
             if config.notifications.enabled and not defer_notification_delivery:
                 try:
-                    delivered, detail = deliver_notification_outbox(
-                        path=notification_outbox_path(runtime_state_dir),
-                        config=config.notifications,
-                    )
+                    with locked_wifi_recovery_state(wifi_state_path) as durable_wifi_state:
+                        blocked_recovery_keys = set()
+                        if durable_wifi_state.wifi_recovery_pending:
+                            blocked_recovery_keys.add(
+                                f"wifi-recovery:{durable_wifi_state.wifi_recovery_handoff_id}"
+                            )
+                        delivered, detail = deliver_notification_outbox(
+                            path=notification_outbox_path(runtime_state_dir),
+                            config=config.notifications,
+                            blocked_idempotency_keys=blocked_recovery_keys,
+                        )
                     result = (delivered, detail)
                     if (
                         detail != "No pending notifications"
@@ -1108,7 +1130,7 @@ def _handle_run(
                             details={"detail": detail},
                         )
                     notification_delivery_result = result
-                except NotificationOutboxError as error:
+                except (NotificationOutboxError, WiFiWatchdogStateError) as error:
                     result = (False, str(error))
                     if result != notification_delivery_result:
                         append_audit_event(

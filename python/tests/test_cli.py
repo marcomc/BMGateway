@@ -647,6 +647,56 @@ def test_run_disabling_wifi_watchdog_clears_a_concurrently_written_handoff(
     assert reloaded.wifi_recovery_pending is False
 
 
+def test_run_consumes_an_authorized_wifi_handoff_after_watchdog_disable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    state_path = wifi_watchdog_state_path(state_dir)
+    pending = new_self_healing_state()
+    pending.wifi_recovery_pending = True
+    pending.wifi_recovery_handoff_id = "handoff-a"
+    pending.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(state_path, pending, preserve_pending=False)
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+
+    def restored_after_disable(**kwargs: object) -> list[SelfHealingEvent]:
+        config = kwargs["config"]
+        assert isinstance(config, AppConfig)
+        assert config.self_healing.wifi_watchdog_enabled is True
+        assert config.self_healing.wifi_reconnect_enabled is False
+        assert config.self_healing.wifi_reboot_enabled is False
+        return [
+            SelfHealingEvent(
+                action="wifi_connectivity_restored",
+                status="completed",
+                details={"outage_seconds": 60},
+            )
+        ]
+
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", restored_after_disable)
+
+    assert (
+        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
+        == 0
+    )
+    reloaded = new_self_healing_state()
+    load_wifi_watchdog_state(state_path, reloaded)
+    assert reloaded.wifi_recovery_pending is False
+
+
 def test_run_uses_persisted_outage_duration_when_consuming_wifi_recovery_handoff(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -956,6 +1006,52 @@ def test_run_prevents_usb_rebind_when_initial_checkpoint_fails(
     assert cli.main(["--config", str(config_path), "run", "--once"]) == 0
     assert rebound == []
     assert scheduled == []
+
+
+def test_run_audits_wifi_state_that_becomes_invalid_before_delivery(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[notifications]\n"
+        + "enabled = true\n"
+        + 'recipient = "operator@example.test"\n',
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+    audits: list[str] = []
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+
+    def invalidate_wifi_state(**_kwargs: object) -> GatewaySnapshot:
+        path = wifi_watchdog_state_path(state_dir)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{invalid", encoding="utf-8")
+        return snapshot
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", invalidate_wifi_state)
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "bm_gateway.cli.append_audit_event",
+        lambda **kwargs: audits.append(str(kwargs["action"])),
+    )
+
+    assert (
+        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
+        == 0
+    )
+    assert audits == ["wifi_watchdog_state_unavailable", "notification_outbox_delivery"]
 
 
 def test_run_reports_usb_watchdog_state_error_when_wifi_state_is_healthy(
