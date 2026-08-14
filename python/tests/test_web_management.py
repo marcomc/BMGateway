@@ -19,7 +19,7 @@ from urllib.request import urlopen as _stdlib_urlopen
 import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway import __version__
-from bm_gateway.config import load_config
+from bm_gateway.config import load_config, write_config
 from bm_gateway.device_registry import load_device_registry, normalize_mac_address, validate_devices
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.state_store import (
@@ -1244,7 +1244,6 @@ def test_update_bluetooth_preferences_persists_adapter_and_timeouts(tmp_path: Pa
     config_path = tmp_path / "config.toml"
     config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
-
     errors = update_bluetooth_preferences(
         config_path=config_path,
         adapter="hci1",
@@ -1263,6 +1262,8 @@ def test_update_self_healing_preferences_persists_recovery_settings(tmp_path: Pa
     config_path = tmp_path / "config.toml"
     config_path.write_text(Path("python/config/config.toml.example").read_text(encoding="utf-8"))
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config = load_config(config_path)
+    write_config(config_path, replace(config, usb_otg=replace(config.usb_otg, enabled=True)))
 
     errors = update_self_healing_preferences(
         config_path=config_path,
@@ -1275,6 +1276,9 @@ def test_update_self_healing_preferences_persists_recovery_settings(tmp_path: Pa
         wifi_reconnect_after_minutes=6,
         wifi_reboot_enabled=True,
         wifi_reboot_after_minutes=18,
+        usb_otg_watchdog_enabled=True,
+        usb_otg_reboot_enabled=True,
+        usb_otg_reboot_attempts=1,
     )
 
     assert errors == []
@@ -1287,6 +1291,9 @@ def test_update_self_healing_preferences_persists_recovery_settings(tmp_path: Pa
     assert config.self_healing.wifi_reconnect_after_minutes == 6
     assert config.self_healing.wifi_reboot_enabled is True
     assert config.self_healing.wifi_reboot_after_minutes == 18
+    assert config.self_healing.usb_otg_watchdog_enabled is True
+    assert config.self_healing.usb_otg_reboot_enabled is True
+    assert config.self_healing.usb_otg_reboot_attempts == 1
 
 
 def test_update_notification_preferences_persists_bounded_delivery_settings(tmp_path: Path) -> None:
@@ -2487,6 +2494,70 @@ def test_settings_display_post_persists_appearance_and_chart_defaults(
     assert config.web.default_chart_metric == "temperature"
 
 
+def test_self_healing_post_persists_usb_otg_watchdog_and_preserves_disabled_values(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "devices.toml").write_text("", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        Path("python/config/config.toml.example").read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+    write_config(config_path, replace(config, usb_otg=replace(config.usb_otg, enabled=True)))
+    from bm_gateway.web import serve_management
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as handle:
+        handle.bind(("127.0.0.1", 0))
+        host, port = handle.getsockname()
+    threading.Thread(
+        target=serve_management,
+        kwargs={"host": host, "port": port, "config_path": config_path, "state_dir": None},
+        daemon=True,
+    ).start()
+
+    enabled_request = urllib.request.Request(
+        f"http://{host}:{port}/settings/self-healing",
+        data=urllib.parse.urlencode(
+            {
+                "periodic_reboot_hours": "24",
+                "wifi_interface": "wlan0",
+                "connectivity_check_host": "1.1.1.1",
+                "wifi_reconnect_after_minutes": "5",
+                "wifi_reboot_after_minutes": "15",
+                "usb_otg_watchdog_enabled": "on",
+                "usb_otg_reboot_enabled": "on",
+                "usb_otg_reboot_attempts": "2",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    with _urlopen_with_retry(enabled_request, timeout=5.0) as response:
+        assert response.status in {200, 303}
+
+    disabled_request = urllib.request.Request(
+        f"http://{host}:{port}/settings/self-healing",
+        data=urllib.parse.urlencode(
+            {
+                "periodic_reboot_hours": "24",
+                "wifi_interface": "wlan0",
+                "connectivity_check_host": "1.1.1.1",
+                "wifi_reconnect_after_minutes": "5",
+                "wifi_reboot_after_minutes": "15",
+                "usb_otg_reboot_attempts": "2",
+            }
+        ).encode("utf-8"),
+        method="POST",
+    )
+    with _urlopen_with_retry(disabled_request, timeout=5.0) as response:
+        assert response.status in {200, 303}
+
+    persisted = load_config(config_path).self_healing
+    assert persisted.usb_otg_watchdog_enabled is False
+    assert persisted.usb_otg_reboot_enabled is True
+    assert persisted.usb_otg_reboot_attempts == 2
+
+
 def test_notification_test_post_does_not_expose_transport_detail(tmp_path: Path) -> None:
     (tmp_path / "devices.toml").write_text("", encoding="utf-8")
     config_path = tmp_path / "config.toml"
@@ -3544,6 +3615,37 @@ def test_render_settings_html_enables_wifi_recovery_when_watchdog_is_enabled() -
     assert 'id="wifi-watchdog-disabled-help" class="inline-field-help" hidden>' in html
     assert 'name="wifi_interface"' in html
     assert 'name="connectivity_check_host"' in html
+
+
+def test_render_settings_html_disables_usb_otg_recovery_when_watchdog_is_disabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=True)
+
+    assert 'id="usb-otg-watchdog-enabled-input"' in html
+    assert 'id="usb-otg-watchdog-dependent-fields"' in html
+    assert 'name="usb_otg_reboot_enabled"' in html
+    assert 'name="usb_otg_reboot_attempts"' in html
+    assert "Monitor USB OTG frame enumeration" in html
+    assert "does not verify that the picture frame is displaying images" in html
+
+
+def test_render_settings_html_shows_usb_otg_reboot_limit_when_enabled() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            usb_otg_watchdog_enabled=True,
+            usb_otg_reboot_enabled=True,
+            usb_otg_reboot_attempts=1,
+        ),
+    )
+
+    html = render_settings_html(config=config, snapshot={}, devices=[], edit_mode=False)
+
+    assert "USB OTG watchdog" in html
+    assert "Up to 1 reboot attempts" in html
 
 
 def test_render_settings_html_shows_connected_mqtt_status_in_green() -> None:

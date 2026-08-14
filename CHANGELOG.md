@@ -4,9 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
-
-## [0.4.0] - 2026-08-10 - Notification Foundation
+## [0.4.0] - Unreleased - Notification Foundation
 
 ### Added
 
@@ -18,6 +16,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   `drop` mode; the default summary prevents a long offline period from
   generating an unbounded mail burst. Notification emails use an explicit
   fixed locale and bounded system-mail execution.
+- Added an opt-in USB OTG watchdog that detects whether the virtual frame drive
+  is enumerated (UDC state `configured`), attempts one rebind, performs a bounded
+  number of reboot recoveries, preserves the recovery counter across reboots,
+  and sends an escalation notification when recovery is exhausted.
 
 ## [0.3.3] - 2026-07-17 - Windowed History Charts
 

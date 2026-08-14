@@ -99,6 +99,9 @@ def test_load_config_defaults_web_port_and_chart_markers(tmp_path: Path) -> None
     assert config.self_healing.wifi_reconnect_after_minutes == 5
     assert config.self_healing.wifi_reboot_enabled is False
     assert config.self_healing.wifi_reboot_after_minutes == 15
+    assert config.self_healing.usb_otg_watchdog_enabled is False
+    assert config.self_healing.usb_otg_reboot_enabled is False
+    assert config.self_healing.usb_otg_reboot_attempts == 1
     assert config.notifications.enabled is False
     assert config.notifications.recipient == ""
     assert config.notifications.locale == "en"
@@ -213,6 +216,8 @@ def test_config_schema_documents_web_language_and_usb_otg_settings() -> None:
     assert self_healing_properties["periodic_reboot_hours"]["minimum"] == 1
     assert self_healing_properties["periodic_reboot_hours"]["maximum"] == 48
     assert self_healing_properties["wifi_reconnect_after_minutes"]["minimum"] == 1
+    assert self_healing_properties["usb_otg_reboot_attempts"]["minimum"] == 0
+    assert self_healing_properties["usb_otg_reboot_attempts"]["maximum"] == 5
     assert notification_properties["offline_delivery"]["enum"] == ["summary", "individual", "drop"]
     assert notification_properties["offline_retention_days"]["maximum"] == 30
     assert retention_properties["raw_retention_days"]["default"] == 730
@@ -270,6 +275,9 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
             wifi_reconnect_after_minutes=7,
             wifi_reboot_enabled=True,
             wifi_reboot_after_minutes=20,
+            usb_otg_watchdog_enabled=True,
+            usb_otg_reboot_enabled=True,
+            usb_otg_reboot_attempts=2,
         ),
         notifications=replace(
             config.notifications,
@@ -301,6 +309,9 @@ def test_write_config_round_trips_archive_sync_settings(tmp_path: Path) -> None:
     assert loaded.self_healing.wifi_reconnect_after_minutes == 7
     assert loaded.self_healing.wifi_reboot_enabled is True
     assert loaded.self_healing.wifi_reboot_after_minutes == 20
+    assert loaded.self_healing.usb_otg_watchdog_enabled is True
+    assert loaded.self_healing.usb_otg_reboot_enabled is True
+    assert loaded.self_healing.usb_otg_reboot_attempts == 2
     assert loaded.notifications.enabled is True
     assert loaded.notifications.recipient == "operator@example.test"
     assert loaded.notifications.locale == "it"
@@ -354,6 +365,7 @@ def test_validate_config_bounds_self_healing_values() -> None:
             wifi_reconnect_after_minutes=0,
             wifi_reboot_enabled=True,
             wifi_reboot_after_minutes=0,
+            usb_otg_reboot_attempts=6,
         ),
     )
 
@@ -364,6 +376,19 @@ def test_validate_config_bounds_self_healing_values() -> None:
     assert "self_healing.connectivity_check_host must not be empty" in errors
     assert "self_healing.wifi_reconnect_after_minutes must be at least 1" in errors
     assert "self_healing.wifi_reboot_after_minutes must be at least 1" in errors
+    assert "self_healing.usb_otg_reboot_attempts must be between 0 and 5" in errors
+
+
+def test_validate_config_requires_usb_export_for_usb_otg_watchdog() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    invalid = replace(
+        config,
+        self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=True),
+    )
+
+    assert "self_healing.usb_otg_watchdog_enabled requires usb_otg.enabled" in validate_config(
+        invalid
+    )
 
 
 def test_validate_config_rejects_invalid_notification_preferences() -> None:

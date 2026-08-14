@@ -201,6 +201,58 @@ def test_install_service_rewrite_preserves_notification_preferences(tmp_path: Pa
         }
 
 
+def test_install_service_rewrite_preserves_usb_otg_watchdog_preferences(tmp_path: Path) -> None:
+    rewrite_config = _install_service_rewrite_payload()
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "[self_healing]",
+                "usb_otg_watchdog_enabled = true",
+                "usb_otg_reboot_enabled = true",
+                "usb_otg_reboot_attempts = 2",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            rewrite_config,
+            str(config_path),
+            str(tmp_path / "state"),
+            "0.0.0.0",
+            "80",
+            "1",
+            "1",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    with config_path.open("rb") as handle:
+        assert tomllib.load(handle)["self_healing"] == {
+            "periodic_reboot_enabled": False,
+            "periodic_reboot_hours": 24,
+            "wifi_watchdog_enabled": False,
+            "wifi_interface": "wlan0",
+            "connectivity_check_host": "1.1.1.1",
+            "wifi_reconnect_enabled": True,
+            "wifi_reconnect_after_minutes": 5,
+            "wifi_reboot_enabled": False,
+            "wifi_reboot_after_minutes": 15,
+            "usb_otg_watchdog_enabled": True,
+            "usb_otg_reboot_enabled": True,
+            "usb_otg_reboot_attempts": 2,
+        }
+
+
 def test_install_service_script_preserves_runtime_recovery_preferences() -> None:
     script_path = (
         Path(__file__).resolve().parents[2] / "rpi-setup" / "scripts" / "install-service.sh"
@@ -220,6 +272,9 @@ def test_install_service_script_preserves_runtime_recovery_preferences() -> None
     assert 'self_healing.get("wifi_reconnect_after_minutes", 5)' in payload
     assert "self_healing.get('wifi_reboot_enabled', False)" in payload
     assert 'self_healing.get("wifi_reboot_after_minutes", 15)' in payload
+    assert "self_healing.get('usb_otg_watchdog_enabled', False)" in payload
+    assert "self_healing.get('usb_otg_reboot_enabled', False)" in payload
+    assert 'self_healing.get("usb_otg_reboot_attempts", 1)' in payload
     assert "[notifications]" in payload
     assert 'notifications.get("locale", "en")' in payload
     assert 'notifications.get("offline_delivery", "summary")' in payload
