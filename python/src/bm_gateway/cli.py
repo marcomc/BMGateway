@@ -61,6 +61,7 @@ from .runtime import (
 )
 from .self_healing import (
     SelfHealingEvent,
+    SelfHealingState,
     USBOTGWatchdogStateError,
     WiFiWatchdogStateError,
     consume_wifi_recovery_notification,
@@ -861,6 +862,29 @@ def _handle_run(
                 print(f"USB OTG image export failed: {export_result.reason}", file=sys.stderr)
                 return 1
         if not dry_run:
+            if (
+                not config.self_healing.wifi_watchdog_enabled
+                and wifi_state_error is None
+                and self_healing_state.wifi_recovery_pending
+            ):
+                cancelled_wifi_recovery = replace(
+                    self_healing_state,
+                    wifi_recovery_pending=False,
+                    wifi_recovery_outage_seconds=0,
+                    wifi_recovery_interface="",
+                    wifi_recovery_started_at=0.0,
+                )
+                try:
+                    persist_wifi_watchdog_state(
+                        wifi_state_path, cancelled_wifi_recovery, preserve_pending=False
+                    )
+                except WiFiWatchdogStateError as error:
+                    wifi_state_error = str(error)
+                else:
+                    self_healing_state.wifi_recovery_pending = False
+                    self_healing_state.wifi_recovery_outage_seconds = 0
+                    self_healing_state.wifi_recovery_interface = ""
+                    self_healing_state.wifi_recovery_started_at = 0.0
             healing_config = config
             if usb_otg_state_error is not None:
                 healing_config = replace(
@@ -971,13 +995,25 @@ def _handle_run(
                             had_pending_handoff = self_healing_state.wifi_recovery_pending
 
                             def queue_recovery_notification(
+                                recovery_state: SelfHealingState | None = None,
                                 event: SelfHealingEvent = event,
                                 config: AppConfig = config,
                             ) -> None:
+                                canonical_event = event
+                                if recovery_state is not None:
+                                    canonical_event = replace(
+                                        event,
+                                        details={
+                                            **event.details,
+                                            "outage_seconds": (
+                                                recovery_state.wifi_recovery_outage_seconds
+                                            ),
+                                        },
+                                    )
                                 _queue_wifi_watchdog_notification(
                                     path=notification_outbox_path(runtime_state_dir),
                                     config=config,
-                                    event=event,
+                                    event=canonical_event,
                                 )
 
                             consumed = consume_wifi_recovery_notification(

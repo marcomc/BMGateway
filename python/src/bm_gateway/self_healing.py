@@ -180,7 +180,7 @@ def persist_wifi_watchdog_state(
 def consume_wifi_recovery_notification(
     path: Path,
     state: SelfHealingState,
-    enqueue: Callable[[], None],
+    enqueue: Callable[[SelfHealingState], None],
 ) -> bool:
     """Queue and acknowledge one persisted recovery handoff under its state lock."""
     lock_handle = None
@@ -191,8 +191,12 @@ def consume_wifi_recovery_notification(
         current = new_self_healing_state()
         load_wifi_watchdog_state(path, current)
         if not current.wifi_recovery_pending:
+            state.wifi_recovery_pending = False
+            state.wifi_recovery_outage_seconds = 0
+            state.wifi_recovery_interface = ""
+            state.wifi_recovery_started_at = 0.0
             return False
-        enqueue()
+        enqueue(current)
         acknowledged = replace(
             current,
             wifi_recovery_pending=False,

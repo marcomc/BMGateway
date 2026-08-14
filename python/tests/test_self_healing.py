@@ -214,7 +214,7 @@ def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
     assert restarted.wifi_recovery_pending is True
     delivered: list[str] = []
     assert consume_wifi_recovery_notification(
-        state_path, restarted, lambda: delivered.append("queued")
+        state_path, restarted, lambda _state: delivered.append("queued")
     )
     assert delivered == ["queued"]
     assert restarted.wifi_recovery_pending is False
@@ -272,9 +272,14 @@ def test_concurrent_recovery_consumers_queue_one_handoff(tmp_path: Path) -> None
     load_wifi_watchdog_state(state_path, second)
     queued: list[str] = []
 
-    assert consume_wifi_recovery_notification(state_path, first, lambda: queued.append("one"))
-    assert not consume_wifi_recovery_notification(state_path, second, lambda: queued.append("two"))
+    assert consume_wifi_recovery_notification(
+        state_path, first, lambda _state: queued.append("one")
+    )
+    assert not consume_wifi_recovery_notification(
+        state_path, second, lambda _state: queued.append("two")
+    )
     assert queued == ["one"]
+    assert second.wifi_recovery_pending is False
 
 
 def test_repeated_wifi_reboots_preserve_the_original_outage_origin() -> None:
