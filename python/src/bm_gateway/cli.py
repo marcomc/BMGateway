@@ -932,7 +932,7 @@ def _handle_run(
                             details={"reason": wifi_state_error},
                         )
                     )
-            elif usb_otg_state_error is not None and not usb_otg_state_error_reported:
+            if usb_otg_state_error is not None and not usb_otg_state_error_reported:
                 events.append(
                     SelfHealingEvent(
                         action="usb_otg_watchdog_state_unavailable",

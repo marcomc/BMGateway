@@ -12,7 +12,7 @@ from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.config import load_config
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.notifications import load_notification_outbox, notification_outbox_path
-from bm_gateway.self_healing import SelfHealingEvent
+from bm_gateway.self_healing import SelfHealingEvent, USBOTGWatchdogStateError
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -276,6 +276,61 @@ def test_run_queues_wifi_watchdog_events_before_attempting_delivery(
     ]
     assert delivered_after_queue is True
     assert event_order.index("deliver") < event_order.index("wifi_reboot")
+
+
+def test_run_reports_usb_watchdog_state_error_when_wifi_state_is_healthy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[usb_otg]\n"
+        + "enabled = true\n"
+        + "\n[self_healing]\n"
+        + "wifi_watchdog_enabled = true\n"
+        + "usb_otg_watchdog_enabled = true\n",
+        encoding="utf-8",
+    )
+    audits: list[str] = []
+
+    def unavailable_usb_state(*_args: object, **_kwargs: object) -> None:
+        raise USBOTGWatchdogStateError("unreadable USB state")
+
+    monkeypatch.setattr("bm_gateway.cli.load_usb_otg_watchdog_state", unavailable_usb_state)
+    monkeypatch.setattr(
+        "bm_gateway.cli._run_cycle",
+        lambda **_kwargs: GatewaySnapshot(
+            generated_at="2026-08-14T20:00:00+00:00",
+            gateway_name="BMGateway",
+            active_adapter="hci0",
+            mqtt_enabled=False,
+            mqtt_connected=False,
+            devices_total=0,
+            devices_online=0,
+            poll_interval_seconds=15,
+            devices=[],
+        ),
+    )
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "bm_gateway.cli.append_audit_event",
+        lambda **kwargs: audits.append(str(kwargs["action"])),
+    )
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "run",
+            "--once",
+            "--state-dir",
+            str(tmp_path / "state"),
+        ]
+    )
+
+    assert result == 0
+    assert audits == ["usb_otg_watchdog_state_unavailable"]
 
 
 def test_cli_version_commands_emit_package_version(capsys: pytest.CaptureFixture[str]) -> None:
