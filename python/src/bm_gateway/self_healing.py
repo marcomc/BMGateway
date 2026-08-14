@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import shutil
@@ -16,7 +17,6 @@ from .config import AppConfig
 
 ConnectivityChecker = Callable[[str, str], bool]
 ReconnectAction = Callable[[str], bool]
-RebootAction = Callable[[], None]
 USBOTGHealthChecker = Callable[[str, str], "USBOTGHealth"]
 USBOTGRebindAction = Callable[[str, str], bool]
 USBOTGStateCheckpoint = Callable[[], None]
@@ -140,34 +140,87 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.wifi_recovery_started_at = float(recovery_started_at)
 
 
-def persist_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
-    _persist_watchdog_json(
-        path,
-        {
+def persist_wifi_watchdog_state(
+    path: Path,
+    state: SelfHealingState,
+    *,
+    preserve_pending: bool = True,
+) -> None:
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        payload: dict[str, object] = {
             "recovery_pending": state.wifi_recovery_pending,
             "outage_seconds": state.wifi_recovery_outage_seconds,
             "wifi_interface": state.wifi_recovery_interface,
             "recovery_started_at": state.wifi_recovery_started_at,
-        },
-        WiFiWatchdogStateError,
-        "Cannot persist Wi-Fi watchdog state",
-    )
+        }
+        if preserve_pending:
+            try:
+                current = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                current = None
+            if isinstance(current, dict) and current.get("recovery_pending") is True:
+                payload = current
+        _persist_watchdog_json(
+            path,
+            payload,
+            WiFiWatchdogStateError,
+            "Cannot persist Wi-Fi watchdog state",
+        )
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
 
 
-def acknowledge_wifi_recovery_notification(path: Path, state: SelfHealingState) -> None:
-    """Clear the persisted recovery handoff only after its outbox enqueue succeeds."""
-    acknowledged = replace(
-        state,
-        wifi_recovery_pending=False,
-        wifi_recovery_outage_seconds=0,
-        wifi_recovery_interface="",
-        wifi_recovery_started_at=0.0,
-    )
-    persist_wifi_watchdog_state(path, acknowledged)
-    state.wifi_recovery_pending = False
-    state.wifi_recovery_outage_seconds = 0
-    state.wifi_recovery_interface = ""
-    state.wifi_recovery_started_at = 0.0
+def consume_wifi_recovery_notification(
+    path: Path,
+    state: SelfHealingState,
+    enqueue: Callable[[], None],
+) -> bool:
+    """Queue and acknowledge one persisted recovery handoff under its state lock."""
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = new_self_healing_state()
+        load_wifi_watchdog_state(path, current)
+        if not current.wifi_recovery_pending:
+            return False
+        enqueue()
+        acknowledged = replace(
+            current,
+            wifi_recovery_pending=False,
+            wifi_recovery_outage_seconds=0,
+            wifi_recovery_interface="",
+            wifi_recovery_started_at=0.0,
+        )
+        _persist_watchdog_json(
+            path,
+            {
+                "recovery_pending": False,
+                "outage_seconds": 0,
+                "wifi_interface": "",
+                "recovery_started_at": 0.0,
+            },
+            WiFiWatchdogStateError,
+            "Cannot persist Wi-Fi watchdog state",
+        )
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
+    state.wifi_recovery_pending = acknowledged.wifi_recovery_pending
+    state.wifi_recovery_outage_seconds = acknowledged.wifi_recovery_outage_seconds
+    state.wifi_recovery_interface = acknowledged.wifi_recovery_interface
+    state.wifi_recovery_started_at = acknowledged.wifi_recovery_started_at
+    return True
 
 
 def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -321,7 +374,6 @@ def evaluate_self_healing(
     now_monotonic: float | None = None,
     connectivity_checker: ConnectivityChecker = default_connectivity_checker,
     reconnect_action: ReconnectAction = default_wifi_reconnect,
-    reboot_action: RebootAction = default_schedule_reboot,
     usb_otg_health_checker: USBOTGHealthChecker = default_usb_otg_health_check,
     usb_otg_rebind_action: USBOTGRebindAction = default_usb_otg_rebind,
     usb_otg_state_checkpoint: USBOTGStateCheckpoint | None = None,
@@ -337,7 +389,6 @@ def evaluate_self_healing(
         threshold_seconds = healing.periodic_reboot_hours * 3600
         if elapsed_seconds >= threshold_seconds:
             state.periodic_reboot_requested = True
-            reboot_action()
             events.append(
                 SelfHealingEvent(
                     action="periodic_reboot_requested",
@@ -408,6 +459,11 @@ def evaluate_self_healing(
                 ):
                     state.wifi_reconnect_attempted = True
                     reconnected = reconnect_action(healing.wifi_interface)
+                    if reconnected:
+                        reconnected = connectivity_checker(
+                            healing.connectivity_check_host,
+                            healing.wifi_interface,
+                        )
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reconnect_attempted",
@@ -424,11 +480,13 @@ def evaluate_self_healing(
                     and not state.wifi_reboot_requested
                     and outage_duration >= healing.wifi_reboot_after_minutes * 60
                 ):
+                    was_recovery_pending = state.wifi_recovery_pending
                     state.wifi_reboot_requested = True
                     state.wifi_recovery_pending = True
                     state.wifi_recovery_outage_seconds = int(outage_duration)
                     state.wifi_recovery_interface = healing.wifi_interface
-                    state.wifi_recovery_started_at = wall_time - outage_duration
+                    if not was_recovery_pending:
+                        state.wifi_recovery_started_at = wall_time - outage_duration
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reboot_requested",

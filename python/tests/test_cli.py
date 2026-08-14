@@ -242,6 +242,11 @@ def test_run_queues_wifi_watchdog_events_before_attempting_delivery(
         "bm_gateway.cli.evaluate_self_healing",
         lambda **_kwargs: [
             SelfHealingEvent(
+                action="periodic_reboot_requested",
+                status="completed",
+                details={},
+            ),
+            SelfHealingEvent(
                 action="wifi_reconnect_attempted",
                 status="completed",
                 details={"wifi_interface": "wlan0", "outage_seconds": 300},
@@ -280,6 +285,12 @@ def test_run_queues_wifi_watchdog_events_before_attempting_delivery(
     monkeypatch.setattr("bm_gateway.cli.deliver_notification_outbox", fake_delivery)
     monkeypatch.setattr(
         "bm_gateway.cli.default_schedule_reboot", lambda: event_order.append("wifi_reboot")
+    )
+    pending_state = new_self_healing_state()
+    pending_state.wifi_recovery_pending = True
+    persist_wifi_watchdog_state(
+        wifi_watchdog_state_path(tmp_path / "state"),
+        pending_state,
     )
 
     result = cli.main(
@@ -401,6 +412,40 @@ def test_run_inhibits_wifi_reboot_when_pending_state_cannot_persist(
     assert cli.main(["--config", str(config_path), "run", "--once"]) == 0
     assert scheduled == []
     assert "wifi_watchdog_state_persist_failed" in audits
+    assert "wifi_reboot_requested" not in audits
+
+
+def test_run_does_not_persist_unchanged_wifi_watchdog_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[self_healing]\n"
+        + "wifi_watchdog_enabled = true\n",
+        encoding="utf-8",
+    )
+    writes: list[bool] = []
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "bm_gateway.cli.persist_wifi_watchdog_state", lambda *_args: writes.append(True)
+    )
+
+    assert cli.main(["--config", str(config_path), "run", "--once"]) == 0
+    assert writes == []
 
 
 @pytest.mark.parametrize(
@@ -458,6 +503,50 @@ def test_run_terminal_notification_policy_acknowledges_a_recovered_wifi_handoff(
     restored = new_self_healing_state()
     load_wifi_watchdog_state(state_path, restored)
     assert restored.wifi_recovery_pending is False
+
+
+def test_run_queues_normal_wifi_restoration_without_a_reboot_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[notifications]\n"
+        + "enabled = true\n"
+        + 'recipient = "operator@example.test"\n',
+        encoding="utf-8",
+    )
+    queued: list[str] = []
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+    monkeypatch.setattr(
+        "bm_gateway.cli.evaluate_self_healing",
+        lambda **_kwargs: [
+            SelfHealingEvent(
+                action="wifi_connectivity_restored",
+                status="completed",
+                details={"outage_seconds": 60},
+            )
+        ],
+    )
+    monkeypatch.setattr(
+        "bm_gateway.cli.queue_notification_event",
+        lambda **kwargs: queued.append(str(kwargs["action"])),
+    )
+
+    assert cli.main(["--config", str(config_path), "run", "--once"]) == 0
+    assert queued == ["wifi_connectivity_restored"]
 
 
 def test_run_reports_usb_watchdog_state_error_when_wifi_state_is_healthy(

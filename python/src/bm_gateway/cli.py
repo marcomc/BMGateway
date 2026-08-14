@@ -63,7 +63,7 @@ from .self_healing import (
     SelfHealingEvent,
     USBOTGWatchdogStateError,
     WiFiWatchdogStateError,
-    acknowledge_wifi_recovery_notification,
+    consume_wifi_recovery_notification,
     default_schedule_reboot,
     evaluate_self_healing,
     load_usb_otg_watchdog_state,
@@ -906,11 +906,17 @@ def _handle_run(
                             details={"reason": usb_otg_state_error},
                         )
                     )
-            if config.self_healing.wifi_watchdog_enabled and wifi_state_error is None:
+            wifi_reboot_event = any(event.action == "wifi_reboot_requested" for event in events)
+            if (
+                config.self_healing.wifi_watchdog_enabled
+                and wifi_state_error is None
+                and wifi_reboot_event
+            ):
                 try:
                     persist_wifi_watchdog_state(wifi_state_path, self_healing_state)
                 except WiFiWatchdogStateError as error:
                     wifi_state_error = str(error)
+                    events = [event for event in events if event.action != "wifi_reboot_requested"]
                     events.append(
                         SelfHealingEvent(
                             action="wifi_watchdog_state_persist_failed",
@@ -938,6 +944,7 @@ def _handle_run(
                 wifi_state_error_reported = True
             wifi_reboot_requested = False
             usb_otg_reboot_requested = False
+            periodic_reboot_requested = False
             for event in events:
                 append_audit_event(
                     config=config,
@@ -949,7 +956,7 @@ def _handle_run(
                     details=event.details,
                 )
                 if event.action == "periodic_reboot_requested":
-                    sys.stderr.write(f"Self-healing action requested: {event.action}\n")
+                    periodic_reboot_requested = True
                 if event.action == "wifi_reboot_requested":
                     wifi_reboot_requested = wifi_state_error is None
                 if event.action == "usb_otg_reboot_requested":
@@ -960,15 +967,31 @@ def _handle_run(
                     "wifi_connectivity_restored",
                 }:
                     try:
-                        _queue_wifi_watchdog_notification(
-                            path=notification_outbox_path(runtime_state_dir),
-                            config=config,
-                            event=event,
-                        )
                         if event.action == "wifi_connectivity_restored":
-                            acknowledge_wifi_recovery_notification(
+                            had_pending_handoff = self_healing_state.wifi_recovery_pending
+
+                            def queue_recovery_notification(
+                                event: SelfHealingEvent = event,
+                                config: AppConfig = config,
+                            ) -> None:
+                                _queue_wifi_watchdog_notification(
+                                    path=notification_outbox_path(runtime_state_dir),
+                                    config=config,
+                                    event=event,
+                                )
+
+                            consumed = consume_wifi_recovery_notification(
                                 wifi_state_path,
                                 self_healing_state,
+                                queue_recovery_notification,
+                            )
+                            if not consumed and not had_pending_handoff:
+                                queue_recovery_notification()
+                        else:
+                            _queue_wifi_watchdog_notification(
+                                path=notification_outbox_path(runtime_state_dir),
+                                config=config,
+                                event=event,
                             )
                     except NotificationOutboxError as error:
                         append_audit_event(
@@ -1046,14 +1069,17 @@ def _handle_run(
                             details={"detail": str(error)},
                         )
                     notification_delivery_result = result
-            if wifi_reboot_requested or usb_otg_reboot_requested:
+            if periodic_reboot_requested or wifi_reboot_requested or usb_otg_reboot_requested:
                 default_schedule_reboot()
                 for action in (
+                    "periodic_reboot_requested",
                     "wifi_reboot_requested",
                     "usb_otg_reboot_requested",
                 ):
-                    if (action == "wifi_reboot_requested" and wifi_reboot_requested) or (
-                        action == "usb_otg_reboot_requested" and usb_otg_reboot_requested
+                    if (
+                        (action == "periodic_reboot_requested" and periodic_reboot_requested)
+                        or (action == "wifi_reboot_requested" and wifi_reboot_requested)
+                        or (action == "usb_otg_reboot_requested" and usb_otg_reboot_requested)
                     ):
                         sys.stderr.write(f"Self-healing action requested: {action}\n")
         completed += 1
