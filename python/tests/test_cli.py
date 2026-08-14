@@ -8,20 +8,24 @@ from pathlib import Path
 from typing import Callable
 
 import pytest
-from bm_gateway import __version__, cli
+from bm_gateway import __version__, cli, self_healing
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
-from bm_gateway.config import load_config
+from bm_gateway.config import AppConfig, load_config
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.notifications import load_notification_outbox, notification_outbox_path
 from bm_gateway.self_healing import (
     SelfHealingEvent,
     SelfHealingState,
+    USBOTGHealth,
     USBOTGWatchdogStateError,
     WiFiWatchdogStateError,
     consume_wifi_recovery_notification,
+    load_usb_otg_watchdog_state,
     load_wifi_watchdog_state,
     new_self_healing_state,
+    persist_usb_otg_watchdog_state,
     persist_wifi_watchdog_state,
+    usb_otg_watchdog_state_path,
     wifi_watchdog_state_path,
 )
 
@@ -654,8 +658,13 @@ def test_run_defers_notification_delivery_when_wifi_recovery_acknowledgement_fai
         + "\n[notifications]\n"
         + "enabled = true\n"
         + 'recipient = "operator@example.test"\n'
+        + "\n[usb_otg]\n"
+        + "enabled = true\n"
         + "\n[self_healing]\n"
-        + "wifi_watchdog_enabled = true\n",
+        + "wifi_watchdog_enabled = true\n"
+        + "usb_otg_watchdog_enabled = true\n"
+        + "usb_otg_reboot_enabled = true\n"
+        + "usb_otg_reboot_attempts = 1\n",
         encoding="utf-8",
     )
     state_dir = tmp_path / "state"
@@ -676,10 +685,15 @@ def test_run_defers_notification_delivery_when_wifi_recovery_acknowledgement_fai
     )
     deliveries: list[bool] = []
     scheduled: list[bool] = []
+    observed_usb_attempts: list[int] = []
     monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
-    monkeypatch.setattr(
-        "bm_gateway.cli.evaluate_self_healing",
-        lambda **_kwargs: [
+
+    def requested_reboots(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, SelfHealingState)
+        observed_usb_attempts.append(state.usb_otg_reboot_attempts_used)
+        state.usb_otg_reboot_attempts_used += 1
+        return [
             SelfHealingEvent(
                 action="wifi_connectivity_restored",
                 status="completed",
@@ -690,8 +704,14 @@ def test_run_defers_notification_delivery_when_wifi_recovery_acknowledgement_fai
                 status="completed",
                 details={},
             ),
-        ],
-    )
+            SelfHealingEvent(
+                action="usb_otg_reboot_requested",
+                status="completed",
+                details={"attempt": state.usb_otg_reboot_attempts_used},
+            ),
+        ]
+
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", requested_reboots)
 
     attempts = 0
 
@@ -714,20 +734,175 @@ def test_run_defers_notification_delivery_when_wifi_recovery_acknowledgement_fai
 
     monkeypatch.setattr("bm_gateway.cli.deliver_notification_outbox", record_delivery)
     monkeypatch.setattr("bm_gateway.cli.default_schedule_reboot", lambda: scheduled.append(True))
+    monkeypatch.setattr("bm_gateway.cli.sleep_interval", lambda _seconds: None)
 
     assert (
-        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
-        == 0
-    )
-    assert deliveries == []
-    assert scheduled == []
-    assert len(load_notification_outbox(notification_outbox_path(state_dir))) == 1
-    assert (
-        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "run",
+                "--iterations",
+                "2",
+                "--state-dir",
+                str(state_dir),
+            ]
+        )
         == 0
     )
     assert deliveries == [True]
+    assert scheduled == [True]
+    assert observed_usb_attempts == [0, 0]
     assert len(load_notification_outbox(notification_outbox_path(state_dir))) == 1
+
+
+def test_run_retries_usb_reboot_after_state_persistence_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[usb_otg]\n"
+        + "enabled = true\n"
+        + "\n[self_healing]\n"
+        + "usb_otg_watchdog_enabled = true\n"
+        + "usb_otg_reboot_enabled = true\n"
+        + "usb_otg_reboot_attempts = 1\n",
+        encoding="utf-8",
+    )
+    state_dir = tmp_path / "state"
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+    observed_usb_attempts: list[int] = []
+    persisted_usb_attempts: list[int] = []
+    scheduled: list[bool] = []
+    persist_calls = 0
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+
+    def requested_usb_reboot(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, SelfHealingState)
+        observed_usb_attempts.append(state.usb_otg_reboot_attempts_used)
+        state.usb_otg_reboot_attempts_used += 1
+        return [
+            SelfHealingEvent(
+                action="usb_otg_reboot_requested",
+                status="completed",
+                details={"attempt": state.usb_otg_reboot_attempts_used},
+            )
+        ]
+
+    def persist_once_then_succeed(path: Path, state: SelfHealingState) -> None:
+        nonlocal persist_calls
+        persist_calls += 1
+        if persist_calls == 1:
+            raise USBOTGWatchdogStateError("cannot persist USB state")
+        persisted_usb_attempts.append(state.usb_otg_reboot_attempts_used)
+        persist_usb_otg_watchdog_state(path, state)
+
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", requested_usb_reboot)
+    monkeypatch.setattr("bm_gateway.cli.persist_usb_otg_watchdog_state", persist_once_then_succeed)
+    monkeypatch.setattr("bm_gateway.cli.default_schedule_reboot", lambda: scheduled.append(True))
+    monkeypatch.setattr("bm_gateway.cli.sleep_interval", lambda _seconds: None)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "run",
+                "--iterations",
+                "2",
+                "--state-dir",
+                str(state_dir),
+            ]
+        )
+        == 0
+    )
+
+    persisted_state = new_self_healing_state()
+    load_usb_otg_watchdog_state(usb_otg_watchdog_state_path(state_dir), persisted_state)
+    assert observed_usb_attempts == [0, 0]
+    assert persisted_usb_attempts == [1]
+    assert persisted_state.usb_otg_reboot_attempts_used == 1
+    assert scheduled == [True]
+
+
+def test_run_prevents_usb_rebind_when_initial_checkpoint_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text(encoding="utf-8")
+        + "\n[usb_otg]\n"
+        + "enabled = true\n"
+        + "\n[self_healing]\n"
+        + "usb_otg_watchdog_enabled = true\n",
+        encoding="utf-8",
+    )
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+    rebound: list[bool] = []
+    scheduled: list[bool] = []
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+
+    def evaluate_with_failed_rebind_checkpoint(
+        *,
+        config: AppConfig,
+        state: SelfHealingState,
+        usb_otg_state_checkpoint: Callable[[], None] | None,
+    ) -> list[SelfHealingEvent]:
+        def record_rebind(_image: str, _gadget: str) -> bool:
+            rebound.append(True)
+            return True
+
+        return self_healing.evaluate_self_healing(
+            config=config,
+            state=state,
+            usb_otg_state_checkpoint=usb_otg_state_checkpoint,
+            usb_otg_health_checker=lambda _image, _gadget: USBOTGHealth(
+                healthy=False,
+                reason="not configured",
+                udc_name=None,
+                udc_state=None,
+            ),
+            usb_otg_rebind_action=record_rebind,
+        )
+
+    def fail_persist(_path: Path, _state: SelfHealingState) -> None:
+        raise USBOTGWatchdogStateError("cannot persist USB state")
+
+    monkeypatch.setattr(
+        "bm_gateway.cli.evaluate_self_healing", evaluate_with_failed_rebind_checkpoint
+    )
+    monkeypatch.setattr("bm_gateway.cli.persist_usb_otg_watchdog_state", fail_persist)
+    monkeypatch.setattr("bm_gateway.cli.default_schedule_reboot", lambda: scheduled.append(True))
+
+    assert cli.main(["--config", str(config_path), "run", "--once"]) == 0
+    assert rebound == []
+    assert scheduled == []
 
 
 def test_run_reports_usb_watchdog_state_error_when_wifi_state_is_healthy(

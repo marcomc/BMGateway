@@ -865,6 +865,7 @@ def _handle_run(
                 print(f"USB OTG image export failed: {export_result.reason}", file=sys.stderr)
                 return 1
         if not dry_run:
+            usb_otg_reboot_attempts_before = self_healing_state.usb_otg_reboot_attempts_used
             if (
                 not config.self_healing.wifi_watchdog_enabled
                 and wifi_state_error is None
@@ -902,7 +903,11 @@ def _handle_run(
                     self_healing=replace(healing_config.self_healing, wifi_watchdog_enabled=False),
                 )
             usb_otg_state_checkpoint = None
-            if config.self_healing.usb_otg_watchdog_enabled and usb_otg_state_error is None:
+            if (
+                config.self_healing.usb_otg_watchdog_enabled
+                and usb_otg_state_error is None
+                and not self_healing_state.usb_otg_rebind_attempted
+            ):
 
                 def usb_otg_state_checkpoint() -> None:
                     persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
@@ -923,7 +928,14 @@ def _handle_run(
                         details={"reason": usb_otg_state_error},
                     )
                 ]
-            if config.self_healing.usb_otg_watchdog_enabled and usb_otg_state_error is None:
+            usb_otg_reboot_event = any(
+                event.action == "usb_otg_reboot_requested" for event in events
+            )
+            if (
+                config.self_healing.usb_otg_watchdog_enabled
+                and usb_otg_state_error is None
+                and not usb_otg_reboot_event
+            ):
                 try:
                     persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
                 except USBOTGWatchdogStateError as error:
@@ -1127,6 +1139,26 @@ def _handle_run(
                             details={"detail": str(error)},
                         )
                     notification_delivery_result = result
+            if defer_notification_delivery:
+                if periodic_reboot_requested:
+                    self_healing_state.periodic_reboot_requested = False
+                if usb_otg_reboot_requested:
+                    self_healing_state.usb_otg_reboot_attempts_used = usb_otg_reboot_attempts_before
+            if usb_otg_reboot_requested and not defer_notification_delivery:
+                try:
+                    persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
+                except USBOTGWatchdogStateError as error:
+                    usb_otg_reboot_requested = False
+                    self_healing_state.usb_otg_reboot_attempts_used = usb_otg_reboot_attempts_before
+                    append_audit_event(
+                        config=config,
+                        state_dir=state_dir,
+                        source="runtime",
+                        trigger="automatic",
+                        action="usb_otg_watchdog_state_persist_failed",
+                        status="failed",
+                        details={"reason": str(error)},
+                    )
             if not defer_notification_delivery and (
                 periodic_reboot_requested or wifi_reboot_requested or usb_otg_reboot_requested
             ):
