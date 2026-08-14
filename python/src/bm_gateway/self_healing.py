@@ -183,6 +183,42 @@ def persist_wifi_watchdog_state(
             lock_handle.close()
 
 
+def clear_wifi_recovery_handoff(path: Path, state: SelfHealingState) -> bool:
+    """Clear a persisted recovery handoff under its state lock when present."""
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = new_self_healing_state()
+        load_wifi_watchdog_state(path, current)
+        if not current.wifi_recovery_pending:
+            return False
+        _persist_watchdog_json(
+            path,
+            {
+                "recovery_pending": False,
+                "outage_seconds": 0,
+                "wifi_interface": "",
+                "recovery_started_at": 0.0,
+                "recovery_handoff_id": "",
+            },
+            WiFiWatchdogStateError,
+            "Cannot persist Wi-Fi watchdog state",
+        )
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
+    state.wifi_recovery_pending = False
+    state.wifi_recovery_outage_seconds = 0
+    state.wifi_recovery_interface = ""
+    state.wifi_recovery_started_at = 0.0
+    state.wifi_recovery_handoff_id = ""
+    return True
+
+
 def consume_wifi_recovery_notification(
     path: Path,
     state: SelfHealingState,

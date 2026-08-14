@@ -331,8 +331,11 @@ def test_run_audits_unavailable_wifi_state_and_disables_watchdog(
     config_path, _devices_path = _write_example_files(tmp_path)
     config_path.write_text(
         config_path.read_text(encoding="utf-8")
+        + "\n[usb_otg]\n"
+        + "enabled = true\n"
         + "\n[self_healing]\n"
-        + "wifi_watchdog_enabled = true\n",
+        + "wifi_watchdog_enabled = true\n"
+        + "usb_otg_watchdog_enabled = true\n",
         encoding="utf-8",
     )
     audits: list[str] = []
@@ -379,8 +382,11 @@ def test_run_inhibits_wifi_reboot_when_pending_state_cannot_persist(
     config_path, _devices_path = _write_example_files(tmp_path)
     config_path.write_text(
         config_path.read_text(encoding="utf-8")
+        + "\n[usb_otg]\n"
+        + "enabled = true\n"
         + "\n[self_healing]\n"
-        + "wifi_watchdog_enabled = true\n",
+        + "wifi_watchdog_enabled = true\n"
+        + "usb_otg_watchdog_enabled = true\n",
         encoding="utf-8",
     )
     scheduled: list[bool] = []
@@ -408,7 +414,13 @@ def test_run_inhibits_wifi_reboot_when_pending_state_cannot_persist(
                 action="wifi_reboot_requested",
                 status="completed",
                 details={"wifi_interface": "wlan0", "outage_seconds": 60},
-            )
+            ),
+            SelfHealingEvent(action="periodic_reboot_requested", status="completed", details={}),
+            SelfHealingEvent(
+                action="usb_otg_reboot_requested",
+                status="completed",
+                details={"attempt": 1},
+            ),
         ],
     )
     monkeypatch.setattr("bm_gateway.cli.persist_wifi_watchdog_state", failed_wifi_persist)
@@ -583,6 +595,47 @@ def test_run_disabling_wifi_watchdog_clears_a_persisted_recovery_handoff(
         devices=[],
     )
     monkeypatch.setattr("bm_gateway.cli._run_cycle", lambda **_kwargs: snapshot)
+    monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", lambda **_kwargs: [])
+
+    assert (
+        cli.main(["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)])
+        == 0
+    )
+    reloaded = new_self_healing_state()
+    load_wifi_watchdog_state(state_path, reloaded)
+    assert reloaded.wifi_recovery_pending is False
+
+
+def test_run_disabling_wifi_watchdog_clears_a_concurrently_written_handoff(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    state_dir = tmp_path / "state"
+    state_path = wifi_watchdog_state_path(state_dir)
+    snapshot = GatewaySnapshot(
+        generated_at="2026-08-14T20:00:00+00:00",
+        gateway_name="BMGateway",
+        active_adapter="hci0",
+        mqtt_enabled=False,
+        mqtt_connected=False,
+        devices_total=0,
+        devices_online=0,
+        poll_interval_seconds=15,
+        devices=[],
+    )
+
+    def write_concurrent_handoff(**_kwargs: object) -> GatewaySnapshot:
+        pending = new_self_healing_state()
+        pending.wifi_recovery_pending = True
+        pending.wifi_recovery_outage_seconds = 60
+        pending.wifi_recovery_interface = "wlan0"
+        pending.wifi_recovery_started_at = 1000.0
+        pending.wifi_recovery_handoff_id = "concurrent-handoff"
+        persist_wifi_watchdog_state(state_path, pending, preserve_pending=False)
+        return snapshot
+
+    monkeypatch.setattr("bm_gateway.cli._run_cycle", write_concurrent_handoff)
     monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", lambda **_kwargs: [])
 
     assert (

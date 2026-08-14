@@ -65,6 +65,7 @@ from .self_healing import (
     SelfHealingState,
     USBOTGWatchdogStateError,
     WiFiWatchdogStateError,
+    clear_wifi_recovery_handoff,
     consume_wifi_recovery_notification,
     default_schedule_reboot,
     evaluate_self_healing,
@@ -866,31 +867,11 @@ def _handle_run(
                 return 1
         if not dry_run:
             usb_otg_reboot_attempts_before = self_healing_state.usb_otg_reboot_attempts_used
-            if (
-                not config.self_healing.wifi_watchdog_enabled
-                and wifi_state_error is None
-                and self_healing_state.wifi_recovery_pending
-            ):
-                cancelled_wifi_recovery = replace(
-                    self_healing_state,
-                    wifi_recovery_pending=False,
-                    wifi_recovery_outage_seconds=0,
-                    wifi_recovery_interface="",
-                    wifi_recovery_started_at=0.0,
-                    wifi_recovery_handoff_id="",
-                )
+            if not config.self_healing.wifi_watchdog_enabled and wifi_state_error is None:
                 try:
-                    persist_wifi_watchdog_state(
-                        wifi_state_path, cancelled_wifi_recovery, preserve_pending=False
-                    )
+                    clear_wifi_recovery_handoff(wifi_state_path, self_healing_state)
                 except WiFiWatchdogStateError as error:
                     wifi_state_error = str(error)
-                else:
-                    self_healing_state.wifi_recovery_pending = False
-                    self_healing_state.wifi_recovery_outage_seconds = 0
-                    self_healing_state.wifi_recovery_interface = ""
-                    self_healing_state.wifi_recovery_started_at = 0.0
-                    self_healing_state.wifi_recovery_handoff_id = ""
             healing_config = config
             if usb_otg_state_error is not None:
                 healing_config = replace(
@@ -948,6 +929,7 @@ def _handle_run(
                         )
                     )
             wifi_reboot_event = any(event.action == "wifi_reboot_requested" for event in events)
+            defer_notification_delivery = False
             if (
                 config.self_healing.wifi_watchdog_enabled
                 and wifi_state_error is None
@@ -957,6 +939,7 @@ def _handle_run(
                     persist_wifi_watchdog_state(wifi_state_path, self_healing_state)
                 except WiFiWatchdogStateError as error:
                     wifi_state_error = str(error)
+                    defer_notification_delivery = True
                     events = [event for event in events if event.action != "wifi_reboot_requested"]
                     events.append(
                         SelfHealingEvent(
@@ -986,7 +969,6 @@ def _handle_run(
             wifi_reboot_requested = False
             usb_otg_reboot_requested = False
             periodic_reboot_requested = False
-            defer_notification_delivery = False
             for event in events:
                 append_audit_event(
                     config=config,
