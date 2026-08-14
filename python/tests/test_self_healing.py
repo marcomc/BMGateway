@@ -7,6 +7,8 @@ from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway.config import load_config
 from bm_gateway.self_healing import (
     USBOTGHealth,
+    USBOTGWatchdogStateError,
+    acknowledge_wifi_recovery_notification,
     default_connectivity_checker,
     default_schedule_reboot,
     default_usb_otg_health_check,
@@ -174,9 +176,10 @@ def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
         config=config,
         state=first,
         now_monotonic=70.0,
+        now_wall_time=1060.0,
         connectivity_checker=lambda _host, _interface: False,
-        wifi_state_checkpoint=lambda: persist_wifi_watchdog_state(state_path, first),
     )
+    persist_wifi_watchdog_state(state_path, first)
 
     restarted = new_self_healing_state(now_monotonic=0.0)
     load_wifi_watchdog_state(state_path, restarted)
@@ -184,13 +187,63 @@ def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
         config=config,
         state=restarted,
         now_monotonic=10.0,
+        now_wall_time=1100.0,
         connectivity_checker=lambda _host, _interface: True,
     )
 
     assert [event.action for event in reboot] == ["wifi_reboot_requested"]
     assert [event.action for event in restored] == ["wifi_connectivity_restored"]
-    assert restored[0].details["outage_seconds"] == 60
+    assert restored[0].details["outage_seconds"] == 100
+    assert restarted.wifi_recovery_pending is True
+    acknowledge_wifi_recovery_notification(state_path, restarted)
     assert restarted.wifi_recovery_pending is False
+
+
+def test_usb_checkpoint_failure_preserves_a_prior_wifi_reboot_request() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(config.usb_otg, enabled=True),
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            wifi_reconnect_enabled=False,
+            usb_otg_watchdog_enabled=True,
+            usb_otg_reboot_enabled=True,
+            usb_otg_reboot_attempts=1,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    def failed_checkpoint() -> None:
+        raise USBOTGWatchdogStateError("cannot persist")
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=60.0,
+        connectivity_checker=lambda _host, _interface: False,
+        usb_otg_health_checker=lambda _image, _gadget: USBOTGHealth(
+            healthy=False,
+            reason="not configured",
+            udc_name=None,
+            udc_state=None,
+        ),
+        usb_otg_state_checkpoint=failed_checkpoint,
+    )
+
+    assert [event.action for event in events] == [
+        "wifi_reboot_requested",
+        "usb_otg_watchdog_state_persist_failed",
+    ]
 
 
 def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:

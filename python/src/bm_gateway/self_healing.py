@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tempfile
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable
 
@@ -42,6 +42,7 @@ class SelfHealingState:
     wifi_recovery_pending: bool = False
     wifi_recovery_outage_seconds: int = 0
     wifi_recovery_interface: str = ""
+    wifi_recovery_started_at: float = 0.0
     periodic_reboot_requested: bool = False
     usb_otg_rebind_attempted: bool = False
     usb_otg_reboot_attempts_used: int = 0
@@ -77,51 +78,19 @@ def wifi_watchdog_state_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "wifi_watchdog_state.json"
 
 
-def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
-    try:
-        payload = path.read_text(encoding="utf-8")
-    except FileNotFoundError:
-        return
-    except OSError as error:
-        raise WiFiWatchdogStateError("Cannot read Wi-Fi watchdog state") from error
-    try:
-        raw = json.loads(payload)
-        recovery_pending = raw["recovery_pending"]
-        outage_seconds = raw["outage_seconds"]
-        wifi_interface = raw["wifi_interface"]
-    except (KeyError, TypeError, json.JSONDecodeError) as error:
-        raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
-    if (
-        not isinstance(recovery_pending, bool)
-        or not isinstance(outage_seconds, int)
-        or outage_seconds < 0
-        or not isinstance(wifi_interface, str)
-    ):
-        raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
-    state.wifi_recovery_pending = recovery_pending
-    state.wifi_recovery_outage_seconds = outage_seconds
-    state.wifi_recovery_interface = wifi_interface
-
-
-def persist_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
-    payload = (
-        json.dumps(
-            {
-                "recovery_pending": state.wifi_recovery_pending,
-                "outage_seconds": state.wifi_recovery_outage_seconds,
-                "wifi_interface": state.wifi_recovery_interface,
-            },
-            sort_keys=True,
-        )
-        + "\n"
-    )
+def _persist_watchdog_json(
+    path: Path,
+    payload: dict[str, object],
+    error_type: type[USBOTGWatchdogStateError] | type[WiFiWatchdogStateError],
+    error_message: str,
+) -> None:
     temporary_path: Path | None = None
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
         ) as temporary:
-            temporary.write(payload)
+            temporary.write(json.dumps(payload, sort_keys=True) + "\n")
             temporary.flush()
             os.fsync(temporary.fileno())
             temporary_path = Path(temporary.name)
@@ -137,7 +106,68 @@ def persist_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
                 temporary_path.unlink(missing_ok=True)
             except OSError:
                 pass
-        raise WiFiWatchdogStateError("Cannot persist Wi-Fi watchdog state") from error
+        raise error_type(error_message) from error
+
+
+def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot read Wi-Fi watchdog state") from error
+    try:
+        raw = json.loads(payload)
+        recovery_pending = raw["recovery_pending"]
+        outage_seconds = raw["outage_seconds"]
+        wifi_interface = raw["wifi_interface"]
+        recovery_started_at = raw.get("recovery_started_at", 0.0)
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
+    if (
+        not isinstance(recovery_pending, bool)
+        or not isinstance(outage_seconds, int)
+        or outage_seconds < 0
+        or not isinstance(wifi_interface, str)
+        or isinstance(recovery_started_at, bool)
+        or not isinstance(recovery_started_at, (int, float))
+        or recovery_started_at < 0
+    ):
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
+    state.wifi_recovery_pending = recovery_pending
+    state.wifi_recovery_outage_seconds = outage_seconds
+    state.wifi_recovery_interface = wifi_interface
+    state.wifi_recovery_started_at = float(recovery_started_at)
+
+
+def persist_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    _persist_watchdog_json(
+        path,
+        {
+            "recovery_pending": state.wifi_recovery_pending,
+            "outage_seconds": state.wifi_recovery_outage_seconds,
+            "wifi_interface": state.wifi_recovery_interface,
+            "recovery_started_at": state.wifi_recovery_started_at,
+        },
+        WiFiWatchdogStateError,
+        "Cannot persist Wi-Fi watchdog state",
+    )
+
+
+def acknowledge_wifi_recovery_notification(path: Path, state: SelfHealingState) -> None:
+    """Clear the persisted recovery handoff only after its outbox enqueue succeeds."""
+    acknowledged = replace(
+        state,
+        wifi_recovery_pending=False,
+        wifi_recovery_outage_seconds=0,
+        wifi_recovery_interface="",
+        wifi_recovery_started_at=0.0,
+    )
+    persist_wifi_watchdog_state(path, acknowledged)
+    state.wifi_recovery_pending = False
+    state.wifi_recovery_outage_seconds = 0
+    state.wifi_recovery_interface = ""
+    state.wifi_recovery_started_at = 0.0
 
 
 def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -167,40 +197,16 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
 
 
 def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
-    payload = (
-        json.dumps(
-            {
-                "rebind_attempted": state.usb_otg_rebind_attempted,
-                "reboot_attempts_used": state.usb_otg_reboot_attempts_used,
-                "escalated": state.usb_otg_escalated,
-            },
-            sort_keys=True,
-        )
-        + "\n"
+    _persist_watchdog_json(
+        path,
+        {
+            "rebind_attempted": state.usb_otg_rebind_attempted,
+            "reboot_attempts_used": state.usb_otg_reboot_attempts_used,
+            "escalated": state.usb_otg_escalated,
+        },
+        USBOTGWatchdogStateError,
+        "Cannot persist USB OTG watchdog state",
     )
-    temporary_path: Path | None = None
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
-        ) as temporary:
-            temporary.write(payload)
-            temporary.flush()
-            os.fsync(temporary.fileno())
-            temporary_path = Path(temporary.name)
-        os.replace(temporary_path, path)
-        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    except OSError as error:
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError:
-                pass
-        raise USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state") from error
 
 
 def default_connectivity_checker(host: str, interface: str) -> bool:
@@ -319,9 +325,10 @@ def evaluate_self_healing(
     usb_otg_health_checker: USBOTGHealthChecker = default_usb_otg_health_check,
     usb_otg_rebind_action: USBOTGRebindAction = default_usb_otg_rebind,
     usb_otg_state_checkpoint: USBOTGStateCheckpoint | None = None,
-    wifi_state_checkpoint: Callable[[], None] | None = None,
+    now_wall_time: float | None = None,
 ) -> list[SelfHealingEvent]:
     now = time.monotonic() if now_monotonic is None else now_monotonic
+    wall_time = time.time() if now_wall_time is None else now_wall_time
     events: list[SelfHealingEvent] = []
     healing = config.self_healing
 
@@ -349,6 +356,7 @@ def evaluate_self_healing(
         state.wifi_recovery_pending = False
         state.wifi_recovery_outage_seconds = 0
         state.wifi_recovery_interface = ""
+        state.wifi_recovery_started_at = 0.0
     else:
         if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
             if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
@@ -356,6 +364,11 @@ def evaluate_self_healing(
                 if not state.wifi_recovery_pending:
                     assert state.wifi_outage_started_monotonic is not None
                     outage_seconds = int(now - state.wifi_outage_started_monotonic)
+                elif state.wifi_recovery_started_at > 0:
+                    outage_seconds = max(
+                        outage_seconds,
+                        int(wall_time - state.wifi_recovery_started_at),
+                    )
                 events.append(
                     SelfHealingEvent(
                         action="wifi_connectivity_restored",
@@ -369,9 +382,10 @@ def evaluate_self_healing(
             state.wifi_outage_started_monotonic = None
             state.wifi_reconnect_attempted = False
             state.wifi_reboot_requested = False
-            state.wifi_recovery_pending = False
-            state.wifi_recovery_outage_seconds = 0
-            state.wifi_recovery_interface = ""
+            if not state.wifi_recovery_pending:
+                state.wifi_recovery_outage_seconds = 0
+                state.wifi_recovery_interface = ""
+                state.wifi_recovery_started_at = 0.0
         else:
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
@@ -414,8 +428,7 @@ def evaluate_self_healing(
                     state.wifi_recovery_pending = True
                     state.wifi_recovery_outage_seconds = int(outage_duration)
                     state.wifi_recovery_interface = healing.wifi_interface
-                    if wifi_state_checkpoint is not None:
-                        wifi_state_checkpoint()
+                    state.wifi_recovery_started_at = wall_time - outage_duration
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reboot_requested",
@@ -457,7 +470,18 @@ def evaluate_self_healing(
     if not state.usb_otg_rebind_attempted:
         state.usb_otg_rebind_attempted = True
         if usb_otg_state_checkpoint is not None:
-            usb_otg_state_checkpoint()
+            try:
+                usb_otg_state_checkpoint()
+            except USBOTGWatchdogStateError as error:
+                state.usb_otg_rebind_attempted = False
+                events.append(
+                    SelfHealingEvent(
+                        action="usb_otg_watchdog_state_persist_failed",
+                        status="failed",
+                        details={"reason": str(error)},
+                    )
+                )
+                return events
         rebound = usb_otg_rebind_action(config.usb_otg.image_path, config.usb_otg.gadget_name)
         events.extend(
             [
@@ -477,7 +501,18 @@ def evaluate_self_healing(
     ):
         state.usb_otg_reboot_attempts_used += 1
         if usb_otg_state_checkpoint is not None:
-            usb_otg_state_checkpoint()
+            try:
+                usb_otg_state_checkpoint()
+            except USBOTGWatchdogStateError as error:
+                state.usb_otg_reboot_attempts_used -= 1
+                events.append(
+                    SelfHealingEvent(
+                        action="usb_otg_watchdog_state_persist_failed",
+                        status="failed",
+                        details={"reason": str(error)},
+                    )
+                )
+                return events
         events.append(
             SelfHealingEvent(
                 action="usb_otg_reboot_requested",
