@@ -578,6 +578,53 @@ def test_usb_otg_watchdog_state_survives_a_runtime_restart(tmp_path: Path) -> No
     assert restored.usb_otg_escalated is True
 
 
+def test_usb_otg_healthy_state_retains_a_pending_terminal_notification() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(config.usb_otg, enabled=True),
+        self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=True),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    state.usb_otg_rebind_attempted = True
+    state.usb_otg_reboot_attempts_used = 1
+    state.usb_otg_escalated = True
+    state.usb_otg_escalation_notification_pending = True
+    state.usb_otg_escalation_id = "escalation-a"
+    state.usb_otg_escalation_reason = "UDC was not configured"
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=20.0,
+        usb_otg_health_checker=lambda _image_path, _gadget_name: USBOTGHealth(
+            True, "", "udc0", "configured"
+        ),
+    )
+
+    assert [event.action for event in events] == [
+        "usb_otg_recovery_exhausted",
+        "usb_otg_enumeration_restored",
+    ]
+    assert events[0].details["reason"] == "UDC was not configured"
+    assert state.usb_otg_escalated is False
+    assert state.usb_otg_escalation_notification_pending is True
+    assert state.usb_otg_escalation_id == "escalation-a"
+
+    flapping_events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=30.0,
+        usb_otg_health_checker=lambda _image_path, _gadget_name: USBOTGHealth(
+            False, "UDC is unavailable", "udc0", "not attached"
+        ),
+    )
+
+    assert [event.action for event in flapping_events] == ["usb_otg_recovery_exhausted"]
+    assert flapping_events[0].details["reason"] == "UDC was not configured"
+    assert state.usb_otg_escalation_id == "escalation-a"
+
+
 def test_default_usb_otg_health_check_requires_configured_udc(
     tmp_path: Path,
 ) -> None:

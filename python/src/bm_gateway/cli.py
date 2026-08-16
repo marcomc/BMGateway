@@ -929,6 +929,7 @@ def _handle_run(
             usb_otg_reboot_event = any(
                 event.action == "usb_otg_reboot_requested" for event in events
             )
+            usb_otg_state_persist_failed = False
             if (
                 config.self_healing.usb_otg_watchdog_enabled
                 and usb_otg_state_error is None
@@ -938,6 +939,7 @@ def _handle_run(
                     persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
                 except USBOTGWatchdogStateError as error:
                     usb_otg_state_error = str(error)
+                    usb_otg_state_persist_failed = True
                     events.append(
                         SelfHealingEvent(
                             action="usb_otg_watchdog_state_persist_failed",
@@ -946,7 +948,7 @@ def _handle_run(
                         )
                     )
             wifi_reboot_event = any(event.action == "wifi_reboot_requested" for event in events)
-            defer_notification_delivery = False
+            defer_notification_delivery = usb_otg_state_persist_failed
             if (
                 config.self_healing.wifi_watchdog_enabled
                 and wifi_state_error is None
@@ -1062,6 +1064,9 @@ def _handle_run(
                                 event=event,
                             )
                     except NotificationOutboxError as error:
+                        if event.action == "wifi_reboot_requested":
+                            defer_notification_delivery = True
+                            self_healing_state.wifi_reboot_requested = False
                         append_audit_event(
                             config=config,
                             state_dir=state_dir,
@@ -1084,17 +1089,33 @@ def _handle_run(
                         )
                 if event.action == "usb_otg_recovery_exhausted":
                     try:
-                        queue_notification_event(
-                            path=notification_outbox_path(runtime_state_dir),
-                            config=config.notifications,
-                            action=event.action,
-                            detail=(
-                                "USB OTG frame enumeration remained unavailable after "
-                                f"{event.details['reboot_attempts']} reboot attempt(s): "
-                                f"{event.details['reason']}"
-                            ),
+                        outbox_path = notification_outbox_path(runtime_state_dir)
+                        idempotency_key = (
+                            f"usb-otg-escalation:{self_healing_state.usb_otg_escalation_id}"
                         )
-                    except NotificationOutboxError as error:
+                        notification_required = (
+                            config.notifications.enabled
+                            and config.notifications.offline_delivery != "drop"
+                        )
+                        if notification_required and not notification_outbox_has_idempotency_key(
+                            outbox_path, idempotency_key
+                        ):
+                            queue_notification_event(
+                                path=outbox_path,
+                                config=config.notifications,
+                                action=event.action,
+                                detail=(
+                                    "USB OTG frame enumeration remained unavailable after "
+                                    f"{event.details['reboot_attempts']} reboot attempt(s): "
+                                    f"{event.details['reason']}"
+                                ),
+                                idempotency_key=idempotency_key,
+                            )
+                        self_healing_state.usb_otg_escalation_notification_pending = False
+                        persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
+                    except (NotificationOutboxError, USBOTGWatchdogStateError) as error:
+                        defer_notification_delivery = True
+                        self_healing_state.usb_otg_escalation_notification_pending = True
                         append_audit_event(
                             config=config,
                             state_dir=state_dir,
@@ -1106,16 +1127,22 @@ def _handle_run(
                         )
             if config.notifications.enabled and not defer_notification_delivery:
                 try:
-                    with locked_wifi_recovery_state(wifi_state_path) as durable_wifi_state:
-                        blocked_recovery_keys = set()
-                        if durable_wifi_state.wifi_recovery_pending:
-                            blocked_recovery_keys.add(
-                                f"wifi-recovery:{durable_wifi_state.wifi_recovery_handoff_id}"
+                    blocked_recovery_keys = set()
+                    if wifi_state_error is None:
+                        with locked_wifi_recovery_state(wifi_state_path) as durable_wifi_state:
+                            if durable_wifi_state.wifi_recovery_pending:
+                                blocked_recovery_keys.add(
+                                    f"wifi-recovery:{durable_wifi_state.wifi_recovery_handoff_id}"
+                                )
+                            delivered, detail = deliver_notification_outbox(
+                                path=notification_outbox_path(runtime_state_dir),
+                                config=config.notifications,
+                                blocked_idempotency_keys=blocked_recovery_keys,
                             )
+                    else:
                         delivered, detail = deliver_notification_outbox(
                             path=notification_outbox_path(runtime_state_dir),
                             config=config.notifications,
-                            blocked_idempotency_keys=blocked_recovery_keys,
                         )
                     result = (delivered, detail)
                     if (
@@ -1133,6 +1160,8 @@ def _handle_run(
                         )
                     notification_delivery_result = result
                 except (NotificationOutboxError, WiFiWatchdogStateError) as error:
+                    if isinstance(error, WiFiWatchdogStateError):
+                        wifi_state_error = str(error)
                     result = (False, str(error))
                     if result != notification_delivery_result:
                         append_audit_event(
