@@ -249,6 +249,8 @@ def queue_notification_event_once(
         current = now or datetime.now(timezone.utc)
         events = _retained_events(path=path, config=config, now=current)
         if any(event.idempotency_key == idempotency_key for event in events):
+            # A visible earlier replacement may still lack directory durability.
+            _persist_notification_outbox_unlocked(path, events)
             return False
         events.append(
             NotificationEvent(

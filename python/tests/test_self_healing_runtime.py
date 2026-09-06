@@ -748,3 +748,61 @@ def test_shared_scheduler_failure_identifies_requested_policies(
     }
     assert not state.periodic_reboot_requested
     assert not state.wifi_reboot_requested
+
+
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_duplicate_queue_failure_defers_ack_delivery_and_peer_reboot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    config = _config()
+    config = replace(
+        config,
+        notifications=replace(config.notifications, offline_delivery=mode),
+        self_healing=replace(config.self_healing, periodic_reboot_enabled=True),
+    )
+    path = _seed(tmp_path)
+    outbox_path = notifications.notification_outbox_path(tmp_path)
+    assert path.parent == outbox_path.parent
+    _evaluate(monkeypatch)
+    delivered = _delivery(monkeypatch, path)
+    reboots: list[bool] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: reboots.append(True))
+    sync_directory = notifications._fsync_directory
+    calls = 0
+
+    def fail_queue_sync(directory: Path) -> None:
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            raise notifications.NotificationOutboxError("injected queue durability failure")
+        sync_directory(directory)
+
+    def run_fresh() -> list[self_healing.SelfHealingEvent]:
+        state = new_self_healing_state()
+        state.started_monotonic -= config.self_healing.periodic_reboot_hours * 3600 + 1
+        return runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+    monkeypatch.setattr(notifications, "_fsync_directory", fail_queue_sync)
+    for _ in range(2):
+        events = run_fresh()
+        assert any(event.action == "usb_otg_recovery_notification_queue" for event in events)
+        assert json.loads(path.read_text())["escalation_notification_pending"]
+        assert len(notifications.load_notification_outbox(outbox_path)) == 1
+        assert delivered == []
+        assert reboots == []
+
+    def interrupt_before_delivery(**kwargs: object) -> tuple[bool, str]:
+        assert calls == 3
+        assert not json.loads(path.read_text())["escalation_notification_pending"]
+        raise SystemExit("stop before delivery")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(runtime, "deliver_notification_outbox", interrupt_before_delivery)
+        with pytest.raises(SystemExit, match="stop before delivery"):
+            run_fresh()
+    assert len(notifications.load_notification_outbox(outbox_path)) == 1
+    assert reboots == []
+    run_fresh()
+    assert len(delivered) == 1
+    assert reboots == [True]
+    assert notifications.load_notification_outbox(outbox_path) == []

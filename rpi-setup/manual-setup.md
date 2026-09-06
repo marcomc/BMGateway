@@ -564,7 +564,8 @@ alerts. A state-read failure suspends USB recovery and outbox delivery while
 existing Wi-Fi reconnect checks continue.
 
 The handoff prevents duplicate alerts caused by concurrent runtimes or failed
-state acknowledgement. System-mail delivery can still repeat if the process
+state acknowledgement. Duplicate queue requests re-confirm durable outbox
+storage before returning. System-mail delivery can still repeat if the process
 stops after `sendmail` accepts a message but before the outbox records success.
 
 ## Optional: Prepare USB OTG Image Export

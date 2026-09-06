@@ -28,7 +28,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   invocations. State acknowledgement completes before any runtime delivers
   the alert, including after an interrupted state-file replacement. Recovery
   action intents survive uncertain checkpoints, and same-boot reboot retries
-  reuse their reserved attempt.
+  reuse their reserved attempt. Duplicate queue requests independently confirm
+  durable storage before returning.
 - Healthy and disabled USB watchdog transitions preserve pending notifications
   while resetting recovery state. USB checkpoint failures defer same-cycle
   reboots and remain visible in the audit log without disabling Wi-Fi reconnect.

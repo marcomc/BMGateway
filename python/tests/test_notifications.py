@@ -15,7 +15,7 @@ from functools import partial
 from pathlib import Path
 
 import pytest
-from bm_gateway import self_healing, self_healing_runtime
+from bm_gateway import notifications, self_healing, self_healing_runtime
 from bm_gateway.config import NotificationsConfig, load_config
 from bm_gateway.localization import supported_locale_codes, translation_for
 from bm_gateway.notifications import (
@@ -685,3 +685,53 @@ def test_replayed_usb_escalation_preserves_already_queued_legacy_detail(
     assert len(payloads) == 1
     message = Parser(policy=policy.default).parsestr(payloads[0])
     assert legacy_detail in message.get_content()
+
+
+@pytest.mark.parametrize("failure_stage", ["file", "directory"])
+def test_duplicate_enqueue_reestablishes_its_own_durability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    path = tmp_path / "outbox.json"
+    config = NotificationsConfig(enabled=True)
+
+    def enqueue(detail: str) -> bool:
+        return queue_notification_event_once(
+            path=path,
+            config=config,
+            action="usb_otg_recovery_exhausted",
+            detail=detail,
+            idempotency_key="stable-episode",
+        )
+
+    def initial_failure(directory: Path) -> None:
+        raise NotificationOutboxError("injected post-replace failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(notifications, "_fsync_directory", initial_failure)
+        with pytest.raises(NotificationOutboxError):
+            enqueue("original")
+    original = load_notification_outbox(path)
+    assert len(original) == 1
+    fsync = os.fsync
+    synced: list[str] = []
+
+    def fail_sync(fd: int) -> None:
+        stage = "directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file"
+        if stage == failure_stage:
+            raise OSError("injected duplicate sync failure")
+        fsync(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_sync)
+        with pytest.raises(NotificationOutboxError, match="injected duplicate sync failure"):
+            enqueue("replacement must not overwrite original")
+
+    def record_sync(fd: int) -> None:
+        synced.append("directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+        fsync(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", record_sync)
+        assert enqueue("replacement must not overwrite original") is False
+    assert synced == ["file", "directory"]
+    assert load_notification_outbox(path) == original
