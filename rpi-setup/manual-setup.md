@@ -553,7 +553,11 @@ USB recovery state and notification handoff are serialized across the service
 and `run --once`. A pending escalation retains its original reason and reboot
 count, including when the frame reconnects or the watchdog is disabled before
 queuing completes. Queue or state-write failures appear in the audit log and
-are retried on the next cycle; same-cycle reboots wait for a safe handoff.
+are retried on the next cycle; same-cycle reboots wait for a safe handoff. Rebind and reboot intents survive interrupted
+checkpoints. Reissuing a reboot request during the same Linux boot reuses its
+reserved attempt; a new boot can consume the next attempt if USB remains
+unavailable. Disabling reboot recovery cancels its pending intent, and lowering
+the budget cancels a pending request that exceeds the new limit.
 Disabling notifications acknowledges pending watchdog state without adding an
 alert; existing queued mail remains retained. Selecting `drop` discards queued
 alerts. A state-read failure suspends USB recovery and outbox delivery while

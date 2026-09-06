@@ -731,7 +731,7 @@ def _handle_run(
     last_snapshot: GatewaySnapshot | None = None
     self_healing_state = new_self_healing_state()
     runtime_state_dir = database_file_path(config, state_dir=state_dir).parent.parent
-    notification_delivery_result: tuple[str, str] | None = None
+    notification_delivery_failure: tuple[str, str] | None = None
     device_backoff = LiveDeviceBackoff()
     timeout_recovery = LiveTimeoutRecoveryTracker()
 
@@ -792,12 +792,17 @@ def _handle_run(
             events = run_self_healing(
                 config=config, state=self_healing_state, state_dir=runtime_state_dir
             )
+            if not any(event.action == "notification_outbox_delivery" for event in events):
+                notification_delivery_failure = None
             for event in events:
                 if event.action == "notification_outbox_delivery":
                     delivery_result = (event.status, str(event.details.get("detail", "")))
-                    if delivery_result == notification_delivery_result:
-                        continue
-                    notification_delivery_result = delivery_result
+                    if event.status == "failed":
+                        if delivery_result == notification_delivery_failure:
+                            continue
+                        notification_delivery_failure = delivery_result
+                    else:
+                        notification_delivery_failure = None
                 append_audit_event(
                     config=config,
                     state_dir=state_dir,

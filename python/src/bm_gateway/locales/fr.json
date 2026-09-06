@@ -537,5 +537,13 @@
   "Occurred at: {timestamp}": "Survenu le : {timestamp}", "Event: {action}": "Événement : {action}", "Detail: {detail}": "Détail : {detail}",
   "notifications.recipient must not be empty when notifications are enabled": "Le destinataire est requis lorsque les notifications sont activées", "notifications.recipient must be a single email address": "Le destinataire doit être une seule adresse e-mail", "notifications.locale must be a supported locale": "La langue des notifications doit être prise en charge", "notifications.offline_delivery must be one of: summary, individual, drop": "La livraison hors ligne doit être résumé, individuelle ou abandon", "notifications.offline_retention_days must be between 1 and 30": "La conservation hors ligne doit être comprise entre 1 et 30 jours", "notifications.offline_max_events must be between 1 and 1000": "Le nombre maximal de notifications en attente doit être compris entre 1 et 1000",
   "USB OTG recovery exhausted": "Récupération USB OTG épuisée",
-  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Le cadre USB OTG reste non détecté après {attempts} tentative(s) de redémarrage : {reason}"
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Le cadre USB OTG reste non détecté après {attempts} tentative(s) de redémarrage : {reason}",
+  "USB OTG backing image is missing": "L’image disque USB OTG est manquante",
+  "USB OTG gadget is not configured": "Le périphérique USB OTG n’est pas configuré",
+  "USB OTG gadget status is unreadable": "L’état du périphérique USB OTG est illisible",
+  "USB OTG gadget is detached": "Le périphérique USB OTG est déconnecté",
+  "USB OTG controller state is unreadable": "L’état du contrôleur USB OTG est illisible",
+  "UDC state is not configured": "L’état UDC n’est pas configuré",
+  "USB OTG reboot boot identity is unavailable": "L’identifiant de démarrage pour le redémarrage USB OTG est indisponible",
+  "Reboot scheduling failed": "La programmation du redémarrage a échoué"
 }

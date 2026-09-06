@@ -529,5 +529,13 @@
   "Occurred at: {timestamp}": "Ocorreu em: {timestamp}", "Event: {action}": "Evento: {action}", "Detail: {detail}": "Detalhe: {detail}",
   "notifications.recipient must not be empty when notifications are enabled": "O destinatário é obrigatório quando as notificações estão ativadas", "notifications.recipient must be a single email address": "O destinatário deve ser um único endereço de e-mail", "notifications.locale must be a supported locale": "O idioma das notificações deve ser compatível", "notifications.offline_delivery must be one of: summary, individual, drop": "A entrega offline deve ser resumo, individual ou descartar", "notifications.offline_retention_days must be between 1 and 30": "A retenção offline deve ficar entre 1 e 30 dias", "notifications.offline_max_events must be between 1 and 1000": "O máximo de notificações pendentes deve ficar entre 1 e 1000",
   "USB OTG recovery exhausted": "Recuperação USB OTG esgotada",
-  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "O quadro USB OTG continua sem ser detetado após {attempts} tentativa(s) de reinício: {reason}"
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "O quadro USB OTG continua sem ser detetado após {attempts} tentativa(s) de reinício: {reason}",
+  "USB OTG backing image is missing": "A imagem de disco USB OTG está ausente",
+  "USB OTG gadget is not configured": "O dispositivo USB OTG não está configurado",
+  "USB OTG gadget status is unreadable": "Não é possível ler o estado do dispositivo USB OTG",
+  "USB OTG gadget is detached": "O dispositivo USB OTG está desligado",
+  "USB OTG controller state is unreadable": "Não é possível ler o estado do controlador USB OTG",
+  "UDC state is not configured": "O estado UDC não está configurado",
+  "USB OTG reboot boot identity is unavailable": "O identificador de arranque para o reinício USB OTG não está disponível",
+  "Reboot scheduling failed": "Falha ao agendar o reinício"
 }

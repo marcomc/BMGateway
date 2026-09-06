@@ -526,5 +526,13 @@
   "[BMGateway] notification summary": "[BMGateway] اطلاعات کا خلاصہ", "[BMGateway] notification: {action}": "[BMGateway] اطلاع: {action}", "Occurred at: {timestamp}": "وقوع کا وقت: {timestamp}", "Event: {action}": "واقعہ: {action}", "Detail: {detail}": "تفصیل: {detail}",
   "notifications.recipient must not be empty when notifications are enabled": "اطلاعات فعال ہوں تو وصول کنندہ ضروری ہے", "notifications.recipient must be a single email address": "وصول کنندہ ایک ہی ای میل پتہ ہونا چاہیے", "notifications.locale must be a supported locale": "اطلاعات کی زبان معاون ہونی چاہیے", "notifications.offline_delivery must be one of: summary, individual, drop": "آف لائن ترسیل خلاصہ، انفرادی یا خارج ہونا چاہیے", "notifications.offline_retention_days must be between 1 and 30": "آف لائن برقراری 1 سے 30 دن کے درمیان ہونی چاہیے", "notifications.offline_max_events must be between 1 and 1000": "زیادہ سے زیادہ زیر التوا اطلاعات 1 سے 1000 کے درمیان ہونی چاہئیں",
   "USB OTG recovery exhausted": "USB OTG بحالی ختم ہو گئی",
-  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "دوبارہ شروع کرنے کی {attempts} کوششوں کے بعد بھی USB OTG فریم کی شناخت دستیاب نہیں ہوئی: {reason}"
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "دوبارہ شروع کرنے کی {attempts} کوششوں کے بعد بھی USB OTG فریم کی شناخت دستیاب نہیں ہوئی: {reason}",
+  "USB OTG backing image is missing": "USB OTG ڈسک امیج موجود نہیں ہے",
+  "USB OTG gadget is not configured": "USB OTG آلہ کنفیگر نہیں کیا گیا",
+  "USB OTG gadget status is unreadable": "USB OTG آلے کی حالت پڑھی نہیں جا سکتی",
+  "USB OTG gadget is detached": "USB OTG آلہ منقطع ہے",
+  "USB OTG controller state is unreadable": "USB OTG کنٹرولر کی حالت پڑھی نہیں جا سکتی",
+  "UDC state is not configured": "UDC کی حالت کنفیگر نہیں کی گئی",
+  "USB OTG reboot boot identity is unavailable": "USB OTG ری بوٹ کے لیے بوٹ شناخت دستیاب نہیں ہے",
+  "Reboot scheduling failed": "ری بوٹ شیڈول کرنا ناکام ہو گیا"
 }

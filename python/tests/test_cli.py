@@ -9,6 +9,7 @@ import pytest
 from bm_gateway import __version__, cli
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.models import DeviceReading, GatewaySnapshot
+from bm_gateway.self_healing import SelfHealingEvent
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -634,3 +635,82 @@ def test_run_once_routes_self_healing_only_outside_dry_run(
         argv.append("--dry-run")
     assert cli.main(argv) == 0
     assert calls == ([] if dry_run else [state_dir])
+
+
+@pytest.mark.parametrize(
+    ("deliveries", "expected"),
+    [
+        (["completed", "completed"], ["completed", "completed"]),
+        (["completed", None, "completed"], ["completed", "completed"]),
+        (["failed", "failed"], ["failed"]),
+        (["failed", None, "failed"], ["failed", "failed"]),
+        (["failed", "completed", "failed"], ["failed", "completed", "failed"]),
+        (["failed", "other_failure"], ["failed", "other_failure"]),
+    ],
+    ids=[
+        "consecutive-successes",
+        "successes-separated-by-idle",
+        "consecutive-identical-failures",
+        "identical-failures-separated-by-idle",
+        "identical-failures-separated-by-success",
+        "distinct-failures",
+    ],
+)
+def test_run_audits_distinct_notification_deliveries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deliveries: list[str | None],
+    expected: list[str],
+) -> None:
+    config_path, _ = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace("[mqtt]\nenabled = true", "[mqtt]\nenabled = false")
+    )
+    pending_deliveries = iter(deliveries)
+
+    def healing(**_kwargs: object) -> list[SelfHealingEvent]:
+        delivery = next(pending_deliveries)
+        if delivery is None:
+            return [SelfHealingEvent(action="usb_otg_healthy", status="completed", details={})]
+        return [
+            SelfHealingEvent(
+                action="notification_outbox_delivery",
+                status="completed" if delivery == "completed" else "failed",
+                details={"detail": delivery},
+            )
+        ]
+
+    monkeypatch.setattr(cli, "run_self_healing", healing)
+    monkeypatch.setattr(cli, "sleep_interval", lambda _seconds: None)
+    state_dir = tmp_path / "state"
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "run",
+                "--iterations",
+                str(len(deliveries)),
+                "--state-dir",
+                str(state_dir),
+            ]
+        )
+        == 0
+    )
+
+    audit_events = [
+        json.loads(line)
+        for path in sorted((state_dir / "runtime" / "audit").glob("*.jsonl"))
+        for line in path.read_text().splitlines()
+    ]
+    delivery_events = [
+        event for event in audit_events if event["action"] == "notification_outbox_delivery"
+    ]
+    assert [event["details"]["detail"] for event in delivery_events] == expected
+    assert [event["status"] for event in delivery_events] == [
+        "completed" if delivery == "completed" else "failed" for delivery in expected
+    ]
+    assert all(event["source"] == "runtime" for event in delivery_events)
+    assert all(event["trigger"] == "automatic" for event in delivery_events)
+    assert next(pending_deliveries, "exhausted") == "exhausted"

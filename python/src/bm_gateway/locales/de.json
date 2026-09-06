@@ -529,5 +529,13 @@
   "Occurred at: {timestamp}": "Aufgetreten am: {timestamp}", "Event: {action}": "Ereignis: {action}", "Detail: {detail}": "Einzelheit: {detail}",
   "notifications.recipient must not be empty when notifications are enabled": "Der Empfänger ist bei aktivierten Benachrichtigungen erforderlich", "notifications.recipient must be a single email address": "Der Empfänger muss eine einzelne E-Mail-Adresse sein", "notifications.locale must be a supported locale": "Die Benachrichtigungssprache muss unterstützt werden", "notifications.offline_delivery must be one of: summary, individual, drop": "Offline-Zustellung muss Übersicht, einzeln oder verwerfen sein", "notifications.offline_retention_days must be between 1 and 30": "Die Offline-Aufbewahrung muss zwischen 1 und 30 Tagen liegen", "notifications.offline_max_events must be between 1 and 1000": "Die maximale Anzahl ausstehender Benachrichtigungen muss zwischen 1 und 1000 liegen",
   "USB OTG recovery exhausted": "USB-OTG-Wiederherstellung erschöpft",
-  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Die USB-OTG-Rahmenerkennung blieb nach {attempts} Neustartversuch(en) nicht verfügbar: {reason}"
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Die USB-OTG-Rahmenerkennung blieb nach {attempts} Neustartversuch(en) nicht verfügbar: {reason}",
+  "USB OTG backing image is missing": "Das USB-OTG-Datenträgerabbild fehlt",
+  "USB OTG gadget is not configured": "Das USB-OTG-Gadget ist nicht konfiguriert",
+  "USB OTG gadget status is unreadable": "Der Status des USB-OTG-Gadgets ist nicht lesbar",
+  "USB OTG gadget is detached": "Das USB-OTG-Gadget ist getrennt",
+  "USB OTG controller state is unreadable": "Der Zustand des USB-OTG-Controllers ist nicht lesbar",
+  "UDC state is not configured": "Der UDC-Zustand ist nicht konfiguriert",
+  "USB OTG reboot boot identity is unavailable": "Die Startkennung für den USB-OTG-Neustart ist nicht verfügbar",
+  "Reboot scheduling failed": "Die Planung des Neustarts ist fehlgeschlagen"
 }

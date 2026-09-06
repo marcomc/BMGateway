@@ -51,6 +51,7 @@ def _evaluate(monkeypatch: pytest.MonkeyPatch, *, healthy: bool = False) -> None
                 healthy, "original-reason", "controller", "configured" if healthy else "powered"
             ),
             usb_otg_rebind_action=lambda *_: True,
+            usb_otg_boot_id_reader=lambda: "boot-one",
             connectivity_checker=lambda *_: False,
         ),
     )
@@ -412,3 +413,338 @@ def test_unchanged_usb_state_is_not_rewritten_for_wifi_changes(
     runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
     runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
     assert writes == []
+
+
+@pytest.mark.parametrize("action", ["rebind", "reboot"])
+@pytest.mark.parametrize("fault", ["before_replace", "after_replace", "interrupted_after_replace"])
+def test_failed_action_checkpoint_resumes_without_another_reservation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, fault: str
+) -> None:
+    config = _config()
+    state = new_self_healing_state()
+    state.usb_otg_rebind_attempted = action == "reboot"
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    self_healing.persist_usb_otg_watchdog_state(path, state)
+    actions: list[str] = []
+
+    def rebind(*args: object) -> bool:
+        actions.append("rebind")
+        return True
+
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            usb_otg_health_checker=lambda *_: USBOTGHealth(False, "offline", None, None),
+            usb_otg_rebind_action=rebind,
+            usb_otg_boot_id_reader=lambda: "boot-one",
+        ),
+    )
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: actions.append("reboot"))
+    persist = self_healing.persist_usb_otg_watchdog_state
+    failed = False
+
+    def checkpoint(target: Path, current: self_healing.SelfHealingState) -> None:
+        nonlocal failed
+        if not failed:
+            failed = True
+            if fault != "before_replace":
+                persist(target, current)
+            if fault == "interrupted_after_replace":
+                raise SystemExit("interrupted before action")
+            raise self_healing.USBOTGWatchdogStateError("injected action checkpoint")
+        persist(target, current)
+
+    monkeypatch.setattr(runtime, "persist_usb_otg_watchdog_state", checkpoint)
+    if fault == "interrupted_after_replace":
+        with pytest.raises(SystemExit, match="interrupted"):
+            runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    else:
+        first = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+        assert any(event.action == "usb_otg_watchdog_state_persist_failed" for event in first)
+    assert actions == []
+    if fault != "before_replace":
+        assert json.loads(path.read_text())["pending_action"] == action
+    fresh = new_self_healing_state()
+    runtime.run_self_healing(config=config, state=fresh, state_dir=tmp_path)
+    assert actions == [action]
+    assert fresh.usb_otg_reboot_attempts_used == (1 if action == "reboot" else 0)
+
+
+@pytest.mark.parametrize("fault_after_replace", [False, True])
+def test_rebind_ack_failure_is_repeatable_without_skipping_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault_after_replace: bool
+) -> None:
+    config = _config()
+    config = replace(
+        config, self_healing=replace(config.self_healing, usb_otg_reboot_enabled=False)
+    )
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    calls: list[str] = []
+
+    def rebind(*args: object) -> bool:
+        calls.append("rebind")
+        return True
+
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            usb_otg_health_checker=lambda *_: USBOTGHealth(False, "offline", None, None),
+            usb_otg_rebind_action=rebind,
+        ),
+    )
+    persist = self_healing.persist_usb_otg_watchdog_state
+    failed = False
+
+    def checkpoint(target: Path, state: self_healing.SelfHealingState) -> None:
+        nonlocal failed
+        if not failed and calls:
+            failed = True
+            if fault_after_replace:
+                persist(target, state)
+            raise self_healing.USBOTGWatchdogStateError("intent clear failure")
+        persist(target, state)
+
+    monkeypatch.setattr(runtime, "persist_usb_otg_watchdog_state", checkpoint)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert calls == ["rebind"]
+    # Keep mail isolated; following escalation is intentionally dropped.
+    config = replace(config, notifications=replace(config.notifications, enabled=False))
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(calls) == (1 if fault_after_replace else 2)
+    assert json.loads(path.read_text())["rebind_attempted"]
+
+
+@pytest.mark.parametrize(
+    "cancel", ["healthy", "watchdog_disabled", "reboot_disabled", "lower_limit"]
+)
+def test_pending_reboot_resumes_once_per_reservation_and_cancels(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, cancel: str
+) -> None:
+    config = _config()
+    config = replace(config, notifications=replace(config.notifications, enabled=False))
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    state = new_self_healing_state()
+    state.usb_otg_rebind_attempted = True
+    self_healing.persist_usb_otg_watchdog_state(path, state)
+    reboots: list[bool] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: reboots.append(True))
+    _evaluate(monkeypatch)
+    for _ in range(2):
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(reboots) == 2
+    assert json.loads(path.read_text())["reboot_attempts_used"] == 1
+    if cancel == "healthy":
+        _evaluate(monkeypatch, healthy=True)
+    elif cancel == "watchdog_disabled":
+        config = replace(
+            config, self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=False)
+        )
+    elif cancel == "reboot_disabled":
+        config = replace(
+            config, self_healing=replace(config.self_healing, usb_otg_reboot_enabled=False)
+        )
+    else:
+        # Reserve the second attempt on a fresh boot, then lower its limit.
+        monkeypatch.setattr(
+            runtime,
+            "evaluate_self_healing",
+            partial(
+                self_healing.evaluate_self_healing,
+                usb_otg_health_checker=lambda *_: USBOTGHealth(False, "offline", None, None),
+                usb_otg_boot_id_reader=lambda: "boot-two",
+            ),
+        )
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+        assert json.loads(path.read_text())["reboot_attempts_used"] == 2
+        config = replace(
+            config, self_healing=replace(config.self_healing, usb_otg_reboot_attempts=1)
+        )
+    before = len(reboots)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(reboots) == before
+    assert json.loads(path.read_text())["pending_action"] == ""
+
+
+def test_reboot_budget_counts_new_boots_and_scheduler_failure_is_retryable(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config()
+    config = replace(
+        config,
+        notifications=replace(config.notifications, enabled=False),
+        self_healing=replace(config.self_healing, usb_otg_reboot_attempts=1),
+    )
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    state = new_self_healing_state()
+    state.usb_otg_rebind_attempted = True
+    self_healing.persist_usb_otg_watchdog_state(path, state)
+    _evaluate(monkeypatch)
+
+    def failed_schedule() -> None:
+        raise OSError("scheduler unavailable")
+
+    monkeypatch.setattr(runtime, "default_schedule_reboot", failed_schedule)
+    events = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert events[-1].action == "reboot_schedule_failed"
+    assert not any(event.action == "usb_otg_reboot_requested" for event in events)
+    reboots: list[bool] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: reboots.append(True))
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert reboots == [True]
+    assert json.loads(path.read_text())["reboot_attempts_used"] == 1
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            usb_otg_health_checker=lambda *_: USBOTGHealth(False, "offline", None, None),
+            usb_otg_boot_id_reader=lambda: "boot-two",
+        ),
+    )
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+    assert any(event.action == "usb_otg_recovery_exhausted" for event in events)
+    assert reboots == [True]
+
+
+def test_missing_boot_identity_does_not_block_rebind_but_defers_reboot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config()
+    calls: list[bool] = []
+
+    def rebind(*args: object) -> bool:
+        calls.append(True)
+        return True
+
+    def unavailable() -> str:
+        raise self_healing.USBOTGWatchdogStateError("USB OTG reboot boot identity is unavailable")
+
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            usb_otg_health_checker=lambda *_: USBOTGHealth(False, "offline", None, None),
+            usb_otg_rebind_action=rebind,
+            usb_otg_boot_id_reader=unavailable,
+        ),
+    )
+    state = new_self_healing_state()
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert calls == [True]
+    events = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert any(event.action == "usb_otg_watchdog_state_unavailable" for event in events)
+    assert state.usb_otg_reboot_attempts_used == 0
+
+
+@pytest.mark.parametrize(
+    "action,boot_id,attempted,count",
+    [
+        ("invalid", "", True, 1),
+        ("reboot", "", True, 1),
+        ("rebind", "boot-one", True, 0),
+        ("reboot", "boot-one", False, 1),
+        ("reboot", "boot-one", True, 0),
+    ],
+)
+def test_invalid_pending_action_state_is_rejected(
+    tmp_path: Path, action: str, boot_id: str, attempted: bool, count: int
+) -> None:
+    path = tmp_path / "state.json"
+    path.write_text(
+        json.dumps(
+            {
+                "rebind_attempted": attempted,
+                "reboot_attempts_used": count,
+                "escalated": False,
+                "pending_action": action,
+                "pending_reboot_boot_id": boot_id,
+            }
+        )
+    )
+    with pytest.raises(self_healing.USBOTGWatchdogStateError, match="invalid values"):
+        self_healing.load_usb_otg_watchdog_state(path, new_self_healing_state())
+
+
+def test_competing_same_boot_reboots_reuse_one_reserved_attempt(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    state = new_self_healing_state()
+    state.usb_otg_rebind_attempted = True
+    self_healing.persist_usb_otg_watchdog_state(path, state)
+    _evaluate(monkeypatch)
+    requests = tmp_path / "requests.txt"
+
+    def reboot() -> None:
+        with requests.open("a") as handle:
+            handle.write("requested\n")
+
+    monkeypatch.setattr(runtime, "default_schedule_reboot", reboot)
+    ctx = multiprocessing.get_context("fork")
+
+    def run() -> None:
+        runtime.run_self_healing(
+            config=_config(), state=new_self_healing_state(), state_dir=tmp_path
+        )
+
+    workers = [ctx.Process(target=run), ctx.Process(target=run)]
+    try:
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(10)
+            assert worker.exitcode == 0
+        assert len(requests.read_text().splitlines()) == 2
+        assert json.loads(path.read_text())["reboot_attempts_used"] == 1
+    finally:
+        for worker in workers:
+            if worker.is_alive():
+                worker.terminate()
+                worker.join(5)
+
+
+@pytest.mark.parametrize(
+    "requests",
+    [
+        ["usb_otg_reboot_requested"],
+        ["periodic_reboot_requested"],
+        ["wifi_reboot_requested"],
+        ["usb_otg_reboot_requested", "periodic_reboot_requested", "wifi_reboot_requested"],
+    ],
+)
+def test_shared_scheduler_failure_identifies_requested_policies(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, requests: list[str]
+) -> None:
+    config = _config()
+    config = replace(config, notifications=replace(config.notifications, enabled=False))
+    state = new_self_healing_state()
+
+    def evaluate(**kwargs: object) -> list[self_healing.SelfHealingEvent]:
+        state.periodic_reboot_requested = True
+        state.wifi_reboot_requested = True
+        return [
+            self_healing.SelfHealingEvent(action=action, status="requested", details={})
+            for action in requests
+        ]
+
+    def schedule() -> None:
+        raise OSError("scheduler unavailable")
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "default_schedule_reboot", schedule)
+    events = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert len(events) == 1
+    assert events[0].action == "reboot_schedule_failed"
+    assert events[0].details == {
+        "reason": "Reboot scheduling failed",
+        "requested_actions": requests,
+    }
+    assert not state.periodic_reboot_requested
+    assert not state.wifi_reboot_requested

@@ -63,7 +63,11 @@ def run_self_healing(
                 reboot_action=lambda: None,
                 usb_otg_state_checkpoint=checkpoint,
             )
-            if any(event.action == "usb_otg_watchdog_state_persist_failed" for event in events):
+            if any(
+                event.action
+                in {"usb_otg_watchdog_state_persist_failed", "usb_otg_watchdog_state_unavailable"}
+                for event in events
+            ):
                 return _defer_reboots(events, state, before)
             checkpoint()
             for event in events:
@@ -79,7 +83,7 @@ def run_self_healing(
                         "{attempts} reboot attempt(s): {reason}"
                     ).format(
                         attempts=state.usb_otg_escalation_reboot_attempts,
-                        reason=state.usb_otg_escalation_reason,
+                        reason=text(state.usb_otg_escalation_reason),
                     ),
                     idempotency_key=f"usb-otg-escalation:{state.usb_otg_escalation_id}",
                 )
@@ -101,8 +105,26 @@ def run_self_healing(
                             details={"detail": detail},
                         )
                     )
-            if any(event.action in _REBOOT_ACTIONS for event in events):
-                default_schedule_reboot()
+            requested_actions = [
+                event.action for event in events if event.action in _REBOOT_ACTIONS
+            ]
+            if requested_actions:
+                try:
+                    default_schedule_reboot()
+                except OSError:
+                    events = _defer_reboots(events, state, before)
+                    events.append(
+                        SelfHealingEvent(
+                            action="reboot_schedule_failed",
+                            status="failed",
+                            details={
+                                "reason": translation_for(config.notifications.locale).gettext(
+                                    "Reboot scheduling failed"
+                                ),
+                                "requested_actions": requested_actions,
+                            },
+                        )
+                    )
     except (USBOTGWatchdogStateError, NotificationOutboxError) as error:
         if not loaded:
             state.usb_otg_escalation_notification_pending = False
@@ -123,7 +145,9 @@ def run_self_healing(
                     else "usb_otg_watchdog_state_unavailable"
                 ),
                 status="failed",
-                details={"reason": str(error)},
+                details={
+                    "reason": translation_for(config.notifications.locale).gettext(str(error))
+                },
             )
         )
     return events

@@ -26,12 +26,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - USB OTG escalation now retains one incident identity and its original reason
   and reboot count across queue failures, restarts, and concurrent runtime
   invocations. State acknowledgement completes before any runtime delivers
-  the alert, including after an interrupted state-file replacement.
+  the alert, including after an interrupted state-file replacement. Recovery
+  action intents survive uncertain checkpoints, and same-boot reboot retries
+  reuse their reserved attempt.
 - Healthy and disabled USB watchdog transitions preserve pending notifications
   while resetting recovery state. USB checkpoint failures defer same-cycle
   reboots and remain visible in the audit log without disabling Wi-Fi reconnect.
 - USB escalation email details and action labels now use the selected
-  notification language in every supported locale.
+  notification language in every supported locale, including the failure reason.
+- Notification delivery audits now retain distinct successful deliveries while
+  suppressing only consecutive identical failures.
 
 ## [0.3.3] - 2026-07-17 - Windowed History Charts
 

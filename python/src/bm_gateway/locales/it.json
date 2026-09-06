@@ -607,5 +607,13 @@
   "notifications.offline_retention_days must be between 1 and 30": "La conservazione offline deve essere compresa tra 1 e 30 giorni",
   "notifications.offline_max_events must be between 1 and 1000": "Il numero massimo di notifiche in attesa deve essere compreso tra 1 e 1000",
   "USB OTG recovery exhausted": "Recupero USB OTG esaurito",
-  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Il frame USB OTG non è stato riconosciuto dopo {attempts} tentativo/i di riavvio: {reason}"
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Il frame USB OTG non è stato riconosciuto dopo {attempts} tentativo/i di riavvio: {reason}",
+  "USB OTG backing image is missing": "L’immagine del disco USB OTG è mancante",
+  "USB OTG gadget is not configured": "Il gadget USB OTG non è configurato",
+  "USB OTG gadget status is unreadable": "Lo stato del gadget USB OTG non è leggibile",
+  "USB OTG gadget is detached": "Il gadget USB OTG è scollegato",
+  "USB OTG controller state is unreadable": "Lo stato del controller USB OTG non è leggibile",
+  "UDC state is not configured": "Lo stato UDC non è configurato",
+  "USB OTG reboot boot identity is unavailable": "L’identificativo di avvio per il riavvio USB OTG non è disponibile",
+  "Reboot scheduling failed": "La pianificazione del riavvio non è riuscita"
 }
