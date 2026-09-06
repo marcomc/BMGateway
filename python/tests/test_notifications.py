@@ -62,6 +62,44 @@ def test_queue_notification_event_prunes_by_retention_and_limit(tmp_path: Path) 
     assert [event.action for event in load_notification_outbox(path)] == ["two", "three"]
 
 
+def test_notification_outbox_keeps_distinct_idempotency_keys(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="wifi_connectivity_restored",
+        detail="first recovery",
+        idempotency_key="wifi-recovery:1000:wlan0",
+    )
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="wifi_connectivity_restored",
+        detail="second recovery",
+        idempotency_key="wifi-recovery:2000:wlan0",
+    )
+
+    assert [event.idempotency_key for event in load_notification_outbox(path)] == [
+        "wifi-recovery:1000:wlan0",
+        "wifi-recovery:2000:wlan0",
+    ]
+
+
+def test_legacy_outbox_event_without_idempotency_key_loads(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    path.write_text(
+        '[{"action": "wifi_connectivity_restored", "detail": "restored", '
+        '"occurred_at": "2026-08-15T00:00:00+00:00"}]\n',
+        encoding="utf-8",
+    )
+
+    assert load_notification_outbox(path)[0].idempotency_key == ""
+
+
 def test_persistence_normalizes_events_and_rejects_blank_actions(tmp_path: Path) -> None:
     path = tmp_path / "notification_outbox.json"
     occurred_at = datetime(2026, 8, 10, tzinfo=timezone.utc)
@@ -463,6 +501,43 @@ def test_individual_and_drop_delivery_modes(tmp_path: Path) -> None:
     assert delivered is True
     assert len(retry_payloads) == 1
     assert "[BMGateway] notification: usb" in retry_payloads[0]
+
+
+def test_delivery_defers_a_pending_wifi_recovery_handoff(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        offline_delivery="individual",
+    )
+    handoff_key = "wifi-recovery:handoff-a"
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="wifi_connectivity_restored",
+        detail="restored",
+        idempotency_key=handoff_key,
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    delivered, detail = deliver_notification_outbox(
+        path=path,
+        config=config,
+        runner=send,
+        blocked_idempotency_keys={handoff_key},
+    )
+
+    assert delivered is True
+    assert detail == "No deliverable pending notifications"
+    assert payloads == []
+    assert [event.idempotency_key for event in load_notification_outbox(path)] == [handoff_key]
+
+    assert deliver_notification_outbox(path=path, config=config, runner=send)[0] is True
+    assert len(payloads) == 1
 
     queue_notification_event(
         path=path,
