@@ -40,6 +40,7 @@ from .notifications import (
     notification_outbox_has_idempotency_key,
     notification_outbox_path,
     queue_notification_event,
+    queue_notification_event_once,
 )
 from .protocol_analysis import analyze_history_captures
 from .protocol_probe import (
@@ -1097,10 +1098,8 @@ def _handle_run(
                             config.notifications.enabled
                             and config.notifications.offline_delivery != "drop"
                         )
-                        if notification_required and not notification_outbox_has_idempotency_key(
-                            outbox_path, idempotency_key
-                        ):
-                            queue_notification_event(
+                        if notification_required:
+                            queue_notification_event_once(
                                 path=outbox_path,
                                 config=config.notifications,
                                 action=event.action,
@@ -1112,7 +1111,11 @@ def _handle_run(
                                 idempotency_key=idempotency_key,
                             )
                         self_healing_state.usb_otg_escalation_notification_pending = False
-                        persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
+                        persist_usb_otg_watchdog_state(
+                            usb_otg_state_path,
+                            self_healing_state,
+                            preserve_pending=False,
+                        )
                     except (NotificationOutboxError, USBOTGWatchdogStateError) as error:
                         defer_notification_delivery = True
                         self_healing_state.usb_otg_escalation_notification_pending = True

@@ -1138,7 +1138,7 @@ def test_run_defers_peer_reboots_when_usb_escalation_state_cannot_persist(
     )
     monkeypatch.setattr(
         "bm_gateway.cli.persist_usb_otg_watchdog_state",
-        lambda *_args: (_ for _ in ()).throw(USBOTGWatchdogStateError("cannot persist")),
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(USBOTGWatchdogStateError("cannot persist")),
     )
     monkeypatch.setattr("bm_gateway.cli.default_schedule_reboot", lambda: scheduled.append(True))
 
@@ -1216,7 +1216,7 @@ def test_run_retries_usb_escalation_after_terminal_notification_queue_failure(
             raise NotificationOutboxError("outbox unavailable")
 
     monkeypatch.setattr("bm_gateway.cli.evaluate_self_healing", request_escalation)
-    monkeypatch.setattr("bm_gateway.cli.queue_notification_event", fail_once_then_queue)
+    monkeypatch.setattr("bm_gateway.cli.queue_notification_event_once", fail_once_then_queue)
     monkeypatch.setattr("bm_gateway.cli.default_schedule_reboot", lambda: scheduled.append(True))
 
     assert (

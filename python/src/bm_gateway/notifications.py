@@ -242,6 +242,35 @@ def queue_notification_event(
         _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
 
 
+def queue_notification_event_once(
+    *,
+    path: Path,
+    config: NotificationsConfig,
+    action: str,
+    detail: str,
+    idempotency_key: str,
+    now: datetime | None = None,
+) -> bool:
+    """Durably queue an event unless its stable identity is already pending."""
+    if not config.enabled or config.offline_delivery == "drop":
+        return False
+    with _notification_outbox_lock(path):
+        current = now or datetime.now(timezone.utc)
+        events = _retained_events(path=path, config=config, now=current)
+        if any(event.idempotency_key == idempotency_key for event in events):
+            return False
+        events.append(
+            NotificationEvent(
+                action=action,
+                detail=detail,
+                occurred_at=_aware_utc(current),
+                idempotency_key=idempotency_key,
+            )
+        )
+        _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
+        return True
+
+
 def _default_sendmail(payload: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         [SYSTEM_SENDMAIL_PATH, "-t"],

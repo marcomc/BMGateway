@@ -592,6 +592,7 @@ def test_usb_otg_healthy_state_retains_a_pending_terminal_notification() -> None
     state.usb_otg_escalation_notification_pending = True
     state.usb_otg_escalation_id = "escalation-a"
     state.usb_otg_escalation_reason = "UDC was not configured"
+    state.usb_otg_escalation_reboot_attempts = 1
 
     events = evaluate_self_healing(
         config=config,
@@ -607,6 +608,7 @@ def test_usb_otg_healthy_state_retains_a_pending_terminal_notification() -> None
         "usb_otg_enumeration_restored",
     ]
     assert events[0].details["reason"] == "UDC was not configured"
+    assert events[0].details["reboot_attempts"] == 1
     assert state.usb_otg_escalated is False
     assert state.usb_otg_escalation_notification_pending is True
     assert state.usb_otg_escalation_id == "escalation-a"

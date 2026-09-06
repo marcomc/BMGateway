@@ -54,6 +54,7 @@ class SelfHealingState:
     usb_otg_escalation_notification_pending: bool = False
     usb_otg_escalation_id: str = ""
     usb_otg_escalation_reason: str = ""
+    usb_otg_escalation_reboot_attempts: int = 0
 
 
 @dataclass(frozen=True)
@@ -226,6 +227,13 @@ def clear_wifi_recovery_handoff(path: Path, state: SelfHealingState) -> bool:
         current = new_self_healing_state()
         load_wifi_watchdog_state(path, current)
         if not current.wifi_recovery_pending or current.wifi_recovery_phase == "reboot_authorized":
+            if current.wifi_recovery_pending:
+                state.wifi_recovery_pending = current.wifi_recovery_pending
+                state.wifi_recovery_outage_seconds = current.wifi_recovery_outage_seconds
+                state.wifi_recovery_interface = current.wifi_recovery_interface
+                state.wifi_recovery_started_at = current.wifi_recovery_started_at
+                state.wifi_recovery_handoff_id = current.wifi_recovery_handoff_id
+                state.wifi_recovery_phase = current.wifi_recovery_phase
             return False
         _persist_watchdog_json(
             path,
@@ -342,6 +350,7 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         escalation_notification_pending = raw.get("escalation_notification_pending", False)
         escalation_id = raw.get("escalation_id", "")
         escalation_reason = raw.get("escalation_reason", "")
+        escalation_reboot_attempts = raw.get("escalation_reboot_attempts", reboot_attempts_used)
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise USBOTGWatchdogStateError("USB OTG watchdog state is invalid") from error
     if (
@@ -352,6 +361,8 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(escalation_notification_pending, bool)
         or not isinstance(escalation_id, str)
         or not isinstance(escalation_reason, str)
+        or not isinstance(escalation_reboot_attempts, int)
+        or escalation_reboot_attempts < 0
     ):
         raise USBOTGWatchdogStateError("USB OTG watchdog state has invalid values")
     state.usb_otg_rebind_attempted = rebind_attempted
@@ -360,22 +371,44 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.usb_otg_escalation_notification_pending = escalation_notification_pending
     state.usb_otg_escalation_id = escalation_id
     state.usb_otg_escalation_reason = escalation_reason
+    state.usb_otg_escalation_reboot_attempts = escalation_reboot_attempts
 
 
-def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
-    _persist_watchdog_json(
-        path,
-        {
-            "rebind_attempted": state.usb_otg_rebind_attempted,
-            "reboot_attempts_used": state.usb_otg_reboot_attempts_used,
-            "escalated": state.usb_otg_escalated,
-            "escalation_notification_pending": state.usb_otg_escalation_notification_pending,
-            "escalation_id": state.usb_otg_escalation_id,
-            "escalation_reason": state.usb_otg_escalation_reason,
-        },
-        USBOTGWatchdogStateError,
-        "Cannot persist USB OTG watchdog state",
-    )
+def persist_usb_otg_watchdog_state(
+    path: Path, state: SelfHealingState, *, preserve_pending: bool = True
+) -> None:
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = new_self_healing_state()
+        load_usb_otg_watchdog_state(path, current)
+        if preserve_pending and current.usb_otg_escalation_notification_pending:
+            state.usb_otg_escalated = current.usb_otg_escalated
+            state.usb_otg_escalation_notification_pending = True
+            state.usb_otg_escalation_id = current.usb_otg_escalation_id
+            state.usb_otg_escalation_reason = current.usb_otg_escalation_reason
+            state.usb_otg_escalation_reboot_attempts = current.usb_otg_escalation_reboot_attempts
+        _persist_watchdog_json(
+            path,
+            {
+                "rebind_attempted": state.usb_otg_rebind_attempted,
+                "reboot_attempts_used": state.usb_otg_reboot_attempts_used,
+                "escalated": state.usb_otg_escalated,
+                "escalation_notification_pending": state.usb_otg_escalation_notification_pending,
+                "escalation_id": state.usb_otg_escalation_id,
+                "escalation_reason": state.usb_otg_escalation_reason,
+                "escalation_reboot_attempts": state.usb_otg_escalation_reboot_attempts,
+            },
+            USBOTGWatchdogStateError,
+            "Cannot persist USB OTG watchdog state",
+        )
+    except OSError as error:
+        raise USBOTGWatchdogStateError("Cannot lock USB OTG watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
 
 
 def default_connectivity_checker(host: str, interface: str) -> bool:
@@ -627,9 +660,10 @@ def evaluate_self_healing(
         state.usb_otg_rebind_attempted = False
         state.usb_otg_reboot_attempts_used = 0
         state.usb_otg_escalated = False
-        state.usb_otg_escalation_notification_pending = False
-        state.usb_otg_escalation_id = ""
-        state.usb_otg_escalation_reason = ""
+        if not state.usb_otg_escalation_notification_pending:
+            state.usb_otg_escalation_id = ""
+            state.usb_otg_escalation_reason = ""
+            state.usb_otg_escalation_reboot_attempts = 0
         return events
 
     health = usb_otg_health_checker(config.usb_otg.image_path, config.usb_otg.gadget_name)
@@ -643,7 +677,7 @@ def evaluate_self_healing(
                         "reason": state.usb_otg_escalation_reason or "unavailable",
                         "udc_name": health.udc_name,
                         "udc_state": health.udc_state,
-                        "reboot_attempts": state.usb_otg_reboot_attempts_used,
+                        "reboot_attempts": state.usb_otg_escalation_reboot_attempts,
                     },
                 )
             )
@@ -676,7 +710,7 @@ def evaluate_self_healing(
                 details={
                     **details,
                     "reason": state.usb_otg_escalation_reason or health.reason,
-                    "reboot_attempts": state.usb_otg_reboot_attempts_used,
+                    "reboot_attempts": state.usb_otg_escalation_reboot_attempts,
                 },
             )
         )
@@ -749,6 +783,7 @@ def evaluate_self_healing(
         state.usb_otg_escalation_notification_pending = True
         state.usb_otg_escalation_id = uuid.uuid4().hex
         state.usb_otg_escalation_reason = health.reason
+        state.usb_otg_escalation_reboot_attempts = state.usb_otg_reboot_attempts_used
         events.append(
             SelfHealingEvent(
                 action="usb_otg_recovery_exhausted",
