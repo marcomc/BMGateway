@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.0] - Unreleased - Notification Foundation
+## [0.4.0] - 2026-09-06 - Notification Foundation and USB OTG Recovery
 
 ### Added
 
@@ -20,6 +20,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is enumerated (UDC state `configured`), attempts one rebind, performs a bounded
   number of reboot recoveries, preserves the recovery counter across reboots,
   and sends an escalation notification when recovery is exhausted.
+
+### Fixed
+
+- USB OTG escalation now retains one incident identity and its original reason
+  and reboot count across queue failures, restarts, and concurrent runtime
+  invocations. State acknowledgement completes before any runtime delivers
+  the alert, including after an interrupted state-file replacement. Recovery
+  action intents survive uncertain checkpoints, and same-boot reboot retries
+  reuse their reserved attempt. Duplicate queue requests independently confirm
+  durable storage before returning.
+- Healthy and disabled USB watchdog transitions preserve pending notifications
+  while resetting recovery state. USB checkpoint failures defer same-cycle
+  reboots and remain visible in the audit log without disabling Wi-Fi reconnect.
+- USB escalation email details and action labels now use the selected
+  notification language in every supported locale, including the failure reason.
+- Notification delivery audits now retain distinct successful deliveries while
+  suppressing only consecutive identical failures.
 
 ## [0.3.3] - 2026-07-17 - Windowed History Charts
 

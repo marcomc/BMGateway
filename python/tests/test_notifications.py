@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import fcntl
+import json
 import os
 import stat
 import subprocess
@@ -8,17 +9,24 @@ import threading
 import time
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
+from email import policy
+from email.parser import Parser
+from functools import partial
 from pathlib import Path
 
 import pytest
-from bm_gateway.config import NotificationsConfig
+from bm_gateway import notifications, self_healing, self_healing_runtime
+from bm_gateway.config import NotificationsConfig, load_config
+from bm_gateway.localization import supported_locale_codes, translation_for
 from bm_gateway.notifications import (
     NotificationEvent,
     NotificationOutboxError,
     deliver_notification_outbox,
     load_notification_outbox,
+    notification_outbox_path,
     persist_notification_outbox,
     queue_notification_event,
+    queue_notification_event_once,
     send_test_notification,
 )
 
@@ -565,3 +573,165 @@ def test_sendmail_timeout_is_a_controlled_failure_and_retains_outbox(tmp_path: P
     delivered, _ = deliver_notification_outbox(path=path, config=config, runner=timeout)
     assert delivered is False
     assert [event.action for event in load_notification_outbox(path)] == ["usb"]
+
+
+_USB_HEALTH_REASONS = (
+    "USB OTG backing image is missing",
+    "USB OTG gadget is not configured",
+    "USB OTG gadget status is unreadable",
+    "USB OTG gadget is detached",
+    "USB OTG controller state is unreadable",
+    "UDC state is not configured",
+)
+
+
+@pytest.mark.parametrize("reason", _USB_HEALTH_REASONS)
+@pytest.mark.parametrize("locale", supported_locale_codes())
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_replayed_usb_escalation_localizes_production_reason_in_email(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, reason: str, locale: str, mode: str
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            enabled=True,
+            recipient="operator@example.test",
+            locale=locale,
+            offline_delivery=mode,
+        ),
+    )
+    state = self_healing.new_self_healing_state()
+    state.usb_otg_escalated = True
+    state.usb_otg_escalation_notification_pending = True
+    state.usb_otg_escalation_id = "pending-episode"
+    state.usb_otg_escalation_reason = reason
+    state.usb_otg_escalation_reboot_attempts = 2
+    state_path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    self_healing.persist_usb_otg_watchdog_state(state_path, state)
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    monkeypatch.setattr(
+        self_healing_runtime,
+        "deliver_notification_outbox",
+        partial(deliver_notification_outbox, runner=send),
+    )
+    # A fresh caller replays durable pending work even with the watchdog disabled.
+    self_healing_runtime.run_self_healing(
+        config=config, state=self_healing.new_self_healing_state(), state_dir=tmp_path
+    )
+    assert len(payloads) == 1
+    message = Parser(policy=policy.default).parsestr(payloads[0])
+    body = message.get_content()
+    translated = translation_for(locale).gettext(reason)
+    assert translated in body
+    assert message["To"] == "operator@example.test"
+    if locale != "en":
+        assert translated != reason
+        assert reason not in body
+    assert json.loads(state_path.read_text())["escalation_reason"] == reason
+    assert not load_notification_outbox(notification_outbox_path(tmp_path))
+
+
+def test_replayed_usb_escalation_preserves_already_queued_legacy_detail(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        notifications=replace(
+            config.notifications, enabled=True, recipient="operator@example.test", locale="it"
+        ),
+    )
+    state = self_healing.new_self_healing_state()
+    state.usb_otg_escalated = True
+    state.usb_otg_escalation_notification_pending = True
+    state.usb_otg_escalation_id = "legacy-episode"
+    state.usb_otg_escalation_reason = "UDC state is not configured"
+    state.usb_otg_escalation_reboot_attempts = 2
+    self_healing.persist_usb_otg_watchdog_state(
+        self_healing.usb_otg_watchdog_state_path(tmp_path), state
+    )
+    legacy_detail = (
+        "USB OTG frame enumeration remained unavailable after "
+        "2 reboot attempt(s): UDC state is not configured"
+    )
+    queue_notification_event_once(
+        path=notification_outbox_path(tmp_path),
+        config=config.notifications,
+        action="usb_otg_recovery_exhausted",
+        detail=legacy_detail,
+        idempotency_key="usb-otg-escalation:legacy-episode",
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    monkeypatch.setattr(
+        self_healing_runtime,
+        "deliver_notification_outbox",
+        partial(deliver_notification_outbox, runner=send),
+    )
+    self_healing_runtime.run_self_healing(
+        config=config, state=self_healing.new_self_healing_state(), state_dir=tmp_path
+    )
+    assert len(payloads) == 1
+    message = Parser(policy=policy.default).parsestr(payloads[0])
+    assert legacy_detail in message.get_content()
+
+
+@pytest.mark.parametrize("failure_stage", ["file", "directory"])
+def test_duplicate_enqueue_reestablishes_its_own_durability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, failure_stage: str
+) -> None:
+    path = tmp_path / "outbox.json"
+    config = NotificationsConfig(enabled=True)
+
+    def enqueue(detail: str) -> bool:
+        return queue_notification_event_once(
+            path=path,
+            config=config,
+            action="usb_otg_recovery_exhausted",
+            detail=detail,
+            idempotency_key="stable-episode",
+        )
+
+    def initial_failure(directory: Path) -> None:
+        raise NotificationOutboxError("injected post-replace failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(notifications, "_fsync_directory", initial_failure)
+        with pytest.raises(NotificationOutboxError):
+            enqueue("original")
+    original = load_notification_outbox(path)
+    assert len(original) == 1
+    fsync = os.fsync
+    synced: list[str] = []
+
+    def fail_sync(fd: int) -> None:
+        stage = "directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file"
+        if stage == failure_stage:
+            raise OSError("injected duplicate sync failure")
+        fsync(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", fail_sync)
+        with pytest.raises(NotificationOutboxError, match="injected duplicate sync failure"):
+            enqueue("replacement must not overwrite original")
+
+    def record_sync(fd: int) -> None:
+        synced.append("directory" if stat.S_ISDIR(os.fstat(fd).st_mode) else "file")
+        fsync(fd)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(os, "fsync", record_sync)
+        assert enqueue("replacement must not overwrite original") is False
+    assert synced == ["file", "directory"]
+    assert load_notification_outbox(path) == original

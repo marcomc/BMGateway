@@ -58,6 +58,9 @@ At the start of every new AI agent chat for this repository, read:
 - When adding derived persistence such as rollups or summaries, rebuild or
   validate it from the canonical source rows and timestamps rather than
   incrementing a second source of truth independently.
+- For watchdog notification handoffs, serialize state reload, evaluation,
+  outbox acknowledgement, and delivery across daemon and one-shot entrypoints.
+  Test checkpoint failures both before and after atomic file replacement.
 - For history charts, derive all-range coverage from the configured retention
   policy rather than a fixed display cap, and test retention beyond every
   paging limit.

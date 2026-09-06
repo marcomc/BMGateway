@@ -532,5 +532,15 @@
   "[BMGateway] notification test: {hostname}": "[BMGateway] اختبار الإشعار: {hostname}", "BMGateway system-mail notification delivery is working.": "يعمل إرسال إشعارات BMGateway عبر بريد النظام.",
   "BMGateway recovered notification delivery on {hostname}.": "استعاد BMGateway إرسال الإشعارات على {hostname}.", "Events retained: {count}": "الأحداث المحتفظ بها: {count}", "First event: {timestamp}": "أول حدث: {timestamp}", "Last event: {timestamp}": "آخر حدث: {timestamp}",
   "[BMGateway] notification summary": "[BMGateway] ملخص الإشعارات", "[BMGateway] notification: {action}": "[BMGateway] إشعار: {action}", "Occurred at: {timestamp}": "حدث في: {timestamp}", "Event: {action}": "الحدث: {action}", "Detail: {detail}": "التفصيل: {detail}",
-  "notifications.recipient must not be empty when notifications are enabled": "المستلم مطلوب عند تمكين الإشعارات", "notifications.recipient must be a single email address": "يجب أن يكون المستلم عنوان بريد إلكتروني واحدًا", "notifications.locale must be a supported locale": "يجب أن تكون لغة الإشعارات مدعومة", "notifications.offline_delivery must be one of: summary, individual, drop": "يجب أن يكون التسليم دون اتصال ملخصًا أو فرديًا أو إسقاطًا", "notifications.offline_retention_days must be between 1 and 30": "يجب أن تكون مدة الاحتفاظ دون اتصال بين 1 و30 يومًا", "notifications.offline_max_events must be between 1 and 1000": "يجب أن يكون الحد الأقصى للإشعارات المعلقة بين 1 و1000"
+  "notifications.recipient must not be empty when notifications are enabled": "المستلم مطلوب عند تمكين الإشعارات", "notifications.recipient must be a single email address": "يجب أن يكون المستلم عنوان بريد إلكتروني واحدًا", "notifications.locale must be a supported locale": "يجب أن تكون لغة الإشعارات مدعومة", "notifications.offline_delivery must be one of: summary, individual, drop": "يجب أن يكون التسليم دون اتصال ملخصًا أو فرديًا أو إسقاطًا", "notifications.offline_retention_days must be between 1 and 30": "يجب أن تكون مدة الاحتفاظ دون اتصال بين 1 و30 يومًا", "notifications.offline_max_events must be between 1 and 1000": "يجب أن يكون الحد الأقصى للإشعارات المعلقة بين 1 و1000",
+  "USB OTG recovery exhausted": "استنفدت استعادة USB OTG",
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "ظل تعداد إطار USB OTG غير متاح بعد {attempts} محاولة لإعادة التشغيل: {reason}",
+  "USB OTG backing image is missing": "صورة قرص USB OTG مفقودة",
+  "USB OTG gadget is not configured": "لم تتم تهيئة جهاز USB OTG",
+  "USB OTG gadget status is unreadable": "تعذرت قراءة حالة جهاز USB OTG",
+  "USB OTG gadget is detached": "جهاز USB OTG مفصول",
+  "USB OTG controller state is unreadable": "تعذرت قراءة حالة وحدة تحكم USB OTG",
+  "UDC state is not configured": "لم تتم تهيئة حالة UDC",
+  "USB OTG reboot boot identity is unavailable": "معرّف الإقلاع لإعادة تشغيل USB OTG غير متاح",
+  "Reboot scheduling failed": "فشلت جدولة إعادة التشغيل"
 }
