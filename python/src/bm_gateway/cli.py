@@ -6,7 +6,6 @@ import argparse
 import asyncio
 import json
 import sys
-from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from typing import Callable, Sequence, cast
@@ -33,12 +32,6 @@ from .drivers.bm300 import (
 )
 from .models import GatewaySnapshot
 from .mqtt import DryRunPublisher, MQTTPublisher, Publisher
-from .notifications import (
-    NotificationOutboxError,
-    deliver_notification_outbox,
-    notification_outbox_path,
-    queue_notification_event,
-)
 from .protocol_analysis import analyze_history_captures
 from .protocol_probe import (
     ProtocolProbeCommand,
@@ -59,15 +52,9 @@ from .runtime import (
     state_file_path,
 )
 from .self_healing import (
-    SelfHealingEvent,
-    USBOTGWatchdogStateError,
-    default_schedule_reboot,
-    evaluate_self_healing,
-    load_usb_otg_watchdog_state,
     new_self_healing_state,
-    persist_usb_otg_watchdog_state,
-    usb_otg_watchdog_state_path,
 )
+from .self_healing_runtime import run_self_healing
 from .state_store import (
     fetch_archive_history,
     fetch_counts,
@@ -744,14 +731,7 @@ def _handle_run(
     last_snapshot: GatewaySnapshot | None = None
     self_healing_state = new_self_healing_state()
     runtime_state_dir = database_file_path(config, state_dir=state_dir).parent.parent
-    usb_otg_state_path = usb_otg_watchdog_state_path(runtime_state_dir)
-    usb_otg_state_error: str | None = None
-    usb_otg_state_error_reported = False
-    notification_delivery_result: tuple[bool, str] | None = None
-    try:
-        load_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
-    except USBOTGWatchdogStateError as error:
-        usb_otg_state_error = str(error)
+    notification_delivery_result: tuple[str, str] | None = None
     device_backoff = LiveDeviceBackoff()
     timeout_recovery = LiveTimeoutRecoveryTracker()
 
@@ -809,56 +789,15 @@ def _handle_run(
                 print(f"USB OTG image export failed: {export_result.reason}", file=sys.stderr)
                 return 1
         if not dry_run:
-            healing_config = config
-            if usb_otg_state_error is not None:
-                healing_config = replace(
-                    config,
-                    self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=False),
-                )
-            usb_otg_state_checkpoint = None
-            if config.self_healing.usb_otg_watchdog_enabled and usb_otg_state_error is None:
-
-                def usb_otg_state_checkpoint() -> None:
-                    persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
-
-            try:
-                events = evaluate_self_healing(
-                    config=healing_config,
-                    state=self_healing_state,
-                    usb_otg_state_checkpoint=usb_otg_state_checkpoint,
-                )
-            except USBOTGWatchdogStateError as error:
-                usb_otg_state_error = str(error)
-                usb_otg_state_error_reported = True
-                events = [
-                    SelfHealingEvent(
-                        action="usb_otg_watchdog_state_persist_failed",
-                        status="failed",
-                        details={"reason": usb_otg_state_error},
-                    )
-                ]
-            if config.self_healing.usb_otg_watchdog_enabled and usb_otg_state_error is None:
-                try:
-                    persist_usb_otg_watchdog_state(usb_otg_state_path, self_healing_state)
-                except USBOTGWatchdogStateError as error:
-                    usb_otg_state_error = str(error)
-                    events.append(
-                        SelfHealingEvent(
-                            action="usb_otg_watchdog_state_persist_failed",
-                            status="failed",
-                            details={"reason": usb_otg_state_error},
-                        )
-                    )
-            elif usb_otg_state_error is not None and not usb_otg_state_error_reported:
-                events.append(
-                    SelfHealingEvent(
-                        action="usb_otg_watchdog_state_unavailable",
-                        status="failed",
-                        details={"reason": usb_otg_state_error},
-                    )
-                )
-                usb_otg_state_error_reported = True
+            events = run_self_healing(
+                config=config, state=self_healing_state, state_dir=runtime_state_dir
+            )
             for event in events:
+                if event.action == "notification_outbox_delivery":
+                    delivery_result = (event.status, str(event.details.get("detail", "")))
+                    if delivery_result == notification_delivery_result:
+                        continue
+                    notification_delivery_result = delivery_result
                 append_audit_event(
                     config=config,
                     state_dir=state_dir,
@@ -868,67 +807,8 @@ def _handle_run(
                     status=event.status,
                     details=event.details,
                 )
-                if event.action in {"periodic_reboot_requested", "wifi_reboot_requested"}:
+                if event.action.endswith("reboot_requested"):
                     sys.stderr.write(f"Self-healing action requested: {event.action}\n")
-                if event.action == "usb_otg_reboot_requested":
-                    default_schedule_reboot()
-                    sys.stderr.write(f"Self-healing action requested: {event.action}\n")
-                if event.action == "usb_otg_recovery_exhausted":
-                    try:
-                        queue_notification_event(
-                            path=notification_outbox_path(runtime_state_dir),
-                            config=config.notifications,
-                            action=event.action,
-                            detail=(
-                                "USB OTG frame enumeration remained unavailable after "
-                                f"{event.details['reboot_attempts']} reboot attempt(s): "
-                                f"{event.details['reason']}"
-                            ),
-                        )
-                    except NotificationOutboxError as error:
-                        append_audit_event(
-                            config=config,
-                            state_dir=state_dir,
-                            source="runtime",
-                            trigger="automatic",
-                            action="usb_otg_recovery_notification_queue",
-                            status="failed",
-                            details={"detail": str(error)},
-                        )
-            if config.notifications.enabled:
-                try:
-                    delivered, detail = deliver_notification_outbox(
-                        path=notification_outbox_path(runtime_state_dir),
-                        config=config.notifications,
-                    )
-                    result = (delivered, detail)
-                    if (
-                        detail != "No pending notifications"
-                        and result != notification_delivery_result
-                    ):
-                        append_audit_event(
-                            config=config,
-                            state_dir=state_dir,
-                            source="runtime",
-                            trigger="automatic",
-                            action="notification_outbox_delivery",
-                            status="completed" if delivered else "failed",
-                            details={"detail": detail},
-                        )
-                    notification_delivery_result = result
-                except NotificationOutboxError as error:
-                    result = (False, str(error))
-                    if result != notification_delivery_result:
-                        append_audit_event(
-                            config=config,
-                            state_dir=state_dir,
-                            source="runtime",
-                            trigger="automatic",
-                            action="notification_outbox_delivery",
-                            status="failed",
-                            details={"detail": str(error)},
-                        )
-                    notification_delivery_result = result
         completed += 1
         if iteration_limit is not None and completed >= iteration_limit:
             break

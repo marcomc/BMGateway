@@ -549,6 +549,20 @@ images. Recovery counters survive a Raspberry Pi reboot, preventing a reboot
 loop; configure `notifications` for an email escalation after the final
 attempt.
 
+USB recovery state and notification handoff are serialized across the service
+and `run --once`. A pending escalation retains its original reason and reboot
+count, including when the frame reconnects or the watchdog is disabled before
+queuing completes. Queue or state-write failures appear in the audit log and
+are retried on the next cycle; same-cycle reboots wait for a safe handoff.
+Disabling notifications acknowledges pending watchdog state without adding an
+alert; existing queued mail remains retained. Selecting `drop` discards queued
+alerts. A state-read failure suspends USB recovery and outbox delivery while
+existing Wi-Fi reconnect checks continue.
+
+The handoff prevents duplicate alerts caused by concurrent runtimes or failed
+state acknowledgement. System-mail delivery can still repeat if the process
+stops after `sendmail` accepts a message but before the outbox records success.
+
 ## Optional: Prepare USB OTG Image Export
 
 `BMGateway` includes a disabled-by-default USB OTG image-export setting for

@@ -609,3 +609,28 @@ def test_run_requests_bluetooth_recovery_after_consecutive_all_timeout_cycles(
         "readings were timeout or device_not_found."
     ]
     assert "Bluetooth recovery requested" in captured.err
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_run_once_routes_self_healing_only_outside_dry_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    config_path, _ = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace("[mqtt]\nenabled = true", "[mqtt]\nenabled = false")
+    )
+    calls: list[Path] = []
+
+    def healing(**kwargs: object) -> list[object]:
+        state_dir = kwargs["state_dir"]
+        assert isinstance(state_dir, Path)
+        calls.append(state_dir)
+        return []
+
+    monkeypatch.setattr(cli, "run_self_healing", healing)
+    state_dir = tmp_path / "state"
+    argv = ["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)]
+    if dry_run:
+        argv.append("--dry-run")
+    assert cli.main(argv) == 0
+    assert calls == ([] if dry_run else [state_dir])
