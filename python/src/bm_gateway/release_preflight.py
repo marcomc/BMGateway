@@ -13,6 +13,10 @@ _ACTIVE_RELEASE_HEADING_PATTERN = re.compile(
     r"^## \[(\d+\.\d+\.\d+)\] - Unreleased - \S.*$",
     re.M,
 )
+_SHIPPED_RELEASE_HEADING_PATTERN = re.compile(
+    r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2} - \S.*$",
+    re.M,
+)
 _VERSIONED_CHANGELOG_HEADING_PATTERN = re.compile(
     r"^## \[(\d+\.\d+\.\d+)\](.*)$",
     re.M,
@@ -65,8 +69,13 @@ def active_release_version_from_changelog(text: str) -> str | None:
 
 def latest_shipped_version_from_changelog(text: str) -> str:
     for heading in _VERSIONED_CHANGELOG_HEADING_PATTERN.finditer(text):
-        if not heading.group(2).startswith(" - Unreleased"):
-            return str(heading.group(1))
+        if _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is not None:
+            continue
+        if _SHIPPED_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None:
+            raise ValueError(
+                "Current shipped release heading must use: ## [X.Y.Z] - YYYY-MM-DD - Title"
+            )
+        return str(heading.group(1))
     raise ValueError("No shipped release section found in CHANGELOG.md")
 
 

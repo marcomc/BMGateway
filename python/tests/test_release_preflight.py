@@ -68,7 +68,8 @@ def test_collect_release_version_state_uses_latest_release_when_unreleased_is_em
         module_version="0.2.2",
         documented_release="0.2.2",
         changelog_text=(
-            "# Changelog\n\n## [Unreleased]\n\n## [0.2.2] - 2026-05-03\n\n- Released changes.\n"
+            "# Changelog\n\n## [Unreleased]\n\n"
+            "## [0.2.2] - 2026-05-03 - Released changes\n\n- Released changes.\n"
         ),
     )
 
@@ -93,7 +94,7 @@ def test_collect_release_version_state_uses_next_patch_when_unreleased_has_conte
             "# Changelog\n\n"
             "## [Unreleased]\n\n"
             "- Candidate fix under test.\n\n"
-            "## [0.2.2] - 2026-05-03\n\n"
+            "## [0.2.2] - 2026-05-03 - Released changes\n\n"
             "- Released changes.\n"
         ),
     )
@@ -119,7 +120,7 @@ def test_validate_release_version_state_rejects_stale_version_when_unreleased_ha
             "# Changelog\n\n"
             "## [Unreleased]\n\n"
             "- Candidate fix under test.\n\n"
-            "## [0.2.2] - 2026-05-03\n\n"
+            "## [0.2.2] - 2026-05-03 - Released changes\n\n"
             "- Released changes.\n"
         ),
     )
@@ -185,6 +186,29 @@ def test_active_release_rejects_nonempty_generic_unreleased_section(tmp_path: Pa
     )
 
     with pytest.raises(ValueError, match="both an active release section and nonempty generic"):
+        validate_release_version_state(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "heading",
+    [
+        "## [0.5.0] - TBD",
+        "## [0.5.0] garbage",
+        "## [0.5.0] - 2026-05-03",
+    ],
+)
+def test_current_shipped_release_heading_must_be_dated_and_titled(
+    tmp_path: Path, heading: str
+) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.5.0",
+        module_version="0.5.0",
+        documented_release="0.5.0",
+        changelog_text=f"# Changelog\n\n{heading}\n\n- Released changes.\n",
+    )
+
+    with pytest.raises(ValueError, match="Current shipped release heading must use"):
         validate_release_version_state(tmp_path)
 
 
