@@ -307,6 +307,31 @@ def test_periodic_authorization_is_consumed_after_a_new_boot(
     assert restored.periodic_reboot_scheduled_boot_id == ""
 
 
+def test_disabling_periodic_reboot_clears_its_scheduled_boot_marker(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    base = _config()
+    config = replace(
+        base,
+        notifications=replace(base.notifications, enabled=False),
+        self_healing=replace(base.self_healing, periodic_reboot_enabled=False),
+    )
+    persisted = new_self_healing_state()
+    persisted.periodic_reboot_requested = True
+    persisted.periodic_reboot_scheduled_boot_id = "boot-one"
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    self_healing.persist_usb_otg_watchdog_state(path, persisted)
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [])
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    restored = new_self_healing_state()
+    self_healing.load_usb_otg_watchdog_state(path, restored)
+    assert restored.periodic_reboot_requested is False
+    assert restored.periodic_reboot_scheduled_boot_id == ""
+
+
 @pytest.mark.parametrize("policy", ["periodic", "wifi"])
 def test_reboot_schedule_failure_retries_in_the_same_boot(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path, policy: str
@@ -447,7 +472,14 @@ def test_runtime_consumes_persisted_wifi_restoration_handoff(
         status="completed",
         details={"outage_seconds": 3600},
     )
-    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [event])
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        state.wifi_recovery_outage_seconds = 3600
+        return [event]
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
     monkeypatch.setattr(
         runtime,
         "deliver_notification_outbox",
@@ -461,6 +493,7 @@ def test_runtime_consumes_persisted_wifi_restoration_handoff(
         notifications.notification_outbox_path(tmp_path)
     )
     assert [item.idempotency_key for item in queued] == ["wifi-recovery:handoff-a"]
+    assert queued[0].detail == "Wi-Fi connectivity restored after 3600 seconds."
     assert state.wifi_recovery_pending is False
 
 
@@ -581,6 +614,7 @@ def test_disabling_wifi_reboot_clears_persisted_authorization(
     restored = new_self_healing_state()
     self_healing.load_wifi_watchdog_state(wifi_watchdog_state_path(tmp_path), restored)
     assert restored.wifi_recovery_pending is False
+    assert restored.wifi_reboot_scheduled_boot_id == ""
 
 
 def test_disabling_wifi_watchdog_clears_persisted_recovery_handoff(

@@ -208,6 +208,7 @@ def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
     assert [event.action for event in restored] == ["wifi_connectivity_restored"]
     assert restored[0].details["outage_seconds"] == 100
     assert restarted.wifi_recovery_pending is True
+    assert restarted.wifi_recovery_outage_seconds == 100
     delivered: list[str] = []
     assert consume_wifi_recovery_notification(
         state_path, restarted, lambda _state: delivered.append("queued")

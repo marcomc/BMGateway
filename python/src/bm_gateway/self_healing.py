@@ -693,6 +693,7 @@ def evaluate_self_healing(
                         outage_seconds,
                         int(wall_time - state.wifi_recovery_started_at),
                     )
+                state.wifi_recovery_outage_seconds = outage_seconds
                 events.append(
                     SelfHealingEvent(
                         action="wifi_connectivity_restored",

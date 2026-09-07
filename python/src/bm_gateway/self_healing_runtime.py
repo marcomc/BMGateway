@@ -150,14 +150,14 @@ def run_self_healing(
                     persisted_periodic = state.periodic_reboot_requested
                     persisted_periodic_boot_id = state.periodic_reboot_scheduled_boot_id
 
-            def wifi_checkpoint() -> None:
+            def wifi_checkpoint(*, preserve_pending: bool = True) -> None:
                 nonlocal persisted_wifi
                 if any(
                     getattr(state, name) != getattr(persisted_wifi, name)
                     for name in vars(state)
                     if name.startswith("wifi_")
                 ):
-                    persist_wifi_watchdog_state(wifi_path, state)
+                    persist_wifi_watchdog_state(wifi_path, state, preserve_pending=preserve_pending)
                     persisted_wifi = replace(state)
 
             def periodic_checkpoint() -> None:
@@ -211,6 +211,7 @@ def run_self_healing(
                     )
                 elif not config.self_healing.periodic_reboot_enabled:
                     state.periodic_reboot_requested = False
+                    state.periodic_reboot_scheduled_boot_id = ""
             usb_checkpoint_failed = any(
                 event.action
                 in {"usb_otg_watchdog_state_persist_failed", "usb_otg_watchdog_state_unavailable"}
@@ -225,7 +226,11 @@ def run_self_healing(
                 periodic_checkpoint()
             else:
                 usb_checkpoint()
-            wifi_checkpoint()
+            wifi_checkpoint(
+                preserve_pending=not any(
+                    event.action == "wifi_connectivity_restored" for event in events
+                )
+            )
 
             if wifi_state_error is not None:
                 events.append(
