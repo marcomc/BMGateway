@@ -619,6 +619,8 @@ running host reports that the current boot was observed, not a new reboot.
 Boot recording waits for synchronized wall-clock time without delaying runtime
 or web activation. The runtime keeps watchdog recovery active while lifecycle
 retention and shared-mail delivery defer until the clock is synchronized.
+An orderly shutdown observed before synchronization is retained without an
+untrusted timestamp and receives its notification time after synchronization.
 
 Pending lifecycle events survive process restarts and follow the configured
 retention and event-count limits. Shutdown mail is best effort: sudden power

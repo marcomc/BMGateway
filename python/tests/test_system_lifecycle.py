@@ -528,6 +528,28 @@ def test_lifecycle_cli_defers_delivery_until_wall_clock_is_synchronized(
     assert delivered == [True]
 
 
+def test_unsynchronized_shutdown_is_timestamped_on_later_trusted_transfer(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = replace(config, notifications=replace(config.notifications, offline_retention_days=1))
+    monkeypatch.setattr(lifecycle, "shutdown_in_progress", lambda: True)
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="shutdown")
+
+    path = tmp_path / "runtime/system_lifecycle_state.json"
+    assert json.loads(path.read_text())["pending"][0]["occurred_at"] is None
+    assert not notifications.notification_outbox_path(tmp_path).exists()
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    assert lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+
+    outbox_path = notifications.notification_outbox_path(tmp_path)
+    events = notifications.load_notification_outbox(outbox_path)
+    assert [event.action for event in events] == ["system_shutdown"]
+    assert not json.loads(path.read_text())["pending"]
+
+
 @pytest.mark.parametrize(
     ("result", "synchronized"),
     [

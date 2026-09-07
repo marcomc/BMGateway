@@ -128,6 +128,8 @@ The example first-run script:
 - installs example config if needed
 - overlays `bm-gateway-config.toml` and `bm-gateway-devices.toml` from the boot
   partition when present
+- restarts the optional boot-notification hook after those overlays, so enabled
+  first-boot notifications use the supplied configuration
 - installs and enables `bm-gateway.service`
 - installs and enables `bm-gateway-web.service`
 - installs and enables `bm-gateway-lifecycle.service` for shutdown notifications

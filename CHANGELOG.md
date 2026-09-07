@@ -28,6 +28,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- The macOS Imager first-run path now restarts its optional boot hook after
+  applying a supplied notification configuration, so the first boot is recorded.
+- Shutdown intents observed before NTP synchronization retain no stale wall
+  timestamp and are assigned a trusted time when transferred later.
+- Release preflight rejects malformed current version fields instead of falling
+  back to an older shipped release.
 - Lifecycle retention and shared-mail delivery now defer until the appliance
   wall clock is NTP synchronized, without delaying runtime or watchdog recovery.
 - Release preflight rejects malformed generic `Unreleased` headings instead of

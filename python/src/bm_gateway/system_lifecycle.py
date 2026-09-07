@@ -82,7 +82,11 @@ def _load(path: Path) -> dict[str, Any]:
             if event["action"] not in {"boot", "shutdown"}:
                 raise ValueError("invalid lifecycle action")
             UUID(event["boot_id"])
-            if datetime.fromisoformat(event["occurred_at"]).tzinfo is None:
+            occurred_at = event["occurred_at"]
+            if occurred_at is not None and (
+                not isinstance(occurred_at, str)
+                or datetime.fromisoformat(occurred_at).tzinfo is None
+            ):
                 raise ValueError("naive lifecycle timestamp")
         descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
         try:
@@ -129,7 +133,11 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> b
     cutoff = transfer_time - timedelta(days=config.notifications.offline_retention_days)
     pending = data["pending"][-config.notifications.offline_max_events :]
     for event in pending:
-        occurred_at = datetime.fromisoformat(event["occurred_at"])
+        occurred_at = (
+            transfer_time
+            if event["occurred_at"] is None
+            else datetime.fromisoformat(event["occurred_at"])
+        )
         if occurred_at < cutoff:
             continue
         queue_notification_event_once(
@@ -168,6 +176,7 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
         return
     if action == "shutdown" and not shutdown_in_progress():
         return
+    clock_is_synchronized = lifecycle_wall_clock_is_synchronized()
     boot_id = str(UUID(default_reboot_boot_id()))
     state = new_self_healing_state()
     with usb_otg_watchdog_transaction(
@@ -183,7 +192,9 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
                 {
                     "boot_id": boot_id,
                     "action": action,
-                    "occurred_at": datetime.now(timezone.utc).isoformat(),
+                    "occurred_at": (
+                        datetime.now(timezone.utc).isoformat() if clock_is_synchronized else None
+                    ),
                 }
             )
             data["pending"] = data["pending"][-config.notifications.offline_max_events :]

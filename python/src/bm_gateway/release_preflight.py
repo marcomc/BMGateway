@@ -21,6 +21,8 @@ _VERSIONED_CHANGELOG_HEADING_PATTERN = re.compile(
     r"^## \[(\d+\.\d+\.\d+)\](.*)$",
     re.M,
 )
+_RELEASE_HEADING_CANDIDATE_PATTERN = re.compile(r"^## \[([^]]+)\](.*)$", re.M)
+_VERSION_LIKE_FIELD_PATTERN = re.compile(r"^(?:v|V)?\d")
 _UNRELEASED_SECTION_PATTERN = re.compile(
     r"^## \[Unreleased\]\s*$.*?(?=^## \[|\Z)",
     re.M | re.S,
@@ -66,6 +68,26 @@ def active_release_version_from_changelog(text: str) -> str | None:
     if len(active_versions) > 1:
         raise ValueError("CHANGELOG.md contains more than one active release section")
     return str(active_versions[0]) if active_versions else None
+
+
+def validate_current_release_heading(text: str) -> None:
+    """Reject malformed current release candidates without rewriting history."""
+    for heading in _RELEASE_HEADING_CANDIDATE_PATTERN.finditer(text):
+        version, _suffix = heading.groups()
+        if version == "Unreleased":
+            continue
+        if not _VERSION_LIKE_FIELD_PATTERN.match(version):
+            continue
+        if (
+            _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None
+            and _SHIPPED_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None
+        ):
+            raise ValueError(
+                "Current release heading must use: "
+                "## [X.Y.Z] - Unreleased - Title or "
+                "## [X.Y.Z] - YYYY-MM-DD - Title"
+            )
+        return
 
 
 def latest_shipped_version_from_changelog(text: str) -> str:
@@ -119,6 +141,7 @@ def collect_release_version_state(root: Path) -> ReleaseVersionState:
     module_version = module_match.group(1)
 
     changelog_text = changelog_path.read_text(encoding="utf-8")
+    validate_current_release_heading(changelog_text)
     active_release_version = active_release_version_from_changelog(changelog_text)
     latest_shipped_version = latest_shipped_version_from_changelog(changelog_text)
     unreleased_has_content = unreleased_has_content_from_changelog(changelog_text)

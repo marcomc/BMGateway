@@ -208,6 +208,26 @@ def test_generic_unreleased_heading_must_not_have_a_suffix(tmp_path: Path, headi
 
 @pytest.mark.parametrize(
     "heading",
+    ["## [0.5] - Unreleased - Candidate", "## [v0.5.0] - 2026-09-07 - Candidate"],
+)
+def test_current_release_heading_must_have_a_semantic_version(tmp_path: Path, heading: str) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            f"# Changelog\n\n{heading}\n\n- Candidate fix under test.\n\n"
+            "## [0.4.0] - 2026-05-03 - Released changes\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Current release heading must use"):
+        validate_release_version_state(tmp_path)
+
+
+@pytest.mark.parametrize(
+    "heading",
     [
         "## [0.5.0] - TBD",
         "## [0.5.0] garbage",
@@ -225,7 +245,7 @@ def test_current_shipped_release_heading_must_be_dated_and_titled(
         changelog_text=f"# Changelog\n\n{heading}\n\n- Released changes.\n",
     )
 
-    with pytest.raises(ValueError, match="Current shipped release heading must use"):
+    with pytest.raises(ValueError, match="Current release heading must use"):
         validate_release_version_state(tmp_path)
 
 
