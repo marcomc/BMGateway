@@ -98,18 +98,21 @@ def run_self_healing(
                 load_wifi_watchdog_state(wifi_path, state)
             except WiFiWatchdogStateError as error:
                 wifi_state_error = error
+            persisted_periodic_reboot = state.periodic_reboot_requested
             persisted_usb = replace(state)
             persisted_wifi = replace(state)
+            persisted_periodic = state.periodic_reboot_requested
 
             def usb_checkpoint() -> None:
-                nonlocal persisted_usb
+                nonlocal persisted_periodic, persisted_usb
                 if any(
                     value != getattr(persisted_usb, name)
                     for name, value in vars(state).items()
-                    if name.startswith("usb_otg_")
+                    if name.startswith("usb_otg_") or name == "periodic_reboot_requested"
                 ):
                     persist_usb_otg_watchdog_state(path, state)
                     persisted_usb = replace(state)
+                    persisted_periodic = state.periodic_reboot_requested
 
             def wifi_checkpoint() -> None:
                 nonlocal persisted_wifi
@@ -121,12 +124,26 @@ def run_self_healing(
                     persist_wifi_watchdog_state(wifi_path, state)
                     persisted_wifi = replace(state)
 
+            def periodic_checkpoint() -> None:
+                nonlocal persisted_periodic
+                if state.periodic_reboot_requested != persisted_periodic:
+                    persist_usb_otg_watchdog_state(path, state)
+                    persisted_periodic = state.periodic_reboot_requested
+
             healing_config = config
             if wifi_state_error is not None:
                 healing_config = replace(
                     config,
                     self_healing=replace(config.self_healing, wifi_watchdog_enabled=False),
                 )
+
+            if (
+                config.self_healing.wifi_watchdog_enabled
+                and not config.self_healing.wifi_reboot_enabled
+                and state.wifi_recovery_pending
+                and state.wifi_recovery_phase == "reboot_authorized"
+            ):
+                clear_wifi_recovery_handoff(wifi_path, state, force=True)
 
             events = evaluate_self_healing(
                 config=healing_config,
@@ -137,6 +154,23 @@ def run_self_healing(
                 usb_otg_state_checkpoint=usb_checkpoint,
                 wifi_state_checkpoint=wifi_checkpoint,
             )
+            if persisted_periodic_reboot:
+                if config.self_healing.periodic_reboot_enabled and not any(
+                    event.action == "periodic_reboot_requested" for event in events
+                ):
+                    events.insert(
+                        0,
+                        SelfHealingEvent(
+                            action="periodic_reboot_requested",
+                            status="completed",
+                            details={
+                                "periodic_reboot_hours": config.self_healing.periodic_reboot_hours,
+                                "elapsed_seconds": config.self_healing.periodic_reboot_hours * 3600,
+                            },
+                        ),
+                    )
+                elif not config.self_healing.periodic_reboot_enabled:
+                    state.periodic_reboot_requested = False
             usb_checkpoint_failed = any(
                 event.action
                 in {"usb_otg_watchdog_state_persist_failed", "usb_otg_watchdog_state_unavailable"}
@@ -145,7 +179,11 @@ def run_self_healing(
 
             if not config.self_healing.wifi_watchdog_enabled:
                 clear_wifi_recovery_handoff(wifi_path, state, force=True)
-            if not usb_checkpoint_failed:
+            if usb_checkpoint_failed:
+                # Periodic reboot authorization is independent of the USB
+                # checkpoint and must survive a deferred peer recovery.
+                periodic_checkpoint()
+            else:
                 usb_checkpoint()
             wifi_checkpoint()
 

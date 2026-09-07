@@ -355,6 +355,7 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         escalation_id = raw.get("escalation_id", "")
         escalation_reason = raw.get("escalation_reason", "")
         escalation_reboot_attempts = raw.get("escalation_reboot_attempts", reboot_attempts_used)
+        periodic_reboot_requested = raw.get("periodic_reboot_requested", False)
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise USBOTGWatchdogStateError("USB OTG watchdog state is invalid") from error
     if (
@@ -374,6 +375,7 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(escalation_reason, str)
         or not isinstance(escalation_reboot_attempts, int)
         or escalation_reboot_attempts < 0
+        or not isinstance(periodic_reboot_requested, bool)
     ):
         raise USBOTGWatchdogStateError("USB OTG watchdog state has invalid values")
     state.usb_otg_rebind_attempted = rebind_attempted
@@ -385,6 +387,7 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.usb_otg_escalation_id = escalation_id
     state.usb_otg_escalation_reason = escalation_reason
     state.usb_otg_escalation_reboot_attempts = escalation_reboot_attempts
+    state.periodic_reboot_requested = periodic_reboot_requested
 
 
 def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -400,6 +403,7 @@ def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
                 "escalation_id": state.usb_otg_escalation_id,
                 "escalation_reason": state.usb_otg_escalation_reason,
                 "escalation_reboot_attempts": state.usb_otg_escalation_reboot_attempts,
+                "periodic_reboot_requested": state.periodic_reboot_requested,
             },
             sort_keys=True,
         )
@@ -470,6 +474,7 @@ def usb_otg_watchdog_transaction(path: Path, state: SelfHealingState) -> Iterato
         for name in vars(current):
             if name.startswith("usb_otg_"):
                 setattr(state, name, getattr(current, name))
+        state.periodic_reboot_requested = current.periodic_reboot_requested
         yield
     finally:
         handle.close()
@@ -634,6 +639,9 @@ def evaluate_self_healing(
         state.wifi_reboot_requested = False
         _clear_wifi_recovery_state(state)
     else:
+        if not healing.wifi_reboot_enabled and state.wifi_recovery_phase == "reboot_authorized":
+            state.wifi_reboot_requested = False
+            _clear_wifi_recovery_state(state)
         if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
             if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
                 outage_seconds = state.wifi_recovery_outage_seconds
@@ -668,7 +676,9 @@ def evaluate_self_healing(
                 _clear_wifi_recovery_state(state)
         else:
             reboot_authorized = (
-                state.wifi_recovery_pending and state.wifi_recovery_phase == "reboot_authorized"
+                state.wifi_recovery_pending
+                and state.wifi_recovery_phase == "reboot_authorized"
+                and healing.wifi_reboot_enabled
             )
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now

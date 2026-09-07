@@ -253,6 +253,95 @@ def test_runtime_schedules_wifi_reboot_after_queueing_notification(
     assert queued[0].action == "wifi_reboot_requested"
 
 
+def test_runtime_resumes_persisted_periodic_reboot_authorization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _config()
+    config = replace(
+        config,
+        notifications=replace(config.notifications, enabled=False),
+        self_healing=replace(config.self_healing, periodic_reboot_enabled=True),
+    )
+    persisted = new_self_healing_state()
+    persisted.periodic_reboot_requested = True
+    persist_usb_path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    self_healing.persist_usb_otg_watchdog_state(persist_usb_path, persisted)
+    scheduled: list[bool] = []
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [])
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
+
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+
+    assert [event.action for event in events] == ["periodic_reboot_requested"]
+    assert scheduled == [True]
+
+
+def test_runtime_persists_new_periodic_reboot_authorization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _config()
+    config = replace(
+        config,
+        notifications=replace(config.notifications, enabled=False),
+        self_healing=replace(config.self_healing, periodic_reboot_enabled=True),
+    )
+    event = SelfHealingEvent(action="periodic_reboot_requested", status="completed", details={})
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        state.periodic_reboot_requested = True
+        return [event]
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: None)
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    restored = new_self_healing_state()
+    self_healing.load_usb_otg_watchdog_state(
+        self_healing.usb_otg_watchdog_state_path(tmp_path), restored
+    )
+    assert restored.periodic_reboot_requested is True
+
+
+def test_periodic_authorization_persists_when_usb_checkpoint_fails(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _config()
+    config = replace(
+        config,
+        notifications=replace(config.notifications, enabled=False),
+        self_healing=replace(config.self_healing, periodic_reboot_enabled=True),
+    )
+    periodic = SelfHealingEvent(action="periodic_reboot_requested", status="completed", details={})
+    usb_failure = SelfHealingEvent(
+        action="usb_otg_watchdog_state_persist_failed", status="failed", details={}
+    )
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        state.periodic_reboot_requested = True
+        return [periodic, usb_failure]
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: None)
+
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+
+    assert events == [usb_failure]
+    restored = new_self_healing_state()
+    self_healing.load_usb_otg_watchdog_state(
+        self_healing.usb_otg_watchdog_state_path(tmp_path), restored
+    )
+    assert restored.periodic_reboot_requested is True
+
+
 def test_runtime_consumes_persisted_wifi_restoration_handoff(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -371,6 +460,41 @@ def test_invalid_wifi_state_preservation_returns_unavailable_event(
     assert any(event.action == "wifi_watchdog_state_unavailable" for event in events)
 
 
+def test_disabling_wifi_reboot_clears_persisted_authorization(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_reboot_enabled=False),
+    )
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_handoff_id = "stale-authorized"
+    persisted.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(
+        wifi_watchdog_state_path(tmp_path), persisted, preserve_pending=False
+    )
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        assert state.wifi_recovery_pending is False
+        return []
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        lambda **_kwargs: (False, "No pending notifications"),
+    )
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    restored = new_self_healing_state()
+    self_healing.load_wifi_watchdog_state(wifi_watchdog_state_path(tmp_path), restored)
+    assert restored.wifi_recovery_pending is False
+
+
 def test_disabling_wifi_watchdog_clears_persisted_recovery_handoff(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -428,6 +552,10 @@ def test_repeated_wifi_reboot_events_use_one_idempotent_notification(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_reboot_enabled=True),
+    )
     persisted = new_self_healing_state()
     persisted.wifi_recovery_pending = True
     persisted.wifi_recovery_handoff_id = "handoff-reboot"

@@ -253,6 +253,39 @@ def test_persisted_wifi_reboot_authorization_is_retryable_immediately(tmp_path: 
     assert state.wifi_reboot_requested is True
 
 
+def test_persisted_wifi_reboot_authorization_is_cancelled_when_disabled(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=False,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_outage_seconds = 600
+    persisted.wifi_recovery_handoff_id = "handoff-disabled"
+    persisted.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(state_path, persisted, preserve_pending=False)
+
+    state = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, state)
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=5.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert [event.action for event in events] == ["wifi_connectivity_lost"]
+    assert state.wifi_reboot_requested is False
+    assert state.wifi_recovery_phase == "pending"
+
+
 def test_wifi_state_preservation_reports_invalid_json(tmp_path: Path) -> None:
     state_path = wifi_watchdog_state_path(tmp_path)
     state_path.parent.mkdir(parents=True)
