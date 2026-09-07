@@ -123,7 +123,9 @@ Expected checks:
   terminology, duplication, and diagram rules.
 - Keep `README.md` accurate for end users.
 - Keep component `README.md` files accurate for contributors.
-- Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
+- Keep `CHANGELOG.md` updated in the active unreleased section for user-visible
+  changes: either generic `## [Unreleased]` or versioned
+  `## [X.Y.Z] - Unreleased - Title`.
 - Remove completed items from `TODO.md` when they ship.
 - Update config documentation when adding or changing config keys.
 - When code changes add, remove, or materially alter functionality or
@@ -163,5 +165,9 @@ When cutting a release, update the version consistently in:
 - `CHANGELOG.md`
 - tests that assert the version string
 
-Use the release-preflight-compatible headings exactly: `## [Unreleased]` for
-pending work, or `## [X.Y.Z] - YYYY-MM-DD - Title` for a release candidate.
+Use exactly one release-preflight-compatible heading mode for pending or shipped
+work:
+
+- `## [Unreleased]` for generic pending work
+- `## [X.Y.Z] - Unreleased - Title` for an active release body
+- `## [X.Y.Z] - YYYY-MM-DD - Title` for a shipped release

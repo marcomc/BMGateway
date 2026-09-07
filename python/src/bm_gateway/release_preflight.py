@@ -9,8 +9,18 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-_CONCRETE_CHANGELOG_PATTERN = re.compile(r"^## \[(?!Unreleased\])([^\]]+)\]", re.M)
-_UNRELEASED_SECTION_PATTERN = re.compile(r"^## \[Unreleased\].*?(?=^## \[|\Z)", re.M | re.S)
+_ACTIVE_RELEASE_HEADING_PATTERN = re.compile(
+    r"^## \[(\d+\.\d+\.\d+)\] - Unreleased - \S.*$",
+    re.M,
+)
+_VERSIONED_CHANGELOG_HEADING_PATTERN = re.compile(
+    r"^## \[(\d+\.\d+\.\d+)\](.*)$",
+    re.M,
+)
+_UNRELEASED_SECTION_PATTERN = re.compile(
+    r"^## \[Unreleased\]\s*$.*?(?=^## \[|\Z)",
+    re.M | re.S,
+)
 _MODULE_VERSION_PATTERN = re.compile(r'^__version__ = "([^"]+)"$', re.M)
 _README_RELEASE_PATTERN = re.compile(
     r"## Release Status.*?The current documented release is:\s*[-*] `([^`]+)`",
@@ -22,7 +32,8 @@ _README_RELEASE_PATTERN = re.compile(
 class ReleaseVersionState:
     package_version: str
     module_version: str
-    latest_concrete_version: str
+    latest_shipped_version: str
+    active_release_version: str | None
     expected_working_version: str
     documented_release_version: str | None
     unreleased_has_content: bool
@@ -37,11 +48,26 @@ def bump_last_component(version: str) -> str:
     return ".".join(str(part) for part in bumped)
 
 
-def latest_concrete_version_from_changelog(text: str) -> str:
-    matches = _CONCRETE_CHANGELOG_PATTERN.findall(text)
-    if not matches:
-        raise ValueError("No concrete release section found in CHANGELOG.md")
-    return str(matches[0])
+def active_release_version_from_changelog(text: str) -> str | None:
+    active_versions = _ACTIVE_RELEASE_HEADING_PATTERN.findall(text)
+    malformed_active = [
+        heading
+        for heading in _VERSIONED_CHANGELOG_HEADING_PATTERN.finditer(text)
+        if heading.group(2).startswith(" - Unreleased")
+        and _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None
+    ]
+    if malformed_active:
+        raise ValueError("Active release headings must use: ## [X.Y.Z] - Unreleased - Title")
+    if len(active_versions) > 1:
+        raise ValueError("CHANGELOG.md contains more than one active release section")
+    return str(active_versions[0]) if active_versions else None
+
+
+def latest_shipped_version_from_changelog(text: str) -> str:
+    for heading in _VERSIONED_CHANGELOG_HEADING_PATTERN.finditer(text):
+        if not heading.group(2).startswith(" - Unreleased"):
+            return str(heading.group(1))
+    raise ValueError("No shipped release section found in CHANGELOG.md")
 
 
 def unreleased_has_content_from_changelog(text: str) -> bool:
@@ -76,13 +102,20 @@ def collect_release_version_state(root: Path) -> ReleaseVersionState:
     module_version = module_match.group(1)
 
     changelog_text = changelog_path.read_text(encoding="utf-8")
-    latest_concrete_version = latest_concrete_version_from_changelog(changelog_text)
+    active_release_version = active_release_version_from_changelog(changelog_text)
+    latest_shipped_version = latest_shipped_version_from_changelog(changelog_text)
     unreleased_has_content = unreleased_has_content_from_changelog(changelog_text)
-    expected_working_version = (
-        bump_last_component(latest_concrete_version)
-        if unreleased_has_content
-        else latest_concrete_version
-    )
+    if active_release_version is not None and unreleased_has_content:
+        raise ValueError(
+            "CHANGELOG.md cannot contain both an active release section and "
+            "nonempty generic [Unreleased] content"
+        )
+    if active_release_version is not None:
+        expected_working_version = active_release_version
+    elif unreleased_has_content:
+        expected_working_version = bump_last_component(latest_shipped_version)
+    else:
+        expected_working_version = latest_shipped_version
 
     documented_release_version = documented_release_version_from_readme(
         readme_path.read_text(encoding="utf-8")
@@ -91,7 +124,8 @@ def collect_release_version_state(root: Path) -> ReleaseVersionState:
     return ReleaseVersionState(
         package_version=package_version,
         module_version=module_version,
-        latest_concrete_version=latest_concrete_version,
+        latest_shipped_version=latest_shipped_version,
+        active_release_version=active_release_version,
         expected_working_version=expected_working_version,
         documented_release_version=documented_release_version,
         unreleased_has_content=unreleased_has_content,
@@ -109,6 +143,11 @@ def validate_release_version_state(root: Path) -> ReleaseVersionState:
         )
 
     if state.package_version != state.expected_working_version:
+        if state.active_release_version is not None:
+            raise ValueError(
+                "An active changelog release exists, so the working package version "
+                f"must match {state.active_release_version}; found {state.package_version}"
+            )
         if state.unreleased_has_content:
             raise ValueError(
                 "Unreleased changelog entries exist, so the working package version "
@@ -117,17 +156,18 @@ def validate_release_version_state(root: Path) -> ReleaseVersionState:
             )
         raise ValueError(
             "No unreleased changelog entries exist, so the working package version "
-            f"must match the latest concrete release {state.latest_concrete_version}; "
+            f"must match the latest shipped release {state.latest_shipped_version}; "
             f"found {state.package_version}"
         )
 
     if state.documented_release_version is None:
         raise ValueError("README.md does not expose a current documented release version")
 
-    if state.documented_release_version != state.latest_concrete_version:
+    expected_documented_version = state.active_release_version or state.latest_shipped_version
+    if state.documented_release_version != expected_documented_version:
         raise ValueError(
             "README.md release status is out of sync: "
-            f"expected {state.latest_concrete_version}, "
+            f"expected {expected_documented_version}, "
             f"found {state.documented_release_version}"
         )
 
@@ -153,8 +193,10 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "Release version preflight passed: "
             f"working={state.package_version}, "
-            f"latest_release={state.latest_concrete_version}, "
-            f"unreleased_has_content={str(state.unreleased_has_content).lower()}"
+            f"latest_shipped={state.latest_shipped_version}, "
+            f"active_release={state.active_release_version or 'none'}, "
+            "generic_unreleased_has_content="
+            f"{str(state.unreleased_has_content).lower()}"
         )
     return 0
 

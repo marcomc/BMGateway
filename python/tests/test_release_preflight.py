@@ -6,6 +6,7 @@ import pytest
 from bm_gateway.release_preflight import (
     bump_last_component,
     collect_release_version_state,
+    main,
     validate_release_version_state,
 )
 
@@ -73,7 +74,8 @@ def test_collect_release_version_state_uses_latest_release_when_unreleased_is_em
 
     state = collect_release_version_state(tmp_path)
 
-    assert state.latest_concrete_version == "0.2.2"
+    assert state.latest_shipped_version == "0.2.2"
+    assert state.active_release_version is None
     assert state.expected_working_version == "0.2.2"
     assert state.unreleased_has_content is False
     assert state.documented_release_version == "0.2.2"
@@ -98,7 +100,8 @@ def test_collect_release_version_state_uses_next_patch_when_unreleased_has_conte
 
     state = collect_release_version_state(tmp_path)
 
-    assert state.latest_concrete_version == "0.2.2"
+    assert state.latest_shipped_version == "0.2.2"
+    assert state.active_release_version is None
     assert state.expected_working_version == "0.2.3"
     assert state.unreleased_has_content is True
     assert state.documented_release_version == "0.2.2"
@@ -131,3 +134,67 @@ def test_validate_release_version_state_accepts_current_repository() -> None:
     state = validate_release_version_state(root)
 
     assert state.package_version == "0.4.0"
+    assert state.module_version == "0.4.0"
+    assert state.documented_release_version == "0.4.0"
+    assert state.active_release_version == "0.4.0"
+    assert state.latest_shipped_version == "0.3.3"
+    assert state.expected_working_version == "0.4.0"
+    assert state.unreleased_has_content is False
+
+
+def test_collect_release_version_state_uses_active_unreleased_release(
+    tmp_path: Path,
+) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n"
+            "- Released changes.\n"
+        ),
+    )
+
+    state = validate_release_version_state(tmp_path)
+
+    assert state.active_release_version == "0.4.0"
+    assert state.latest_shipped_version == "0.3.3"
+    assert state.expected_working_version == "0.4.0"
+    assert state.unreleased_has_content is False
+
+
+def test_active_release_rejects_nonempty_generic_unreleased_section(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [Unreleased]\n\n"
+            "- Ambiguous next change.\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n"
+            "- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="both an active release section and nonempty generic"):
+        validate_release_version_state(tmp_path)
+
+
+def test_cli_reports_active_release_state(capsys: pytest.CaptureFixture[str]) -> None:
+    root = Path(__file__).resolve().parents[2]
+
+    assert main(["--root", str(root)]) == 0
+
+    output = capsys.readouterr().out
+    assert "working=0.4.0" in output
+    assert "latest_shipped=0.3.3" in output
+    assert "active_release=0.4.0" in output
+    assert "generic_unreleased_has_content=false" in output
