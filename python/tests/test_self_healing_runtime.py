@@ -276,6 +276,47 @@ def test_repeated_wifi_reboot_events_use_one_idempotent_notification(
     assert [item.idempotency_key for item in queued] == ["wifi-reboot:handoff-reboot"]
 
 
+def test_restoration_queue_failure_keeps_handoff_for_a_later_cycle(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_handoff_id = "handoff-retry"
+    persisted.wifi_recovery_phase = "pending"
+    persist_wifi_watchdog_state(
+        wifi_watchdog_state_path(tmp_path), persisted, preserve_pending=False
+    )
+    event = SelfHealingEvent(
+        action="wifi_connectivity_restored",
+        status="completed",
+        details={"outage_seconds": 3600},
+    )
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [event])
+    attempts = 0
+
+    def fail_once(**_kwargs: object) -> bool:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise notifications.NotificationOutboxError("injected queue failure")
+        return True
+
+    monkeypatch.setattr(runtime, "queue_notification_event_once", fail_once)
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        lambda **_kwargs: (False, "No pending notifications"),
+    )
+    state = new_self_healing_state()
+    first = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert first == [event]
+    assert state.wifi_recovery_pending is True
+
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert state.wifi_recovery_pending is False
+
+
 @pytest.mark.parametrize("failure", ["queue", "checkpoint", "ack", "ack_after_replace"])
 @pytest.mark.parametrize("next_state", ["unhealthy", "healthy", "disabled"])
 def test_pending_handoff_survives_failure_and_restart(

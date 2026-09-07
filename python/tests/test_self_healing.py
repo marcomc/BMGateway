@@ -123,9 +123,12 @@ def test_self_healing_reconnects_wifi_before_rebooting() -> None:
     )
 
     assert [event.action for event in lost] == ["wifi_connectivity_lost"]
-    assert [event.action for event in reconnect] == ["wifi_reconnect_attempted"]
+    assert [event.action for event in reconnect] == [
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+    ]
     assert reconnect[0].status == "completed"
-    assert [event.action for event in reboot] == ["wifi_reboot_requested"]
+    assert [event.action for event in reboot] == ["wifi_connectivity_lost"]
     assert reconnect_calls == ["wlan1"]
     assert reboot_calls == 0
 
@@ -272,8 +275,50 @@ def test_successful_wifi_reconnect_does_not_request_a_same_cycle_reboot() -> Non
         reconnect_action=lambda _interface: True,
     )
 
-    assert [event.action for event in events] == ["wifi_reconnect_attempted"]
+    assert [event.action for event in events] == [
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+    ]
     assert events[0].status == "completed"
+
+
+def test_successful_wifi_reconnect_preserves_restoration_before_peer_reboot() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=True,
+            periodic_reboot_hours=1,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=False,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    connectivity_results = iter([False, True])
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=3600.0,
+        connectivity_checker=lambda _host, _interface: next(connectivity_results),
+        reconnect_action=lambda _interface: True,
+        reboot_action=lambda: None,
+    )
+
+    assert [event.action for event in events] == [
+        "periodic_reboot_requested",
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+    ]
+    assert state.wifi_recovery_pending is True
 
 
 def test_stale_wifi_state_write_preserves_a_concurrent_pending_recovery(tmp_path: Path) -> None:

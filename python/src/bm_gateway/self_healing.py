@@ -632,6 +632,12 @@ def evaluate_self_healing(
                 if not state.wifi_recovery_pending:
                     assert state.wifi_outage_started_monotonic is not None
                     outage_seconds = int(now - state.wifi_outage_started_monotonic)
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_outage_seconds = outage_seconds
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    state.wifi_recovery_started_at = wall_time - outage_seconds
+                    state.wifi_recovery_handoff_id = uuid.uuid4().hex
+                    state.wifi_recovery_phase = "pending"
                 elif state.wifi_recovery_started_at > 0:
                     outage_seconds = max(
                         outage_seconds,
@@ -691,6 +697,27 @@ def evaluate_self_healing(
                             },
                         )
                     )
+                    if reconnected:
+                        state.wifi_recovery_pending = True
+                        state.wifi_recovery_outage_seconds = int(outage_duration)
+                        state.wifi_recovery_interface = healing.wifi_interface
+                        if not state.wifi_recovery_handoff_id:
+                            state.wifi_recovery_started_at = wall_time - outage_duration
+                            state.wifi_recovery_handoff_id = uuid.uuid4().hex
+                        state.wifi_recovery_phase = "pending"
+                        events.append(
+                            SelfHealingEvent(
+                                action="wifi_connectivity_restored",
+                                status="completed",
+                                details={
+                                    "connectivity_check_host": healing.connectivity_check_host,
+                                    "outage_seconds": int(outage_duration),
+                                },
+                            )
+                        )
+                        state.wifi_outage_started_monotonic = None
+                        state.wifi_reconnect_attempted = False
+                        state.wifi_reboot_requested = False
 
                 if (
                     healing.wifi_reboot_enabled

@@ -137,19 +137,16 @@ def run_self_healing(
                 usb_otg_state_checkpoint=usb_checkpoint,
                 wifi_state_checkpoint=wifi_checkpoint,
             )
-            if any(
+            usb_checkpoint_failed = any(
                 event.action
                 in {"usb_otg_watchdog_state_persist_failed", "usb_otg_watchdog_state_unavailable"}
                 for event in events
-            ):
-                # Keep an independently detected Wi-Fi handoff durable even
-                # when the USB transaction cannot safely proceed to reboot.
-                wifi_checkpoint()
-                return _defer_reboots(events, state, before)
+            )
 
             if not config.self_healing.wifi_watchdog_enabled:
                 clear_wifi_recovery_handoff(wifi_path, state, force=True)
-            usb_checkpoint()
+            if not usb_checkpoint_failed:
+                usb_checkpoint()
             wifi_checkpoint()
 
             if wifi_state_error is not None:
@@ -216,6 +213,11 @@ def run_self_healing(
                         defer_notification_delivery = True
 
             if defer_notification_delivery:
+                return _defer_reboots(events, state, before)
+
+            if usb_checkpoint_failed:
+                # Wi-Fi notifications are independent of a failed USB
+                # checkpoint, but no reboot may be scheduled in this cycle.
                 return _defer_reboots(events, state, before)
 
             for event in events:
@@ -307,5 +309,6 @@ def _defer_reboots(
     # overwrite a checkpoint that may already have reached disk before fsync
     # reported an error. Only process-local peer request flags are restored.
     state.periodic_reboot_requested = before.periodic_reboot_requested
+    state.wifi_reconnect_attempted = before.wifi_reconnect_attempted
     state.wifi_reboot_requested = before.wifi_reboot_requested
     return [event for event in events if event.action not in _REBOOT_ACTIONS]
