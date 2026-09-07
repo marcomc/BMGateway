@@ -20,9 +20,30 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   is enumerated (UDC state `configured`), attempts one rebind, performs a bounded
   number of reboot recoveries, preserves the recovery counter across reboots,
   and sends an escalation notification when recovery is exhausted.
+- Wi-Fi watchdog recovery now queues system-mail notifications when a reconnect
+  is attempted, a reboot is requested, and connectivity is restored.
 
 ### Fixed
 
+- Wi-Fi recovery retains serialized state and notification handoffs when USB
+  watchdog state cannot be read or synchronized. Shared delivery and reboots
+  remain deferred until that state is available again.
+- Initial Wi-Fi outage checkpoints are retried after storage errors without
+  losing the outage timer or mistaking unsaved state for a completed handoff.
+- Completed Wi-Fi recovery reboots restart the configured retry delays without
+  losing the original outage duration. Service restarts preserve those delays
+  instead of triggering another immediate reboot while the network is offline.
+- Wi-Fi recovery notifications retain incident identities across legacy-state
+  migration and process restarts. Repeated alerts for the same recovery outcome
+  are suppressed while changed outcomes, new incidents, and reboot attempts
+  from later boots remain visible.
+- Wi-Fi outage duration stops at the observed recovery, even when notification
+  handoff is retried later. Queued Wi-Fi details use the language selected at
+  delivery, including after a language change while mail is pending.
+- Notification summaries include every retained event within the configured
+  outbox limits and no longer imply that mail delivery previously failed.
+  Wi-Fi event labels follow the selected notification language in both summary
+  and individual messages.
 - USB OTG escalation now retains one incident identity and its original reason
   and reboot count across queue failures, restarts, and concurrent runtime
   invocations. State acknowledgement completes before any runtime delivers

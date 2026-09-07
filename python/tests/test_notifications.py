@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import socket
 import stat
 import subprocess
 import threading
@@ -162,6 +163,119 @@ def test_failed_delivery_keeps_outbox(tmp_path: Path) -> None:
     assert delivered is False
     assert detail == "temporary failure"
     assert [event.action for event in load_notification_outbox(path)] == ["wifi"]
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_summary_preserves_every_retained_failure_beyond_twenty_events(
+    tmp_path: Path, fail_first: bool
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", offline_max_events=25
+    )
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="usb_otg_recovery_exhausted",
+        detail="",
+        usb_otg_reason="USB OTG gadget is not configured",
+        usb_otg_reboot_attempts=1,
+    )
+    for index in range(24):
+        queue_notification_event(
+            path=path,
+            config=config,
+            action="failure",
+            detail=f"distinct failure [{index}]",
+        )
+    retained = load_notification_outbox(path)
+    assert len(retained) == config.offline_max_events
+    if fail_first:
+        delivered, _ = deliver_notification_outbox(path=path, config=config, runner=_failure)
+        assert delivered is False
+        assert load_notification_outbox(path) == retained
+
+    bodies: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        bodies.append(Parser(policy=policy.default).parsestr(payload).get_content())
+        return _success(payload)
+
+    delivered, _ = deliver_notification_outbox(path=path, config=config, runner=send)
+
+    assert delivered is True
+    assert len(bodies) == 1
+    assert "Events retained: 25" in bodies[0]
+    assert "USB OTG recovery exhausted" in bodies[0]
+    assert "USB OTG gadget is not configured" in bodies[0]
+    for index in range(24):
+        assert f"distinct failure [{index}]" in bodies[0]
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("locale", supported_locale_codes())
+def test_summary_header_is_neutral_in_delivery_locale(tmp_path: Path, locale: str) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+    queue_notification_event(path=path, config=config, action="failure", detail="unavailable")
+    bodies: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        bodies.append(Parser(policy=policy.default).parsestr(payload).get_content())
+        return _success(payload)
+
+    delivered, _ = deliver_notification_outbox(
+        path=path, config=replace(config, locale=locale), runner=send
+    )
+
+    assert delivered is True
+    expected = translation_for(locale).gettext("BMGateway notification summary on {hostname}.")
+    assert bodies[0].splitlines()[0] == expected.format(hostname=socket.gethostname())
+
+
+@pytest.mark.parametrize("locale", supported_locale_codes())
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_wifi_action_labels_use_delivery_locale_in_decoded_mail(
+    tmp_path: Path, locale: str, mode: str
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", offline_delivery=mode
+    )
+    labels = {
+        "wifi_reconnect_attempted": "Wi-Fi reconnect attempted",
+        "wifi_reboot_requested": "Wi-Fi reboot requested",
+        "wifi_connectivity_restored": "Wi-Fi connectivity restored",
+    }
+    for action in labels:
+        queue_notification_event(path=path, config=config, action=action, detail="watchdog event")
+    assert deliver_notification_outbox(path=path, config=config, runner=_failure)[0] is False
+    assert [event.action for event in load_notification_outbox(path)] == list(labels)
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(
+        path=path, config=replace(config, locale=locale), runner=send
+    )[0]
+    messages = [Parser(policy=policy.default).parsestr(payload) for payload in payloads]
+    assert len(messages) == (1 if mode == "summary" else len(labels))
+    translation = translation_for(locale)
+    for index, (action, label) in enumerate(labels.items()):
+        translated = translation.gettext(label)
+        if locale != "en":
+            assert translated != label
+        message = messages[0 if mode == "summary" else index]
+        body = message.get_content()
+        assert translated in body
+        assert action not in body
+        assert action not in str(message["Subject"])
+        if mode == "individual":
+            assert translated in str(message["Subject"])
+            assert translation.gettext("Event: {action}").format(action=translated) in body
+    assert not path.exists()
 
 
 def test_summary_delivery_reports_outbox_deletion_failure(
@@ -923,6 +1037,255 @@ def test_failed_delivery_and_duplicate_preserve_usb_facts_for_new_locale(
     body = Parser(policy=policy.default).parsestr(payloads[0]).get_content()
     assert text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=text(reason)) in body
     assert occurred_at.isoformat() in body
+
+
+_WIFI_DETAIL_CASES = (
+    (
+        "wifi_reconnect_attempted",
+        "completed",
+        "Wi-Fi reconnect succeeded after {outage_seconds} seconds on {wifi_interface}.",
+    ),
+    (
+        "wifi_reconnect_attempted",
+        "failed",
+        "Wi-Fi reconnect failed after {outage_seconds} seconds on {wifi_interface}.",
+    ),
+    (
+        "wifi_reboot_requested",
+        "completed",
+        "Wi-Fi reboot requested after {outage_seconds} seconds on {wifi_interface}.",
+    ),
+    (
+        "wifi_connectivity_restored",
+        "completed",
+        "Wi-Fi connectivity restored after {outage_seconds} seconds.",
+    ),
+)
+
+
+@pytest.mark.parametrize("action,outcome,template", _WIFI_DETAIL_CASES)
+@pytest.mark.parametrize("locale", supported_locale_codes())
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+@pytest.mark.parametrize("queue_once", [False, True])
+def test_wifi_facts_survive_failed_delivery_and_render_in_new_locale(
+    tmp_path: Path,
+    action: str,
+    outcome: str,
+    template: str,
+    locale: str,
+    mode: str,
+    queue_once: bool,
+) -> None:
+    path = notification_outbox_path(tmp_path)
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", offline_delivery=mode
+    )
+    queued_at = datetime.now(timezone.utc)
+    enqueue = queue_notification_event_once if queue_once else queue_notification_event
+    enqueue(
+        path=path,
+        config=config,
+        action=action,
+        detail="",
+        idempotency_key="stable-incident-event",
+        wifi_outcome=outcome,
+        wifi_interface="wlan0",
+        wifi_outage_seconds=123,
+        now=queued_at,
+    )
+    assert deliver_notification_outbox(path=path, config=config, runner=_failure)[0] is False
+    # A newly loaded queue keeps canonical facts and identity, independent of locale.
+    pending = load_notification_outbox(path)
+    assert len(pending) == 1
+    assert pending[0].wifi_outcome == outcome
+    assert pending[0].wifi_interface == "wlan0"
+    assert pending[0].wifi_outage_seconds == 123
+    assert pending[0].idempotency_key == "stable-incident-event"
+    assert pending[0].occurred_at == queued_at
+    if queue_once:
+        assert (
+            enqueue(
+                path=path,
+                config=config,
+                action=action,
+                detail="duplicate cannot replace original facts",
+                idempotency_key="stable-incident-event",
+                wifi_outcome=outcome,
+                wifi_interface="wlan1",
+                wifi_outage_seconds=999,
+            )
+            is False
+        )
+        assert load_notification_outbox(path) == pending
+    bodies: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        bodies.append(Parser(policy=policy.default).parsestr(payload).get_content())
+        return _success(payload)
+
+    assert deliver_notification_outbox(
+        path=path, config=replace(config, locale=locale), runner=send
+    )[0]
+    expected = (
+        translation_for(locale).gettext(template).format(wifi_interface="wlan0", outage_seconds=123)
+    )
+    assert len(bodies) == 1
+    assert expected in bodies[0]
+    if locale != "en":
+        assert template.format(wifi_interface="wlan0", outage_seconds=123) not in bodies[0]
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("action,outcome,template", _WIFI_DETAIL_CASES)
+@pytest.mark.parametrize("locale", supported_locale_codes())
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_recognized_legacy_wifi_templates_relocalize_on_retry(
+    tmp_path: Path, action: str, outcome: str, template: str, locale: str, mode: str
+) -> None:
+    path = notification_outbox_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    occurred_at = datetime.now(timezone.utc).isoformat()
+    path.write_text(
+        json.dumps(
+            [
+                {
+                    "action": action,
+                    "detail": translation_for(locale)
+                    .gettext(template)
+                    .format(wifi_interface="wlan0", outage_seconds=123),
+                    "occurred_at": occurred_at,
+                    "idempotency_key": "legacy-incident",
+                }
+            ]
+        )
+    )
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", locale=locale, offline_delivery=mode
+    )
+    assert deliver_notification_outbox(path=path, config=config, runner=_failure)[0] is False
+    event = load_notification_outbox(path)[0]
+    assert event.wifi_outcome == outcome
+    assert event.wifi_outage_seconds == 123
+    assert event.idempotency_key == "legacy-incident"
+    assert event.occurred_at.isoformat() == occurred_at
+    bodies: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        bodies.append(Parser(policy=policy.default).parsestr(payload).get_content())
+        return _success(payload)
+
+    assert deliver_notification_outbox(
+        path=path, config=replace(config, locale="it" if locale == "en" else "en"), runner=send
+    )[0]
+    expected_locale = "it" if locale == "en" else "en"
+    assert (
+        translation_for(expected_locale)
+        .gettext(template)
+        .format(wifi_interface="wlan0", outage_seconds=123)
+        in bodies[0]
+    )
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("wifi_outcome", None),
+        ("wifi_outcome", "unknown"),
+        ("wifi_outcome", 1),
+        ("wifi_interface", None),
+        ("wifi_interface", 1),
+        ("wifi_outage_seconds", None),
+        ("wifi_outage_seconds", -1),
+        ("wifi_outage_seconds", True),
+        ("wifi_outage_seconds", "3"),
+    ],
+)
+def test_malformed_explicit_wifi_fields_are_not_legacy(
+    tmp_path: Path, field: str, value: object
+) -> None:
+    path = tmp_path / "outbox.json"
+    event = NotificationEvent(
+        action="wifi_reconnect_attempted",
+        detail="",
+        occurred_at=datetime.now(timezone.utc),
+        wifi_outcome="failed",
+        wifi_interface="wlan0",
+        wifi_outage_seconds=123,
+    ).to_dict()
+    malformed: dict[str, object] = dict(event)
+    malformed[field] = value
+    path.write_text(json.dumps([malformed]))
+    with pytest.raises(NotificationOutboxError, match="invalid event"):
+        load_notification_outbox(path)
+    del malformed[field]
+    path.write_text(json.dumps([malformed]))
+    with pytest.raises(NotificationOutboxError, match="invalid event"):
+        load_notification_outbox(path)
+
+
+@pytest.mark.parametrize(
+    "detail",
+    [
+        "operator freeform warning",
+        "prefix Wi-Fi reconnect failed after 1 seconds on wlan0.",
+        "Wi-Fi reconnect failed after 1 seconds on wlan0. Additional failure.",
+    ],
+)
+def test_unknown_legacy_wifi_detail_is_preserved(tmp_path: Path, detail: str) -> None:
+    path = tmp_path / "outbox.json"
+    event = NotificationEvent(
+        action="wifi_reconnect_attempted", detail=detail, occurred_at=datetime.now(timezone.utc)
+    )
+    persist_notification_outbox(path, [event])
+    assert load_notification_outbox(path) == [event]
+
+
+def test_ambiguous_legacy_wifi_outcome_is_not_inferred(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    template = "Reconnect after {outage_seconds} seconds on {wifi_interface}."
+
+    class AmbiguousTranslation:
+        def gettext(self, key: str) -> str:
+            return template if key.startswith("Wi-Fi reconnect ") else key
+
+    monkeypatch.setattr(notifications, "translation_for", lambda locale: AmbiguousTranslation())
+    path = tmp_path / "outbox.json"
+    event = NotificationEvent(
+        action="wifi_reconnect_attempted",
+        detail=template.format(outage_seconds=123, wifi_interface="wlan0"),
+        occurred_at=datetime.now(timezone.utc),
+    )
+    persist_notification_outbox(path, [event])
+    assert load_notification_outbox(path) == [event]
+
+
+@pytest.mark.parametrize("queue_once", [False, True])
+@pytest.mark.parametrize(
+    "action,outcome",
+    [
+        ("wifi_connectivity_restored", "failed"),
+        ("usb_otg_recovery_exhausted", "completed"),
+        ("wifi_reconnect_attempted", None),
+    ],
+)
+def test_both_queue_apis_reject_inconsistent_wifi_facts(
+    tmp_path: Path, queue_once: bool, action: str, outcome: str | None
+) -> None:
+    enqueue = queue_notification_event_once if queue_once else queue_notification_event
+    path = tmp_path / "outbox.json"
+    with pytest.raises(NotificationOutboxError, match="invalid event"):
+        enqueue(
+            path=path,
+            config=NotificationsConfig(enabled=True),
+            action=action,
+            detail="",
+            idempotency_key="episode",
+            wifi_outcome=outcome,
+            wifi_interface="wlan0",
+            wifi_outage_seconds=123,
+        )
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("legacy", [False, True])

@@ -149,7 +149,7 @@ preserved. The installer does not create mail credentials. For `msmtp`,
 configure `/etc/msmtprc` separately; the installer hardens an existing regular
 file to `root:msmtp` and mode `0640`, and applies the matching setgid override.
 Then enable Notifications in Settings. It also prepares the fixed bounded
-offline-delivery mode for upcoming lifecycle and watchdog notifications:
+offline-delivery mode for current watchdog and future lifecycle notifications:
 `summary`, `individual`, or `drop`; `summary` is the default and avoids a long
 outage producing a burst of individual emails. Select a fixed notification
 language for unattended email; this setting intentionally does not inherit the
@@ -542,6 +542,38 @@ For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 reconnect attempts do not restore the link reliably. The reboot delay must be
 longer than the reconnect delay when both actions are enabled.
 
+After a scheduled Wi-Fi recovery reboot completes, reconnect and reboot delays
+start again. Service restarts preserve the retry timer; notification durations
+continue to describe the full outage, including time before the reboot.
+If the initial state write fails, later cycles retry it while preserving the
+in-process outage timer; a process exit before any successful write cannot
+preserve that unsaved observation.
+
+When system-mail Notifications are enabled, the Wi-Fi watchdog queues and
+attempts delivery for a reconnect attempt, a requested reboot, and the later
+connectivity restoration. `summary` and `individual` retain an undelivered
+alert in the bounded outbox; `drop` discards it. A requested reboot is queued
+and delivery is attempted before its reboot is scheduled.
+
+Wi-Fi notification acknowledgements survive service restarts. Repeated reports
+of the same reconnect outcome or same-boot reboot request are suppressed within
+one incident. A changed reconnect outcome, a reboot requested from a later boot,
+or a new outage after recovery remains reportable. This does not delay recovery
+actions or impose an alert cooldown. Summaries include all events retained by
+the configured age and count limits; their heading does not imply a prior mail
+delivery failure.
+
+An upgrade with older Wi-Fi alerts still queued can produce a one-time duplicate:
+legacy alerts lack the outcome or boot identity needed to match them safely.
+They remain deliverable so migration cannot discard a genuine failure.
+
+Outage duration ends when connectivity is observed to recover. Notification
+retries retain that duration. An ended incident is transferred to the outbox
+before a new incident is evaluated; a failed state/queue write preserves the
+old incident and reports an error while deferring evaluation. Wi-Fi details and
+labels use the notification language selected at delivery. Unrecognized legacy
+freeform details remain unchanged.
+
 The USB OTG watchdog considers the frame enumerated only when the gadget is
 attached and its UDC state is `configured`. This is a useful host-side signal,
 but it does not prove that the picture-frame application is displaying the
@@ -566,8 +598,11 @@ the budget cancels a pending request that exceeds the new limit.
 
 Disabling notifications acknowledges pending watchdog state without adding an
 alert; existing queued mail remains retained. Selecting `drop` discards queued
-alerts. A state-read failure suspends USB recovery and outbox delivery while
-existing Wi-Fi reconnect checks continue.
+alerts. An unreadable or unsynchronized USB state suspends USB recovery, shared
+outbox delivery, and reboot scheduling. Wi-Fi reconnect checks continue under
+the shared lock, saving recovery events and notification acknowledgements for
+delivery after USB state becomes available. If the shared lock itself cannot be
+acquired, recovery checks are skipped rather than run without serialization.
 
 The handoff prevents duplicate alerts caused by concurrent runtimes or failed
 state acknowledgement. Duplicate queue requests re-confirm durable outbox

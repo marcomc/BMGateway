@@ -61,6 +61,9 @@ At the start of every new AI agent chat for this repository, read:
 - For watchdog notification handoffs, serialize state reload, evaluation,
   outbox acknowledgement, and delivery across daemon and one-shot entrypoints.
   Test checkpoint failures both before and after atomic file replacement.
+- When a recovery action can restart the process before its outcome is known,
+  persist the minimal pending recovery state before scheduling it and test the
+  first healthy cycle of a fresh process.
 - For history charts, derive all-range coverage from the configured retention
   policy rather than a fixed display cap, and test retention beyond every
   paging limit.

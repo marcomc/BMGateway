@@ -4,14 +4,16 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
 import time
 import uuid
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Iterator
 
@@ -34,13 +36,31 @@ class USBOTGWatchdogStateError(RuntimeError):
     """The USB OTG watchdog recovery state cannot be safely used."""
 
 
+class WiFiWatchdogStateError(RuntimeError):
+    """The Wi-Fi watchdog recovery state cannot be safely used."""
+
+
 @dataclass
 class SelfHealingState:
     started_monotonic: float
     wifi_outage_started_monotonic: float | None = None
+    wifi_outage_ended_monotonic: float | None = None
+    wifi_outage_reconnected: bool = False
     wifi_reconnect_attempted: bool = False
     wifi_reboot_requested: bool = False
+    wifi_recovery_pending: bool = False
+    wifi_recovery_outage_seconds: int = 0
+    wifi_recovery_interface: str = ""
+    wifi_recovery_started_at: float = 0.0
+    wifi_retry_started_at: float = 0.0
+    wifi_recovery_handoff_id: str = ""
+    wifi_recovery_phase: str = ""
+    wifi_recovery_observed: bool = False
+    wifi_reboot_scheduled_boot_id: str = ""
+    wifi_reconnect_notified_outcomes: tuple[str, ...] = ()
+    wifi_reboot_notified_boot_id: str = ""
     periodic_reboot_requested: bool = False
+    periodic_reboot_scheduled_boot_id: str = ""
     usb_otg_rebind_attempted: bool = False
     usb_otg_reboot_attempts_used: int = 0
     usb_otg_escalated: bool = False
@@ -77,6 +97,373 @@ def usb_otg_watchdog_state_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "usb_otg_watchdog_state.json"
 
 
+def wifi_watchdog_state_path(state_dir: Path) -> Path:
+    return state_dir / "runtime" / "wifi_watchdog_state.json"
+
+
+def _persist_watchdog_json(
+    path: Path,
+    payload: dict[str, object],
+    error_type: type[USBOTGWatchdogStateError] | type[WiFiWatchdogStateError],
+    error_message: str,
+) -> None:
+    temporary_path: Path | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+        ) as temporary:
+            temporary.write(json.dumps(payload, sort_keys=True) + "\n")
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, path)
+        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError as error:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+        raise error_type(error_message) from error
+
+
+def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
+    try:
+        payload = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot read Wi-Fi watchdog state") from error
+    try:
+        raw = json.loads(payload)
+        recovery_pending = raw["recovery_pending"]
+        outage_seconds = raw["outage_seconds"]
+        wifi_interface = raw["wifi_interface"]
+        recovery_started_at = raw.get("recovery_started_at", 0.0)
+        retry_started_at = raw.get("retry_started_at", 0.0)
+        recovery_handoff_id = raw.get("recovery_handoff_id", "")
+        recovery_phase = raw.get("recovery_phase", "")
+        reboot_scheduled_boot_id = raw.get("reboot_scheduled_boot_id", "")
+        reconnect_notified_outcomes = raw.get("reconnect_notified_outcomes", [])
+        reboot_notified_boot_id = raw.get("reboot_notified_boot_id", "")
+        if recovery_pending and not recovery_phase:
+            recovery_phase = "pending"
+        recovery_observed = raw.get("recovery_observed", recovery_phase == "reconnect_pending")
+    except (KeyError, TypeError, json.JSONDecodeError) as error:
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
+    try:
+        recovery_started_at_float = float(recovery_started_at)
+        retry_started_at_float = float(retry_started_at)
+    except (OverflowError, TypeError, ValueError):
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values") from None
+    if (
+        not isinstance(recovery_pending, bool)
+        or not isinstance(outage_seconds, int)
+        or outage_seconds < 0
+        or not isinstance(wifi_interface, str)
+        or isinstance(recovery_started_at, bool)
+        or not isinstance(recovery_started_at, (int, float))
+        or not math.isfinite(recovery_started_at_float)
+        or recovery_started_at_float < 0
+        or isinstance(retry_started_at, bool)
+        or not isinstance(retry_started_at, (int, float))
+        or not math.isfinite(retry_started_at_float)
+        or retry_started_at_float < 0
+        or not isinstance(recovery_handoff_id, str)
+        or recovery_phase not in {"", "pending", "reconnect_pending", "reboot_authorized"}
+        or not isinstance(reboot_scheduled_boot_id, str)
+        or (recovery_phase != "reboot_authorized" and bool(reboot_scheduled_boot_id))
+        or not isinstance(reconnect_notified_outcomes, list)
+        or any(outcome not in ("failed", "completed") for outcome in reconnect_notified_outcomes)
+        or not isinstance(reboot_notified_boot_id, str)
+        or not isinstance(recovery_observed, bool)
+        or (recovery_observed and not recovery_pending)
+    ):
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
+    state.wifi_recovery_pending = recovery_pending
+    state.wifi_recovery_outage_seconds = outage_seconds
+    state.wifi_recovery_interface = wifi_interface
+    state.wifi_recovery_started_at = recovery_started_at_float
+    state.wifi_retry_started_at = retry_started_at_float
+    state.wifi_recovery_handoff_id = recovery_handoff_id
+    state.wifi_recovery_phase = recovery_phase
+    state.wifi_recovery_observed = recovery_observed
+    state.wifi_reboot_scheduled_boot_id = reboot_scheduled_boot_id
+    state.wifi_reconnect_notified_outcomes = tuple(reconnect_notified_outcomes)
+    state.wifi_reboot_notified_boot_id = reboot_notified_boot_id
+
+
+def ensure_wifi_recovery_identity(state: SelfHealingState) -> bool:
+    """Give a pending legacy incident an identity without changing its origin."""
+    if state.wifi_recovery_pending and not state.wifi_recovery_handoff_id:
+        state.wifi_recovery_handoff_id = uuid.uuid4().hex
+        return True
+    return False
+
+
+def observe_wifi_recovery(state: SelfHealingState, outage_seconds: int) -> None:
+    """Freeze the outage at its first successful probe, independently of delivery."""
+    if not state.wifi_recovery_observed:
+        state.wifi_recovery_outage_seconds = max(0, outage_seconds)
+        state.wifi_recovery_observed = True
+
+
+def wifi_incident_outage_seconds(state: SelfHealingState, now: float, wall_time: float) -> int:
+    """Measure the whole incident independently of its most recent recovery attempt."""
+    if state.wifi_recovery_observed:
+        return state.wifi_recovery_outage_seconds
+    duration = state.wifi_recovery_outage_seconds
+    if state.wifi_recovery_started_at > 0:
+        duration = max(duration, int(wall_time - state.wifi_recovery_started_at))
+    if state.wifi_outage_started_monotonic is not None:
+        duration = max(duration, int(now - state.wifi_outage_started_monotonic))
+    return max(0, duration)
+
+
+def confirm_wifi_watchdog_state_durable(path: Path) -> None:
+    """Reestablish barriers before reusing state from an interrupted checkpoint."""
+    try:
+        with path.open("rb") as handle:
+            os.fsync(handle.fileno())
+        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot persist Wi-Fi watchdog state") from error
+
+
+def persist_wifi_watchdog_state(
+    path: Path,
+    state: SelfHealingState,
+    *,
+    preserve_pending: bool = True,
+) -> None:
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        payload: dict[str, object] = {
+            "recovery_pending": state.wifi_recovery_pending,
+            "outage_seconds": state.wifi_recovery_outage_seconds,
+            "wifi_interface": state.wifi_recovery_interface,
+            "recovery_started_at": state.wifi_recovery_started_at,
+            "retry_started_at": state.wifi_retry_started_at,
+            "recovery_handoff_id": state.wifi_recovery_handoff_id,
+            "recovery_phase": state.wifi_recovery_phase,
+            "recovery_observed": state.wifi_recovery_observed,
+            "reboot_scheduled_boot_id": state.wifi_reboot_scheduled_boot_id,
+            "reconnect_notified_outcomes": list(state.wifi_reconnect_notified_outcomes),
+            "reboot_notified_boot_id": state.wifi_reboot_notified_boot_id,
+        }
+        if preserve_pending:
+            try:
+                current = json.loads(path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                current = None
+            except json.JSONDecodeError as error:
+                raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
+            if (
+                isinstance(current, dict)
+                and current.get("recovery_pending") is True
+                and state.wifi_recovery_phase != "reboot_authorized"
+            ):
+                payload = current
+        _persist_watchdog_json(
+            path,
+            payload,
+            WiFiWatchdogStateError,
+            "Cannot persist Wi-Fi watchdog state",
+        )
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
+
+
+def clear_wifi_recovery_handoff(
+    path: Path, state: SelfHealingState, *, force: bool = False
+) -> bool:
+    """Clear a persisted Wi-Fi recovery handoff while holding its lock."""
+    lock_handle = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = new_self_healing_state()
+        load_wifi_watchdog_state(path, current)
+        if not current.wifi_recovery_pending or (
+            current.wifi_recovery_phase == "reboot_authorized" and not force
+        ):
+            if current.wifi_recovery_pending:
+                _copy_wifi_recovery_state(current, state)
+            return False
+        _persist_watchdog_json(
+            path,
+            {
+                "recovery_pending": False,
+                "outage_seconds": 0,
+                "wifi_interface": "",
+                "recovery_started_at": 0.0,
+                "retry_started_at": 0.0,
+                "recovery_handoff_id": "",
+                "recovery_phase": "",
+                "recovery_observed": False,
+                "reboot_scheduled_boot_id": "",
+                "reconnect_notified_outcomes": [],
+                "reboot_notified_boot_id": "",
+            },
+            WiFiWatchdogStateError,
+            "Cannot persist Wi-Fi watchdog state",
+        )
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
+    _clear_wifi_recovery_state(state)
+    return True
+
+
+def consume_wifi_recovery_notification(
+    path: Path,
+    state: SelfHealingState,
+    enqueue: Callable[[SelfHealingState], None],
+) -> bool:
+    """Queue and acknowledge one persisted Wi-Fi recovery handoff atomically."""
+    lock_handle = None
+    acknowledged: SelfHealingState | None = None
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        lock_handle = (path.parent / f".{path.name}.lock").open("a+", encoding="utf-8")
+        fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+        current = new_self_healing_state()
+        load_wifi_watchdog_state(path, current)
+        if not current.wifi_recovery_pending:
+            _clear_wifi_recovery_state(state)
+            return False
+        if path.exists():
+            confirm_wifi_watchdog_state_durable(path)
+        if ensure_wifi_recovery_identity(current):
+            _persist_watchdog_json(
+                path,
+                {
+                    "recovery_pending": True,
+                    "outage_seconds": current.wifi_recovery_outage_seconds,
+                    "wifi_interface": current.wifi_recovery_interface,
+                    "recovery_started_at": current.wifi_recovery_started_at,
+                    "retry_started_at": current.wifi_retry_started_at,
+                    "recovery_handoff_id": current.wifi_recovery_handoff_id,
+                    "recovery_phase": current.wifi_recovery_phase,
+                    "recovery_observed": current.wifi_recovery_observed,
+                    "reboot_scheduled_boot_id": current.wifi_reboot_scheduled_boot_id,
+                    "reconnect_notified_outcomes": list(current.wifi_reconnect_notified_outcomes),
+                    "reboot_notified_boot_id": current.wifi_reboot_notified_boot_id,
+                },
+                WiFiWatchdogStateError,
+                "Cannot persist Wi-Fi watchdog state",
+            )
+        enqueue(current)
+        acknowledged = replace(
+            current,
+            wifi_recovery_pending=False,
+            wifi_recovery_outage_seconds=0,
+            wifi_recovery_interface="",
+            wifi_recovery_started_at=0.0,
+            wifi_retry_started_at=0.0,
+            wifi_recovery_handoff_id="",
+            wifi_recovery_phase="",
+            wifi_recovery_observed=False,
+            wifi_reboot_scheduled_boot_id="",
+            wifi_reconnect_notified_outcomes=(),
+            wifi_reboot_notified_boot_id="",
+        )
+        _persist_watchdog_json(
+            path,
+            {
+                "recovery_pending": False,
+                "outage_seconds": 0,
+                "wifi_interface": "",
+                "recovery_started_at": 0.0,
+                "retry_started_at": 0.0,
+                "recovery_handoff_id": "",
+                "recovery_phase": "",
+                "recovery_observed": False,
+                "reboot_scheduled_boot_id": "",
+                "reconnect_notified_outcomes": [],
+                "reboot_notified_boot_id": "",
+            },
+            WiFiWatchdogStateError,
+            "Cannot persist Wi-Fi watchdog state",
+        )
+    except OSError as error:
+        raise WiFiWatchdogStateError("Cannot lock Wi-Fi watchdog state") from error
+    finally:
+        if lock_handle is not None:
+            lock_handle.close()
+    if acknowledged is not None:
+        _copy_wifi_recovery_state(acknowledged, state)
+        clear_wifi_recovery_transient_state(state)
+    return acknowledged is not None
+
+
+def _copy_wifi_recovery_state(source: SelfHealingState, target: SelfHealingState) -> None:
+    for name in (
+        "wifi_recovery_pending",
+        "wifi_recovery_outage_seconds",
+        "wifi_recovery_interface",
+        "wifi_recovery_started_at",
+        "wifi_retry_started_at",
+        "wifi_recovery_handoff_id",
+        "wifi_recovery_phase",
+        "wifi_recovery_observed",
+        "wifi_reboot_scheduled_boot_id",
+        "wifi_reconnect_notified_outcomes",
+        "wifi_reboot_notified_boot_id",
+    ):
+        setattr(target, name, getattr(source, name))
+
+
+def rollback_initial_wifi_checkpoint(state: SelfHealingState, baseline: SelfHealingState) -> None:
+    """Keep an unsaved initial outage retryable without pretending disk acknowledged it."""
+    if not baseline.wifi_recovery_pending:
+        if state.wifi_outage_started_monotonic is None:
+            state.wifi_outage_started_monotonic = baseline.wifi_outage_started_monotonic
+        _copy_wifi_recovery_state(baseline, state)
+
+
+def clear_wifi_recovery_transient_state(state: SelfHealingState) -> None:
+    """Clear process-local guards after another process consumes a handoff."""
+    state.wifi_outage_started_monotonic = None
+    state.wifi_outage_ended_monotonic = None
+    state.wifi_outage_reconnected = False
+    state.wifi_reconnect_attempted = False
+    state.wifi_reboot_requested = False
+
+
+def _clear_wifi_recovery_state(state: SelfHealingState) -> None:
+    clear_wifi_recovery_transient_state(state)
+    state.wifi_recovery_pending = False
+    state.wifi_recovery_outage_seconds = 0
+    state.wifi_recovery_interface = ""
+    state.wifi_recovery_started_at = 0.0
+    state.wifi_retry_started_at = 0.0
+    state.wifi_recovery_handoff_id = ""
+    state.wifi_recovery_phase = ""
+    state.wifi_recovery_observed = False
+    state.wifi_reboot_scheduled_boot_id = ""
+    state.wifi_reconnect_notified_outcomes = ()
+    state.wifi_reboot_notified_boot_id = ""
+
+
 def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
     try:
         payload = path.read_text(encoding="utf-8")
@@ -95,6 +482,8 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         escalation_id = raw.get("escalation_id", "")
         escalation_reason = raw.get("escalation_reason", "")
         escalation_reboot_attempts = raw.get("escalation_reboot_attempts", reboot_attempts_used)
+        periodic_reboot_requested = raw.get("periodic_reboot_requested", False)
+        periodic_reboot_scheduled_boot_id = raw.get("periodic_reboot_scheduled_boot_id", "")
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise USBOTGWatchdogStateError("USB OTG watchdog state is invalid") from error
     if (
@@ -114,6 +503,9 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(escalation_reason, str)
         or not isinstance(escalation_reboot_attempts, int)
         or escalation_reboot_attempts < 0
+        or not isinstance(periodic_reboot_requested, bool)
+        or not isinstance(periodic_reboot_scheduled_boot_id, str)
+        or (not periodic_reboot_requested and bool(periodic_reboot_scheduled_boot_id))
     ):
         raise USBOTGWatchdogStateError("USB OTG watchdog state has invalid values")
     state.usb_otg_rebind_attempted = rebind_attempted
@@ -125,6 +517,8 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.usb_otg_escalation_id = escalation_id
     state.usb_otg_escalation_reason = escalation_reason
     state.usb_otg_escalation_reboot_attempts = escalation_reboot_attempts
+    state.periodic_reboot_requested = periodic_reboot_requested
+    state.periodic_reboot_scheduled_boot_id = periodic_reboot_scheduled_boot_id
 
 
 def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -140,6 +534,8 @@ def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
                 "escalation_id": state.usb_otg_escalation_id,
                 "escalation_reason": state.usb_otg_escalation_reason,
                 "escalation_reboot_attempts": state.usb_otg_escalation_reboot_attempts,
+                "periodic_reboot_requested": state.periodic_reboot_requested,
+                "periodic_reboot_scheduled_boot_id": state.periodic_reboot_scheduled_boot_id,
             },
             sort_keys=True,
         )
@@ -171,7 +567,9 @@ def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
 
 
 @contextmanager
-def usb_otg_watchdog_transaction(path: Path, state: SelfHealingState) -> Iterator[None]:
+def usb_otg_watchdog_transaction(
+    path: Path, state: SelfHealingState, *, allow_unavailable: bool = False
+) -> Iterator[USBOTGWatchdogStateError | None]:
     """Serialize reload, evaluation, outbox acknowledgement and delivery.
 
     Always acquire this lock before the notification outbox lock. The runtime
@@ -189,28 +587,38 @@ def usb_otg_watchdog_transaction(path: Path, state: SelfHealingState) -> Iterato
     try:
         # Missing state also replaces a stale process-local cache.
         current = new_self_healing_state()
-        load_usb_otg_watchdog_state(path, current)
+        initialization_error: USBOTGWatchdogStateError | None = None
         # A predecessor may have replaced JSON then failed directory fsync.
         # Establish durability before trusting an ACK observed from that file.
         try:
-            with path.open("rb") as state_file:
-                os.fsync(state_file.fileno())
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            raise USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state") from error
-        try:
+            load_usb_otg_watchdog_state(path, current)
+            try:
+                with path.open("rb") as state_file:
+                    os.fsync(state_file.fileno())
+            except FileNotFoundError:
+                pass
             descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             try:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-        except OSError as error:
-            raise USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state") from error
-        for name in vars(current):
-            if name.startswith("usb_otg_"):
-                setattr(state, name, getattr(current, name))
-        yield
+        except (USBOTGWatchdogStateError, OSError) as error:
+            initialization_error = (
+                error
+                if isinstance(error, USBOTGWatchdogStateError)
+                else USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state")
+            )
+            if not allow_unavailable:
+                if initialization_error is error:
+                    raise
+                raise initialization_error from error
+        if initialization_error is None:
+            for name in vars(current):
+                if name.startswith("usb_otg_"):
+                    setattr(state, name, getattr(current, name))
+            state.periodic_reboot_requested = current.periodic_reboot_requested
+            state.periodic_reboot_scheduled_boot_id = current.periodic_reboot_scheduled_boot_id
+        yield initialization_error
     finally:
         handle.close()
 
@@ -320,6 +728,20 @@ def default_usb_otg_rebind(image_path: str, gadget_name: str) -> bool:
     return completed.returncode == 0
 
 
+def default_reboot_boot_id() -> str:
+    """Identify the current Linux boot before reserving or resuming a reboot."""
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        # Unit tests and non-Linux development hosts do not expose procfs.  A
+        # stable host fallback still lets same-process scheduling be tested;
+        # appliance deployments use the kernel boot ID above.
+        boot_id = platform.node().strip()
+    if not boot_id:
+        raise USBOTGWatchdogStateError("Reboot boot identity is unavailable")
+    return boot_id
+
+
 def default_usb_otg_boot_id() -> str:
     """Identify a Linux boot before reserving or resuming a USB reboot."""
     try:
@@ -343,8 +765,11 @@ def evaluate_self_healing(
     usb_otg_rebind_action: USBOTGRebindAction = default_usb_otg_rebind,
     usb_otg_state_checkpoint: USBOTGStateCheckpoint | None = None,
     usb_otg_boot_id_reader: USBOTGBootIDReader = default_usb_otg_boot_id,
+    wifi_state_checkpoint: Callable[[], None] | None = None,
+    now_wall_time: float | None = None,
 ) -> list[SelfHealingEvent]:
     now = time.monotonic() if now_monotonic is None else now_monotonic
+    wall_time = time.time() if now_wall_time is None else now_wall_time
     events: list[SelfHealingEvent] = []
     healing = config.self_healing
 
@@ -366,28 +791,73 @@ def evaluate_self_healing(
             )
 
     if not healing.wifi_watchdog_enabled:
-        state.wifi_outage_started_monotonic = None
-        state.wifi_reconnect_attempted = False
-        state.wifi_reboot_requested = False
+        _clear_wifi_recovery_state(state)
     else:
-        if connectivity_checker(healing.connectivity_check_host, healing.wifi_interface):
-            if state.wifi_outage_started_monotonic is not None:
+        if not healing.wifi_reboot_enabled and state.wifi_recovery_phase == "reboot_authorized":
+            state.wifi_reboot_requested = False
+            _clear_wifi_recovery_state(state)
+        ensure_wifi_recovery_identity(state)
+        if state.wifi_recovery_phase == "reconnect_pending":
+            observe_wifi_recovery(state, state.wifi_recovery_outage_seconds)
+        if (
+            state.wifi_recovery_observed
+            or state.wifi_outage_ended_monotonic is not None
+            or connectivity_checker(healing.connectivity_check_host, healing.wifi_interface)
+        ):
+            if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
+                outage_seconds = wifi_incident_outage_seconds(state, now, wall_time)
+                if not state.wifi_recovery_pending:
+                    assert state.wifi_outage_started_monotonic is not None
+                    if state.wifi_outage_ended_monotonic is None:
+                        state.wifi_outage_ended_monotonic = now
+                    outage_seconds = int(
+                        state.wifi_outage_ended_monotonic - state.wifi_outage_started_monotonic
+                    )
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_outage_seconds = outage_seconds
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    state.wifi_recovery_started_at = wall_time - (
+                        now - state.wifi_outage_started_monotonic
+                    )
+                    ensure_wifi_recovery_identity(state)
+                    state.wifi_recovery_phase = (
+                        "reconnect_pending" if state.wifi_outage_reconnected else "pending"
+                    )
+                observe_wifi_recovery(state, outage_seconds)
                 events.append(
                     SelfHealingEvent(
                         action="wifi_connectivity_restored",
                         status="completed",
                         details={
                             "connectivity_check_host": healing.connectivity_check_host,
-                            "outage_seconds": int(now - state.wifi_outage_started_monotonic),
+                            "outage_seconds": outage_seconds,
                         },
                     )
                 )
             state.wifi_outage_started_monotonic = None
             state.wifi_reconnect_attempted = False
             state.wifi_reboot_requested = False
+            if not state.wifi_recovery_pending:
+                _clear_wifi_recovery_state(state)
         else:
-            if state.wifi_outage_started_monotonic is None:
-                state.wifi_outage_started_monotonic = now
+            reboot_authorized = (
+                state.wifi_recovery_pending
+                and state.wifi_recovery_phase == "reboot_authorized"
+                and healing.wifi_reboot_enabled
+            )
+            resumed_pending = (
+                state.wifi_outage_started_monotonic is None
+                and state.wifi_recovery_pending
+                and state.wifi_recovery_phase == "pending"
+                and (state.wifi_retry_started_at > 0 or state.wifi_recovery_started_at > 0)
+            )
+            if resumed_pending:
+                retry_origin = state.wifi_retry_started_at or state.wifi_recovery_started_at
+                retry_seconds = max(0.0, wall_time - retry_origin)
+                state.wifi_outage_started_monotonic = now - retry_seconds
+                state.wifi_recovery_outage_seconds = wifi_incident_outage_seconds(
+                    state, now, wall_time
+                )
                 events.append(
                     SelfHealingEvent(
                         action="wifi_connectivity_lost",
@@ -398,33 +868,20 @@ def evaluate_self_healing(
                         },
                     )
                 )
-            else:
-                outage_seconds = now - state.wifi_outage_started_monotonic
-                if (
-                    healing.wifi_reconnect_enabled
-                    and not state.wifi_reconnect_attempted
-                    and outage_seconds >= healing.wifi_reconnect_after_minutes * 60
-                ):
-                    state.wifi_reconnect_attempted = True
-                    reconnected = reconnect_action(healing.wifi_interface)
-                    events.append(
-                        SelfHealingEvent(
-                            action="wifi_reconnect_attempted",
-                            status="completed" if reconnected else "failed",
-                            details={
-                                "wifi_interface": healing.wifi_interface,
-                                "outage_seconds": int(outage_seconds),
-                            },
-                        )
-                    )
-
-                if (
-                    healing.wifi_reboot_enabled
-                    and not state.wifi_reboot_requested
-                    and outage_seconds >= healing.wifi_reboot_after_minutes * 60
-                ):
+            if state.wifi_outage_started_monotonic is None:
+                state.wifi_outage_started_monotonic = now
+                if not state.wifi_recovery_pending:
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_outage_seconds = 0
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    state.wifi_recovery_started_at = wall_time
+                    ensure_wifi_recovery_identity(state)
+                    state.wifi_recovery_phase = "pending"
+                elif reboot_authorized:
                     state.wifi_reboot_requested = True
-                    reboot_action()
+                    state.wifi_recovery_outage_seconds = wifi_incident_outage_seconds(
+                        state, now, wall_time
+                    )
                     events.append(
                         SelfHealingEvent(
                             action="wifi_reboot_requested",
@@ -432,7 +889,100 @@ def evaluate_self_healing(
                             details={
                                 "wifi_interface": healing.wifi_interface,
                                 "connectivity_check_host": healing.connectivity_check_host,
-                                "outage_seconds": int(outage_seconds),
+                                "outage_seconds": state.wifi_recovery_outage_seconds,
+                            },
+                        )
+                    )
+                if not reboot_authorized:
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_connectivity_lost",
+                            status="failed",
+                            details={
+                                "connectivity_check_host": healing.connectivity_check_host,
+                                "wifi_interface": healing.wifi_interface,
+                            },
+                        )
+                    )
+            else:
+                outage_duration = now - state.wifi_outage_started_monotonic
+                if not state.wifi_recovery_pending:
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    state.wifi_recovery_started_at = wall_time - outage_duration
+                    state.wifi_recovery_phase = "pending"
+                    ensure_wifi_recovery_identity(state)
+                total_outage_seconds = wifi_incident_outage_seconds(state, now, wall_time)
+                reconnect_succeeded = False
+                if (
+                    healing.wifi_reconnect_enabled
+                    and not state.wifi_reconnect_attempted
+                    and outage_duration >= healing.wifi_reconnect_after_minutes * 60
+                ):
+                    state.wifi_reconnect_attempted = True
+                    reconnected = reconnect_action(healing.wifi_interface)
+                    if reconnected:
+                        reconnected = connectivity_checker(
+                            healing.connectivity_check_host,
+                            healing.wifi_interface,
+                        )
+                    reconnect_succeeded = reconnected
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_reconnect_attempted",
+                            status="completed" if reconnected else "failed",
+                            details={
+                                "wifi_interface": healing.wifi_interface,
+                                "outage_seconds": total_outage_seconds,
+                            },
+                        )
+                    )
+                    if reconnected:
+                        state.wifi_outage_ended_monotonic = now
+                        state.wifi_outage_reconnected = True
+                        state.wifi_recovery_pending = True
+                        observe_wifi_recovery(state, total_outage_seconds)
+                        state.wifi_recovery_interface = healing.wifi_interface
+                        if state.wifi_recovery_started_at <= 0:
+                            state.wifi_recovery_started_at = wall_time - outage_duration
+                        ensure_wifi_recovery_identity(state)
+                        state.wifi_recovery_phase = "reconnect_pending"
+                        events.append(
+                            SelfHealingEvent(
+                                action="wifi_connectivity_restored",
+                                status="completed",
+                                details={
+                                    "connectivity_check_host": healing.connectivity_check_host,
+                                    "outage_seconds": total_outage_seconds,
+                                },
+                            )
+                        )
+                        state.wifi_outage_started_monotonic = None
+                        state.wifi_reconnect_attempted = False
+                        state.wifi_reboot_requested = False
+
+                if (
+                    healing.wifi_reboot_enabled
+                    and not state.wifi_reboot_requested
+                    and not reconnect_succeeded
+                    and outage_duration >= healing.wifi_reboot_after_minutes * 60
+                ):
+                    state.wifi_reboot_requested = True
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_outage_seconds = total_outage_seconds
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    if state.wifi_recovery_started_at <= 0:
+                        state.wifi_recovery_started_at = wall_time - outage_duration
+                    ensure_wifi_recovery_identity(state)
+                    state.wifi_recovery_phase = "reboot_authorized"
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_reboot_requested",
+                            status="completed",
+                            details={
+                                "wifi_interface": healing.wifi_interface,
+                                "connectivity_check_host": healing.connectivity_check_host,
+                                "outage_seconds": total_outage_seconds,
                             },
                         )
                     )
