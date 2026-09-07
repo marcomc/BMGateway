@@ -16,6 +16,7 @@ from bm_gateway.self_healing import (
     SelfHealingState,
     USBOTGHealth,
     WiFiWatchdogStateError,
+    clear_wifi_recovery_handoff,
     consume_wifi_recovery_notification,
     default_connectivity_checker,
     default_schedule_reboot,
@@ -441,6 +442,75 @@ def test_legacy_pending_wifi_handoff_gets_a_persisted_id_before_enqueue(tmp_path
     assert consume_wifi_recovery_notification(state_path, state, enqueue)
     assert len(observed_ids) == 1
     assert observed_ids[0]
+
+
+@pytest.mark.parametrize("phase", ["pending", "reboot_authorized", "reconnect_pending"])
+@pytest.mark.parametrize("healthy", [False, True])
+def test_legacy_wifi_evaluation_assigns_identity_without_changing_origin(
+    phase: str, healthy: bool
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0)
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_started_at = 1000.0
+    state.wifi_recovery_phase = phase
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=1000.0,
+        now_wall_time=2000.0,
+        connectivity_checker=lambda *_: healthy,
+        reboot_action=lambda: None,
+    )
+    assert state.wifi_recovery_handoff_id
+    assert state.wifi_recovery_started_at == 1000.0
+
+
+@pytest.mark.parametrize("consume", [False, True])
+def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume: bool) -> None:
+    path = wifi_watchdog_state_path(tmp_path)
+    state = new_self_healing_state()
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_handoff_id = "incident"
+    state.wifi_recovery_phase = "pending"
+    state.wifi_reconnect_notified_outcomes = ("failed", "completed")
+    state.wifi_reboot_notified_boot_id = "boot-one"
+    persist_wifi_watchdog_state(path, state, preserve_pending=False)
+    loaded = new_self_healing_state()
+    load_wifi_watchdog_state(path, loaded)
+    assert loaded.wifi_reconnect_notified_outcomes == ("failed", "completed")
+    assert loaded.wifi_reboot_notified_boot_id == "boot-one"
+    if consume:
+        assert consume_wifi_recovery_notification(path, loaded, lambda _: None)
+    else:
+        assert clear_wifi_recovery_handoff(path, loaded, force=True)
+    reloaded = new_self_healing_state()
+    load_wifi_watchdog_state(path, reloaded)
+    for current in (loaded, reloaded):
+        assert current.wifi_reconnect_notified_outcomes == ()
+        assert current.wifi_reboot_notified_boot_id == ""
+        assert current.wifi_recovery_handoff_id == ""
+
+
+@pytest.mark.parametrize("invalid", [None, "failed", ["unknown"], [None], [True]])
+def test_wifi_notification_receipt_validation(tmp_path: Path, invalid: object) -> None:
+    path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(path, new_self_healing_state())
+    payload = json.loads(path.read_text())
+    payload["reconnect_notified_outcomes"] = invalid
+    path.write_text(json.dumps(payload))
+    with pytest.raises(WiFiWatchdogStateError):
+        load_wifi_watchdog_state(path, new_self_healing_state())
 
 
 @pytest.mark.parametrize("raw_timestamp", ["NaN", "Infinity", "-Infinity", str(10**400)])

@@ -21,9 +21,11 @@ from .self_healing import (
     WiFiWatchdogStateError,
     clear_wifi_recovery_handoff,
     clear_wifi_recovery_transient_state,
+    confirm_wifi_watchdog_state_durable,
     consume_wifi_recovery_notification,
     default_reboot_boot_id,
     default_schedule_reboot,
+    ensure_wifi_recovery_identity,
     evaluate_self_healing,
     load_wifi_watchdog_state,
     persist_usb_otg_watchdog_state,
@@ -101,6 +103,11 @@ def run_self_healing(
                 load_wifi_watchdog_state(wifi_path, state)
             except WiFiWatchdogStateError as error:
                 wifi_state_error = error
+            if wifi_state_error is None:
+                if wifi_path.exists():
+                    confirm_wifi_watchdog_state_durable(wifi_path)
+                if ensure_wifi_recovery_identity(state):
+                    persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
             if had_wifi_recovery_pending and not state.wifi_recovery_pending:
                 clear_wifi_recovery_transient_state(state)
             current_boot_id: str | None = None
@@ -309,27 +316,39 @@ def run_self_healing(
                     "wifi_reboot_requested",
                 }:
                     try:
-                        idempotency_key = ""
-                        if event.action in {
-                            "wifi_reconnect_attempted",
-                            "wifi_reboot_requested",
-                        }:
-                            notification_kind = (
-                                "reconnect"
-                                if event.action == "wifi_reconnect_attempted"
-                                else "reboot"
-                            )
-                            idempotency_key = (
-                                f"wifi-{notification_kind}:{state.wifi_recovery_handoff_id}"
-                                if state.wifi_recovery_handoff_id
-                                else ""
-                            )
-                        _queue_wifi_watchdog_notification(
-                            path=notification_outbox_path(state_dir),
-                            config=config,
-                            event=event,
-                            idempotency_key=idempotency_key,
+                        reconnect = event.action == "wifi_reconnect_attempted"
+                        notification_kind = "reconnect" if reconnect else "reboot"
+                        notification_instance = event.status if reconnect else reboot_boot_id()
+                        acknowledged = (
+                            notification_instance in state.wifi_reconnect_notified_outcomes
+                            if reconnect
+                            else notification_instance == state.wifi_reboot_notified_boot_id
                         )
+                        idempotency_key = ""
+                        if state.wifi_recovery_handoff_id:
+                            idempotency_key = (
+                                f"wifi-{notification_kind}:{state.wifi_recovery_handoff_id}:"
+                                f"{notification_instance}"
+                            )
+                        if not acknowledged:
+                            _queue_wifi_watchdog_notification(
+                                path=notification_outbox_path(state_dir),
+                                config=config,
+                                event=event,
+                                idempotency_key=idempotency_key,
+                            )
+                            if (
+                                state.wifi_recovery_pending
+                                and config.notifications.enabled
+                                and config.notifications.offline_delivery != "drop"
+                            ):
+                                if reconnect:
+                                    state.wifi_reconnect_notified_outcomes += (event.status,)
+                                else:
+                                    state.wifi_reboot_notified_boot_id = notification_instance
+                                persist_wifi_watchdog_state(
+                                    wifi_path, state, preserve_pending=False
+                                )
                         if (
                             event.action == "wifi_reconnect_attempted"
                             and event.status == "completed"

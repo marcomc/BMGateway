@@ -548,6 +548,18 @@ connectivity restoration. `summary` and `individual` retain an undelivered
 alert in the bounded outbox; `drop` discards it. A requested reboot is queued
 and delivery is attempted before its reboot is scheduled.
 
+Wi-Fi notification acknowledgements survive service restarts. Repeated reports
+of the same reconnect outcome or same-boot reboot request are suppressed within
+one incident. A changed reconnect outcome, a reboot requested from a later boot,
+or a new outage after recovery remains reportable. This does not delay recovery
+actions or impose an alert cooldown. Summaries include all events retained by
+the configured age and count limits; their heading does not imply a prior mail
+delivery failure.
+
+An upgrade with older Wi-Fi alerts still queued can produce a one-time duplicate:
+legacy alerts lack the outcome or boot identity needed to match them safely.
+They remain deliverable so migration cannot discard a genuine failure.
+
 The USB OTG watchdog considers the frame enumerated only when the gadget is
 attached and its UDC state is `configured`. This is a useful host-side signal,
 but it does not prove that the picture-frame application is displaying the

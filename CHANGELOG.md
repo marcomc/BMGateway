@@ -25,6 +25,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Wi-Fi recovery notifications retain incident identities across legacy-state
+  migration and process restarts. Repeated alerts for the same recovery outcome
+  are suppressed while changed outcomes, new incidents, and reboot attempts
+  from later boots remain visible.
+- Notification summaries include every retained event within the configured
+  outbox limits and no longer imply that mail delivery previously failed.
+  Wi-Fi event labels follow the selected notification language in both summary
+  and individual messages.
 - USB OTG escalation now retains one incident identity and its original reason
   and reboot count across queue failures, restarts, and concurrent runtime
   invocations. State acknowledgement completes before any runtime delivers

@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 from bm_gateway import notifications, self_healing
 from bm_gateway import self_healing_runtime as runtime
-from bm_gateway.config import AppConfig, load_config
+from bm_gateway.config import AppConfig, NotificationsConfig, load_config
 from bm_gateway.localization import translation_for
 from bm_gateway.self_healing import (
     SelfHealingEvent,
@@ -96,6 +96,261 @@ def _wifi_config() -> AppConfig:
             config.notifications, enabled=True, recipient="user@example.com", locale="en"
         ),
     )
+
+
+def _legacy_wifi_state(
+    tmp_path: Path, *, phase: str = "pending", identity: str | None = None
+) -> Path:
+    path = wifi_watchdog_state_path(tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "recovery_pending": True,
+        "outage_seconds": 600,
+        "wifi_interface": "wlan0",
+        "recovery_started_at": 1000.0,
+        "recovery_phase": phase,
+    }
+    if identity is not None:
+        payload["recovery_handoff_id"] = identity
+    path.write_text(json.dumps(payload))
+    return path
+
+
+def _wifi_mail_delivery(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    delivered: list[str] = []
+
+    def sendmail(payload: str) -> subprocess.CompletedProcess[str]:
+        body = message_from_string(payload).get_payload(decode=True)
+        assert isinstance(body, bytes)
+        delivered.append(body.decode())
+        return subprocess.CompletedProcess(["sendmail"], 0, "", "")
+
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        partial(notifications.deliver_notification_outbox, runner=sendmail),
+    )
+    return delivered
+
+
+@pytest.mark.parametrize("identity", [None, "", "existing-incident"])
+@pytest.mark.parametrize(
+    "scenario", ["reconnect_failed", "reconnect_success", "reboot", "authorized", "healthy"]
+)
+def test_legacy_wifi_identity_is_durable_before_actions_and_alerts(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, identity: str | None, scenario: str
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_reconnect_enabled=scenario.startswith("reconnect"),
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=scenario in {"reboot", "authorized"},
+            wifi_reboot_after_minutes=2,
+        ),
+    )
+    path = _legacy_wifi_state(
+        tmp_path,
+        phase="reboot_authorized" if scenario == "authorized" else "pending",
+        identity=identity,
+    )
+    observed: list[str] = []
+
+    def assert_identity() -> None:
+        payload = json.loads(path.read_text())
+        assert payload["recovery_handoff_id"]
+        assert payload["recovery_started_at"] == 1000.0
+        observed.append(payload["recovery_handoff_id"])
+
+    probes = 0
+
+    def probe(*_args: object) -> bool:
+        nonlocal probes
+        assert_identity()
+        probes += 1
+        return scenario == "healthy" or (scenario == "reconnect_success" and probes > 1)
+
+    def reconnect(_interface: str) -> bool:
+        assert_identity()
+        return scenario == "reconnect_success"
+
+    def queue(
+        *, path: Path, config: NotificationsConfig, action: str, detail: str, idempotency_key: str
+    ) -> bool:
+        assert_identity()
+        return notifications.queue_notification_event_once(
+            path=path, config=config, action=action, detail=detail, idempotency_key=idempotency_key
+        )
+
+    monkeypatch.setattr(runtime, "queue_notification_event_once", queue)
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
+    monkeypatch.setattr(runtime, "default_schedule_reboot", assert_identity)
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            now_monotonic=1000.0,
+            now_wall_time=2000.0,
+            connectivity_checker=probe,
+            reconnect_action=reconnect,
+        ),
+    )
+    delivered = _wifi_mail_delivery(monkeypatch)
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+    assert delivered
+    assert not any(event.action == "wifi_watchdog_state_unavailable" for event in events)
+    assert len(set(observed)) == 1
+    if identity:
+        assert observed[0] == identity
+
+
+@pytest.mark.parametrize("action", ["wifi_reconnect_attempted", "wifi_reboot_requested"])
+def test_delivered_wifi_alert_does_not_replay_after_restart(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, action: str
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_reboot_enabled=action == "wifi_reboot_requested",
+            wifi_reconnect_enabled=action == "wifi_reconnect_attempted",
+            wifi_reconnect_after_minutes=1,
+        ),
+    )
+    _legacy_wifi_state(
+        tmp_path, phase="reboot_authorized" if action == "wifi_reboot_requested" else "pending"
+    )
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            now_monotonic=1000.0,
+            now_wall_time=2000.0,
+            connectivity_checker=lambda *_: False,
+            reconnect_action=lambda _: False,
+        ),
+    )
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: None)
+    delivered = _wifi_mail_delivery(monkeypatch)
+    for _ in range(3):
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(delivered) == 1
+    assert (
+        notifications.load_notification_outbox(notifications.notification_outbox_path(tmp_path))
+        == []
+    )
+
+
+@pytest.mark.parametrize("after_replace", [False, True])
+@pytest.mark.parametrize("checkpoint", ["identity", "receipt"])
+def test_wifi_identity_and_receipt_checkpoint_failures_retry_durably(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, after_replace: bool, checkpoint: str
+) -> None:
+    config = _wifi_config()
+    path = _legacy_wifi_state(tmp_path)
+    real_persist = self_healing._persist_watchdog_json
+    failed = False
+
+    def persist(
+        target: Path,
+        payload: dict[str, object],
+        error_type: type[self_healing.USBOTGWatchdogStateError] | type[WiFiWatchdogStateError],
+        error_message: str,
+    ) -> None:
+        nonlocal failed
+        match = (
+            bool(payload.get("reconnect_notified_outcomes"))
+            if checkpoint == "receipt"
+            else bool(payload.get("recovery_handoff_id"))
+        )
+        if target == path and match and not failed:
+            failed = True
+            if after_replace:
+                real_fsync = os.fsync
+                sync_calls = 0
+
+                def fail_parent_sync(fd: int) -> None:
+                    nonlocal sync_calls
+                    sync_calls += 1
+                    if sync_calls == 2:
+                        raise OSError("injected directory fsync failure after replace")
+                    real_fsync(fd)
+
+                with monkeypatch.context() as injection:
+                    injection.setattr(os, "fsync", fail_parent_sync)
+                    real_persist(target, payload, error_type, error_message)
+            raise WiFiWatchdogStateError("injected checkpoint failure")
+        real_persist(target, payload, error_type, error_message)
+
+    event = SelfHealingEvent(action="wifi_reconnect_attempted", status="failed", details={})
+    monkeypatch.setattr(self_healing, "_persist_watchdog_json", persist)
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [event])
+    delivered = _wifi_mail_delivery(monkeypatch)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert failed
+    assert delivered == []
+    real_confirm = self_healing.confirm_wifi_watchdog_state_durable
+
+    def fail_barrier(_path: Path) -> None:
+        raise WiFiWatchdogStateError("injected durability barrier failure")
+
+    monkeypatch.setattr(runtime, "confirm_wifi_watchdog_state_durable", fail_barrier)
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+    assert any(event.action == "wifi_watchdog_state_unavailable" for event in events)
+    assert delivered == []
+    monkeypatch.setattr(runtime, "confirm_wifi_watchdog_state_durable", real_confirm)
+    for _ in range(2):
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(delivered) == 1
+
+
+def test_wifi_receipts_preserve_new_outcomes_boots_and_incidents(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    config = replace(config, self_healing=replace(config.self_healing, wifi_reboot_enabled=True))
+    path = _legacy_wifi_state(tmp_path)
+    current_event = SelfHealingEvent(action="wifi_reconnect_attempted", status="failed", details={})
+    boot = "boot-one"
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [current_event])
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: boot)
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: None)
+    delivered = _wifi_mail_delivery(monkeypatch)
+
+    def cycle() -> None:
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    cycle()
+    current_event = replace(current_event, status="completed")
+    cycle()
+    assert len(delivered) == 2
+    current_event = SelfHealingEvent(action="wifi_reboot_requested", status="completed", details={})
+    cycle()
+    boot = "boot-two"
+    cycle()
+    assert len(delivered) == 4
+    current_event = SelfHealingEvent(
+        action="wifi_connectivity_restored", status="completed", details={}
+    )
+    cycle()
+    assert len(delivered) == 5
+    payload = json.loads(path.read_text())
+    assert payload["recovery_pending"] is False
+    assert payload["reconnect_notified_outcomes"] == []
+    _legacy_wifi_state(tmp_path)
+    current_event = SelfHealingEvent(action="wifi_reconnect_attempted", status="failed", details={})
+    cycle()
+    assert len(delivered) == 6
 
 
 def test_runtime_queues_wifi_recovery_events(
@@ -736,7 +991,9 @@ def test_repeated_wifi_reboot_events_use_one_idempotent_notification(
     queued = notifications.load_notification_outbox(
         notifications.notification_outbox_path(tmp_path)
     )
-    assert [item.idempotency_key for item in queued] == ["wifi-reboot:handoff-reboot"]
+    assert [item.idempotency_key for item in queued] == [
+        f"wifi-reboot:handoff-reboot:{self_healing.default_reboot_boot_id()}"
+    ]
 
 
 def test_wifi_reboot_authorization_is_consumed_after_a_new_boot(

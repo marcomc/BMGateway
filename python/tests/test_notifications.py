@@ -3,6 +3,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import socket
 import stat
 import subprocess
 import threading
@@ -162,6 +163,119 @@ def test_failed_delivery_keeps_outbox(tmp_path: Path) -> None:
     assert delivered is False
     assert detail == "temporary failure"
     assert [event.action for event in load_notification_outbox(path)] == ["wifi"]
+
+
+@pytest.mark.parametrize("fail_first", [False, True])
+def test_summary_preserves_every_retained_failure_beyond_twenty_events(
+    tmp_path: Path, fail_first: bool
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", offline_max_events=25
+    )
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="usb_otg_recovery_exhausted",
+        detail="",
+        usb_otg_reason="USB OTG gadget is not configured",
+        usb_otg_reboot_attempts=1,
+    )
+    for index in range(24):
+        queue_notification_event(
+            path=path,
+            config=config,
+            action="failure",
+            detail=f"distinct failure [{index}]",
+        )
+    retained = load_notification_outbox(path)
+    assert len(retained) == config.offline_max_events
+    if fail_first:
+        delivered, _ = deliver_notification_outbox(path=path, config=config, runner=_failure)
+        assert delivered is False
+        assert load_notification_outbox(path) == retained
+
+    bodies: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        bodies.append(Parser(policy=policy.default).parsestr(payload).get_content())
+        return _success(payload)
+
+    delivered, _ = deliver_notification_outbox(path=path, config=config, runner=send)
+
+    assert delivered is True
+    assert len(bodies) == 1
+    assert "Events retained: 25" in bodies[0]
+    assert "USB OTG recovery exhausted" in bodies[0]
+    assert "USB OTG gadget is not configured" in bodies[0]
+    for index in range(24):
+        assert f"distinct failure [{index}]" in bodies[0]
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("locale", supported_locale_codes())
+def test_summary_header_is_neutral_in_delivery_locale(tmp_path: Path, locale: str) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+    queue_notification_event(path=path, config=config, action="failure", detail="unavailable")
+    bodies: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        bodies.append(Parser(policy=policy.default).parsestr(payload).get_content())
+        return _success(payload)
+
+    delivered, _ = deliver_notification_outbox(
+        path=path, config=replace(config, locale=locale), runner=send
+    )
+
+    assert delivered is True
+    expected = translation_for(locale).gettext("BMGateway notification summary on {hostname}.")
+    assert bodies[0].splitlines()[0] == expected.format(hostname=socket.gethostname())
+
+
+@pytest.mark.parametrize("locale", supported_locale_codes())
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_wifi_action_labels_use_delivery_locale_in_decoded_mail(
+    tmp_path: Path, locale: str, mode: str
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", offline_delivery=mode
+    )
+    labels = {
+        "wifi_reconnect_attempted": "Wi-Fi reconnect attempted",
+        "wifi_reboot_requested": "Wi-Fi reboot requested",
+        "wifi_connectivity_restored": "Wi-Fi connectivity restored",
+    }
+    for action in labels:
+        queue_notification_event(path=path, config=config, action=action, detail="watchdog event")
+    assert deliver_notification_outbox(path=path, config=config, runner=_failure)[0] is False
+    assert [event.action for event in load_notification_outbox(path)] == list(labels)
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(
+        path=path, config=replace(config, locale=locale), runner=send
+    )[0]
+    messages = [Parser(policy=policy.default).parsestr(payload) for payload in payloads]
+    assert len(messages) == (1 if mode == "summary" else len(labels))
+    translation = translation_for(locale)
+    for index, (action, label) in enumerate(labels.items()):
+        translated = translation.gettext(label)
+        if locale != "en":
+            assert translated != label
+        message = messages[0 if mode == "summary" else index]
+        body = message.get_content()
+        assert translated in body
+        assert action not in body
+        assert action not in str(message["Subject"])
+        if mode == "individual":
+            assert translated in str(message["Subject"])
+            assert translation.gettext("Event: {action}").format(action=translated) in body
+    assert not path.exists()
 
 
 def test_summary_delivery_reports_outbox_deletion_failure(

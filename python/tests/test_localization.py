@@ -313,7 +313,7 @@ def test_notification_mail_templates_are_translated_for_every_locale(locale: str
     templates = (
         "[BMGateway] notification test: {hostname}",
         "BMGateway system-mail notification delivery is working.",
-        "BMGateway recovered notification delivery on {hostname}.",
+        "BMGateway notification summary on {hostname}.",
         "Events retained: {count}",
         "First event: {timestamp}",
         "Last event: {timestamp}",

@@ -372,6 +372,12 @@ def _text(config: NotificationsConfig, key: str, **values: object) -> str:
 def _action_label(config: NotificationsConfig, action: str) -> str:
     if action == "usb_otg_recovery_exhausted":
         return _text(config, "USB OTG recovery exhausted")
+    if action == "wifi_reconnect_attempted":
+        return _text(config, "Wi-Fi reconnect attempted")
+    if action == "wifi_reboot_requested":
+        return _text(config, "Wi-Fi reboot requested")
+    if action == "wifi_connectivity_restored":
+        return _text(config, "Wi-Fi connectivity restored")
     return action
 
 
@@ -441,7 +447,7 @@ def _deliver_notification_outbox_unlocked(
             [
                 _text(
                     config,
-                    "BMGateway recovered notification delivery on {hostname}.",
+                    "BMGateway notification summary on {hostname}.",
                     hostname=socket.gethostname(),
                 ),
                 "",
@@ -456,7 +462,7 @@ def _deliver_notification_outbox_unlocked(
                 *[
                     f"- {event.occurred_at.isoformat()} "
                     f"{_action_label(config, event.action)}: {_event_detail(config, event)}"
-                    for event in events[-20:]
+                    for event in events
                 ],
             ]
         )
