@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import shutil
 import subprocess
@@ -141,6 +142,10 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
             recovery_phase = "pending"
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
+    try:
+        recovery_started_at_float = float(recovery_started_at)
+    except (OverflowError, TypeError, ValueError):
+        raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values") from None
     if (
         not isinstance(recovery_pending, bool)
         or not isinstance(outage_seconds, int)
@@ -148,7 +153,8 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(wifi_interface, str)
         or isinstance(recovery_started_at, bool)
         or not isinstance(recovery_started_at, (int, float))
-        or recovery_started_at < 0
+        or not math.isfinite(recovery_started_at_float)
+        or recovery_started_at_float < 0
         or not isinstance(recovery_handoff_id, str)
         or recovery_phase not in {"", "pending", "reconnect_pending", "reboot_authorized"}
     ):
@@ -156,7 +162,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.wifi_recovery_pending = recovery_pending
     state.wifi_recovery_outage_seconds = outage_seconds
     state.wifi_recovery_interface = wifi_interface
-    state.wifi_recovery_started_at = float(recovery_started_at)
+    state.wifi_recovery_started_at = recovery_started_at_float
     state.wifi_recovery_handoff_id = recovery_handoff_id
     state.wifi_recovery_phase = recovery_phase
 

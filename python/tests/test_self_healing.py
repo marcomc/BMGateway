@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
 from bm_gateway.config import NotificationsConfig, load_config
 from bm_gateway.notifications import (
@@ -14,6 +15,7 @@ from bm_gateway.notifications import (
 from bm_gateway.self_healing import (
     SelfHealingState,
     USBOTGHealth,
+    WiFiWatchdogStateError,
     consume_wifi_recovery_notification,
     default_connectivity_checker,
     default_schedule_reboot,
@@ -359,6 +361,22 @@ def test_legacy_pending_wifi_handoff_gets_a_persisted_id_before_enqueue(tmp_path
     assert consume_wifi_recovery_notification(state_path, state, enqueue)
     assert len(observed_ids) == 1
     assert observed_ids[0]
+
+
+@pytest.mark.parametrize("raw_timestamp", ["NaN", "Infinity", "-Infinity", str(10**400)])
+def test_wifi_state_rejects_nonfinite_or_oversized_timestamp(
+    tmp_path: Path, raw_timestamp: str
+) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"recovery_pending": true, "outage_seconds": 60, "wifi_interface": "wlan0", '
+        f'"recovery_started_at": {raw_timestamp}}}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WiFiWatchdogStateError):
+        load_wifi_watchdog_state(state_path, new_self_healing_state())
 
 
 def test_distinct_wifi_handoffs_queue_distinct_outbox_events(tmp_path: Path) -> None:
