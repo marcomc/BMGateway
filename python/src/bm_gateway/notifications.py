@@ -5,6 +5,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import re
 import socket
 import subprocess
 import tempfile
@@ -16,12 +17,25 @@ from pathlib import Path
 from typing import Callable, Iterator
 
 from .config import NotificationsConfig, is_valid_notification_recipient
-from .localization import translation_for
+from .localization import supported_locale_codes, translation_for
 
 SendmailRunner = Callable[[str], subprocess.CompletedProcess[str]]
 SYSTEM_SENDMAIL_PATH = "/usr/sbin/sendmail"
 OFFLINE_DELIVERY_MODES = ("summary", "individual", "drop")
 SENDMAIL_TIMEOUT_SECONDS = 30
+_USB_ESCALATION_ACTION = "usb_otg_recovery_exhausted"
+_USB_ESCALATION_TEMPLATE = (
+    "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}"
+)
+_LEGACY_USB_HEALTH_REASONS = (
+    "USB OTG backing image is missing",
+    "USB OTG gadget is not configured",
+    "USB OTG gadget status is unreadable",
+    "USB OTG gadget is detached",
+    "USB OTG controller state is unreadable",
+    "UDC state is not configured",
+)
+_MISSING = object()
 
 
 class NotificationOutboxError(RuntimeError):
@@ -33,13 +47,34 @@ class NotificationEvent:
     action: str
     detail: str
     occurred_at: datetime
+    idempotency_key: str = ""
+    usb_otg_reason: str | None = None
+    usb_otg_reboot_attempts: int | None = None
 
-    def to_dict(self) -> dict[str, str]:
-        return {
-            "action": self.action,
-            "detail": self.detail,
-            "occurred_at": self.occurred_at.isoformat(),
+    def to_dict(self) -> dict[str, str | int]:
+        event = _canonical_event(
+            action=self.action,
+            detail=self.detail,
+            occurred_at=self.occurred_at,
+            idempotency_key=self.idempotency_key,
+            usb_otg_reason=self.usb_otg_reason if self.usb_otg_reason is not None else _MISSING,
+            usb_otg_reboot_attempts=(
+                self.usb_otg_reboot_attempts
+                if self.usb_otg_reboot_attempts is not None
+                else _MISSING
+            ),
+        )
+        payload: dict[str, str | int] = {
+            "action": event.action,
+            "detail": event.detail,
+            "occurred_at": event.occurred_at.isoformat(),
         }
+        if event.idempotency_key:
+            payload["idempotency_key"] = event.idempotency_key
+        if event.usb_otg_reason is not None and event.usb_otg_reboot_attempts is not None:
+            payload["usb_otg_reason"] = event.usb_otg_reason
+            payload["usb_otg_reboot_attempts"] = event.usb_otg_reboot_attempts
+        return payload
 
 
 def notification_outbox_path(state_dir: Path) -> Path:
@@ -94,15 +129,69 @@ def _aware_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
-def _canonical_event(*, action: object, detail: object, occurred_at: datetime) -> NotificationEvent:
+def _canonical_event(
+    *,
+    action: object,
+    detail: object,
+    occurred_at: datetime,
+    idempotency_key: object = "",
+    usb_otg_reason: object = _MISSING,
+    usb_otg_reboot_attempts: object = _MISSING,
+) -> NotificationEvent:
     normalized_action = str(action).strip()
     if not normalized_action:
         raise NotificationOutboxError("Notification outbox contains an event without an action")
+    normalized_detail = str(detail).strip()
+    reason: str | None = None
+    attempts: int | None = None
+    if usb_otg_reason is not _MISSING or usb_otg_reboot_attempts is not _MISSING:
+        if (
+            normalized_action != _USB_ESCALATION_ACTION
+            or not isinstance(usb_otg_reason, str)
+            or not isinstance(usb_otg_reboot_attempts, int)
+            or isinstance(usb_otg_reboot_attempts, bool)
+            or usb_otg_reboot_attempts < 0
+        ):
+            raise NotificationOutboxError("Notification outbox contains an invalid event")
+        reason, attempts = usb_otg_reason, usb_otg_reboot_attempts
+    elif normalized_action == _USB_ESCALATION_ACTION:
+        legacy = _legacy_usb_detail(normalized_detail)
+        if legacy is not None:
+            reason, attempts = legacy
+    if reason is not None and attempts is not None:
+        normalized_detail = _USB_ESCALATION_TEMPLATE.format(attempts=attempts, reason=reason)
     return NotificationEvent(
         action=normalized_action,
-        detail=str(detail).strip(),
+        detail=normalized_detail,
         occurred_at=_aware_utc(occurred_at),
+        idempotency_key=str(idempotency_key).strip(),
+        usb_otg_reason=reason,
+        usb_otg_reboot_attempts=attempts,
     )
+
+
+def _legacy_usb_detail(detail: str) -> tuple[str, int] | None:
+    """Recognize only complete shipped templates with an unambiguous known reason."""
+    matches: set[tuple[str, int]] = set()
+    for locale in supported_locale_codes():
+        text = translation_for(locale).gettext
+        pattern = (
+            re.escape(text(_USB_ESCALATION_TEMPLATE))
+            .replace(re.escape("{attempts}"), r"(?P<attempts>0|[1-9][0-9]*)")
+            .replace(re.escape("{reason}"), r"(?P<reason>.+)")
+        )
+        match = re.fullmatch(pattern, detail)
+        if match is None:
+            continue
+        try:
+            attempts = int(match["attempts"])
+        except ValueError:
+            # Python bounds oversized decimal conversion; preserve opaque legacy text.
+            continue
+        for reason in _LEGACY_USB_HEALTH_REASONS:
+            if match["reason"] in {reason, text(reason)}:
+                matches.add((reason, attempts))
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def _load_notification_outbox_unlocked(path: Path) -> list[NotificationEvent]:
@@ -133,6 +222,9 @@ def _load_notification_outbox_unlocked(path: Path) -> list[NotificationEvent]:
                 action=item.get("action", ""),
                 detail=item.get("detail", ""),
                 occurred_at=occurred_at,
+                idempotency_key=item.get("idempotency_key", ""),
+                usb_otg_reason=item.get("usb_otg_reason", _MISSING),
+                usb_otg_reboot_attempts=item.get("usb_otg_reboot_attempts", _MISSING),
             )
         )
     return events
@@ -144,16 +236,7 @@ def load_notification_outbox(path: Path) -> list[NotificationEvent]:
 
 
 def _persist_notification_outbox_unlocked(path: Path, events: list[NotificationEvent]) -> None:
-    normalized_events: list[NotificationEvent] = []
-    for event in events:
-        normalized_events.append(
-            _canonical_event(
-                action=event.action,
-                detail=event.detail,
-                occurred_at=event.occurred_at,
-            )
-        )
-    payload = json.dumps([event.to_dict() for event in normalized_events], indent=2) + "\n"
+    payload = json.dumps([event.to_dict() for event in events], indent=2) + "\n"
     temporary_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
@@ -205,6 +288,9 @@ def queue_notification_event(
     config: NotificationsConfig,
     action: str,
     detail: str,
+    idempotency_key: str = "",
+    usb_otg_reason: str | None = None,
+    usb_otg_reboot_attempts: int | None = None,
     now: datetime | None = None,
 ) -> None:
     if not config.enabled or config.offline_delivery == "drop":
@@ -212,8 +298,52 @@ def queue_notification_event(
     with _notification_outbox_lock(path):
         current = _aware_utc(now or datetime.now(timezone.utc))
         events = _retained_events(path=path, config=config, now=current)
-        events.append(NotificationEvent(action=action, detail=detail, occurred_at=current))
+        events.append(
+            NotificationEvent(
+                action=action,
+                detail=detail,
+                occurred_at=current,
+                idempotency_key=idempotency_key,
+                usb_otg_reason=usb_otg_reason,
+                usb_otg_reboot_attempts=usb_otg_reboot_attempts,
+            )
+        )
         _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
+
+
+def queue_notification_event_once(
+    *,
+    path: Path,
+    config: NotificationsConfig,
+    action: str,
+    detail: str,
+    idempotency_key: str,
+    usb_otg_reason: str | None = None,
+    usb_otg_reboot_attempts: int | None = None,
+    now: datetime | None = None,
+) -> bool:
+    """Durably queue an event unless its stable identity is already pending."""
+    if not config.enabled or config.offline_delivery == "drop":
+        return False
+    with _notification_outbox_lock(path):
+        current = now or datetime.now(timezone.utc)
+        events = _retained_events(path=path, config=config, now=current)
+        if any(event.idempotency_key == idempotency_key for event in events):
+            # A visible earlier replacement may still lack directory durability.
+            _persist_notification_outbox_unlocked(path, events)
+            return False
+        events.append(
+            NotificationEvent(
+                action=action,
+                detail=detail,
+                occurred_at=_aware_utc(current),
+                idempotency_key=idempotency_key,
+                usb_otg_reason=usb_otg_reason,
+                usb_otg_reboot_attempts=usb_otg_reboot_attempts,
+            )
+        )
+        _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
+        return True
 
 
 def _default_sendmail(payload: str) -> subprocess.CompletedProcess[str]:
@@ -237,6 +367,21 @@ def _message(*, recipient: str, subject: str, body: str) -> str:
 
 def _text(config: NotificationsConfig, key: str, **values: object) -> str:
     return translation_for(config.locale).gettext(key).format(**values)
+
+
+def _action_label(config: NotificationsConfig, action: str) -> str:
+    if action == "usb_otg_recovery_exhausted":
+        return _text(config, "USB OTG recovery exhausted")
+    return action
+
+
+def _event_detail(config: NotificationsConfig, event: NotificationEvent) -> str:
+    if event.usb_otg_reason is None or event.usb_otg_reboot_attempts is None:
+        return event.detail
+    reason = translation_for(config.locale).gettext(event.usb_otg_reason)
+    return _text(
+        config, _USB_ESCALATION_TEMPLATE, attempts=event.usb_otg_reboot_attempts, reason=reason
+    )
 
 
 def send_test_notification(
@@ -309,7 +454,8 @@ def _deliver_notification_outbox_unlocked(
                 ),
                 "",
                 *[
-                    f"- {event.occurred_at.isoformat()} {event.action}: {event.detail}"
+                    f"- {event.occurred_at.isoformat()} "
+                    f"{_action_label(config, event.action)}: {_event_detail(config, event)}"
                     for event in events[-20:]
                 ],
             ]
@@ -330,7 +476,9 @@ def _deliver_notification_outbox_unlocked(
                 payload = _message(
                     recipient=config.recipient,
                     subject=_text(
-                        config, "[BMGateway] notification: {action}", action=event.action
+                        config,
+                        "[BMGateway] notification: {action}",
+                        action=_action_label(config, event.action),
                     ),
                     body="\n".join(
                         [
@@ -339,8 +487,12 @@ def _deliver_notification_outbox_unlocked(
                                 "Occurred at: {timestamp}",
                                 timestamp=event.occurred_at.isoformat(),
                             ),
-                            _text(config, "Event: {action}", action=event.action),
-                            _text(config, "Detail: {detail}", detail=event.detail),
+                            _text(
+                                config,
+                                "Event: {action}",
+                                action=_action_label(config, event.action),
+                            ),
+                            _text(config, "Detail: {detail}", detail=_event_detail(config, event)),
                             "",
                         ]
                     ),

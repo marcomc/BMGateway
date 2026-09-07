@@ -524,5 +524,15 @@
   "[BMGateway] notification test: {hostname}": "[BMGateway] проверка уведомлений: {hostname}", "BMGateway system-mail notification delivery is working.": "Доставка уведомлений BMGateway через системную почту работает.",
   "BMGateway recovered notification delivery on {hostname}.": "BMGateway восстановил доставку уведомлений на {hostname}.", "Events retained: {count}": "Сохранено событий: {count}", "First event: {timestamp}": "Первое событие: {timestamp}", "Last event: {timestamp}": "Последнее событие: {timestamp}",
   "[BMGateway] notification summary": "[BMGateway] сводка уведомлений", "[BMGateway] notification: {action}": "[BMGateway] уведомление: {action}", "Occurred at: {timestamp}": "Произошло: {timestamp}", "Event: {action}": "Событие: {action}", "Detail: {detail}": "Подробности: {detail}",
-  "notifications.recipient must not be empty when notifications are enabled": "При включенных уведомлениях получатель обязателен", "notifications.recipient must be a single email address": "Получатель должен быть одним адресом электронной почты", "notifications.locale must be a supported locale": "Язык уведомлений должен поддерживаться", "notifications.offline_delivery must be one of: summary, individual, drop": "Офлайн-доставка должна быть сводной, отдельной или с удалением", "notifications.offline_retention_days must be between 1 and 30": "Срок хранения офлайн должен быть от 1 до 30 дней", "notifications.offline_max_events must be between 1 and 1000": "Максимум ожидающих уведомлений должен быть от 1 до 1000"
+  "notifications.recipient must not be empty when notifications are enabled": "При включенных уведомлениях получатель обязателен", "notifications.recipient must be a single email address": "Получатель должен быть одним адресом электронной почты", "notifications.locale must be a supported locale": "Язык уведомлений должен поддерживаться", "notifications.offline_delivery must be one of: summary, individual, drop": "Офлайн-доставка должна быть сводной, отдельной или с удалением", "notifications.offline_retention_days must be between 1 and 30": "Срок хранения офлайн должен быть от 1 до 30 дней", "notifications.offline_max_events must be between 1 and 1000": "Максимум ожидающих уведомлений должен быть от 1 до 1000",
+  "USB OTG recovery exhausted": "Восстановление USB OTG исчерпано",
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "Рамка USB OTG не обнаружена после {attempts} попыток перезагрузки: {reason}",
+  "USB OTG backing image is missing": "Образ диска USB OTG отсутствует",
+  "USB OTG gadget is not configured": "Устройство USB OTG не настроено",
+  "USB OTG gadget status is unreadable": "Не удалось прочитать состояние устройства USB OTG",
+  "USB OTG gadget is detached": "Устройство USB OTG отключено",
+  "USB OTG controller state is unreadable": "Не удалось прочитать состояние контроллера USB OTG",
+  "UDC state is not configured": "Состояние UDC не настроено",
+  "USB OTG reboot boot identity is unavailable": "Идентификатор загрузки для перезагрузки USB OTG недоступен",
+  "Reboot scheduling failed": "Не удалось запланировать перезагрузку"
 }

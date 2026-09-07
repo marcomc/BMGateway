@@ -187,6 +187,7 @@ def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:
         config=config,
         state=state,
         now_monotonic=20.0,
+        usb_otg_boot_id_reader=lambda: "boot-one",
         usb_otg_health_checker=_unhealthy,
         usb_otg_rebind_action=_rebind,
         usb_otg_state_checkpoint=_checkpoint,
@@ -195,6 +196,7 @@ def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:
         config=config,
         state=state,
         now_monotonic=30.0,
+        usb_otg_boot_id_reader=lambda: "boot-two",
         usb_otg_health_checker=_unhealthy,
         usb_otg_rebind_action=_rebind,
         usb_otg_state_checkpoint=_checkpoint,
@@ -208,7 +210,7 @@ def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:
     assert [event.action for event in third] == ["usb_otg_recovery_exhausted"]
     assert rebind_calls == [("/var/lib/bm-gateway/usb-otg/bmgateway-frame.img", "bmgw_frame")]
     assert state.usb_otg_reboot_attempts_used == 1
-    assert checkpoints == [(True, 0), (True, 1)]
+    assert checkpoints == [(True, 0), (True, 0), (True, 1)]
 
 
 def test_self_healing_resets_usb_otg_recovery_after_enumeration_returns() -> None:

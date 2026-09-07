@@ -524,5 +524,15 @@
   "[BMGateway] notification test: {hostname}": "[BMGateway] सूचना परीक्षण: {hostname}", "BMGateway system-mail notification delivery is working.": "BMGateway सिस्टम-मेल सूचना वितरण काम कर रहा है।",
   "BMGateway recovered notification delivery on {hostname}.": "BMGateway ने {hostname} पर सूचना वितरण बहाल किया।", "Events retained: {count}": "रखे गए इवेंट: {count}", "First event: {timestamp}": "पहला इवेंट: {timestamp}", "Last event: {timestamp}": "अंतिम इवेंट: {timestamp}",
   "[BMGateway] notification summary": "[BMGateway] सूचना सारांश", "[BMGateway] notification: {action}": "[BMGateway] सूचना: {action}", "Occurred at: {timestamp}": "घटित समय: {timestamp}", "Event: {action}": "इवेंट: {action}", "Detail: {detail}": "विवरण: {detail}",
-  "notifications.recipient must not be empty when notifications are enabled": "सूचनाएं सक्षम होने पर प्राप्तकर्ता आवश्यक है", "notifications.recipient must be a single email address": "प्राप्तकर्ता एक ही ईमेल पता होना चाहिए", "notifications.locale must be a supported locale": "सूचना भाषा समर्थित होनी चाहिए", "notifications.offline_delivery must be one of: summary, individual, drop": "ऑफ़लाइन वितरण सारांश, व्यक्तिगत या हटाएं होना चाहिए", "notifications.offline_retention_days must be between 1 and 30": "ऑफ़लाइन प्रतिधारण 1 से 30 दिनों के बीच होना चाहिए", "notifications.offline_max_events must be between 1 and 1000": "अधिकतम लंबित सूचनाएं 1 से 1000 के बीच होनी चाहिए"
+  "notifications.recipient must not be empty when notifications are enabled": "सूचनाएं सक्षम होने पर प्राप्तकर्ता आवश्यक है", "notifications.recipient must be a single email address": "प्राप्तकर्ता एक ही ईमेल पता होना चाहिए", "notifications.locale must be a supported locale": "सूचना भाषा समर्थित होनी चाहिए", "notifications.offline_delivery must be one of: summary, individual, drop": "ऑफ़लाइन वितरण सारांश, व्यक्तिगत या हटाएं होना चाहिए", "notifications.offline_retention_days must be between 1 and 30": "ऑफ़लाइन प्रतिधारण 1 से 30 दिनों के बीच होना चाहिए", "notifications.offline_max_events must be between 1 and 1000": "अधिकतम लंबित सूचनाएं 1 से 1000 के बीच होनी चाहिए",
+  "USB OTG recovery exhausted": "USB OTG पुनर्प्राप्ति समाप्त",
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "{attempts} बार रीबूट करने के प्रयास के बाद भी USB OTG फ़्रेम की पहचान उपलब्ध नहीं हुई: {reason}",
+  "USB OTG backing image is missing": "USB OTG डिस्क इमेज मौजूद नहीं है",
+  "USB OTG gadget is not configured": "USB OTG गैजेट कॉन्फ़िगर नहीं किया गया है",
+  "USB OTG gadget status is unreadable": "USB OTG गैजेट की स्थिति पढ़ी नहीं जा सकती",
+  "USB OTG gadget is detached": "USB OTG गैजेट डिस्कनेक्ट है",
+  "USB OTG controller state is unreadable": "USB OTG नियंत्रक की स्थिति पढ़ी नहीं जा सकती",
+  "UDC state is not configured": "UDC स्थिति कॉन्फ़िगर नहीं की गई है",
+  "USB OTG reboot boot identity is unavailable": "USB OTG रीबूट के लिए बूट पहचान उपलब्ध नहीं है",
+  "Reboot scheduling failed": "रीबूट शेड्यूल करना विफल रहा"
 }

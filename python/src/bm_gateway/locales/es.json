@@ -527,5 +527,15 @@
   "Events retained: {count}": "Eventos conservados: {count}", "First event: {timestamp}": "Primer evento: {timestamp}", "Last event: {timestamp}": "Último evento: {timestamp}",
   "[BMGateway] notification summary": "[BMGateway] resumen de notificaciones", "[BMGateway] notification: {action}": "[BMGateway] notificación: {action}",
   "Occurred at: {timestamp}": "Ocurrió el: {timestamp}", "Event: {action}": "Evento: {action}", "Detail: {detail}": "Detalle: {detail}",
-  "notifications.recipient must not be empty when notifications are enabled": "El destinatario es obligatorio cuando las notificaciones están activadas", "notifications.recipient must be a single email address": "El destinatario debe ser una sola dirección de correo", "notifications.locale must be a supported locale": "El idioma de las notificaciones debe ser compatible", "notifications.offline_delivery must be one of: summary, individual, drop": "La entrega sin conexión debe ser resumen, individual o descartar", "notifications.offline_retention_days must be between 1 and 30": "La retención sin conexión debe estar entre 1 y 30 días", "notifications.offline_max_events must be between 1 and 1000": "El máximo de notificaciones pendientes debe estar entre 1 y 1000"
+  "notifications.recipient must not be empty when notifications are enabled": "El destinatario es obligatorio cuando las notificaciones están activadas", "notifications.recipient must be a single email address": "El destinatario debe ser una sola dirección de correo", "notifications.locale must be a supported locale": "El idioma de las notificaciones debe ser compatible", "notifications.offline_delivery must be one of: summary, individual, drop": "La entrega sin conexión debe ser resumen, individual o descartar", "notifications.offline_retention_days must be between 1 and 30": "La retención sin conexión debe estar entre 1 y 30 días", "notifications.offline_max_events must be between 1 and 1000": "El máximo de notificaciones pendientes debe estar entre 1 y 1000",
+  "USB OTG recovery exhausted": "Recuperación USB OTG agotada",
+  "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}": "El marco USB OTG sigue sin detectarse tras {attempts} intento(s) de reinicio: {reason}",
+  "USB OTG backing image is missing": "Falta la imagen de disco USB OTG",
+  "USB OTG gadget is not configured": "El dispositivo USB OTG no está configurado",
+  "USB OTG gadget status is unreadable": "No se puede leer el estado del dispositivo USB OTG",
+  "USB OTG gadget is detached": "El dispositivo USB OTG está desconectado",
+  "USB OTG controller state is unreadable": "No se puede leer el estado del controlador USB OTG",
+  "UDC state is not configured": "El estado UDC no está configurado",
+  "USB OTG reboot boot identity is unavailable": "El identificador de arranque para el reinicio USB OTG no está disponible",
+  "Reboot scheduling failed": "No se pudo programar el reinicio"
 }
