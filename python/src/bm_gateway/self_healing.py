@@ -724,6 +724,29 @@ def evaluate_self_healing(
                 and state.wifi_recovery_phase == "reboot_authorized"
                 and healing.wifi_reboot_enabled
             )
+            resumed_pending = (
+                state.wifi_outage_started_monotonic is None
+                and state.wifi_recovery_pending
+                and state.wifi_recovery_phase == "pending"
+                and state.wifi_recovery_started_at > 0
+            )
+            if resumed_pending:
+                persisted_outage_seconds = max(0.0, wall_time - state.wifi_recovery_started_at)
+                state.wifi_outage_started_monotonic = now - persisted_outage_seconds
+                state.wifi_recovery_outage_seconds = max(
+                    state.wifi_recovery_outage_seconds,
+                    int(persisted_outage_seconds),
+                )
+                events.append(
+                    SelfHealingEvent(
+                        action="wifi_connectivity_lost",
+                        status="failed",
+                        details={
+                            "connectivity_check_host": healing.connectivity_check_host,
+                            "wifi_interface": healing.wifi_interface,
+                        },
+                    )
+                )
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
                 if not state.wifi_recovery_pending:

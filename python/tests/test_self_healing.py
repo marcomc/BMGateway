@@ -531,6 +531,128 @@ def test_repeated_wifi_reboots_preserve_the_original_outage_origin() -> None:
     assert state.wifi_recovery_started_at == original_start
 
 
+def test_pending_wifi_handoff_resumes_outage_timer_after_restart() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=5,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=15,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_outage_seconds = 120
+    state.wifi_recovery_started_at = 1_000.0
+    state.wifi_recovery_handoff_id = "pending-after-restart"
+    state.wifi_recovery_phase = "pending"
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=10_000.0,
+        now_wall_time=1_360.0,
+        connectivity_checker=lambda _host, _interface: False,
+        reconnect_action=lambda _interface: False,
+    )
+
+    assert [event.action for event in events] == [
+        "wifi_connectivity_lost",
+        "wifi_reconnect_attempted",
+    ]
+    assert state.wifi_outage_started_monotonic == 9_640.0
+    assert state.wifi_recovery_outage_seconds == 360
+    assert state.wifi_recovery_started_at == 1_000.0
+
+
+def test_pending_wifi_handoff_reconnect_threshold_survives_restarts(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=5,
+            wifi_reboot_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_started_at = 1_000.0
+    persisted.wifi_recovery_handoff_id = "pending-reconnect"
+    persisted.wifi_recovery_phase = "pending"
+    persist_wifi_watchdog_state(state_path, persisted)
+    state = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, state)
+
+    first = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=2_000.0,
+        now_wall_time=1_200.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    persist_wifi_watchdog_state(state_path, state)
+    restarted = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, restarted)
+    second = evaluate_self_healing(
+        config=config,
+        state=restarted,
+        now_monotonic=2_101.0,
+        now_wall_time=1_301.0,
+        connectivity_checker=lambda _host, _interface: False,
+        reconnect_action=lambda _interface: False,
+    )
+
+    assert [event.action for event in first] == ["wifi_connectivity_lost"]
+    assert [event.action for event in second] == [
+        "wifi_connectivity_lost",
+        "wifi_reconnect_attempted",
+    ]
+    assert second[1].status == "failed"
+    assert second[1].details["outage_seconds"] == 301
+
+
+def test_pending_wifi_handoff_reboot_threshold_survives_restart() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=False,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=5,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_started_at = 1_000.0
+    state.wifi_recovery_handoff_id = "pending-reboot"
+    state.wifi_recovery_phase = "pending"
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=2_300.0,
+        now_wall_time=1_301.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert [event.action for event in events] == [
+        "wifi_connectivity_lost",
+        "wifi_reboot_requested",
+    ]
+    assert events[1].details["outage_seconds"] == 301
+    assert state.wifi_recovery_phase == "reboot_authorized"
+
+
 def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(
