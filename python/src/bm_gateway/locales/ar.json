@@ -1,4 +1,10 @@
 {
+"Cannot load lifecycle notification state": "تعذر تحميل حالة إشعارات دورة حياة النظام",
+"Cannot persist lifecycle notification state": "تعذر حفظ حالة إشعارات دورة حياة النظام",
+"System started": "بدأ تشغيل النظام",
+"System shutting down": "جارٍ إيقاف تشغيل النظام",
+"A system boot was observed. This is not an application restart.": "تم رصد إقلاع للنظام. هذا ليس إعادة تشغيل للتطبيق.",
+"The system is shutting down or rebooting.": "يتم إيقاف تشغيل النظام أو إعادة تشغيله.",
   "; the UI normalizes it to Bluetooth MAC format.": "; the UI normalizes it to Bluetooth MAC format.",
   "AGM Battery": "AGM Battery",
   "ATV / Quad": "ATV / Quad",

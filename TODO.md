@@ -2,6 +2,9 @@
 
 ## Next Steps
 
+- Complete release 0.4.0 update notifications in a separate feature branch:
+  report update outcome and explicitly indicate whether a reboot is required,
+  reusing PiServ components where applicable and the existing notification outbox.
 - Expand BM6-family archive-history recovery beyond the verified bounded sync.
   BM200/BM6 archive import now reads cumulative `d15505` page counts, stores
   voltage, SoC, temperature, raw record, page selector, record index, and

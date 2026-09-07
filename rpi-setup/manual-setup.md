@@ -149,7 +149,7 @@ preserved. The installer does not create mail credentials. For `msmtp`,
 configure `/etc/msmtprc` separately; the installer hardens an existing regular
 file to `root:msmtp` and mode `0640`, and applies the matching setgid override.
 Then enable Notifications in Settings. It also prepares the fixed bounded
-offline-delivery mode for current watchdog and future lifecycle notifications:
+offline-delivery mode for watchdog and system lifecycle notifications:
 `summary`, `individual`, or `drop`; `summary` is the default and avoids a long
 outage producing a burst of individual emails. Select a fixed notification
 language for unattended email; this setting intentionally does not inherit the
@@ -608,6 +608,25 @@ The handoff prevents duplicate alerts caused by concurrent runtimes or failed
 state acknowledgement. Duplicate queue requests re-confirm durable outbox
 storage before returning. System-mail delivery can still repeat if the process
 stops after `sendmail` accepts a message but before the outbox records success.
+
+System lifecycle notifications use the same Notifications enable switch,
+recipient, language, and offline-delivery policy. The installer enables
+`bm-gateway-boot-notification.service`, which records a boot once per Linux boot
+ID, and independently arms `bm-gateway-lifecycle.service` for shutdown. Shutdown
+is recorded only when systemd reports that the host is stopping. Ordinary
+service restarts do not produce shutdown mail. Installing this feature on a
+running host reports that the current boot was observed, not a new reboot.
+
+Pending lifecycle events survive process restarts and follow the configured
+retention and event-count limits. Shutdown mail is best effort: sudden power
+loss cannot run the hook, and network teardown or the service timeout can defer
+delivery until the next boot. Events describe an observed boot or an orderly
+shutdown/reboot, not the cause of the event.
+
+The installed CLI entrypoints are `bm-gateway lifecycle boot` and
+`bm-gateway lifecycle shutdown`, with the usual `--config` option and an optional
+`--state-dir`. They do not initiate a reboot or shutdown. Notification delivery
+waits if another watchdog has an uncertain acknowledgement.
 
 ## Optional: Prepare USB OTG Image Export
 

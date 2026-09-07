@@ -514,7 +514,58 @@ if [[ "${enable_cockpit}" -eq 1 ]] && ! dpkg -s cockpit >/dev/null 2>&1; then
   apt-get install -y cockpit
 fi
 
+# Adapted from PiServ's boot and guarded ExecStop notification services.
+# A normal service restart must not report a host shutdown.
+cat > /etc/systemd/system/bm-gateway-lifecycle.service <<EOF
+[Unit]
+Description=BMGateway Shutdown Notification
+Wants=network-online.target
+After=network-online.target
+Before=bm-gateway.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+Environment=BMGATEWAY_CONFIG=${config_path}
+ExecStart=/usr/bin/true
+ExecStop=/usr/local/bin/bm-gateway --config \${BMGATEWAY_CONFIG} lifecycle shutdown --state-dir ${state_dir}
+User=${service_user}
+Group=${service_user}
+WorkingDirectory=${state_dir}
+TimeoutStartSec=45
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+cat > /etc/systemd/system/bm-gateway-boot-notification.service <<EOF
+[Unit]
+Description=BMGateway Boot Notification
+Wants=network-online.target
+After=network-online.target
+Before=bm-gateway.service
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=oneshot
+Environment=BMGATEWAY_CONFIG=${config_path}
+ExecStart=/usr/local/bin/bm-gateway --config \${BMGATEWAY_CONFIG} lifecycle boot --state-dir ${state_dir}
+User=${service_user}
+Group=${service_user}
+WorkingDirectory=${state_dir}
+TimeoutStartSec=45
+Restart=on-failure
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
+systemctl enable bm-gateway-lifecycle.service
+systemctl enable bm-gateway-boot-notification.service
 systemctl enable bm-gateway.service
 if [[ "${enable_web}" -eq 1 ]]; then
   systemctl enable bm-gateway-web.service
@@ -529,6 +580,8 @@ if [[ "${enable_cockpit}" -eq 1 ]]; then
 fi
 
 if [[ "${start_services}" -eq 1 ]]; then
+  systemctl restart bm-gateway-lifecycle.service
+  systemctl restart bm-gateway-boot-notification.service
   systemctl restart bm-gateway.service
   if [[ "${enable_web}" -eq 1 ]]; then
     systemctl restart bm-gateway-web.service

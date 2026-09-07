@@ -178,6 +178,9 @@ software and protocol research that should be credited explicitly.
 
 ### Open-Source Software Used
 
+- [PiServ](https://github.com/marcomc/PiServ) by Marco Massari Calderone:
+  BMGateway adapts its boot and guarded shutdown service pattern, using
+  BMGateway's existing notification transport and outbox.
 - [Bleak](https://github.com/hbldh/bleak) by
   [Henrik Blidh](https://github.com/hbldh) and contributors.
   `BMGateway` uses `Bleak` as the Python BLE client/scanner foundation for the

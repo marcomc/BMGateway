@@ -36,6 +36,7 @@ from .self_healing import (
     usb_otg_watchdog_transaction,
     wifi_watchdog_state_path,
 )
+from .system_lifecycle import transfer_lifecycle_notifications
 
 _REBOOT_ACTIONS = {
     "periodic_reboot_requested",
@@ -177,6 +178,11 @@ def run_self_healing(
     before = replace(state)
     try:
         with usb_otg_watchdog_transaction(path, state, allow_unavailable=True) as usb_state_error:
+            lifecycle_error: NotificationOutboxError | None = None
+            try:
+                transfer_lifecycle_notifications(config=config, state_dir=state_dir)
+            except NotificationOutboxError as error:
+                lifecycle_error = error
             before = replace(state)
             wifi_state_error: WiFiWatchdogStateError | None = None
             had_wifi_recovery_pending = state.wifi_recovery_pending
@@ -401,7 +407,19 @@ def run_self_healing(
                     ),
                 )
 
-            defer_notification_delivery = False
+            defer_notification_delivery = lifecycle_error is not None
+            if lifecycle_error is not None:
+                events.append(
+                    SelfHealingEvent(
+                        action="lifecycle_notification_handoff_failed",
+                        status="failed",
+                        details={
+                            "reason": translation_for(config.notifications.locale).gettext(
+                                str(lifecycle_error)
+                            )
+                        },
+                    )
+                )
             for event in events:
                 if event.action == "wifi_connectivity_restored":
                     if defer_notification_delivery:

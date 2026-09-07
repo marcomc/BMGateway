@@ -1,4 +1,10 @@
 {
+"Cannot load lifecycle notification state": "Impossibile caricare lo stato delle notifiche del ciclo di vita",
+"Cannot persist lifecycle notification state": "Impossibile salvare lo stato delle notifiche del ciclo di vita",
+"System started": "Sistema avviato",
+"System shutting down": "Arresto del sistema in corso",
+"A system boot was observed. This is not an application restart.": "È stato rilevato un avvio del sistema. Non è un riavvio dell’applicazione.",
+"The system is shutting down or rebooting.": "Il sistema si sta spegnendo o riavviando.",
   "1 day": "1 giorno",
   "1 year": "1 anno",
   "2 years": "2 anni",

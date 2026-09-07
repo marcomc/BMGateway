@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- System boot and orderly shutdown notifications share the existing mail
+  settings and bounded outbox. Same-boot service restarts do not repeat boot
+  messages or generate false shutdown messages.
 - Added an optional system-mail notification foundation using the host
   `sendmail` compatibility interface from `msmtp-mta`, with Settings controls,
   a test-email action, and no SMTP credentials stored in the repository.

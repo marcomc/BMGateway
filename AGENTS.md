@@ -61,6 +61,9 @@ At the start of every new AI agent chat for this repository, read:
 - For watchdog notification handoffs, serialize state reload, evaluation,
   outbox acknowledgement, and delivery across daemon and one-shot entrypoints.
   Test checkpoint failures both before and after atomic file replacement.
+- Keep shutdown-hook arming independent of fallible boot notification work.
+  Notification-only state failures must not disable hardware recovery; retain
+  diagnostics and defer unsafe delivery or reboot instead.
 - When a recovery action can restart the process before its outcome is known,
   persist the minimal pending recovery state before scheduling it and test the
   first healthy cycle of a fresh process.

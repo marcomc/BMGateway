@@ -233,6 +233,10 @@ def build_parser() -> argparse.ArgumentParser:
             help="Override the base directory used for runtime state files.",
         )
 
+    lifecycle_parser = subparsers.add_parser("lifecycle")
+    lifecycle_parser.add_argument("event", choices=("boot", "shutdown"))
+    lifecycle_parser.add_argument("--state-dir", type=Path)
+
     run_parser = subparsers.add_parser("run", help="Execute the gateway runtime.")
     run_parser.add_argument("--once", action="store_true", help="Run one iteration and exit.")
     run_parser.add_argument(
@@ -1288,6 +1292,33 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     parser = build_parser()
     args = parser.parse_args(args_list)
+
+    if args.command == "lifecycle":
+        from .localization import translation_for
+        from .notifications import NotificationOutboxError
+        from .self_healing import USBOTGWatchdogStateError, WiFiWatchdogStateError
+        from .system_lifecycle import notify_system_lifecycle
+
+        lifecycle_config = None
+        try:
+            config = load_config(args.config)
+            lifecycle_config = config
+            notify_system_lifecycle(
+                config=config,
+                state_dir=database_file_path(config, state_dir=args.state_dir).parent.parent,
+                action=args.event,
+            )
+        except (
+            OSError,
+            ValueError,
+            NotificationOutboxError,
+            USBOTGWatchdogStateError,
+            WiFiWatchdogStateError,
+        ) as error:
+            locale = lifecycle_config.notifications.locale if lifecycle_config else "en"
+            print(translation_for(locale).gettext(str(error)), file=sys.stderr)
+            return 1
+        return 0
 
     if args.command == "config":
         if args.config_command == "show":
