@@ -175,10 +175,8 @@ def run_self_healing(
     path = usb_otg_watchdog_state_path(state_dir)
     wifi_path = wifi_watchdog_state_path(state_dir)
     before = replace(state)
-    loaded = False
     try:
-        with usb_otg_watchdog_transaction(path, state):
-            loaded = True
+        with usb_otg_watchdog_transaction(path, state, allow_unavailable=True) as usb_state_error:
             before = replace(state)
             wifi_state_error: WiFiWatchdogStateError | None = None
             had_wifi_recovery_pending = state.wifi_recovery_pending
@@ -216,7 +214,7 @@ def run_self_healing(
 
             periodic_handoff_changed = False
             wifi_handoff_changed = False
-            if state.periodic_reboot_requested:
+            if state.periodic_reboot_requested and usb_state_error is None:
                 if not state.periodic_reboot_scheduled_boot_id:
                     state.periodic_reboot_scheduled_boot_id = reboot_boot_id()
                     periodic_handoff_changed = True
@@ -239,7 +237,7 @@ def run_self_healing(
                 persist_usb_otg_watchdog_state(path, state)
             if wifi_handoff_changed:
                 persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
-            persisted_periodic_reboot = state.periodic_reboot_requested
+            persisted_periodic_reboot = state.periodic_reboot_requested and usb_state_error is None
             persisted_usb = replace(state)
             persisted_wifi = replace(state)
             persisted_periodic = state.periodic_reboot_requested
@@ -248,6 +246,8 @@ def run_self_healing(
 
             def usb_checkpoint() -> None:
                 nonlocal persisted_periodic, persisted_periodic_boot_id, persisted_usb
+                if usb_state_error is not None:
+                    return
                 if any(
                     value != getattr(persisted_usb, name)
                     for name, value in vars(state).items()
@@ -277,6 +277,8 @@ def run_self_healing(
 
             def periodic_checkpoint() -> None:
                 nonlocal persisted_periodic, persisted_periodic_boot_id
+                if usb_state_error is not None:
+                    return
                 if (
                     state.periodic_reboot_requested != persisted_periodic
                     or state.periodic_reboot_scheduled_boot_id != persisted_periodic_boot_id
@@ -286,10 +288,19 @@ def run_self_healing(
                     persisted_periodic_boot_id = state.periodic_reboot_scheduled_boot_id
 
             healing_config = config
-            if wifi_state_error is not None:
+            if usb_state_error is not None:
                 healing_config = replace(
                     config,
-                    self_healing=replace(config.self_healing, wifi_watchdog_enabled=False),
+                    self_healing=replace(
+                        config.self_healing,
+                        usb_otg_watchdog_enabled=False,
+                        periodic_reboot_enabled=False,
+                    ),
+                )
+            if wifi_state_error is not None:
+                healing_config = replace(
+                    healing_config,
+                    self_healing=replace(healing_config.self_healing, wifi_watchdog_enabled=False),
                 )
 
             if (
@@ -309,6 +320,18 @@ def run_self_healing(
                 usb_otg_state_checkpoint=usb_checkpoint,
                 wifi_state_checkpoint=wifi_checkpoint,
             )
+            if usb_state_error is not None:
+                events.append(
+                    SelfHealingEvent(
+                        action="usb_otg_watchdog_state_unavailable",
+                        status="failed",
+                        details={
+                            "reason": translation_for(config.notifications.locale).gettext(
+                                str(usb_state_error)
+                            )
+                        },
+                    )
+                )
             if persisted_periodic_reboot:
                 if config.self_healing.periodic_reboot_enabled and not any(
                     event.action == "periodic_reboot_requested" for event in events
@@ -507,16 +530,6 @@ def run_self_healing(
                         )
                     )
     except (USBOTGWatchdogStateError, NotificationOutboxError, WiFiWatchdogStateError) as error:
-        if not loaded:
-            state.usb_otg_escalation_notification_pending = False
-            events = evaluate_self_healing(
-                config=replace(
-                    config,
-                    self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=False),
-                ),
-                state=state,
-                reboot_action=lambda: None,
-            )
         events = _defer_reboots(events, state, before)
         events.append(
             SelfHealingEvent(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import fcntl
 import json
 import multiprocessing
 import os
@@ -2196,6 +2197,189 @@ def test_corrupt_usb_does_not_disable_existing_wifi_reconnect(
     runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
     assert reconnects == [config.self_healing.wifi_interface]
     assert not state.wifi_reboot_requested
+
+
+@pytest.mark.parametrize("fault", ["corrupt", "unreadable", "durability"])
+def test_unavailable_usb_retains_serialized_wifi_handoff_until_repair(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fault: str
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+        ),
+    )
+    usb_path = _seed(tmp_path)
+    original = usb_path.read_bytes()
+    delivered = _wifi_mail_delivery(monkeypatch)
+    reconnects: list[str] = []
+    state = new_self_healing_state(now_monotonic=0)
+    state.wifi_outage_started_monotonic = 0
+    healthy = False
+
+    def reconnect(interface: str) -> bool:
+        # A separate open description must be excluded throughout evaluation.
+        with (usb_path.parent / f".{usb_path.name}.lock").open("a+") as contender:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        reconnects.append(interface)
+        return True
+
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            now_monotonic=120,
+            connectivity_checker=lambda *_: healthy,
+            reconnect_action=reconnect,
+        ),
+    )
+    with monkeypatch.context() as degraded:
+        if fault == "corrupt":
+            usb_path.write_text("invalid")
+        elif fault == "unreadable":
+            original_load = self_healing.load_usb_otg_watchdog_state
+
+            def fail_load(path: Path, current: self_healing.SelfHealingState) -> None:
+                if path == usb_path:
+                    raise self_healing.USBOTGWatchdogStateError(
+                        "Cannot read USB OTG watchdog state"
+                    )
+                original_load(path, current)
+
+            degraded.setattr(self_healing, "load_usb_otg_watchdog_state", fail_load)
+        else:
+            original_fsync = os.fsync
+
+            def fail_usb_sync(descriptor: int) -> None:
+                if os.fstat(descriptor).st_ino == usb_path.stat().st_ino:
+                    raise OSError("USB file fsync failure")
+                original_fsync(descriptor)
+
+            degraded.setattr(os, "fsync", fail_usb_sync)
+        unchanged = usb_path.read_bytes()
+        degraded.setattr(
+            runtime, "persist_usb_otg_watchdog_state", lambda *_: pytest.fail("USB write")
+        )
+        degraded.setattr(runtime, "default_schedule_reboot", lambda: pytest.fail("reboot"))
+        events = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+        assert "usb_otg_watchdog_state_unavailable" in [event.action for event in events]
+        assert reconnects == ["wlan0"]
+        assert json.loads(wifi_watchdog_state_path(tmp_path).read_text())["recovery_pending"]
+        assert delivered == []
+        healthy = True
+        for _ in range(2):
+            runtime.run_self_healing(
+                config=config, state=new_self_healing_state(), state_dir=tmp_path
+            )
+        assert not json.loads(wifi_watchdog_state_path(tmp_path).read_text())["recovery_pending"]
+        assert usb_path.read_bytes() == unchanged
+        assert delivered == []
+        outbox = notifications.notification_outbox_path(tmp_path).read_bytes()
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+        assert notifications.notification_outbox_path(tmp_path).read_bytes() == outbox
+    usb_path.write_bytes(original)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(delivered) == 1
+    assert "Events retained: 2" in delivered[0]
+
+
+def test_unavailable_shared_lock_never_evaluates_wifi(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_lock(*args: object) -> None:
+        raise OSError("lock unavailable")
+
+    monkeypatch.setattr(fcntl, "flock", fail_lock)
+    monkeypatch.setattr(
+        runtime, "evaluate_self_healing", lambda **_: pytest.fail("unlocked evaluation")
+    )
+    events = runtime.run_self_healing(
+        config=_wifi_config(),
+        state=new_self_healing_state(),
+        state_dir=tmp_path,
+    )
+    assert [event.action for event in events] == ["usb_otg_watchdog_state_unavailable"]
+    assert not wifi_watchdog_state_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize(
+    "allow_unavailable, corrupt", [(False, False), (True, False), (True, True)]
+)
+def test_usb_transaction_releases_lock_and_does_not_swallow_body_error(
+    tmp_path: Path, allow_unavailable: bool, corrupt: bool
+) -> None:
+    path = _seed(tmp_path)
+    if corrupt:
+        path.write_text("invalid")
+    state = new_self_healing_state()
+    with pytest.raises(self_healing.USBOTGWatchdogStateError, match="body failure"):
+        with self_healing.usb_otg_watchdog_transaction(
+            path, state, allow_unavailable=allow_unavailable
+        ) as error:
+            assert (error is not None) == corrupt
+            raise self_healing.USBOTGWatchdogStateError("body failure")
+    with (path.parent / f".{path.name}.lock").open("a+") as contender:
+        fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    path.write_text("invalid")
+    with pytest.raises(self_healing.USBOTGWatchdogStateError):
+        with self_healing.usb_otg_watchdog_transaction(path, state):
+            pytest.fail("strict transaction accepted corrupt state")
+    with (path.parent / f".{path.name}.lock").open("a+") as contender:
+        fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_ended_wifi_handoff_transfers_before_evaluation_with_unavailable_usb(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _wifi_config()
+    usb_path = _seed(tmp_path)
+    original = usb_path.read_bytes()
+    usb_path.write_text("invalid")
+    state = new_self_healing_state()
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_observed = True
+    state.wifi_recovery_phase = "reconnect_pending"
+    state.wifi_recovery_handoff_id = "ended-incident"
+    state.wifi_recovery_interface = "wlan0"
+    state.wifi_recovery_started_at = 1000.0
+    state.wifi_recovery_outage_seconds = 60
+    wifi_path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
+    delivered = _wifi_mail_delivery(monkeypatch)
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        assert not json.loads(wifi_path.read_text())["recovery_pending"]
+        assert notifications.notification_outbox_path(tmp_path).exists()
+        with (usb_path.parent / f".{usb_path.name}.lock").open("a+") as contender:
+            with pytest.raises(BlockingIOError):
+                fcntl.flock(contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        return []
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: pytest.fail("reboot"))
+    with monkeypatch.context() as degraded:
+        degraded.setattr(
+            runtime, "persist_usb_otg_watchdog_state", lambda *_: pytest.fail("USB write")
+        )
+        events = runtime.run_self_healing(
+            config=config, state=new_self_healing_state(), state_dir=tmp_path
+        )
+    assert {event.action for event in events} == {
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+        "usb_otg_watchdog_state_unavailable",
+    }
+    assert usb_path.read_text() == "invalid"
+    assert delivered == []
+    usb_path.write_bytes(original)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(delivered) == 1
+    assert "Events retained: 2" in delivered[0]
 
 
 def test_unchanged_usb_state_is_not_rewritten_for_wifi_changes(

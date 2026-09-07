@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Wi-Fi recovery retains serialized state and notification handoffs when USB
+  watchdog state cannot be read or synchronized. Shared delivery and reboots
+  remain deferred until that state is available again.
 - Initial Wi-Fi outage checkpoints are retried after storage errors without
   losing the outage timer or mistaking unsaved state for a completed handoff.
 - Completed Wi-Fi recovery reboots restart the configured retry delays without

@@ -598,8 +598,11 @@ the budget cancels a pending request that exceeds the new limit.
 
 Disabling notifications acknowledges pending watchdog state without adding an
 alert; existing queued mail remains retained. Selecting `drop` discards queued
-alerts. A state-read failure suspends USB recovery and outbox delivery while
-existing Wi-Fi reconnect checks continue.
+alerts. An unreadable or unsynchronized USB state suspends USB recovery, shared
+outbox delivery, and reboot scheduling. Wi-Fi reconnect checks continue under
+the shared lock, saving recovery events and notification acknowledgements for
+delivery after USB state becomes available. If the shared lock itself cannot be
+acquired, recovery checks are skipped rather than run without serialization.
 
 The handoff prevents duplicate alerts caused by concurrent runtimes or failed
 state acknowledgement. Duplicate queue requests re-confirm durable outbox

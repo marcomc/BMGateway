@@ -567,7 +567,9 @@ def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
 
 
 @contextmanager
-def usb_otg_watchdog_transaction(path: Path, state: SelfHealingState) -> Iterator[None]:
+def usb_otg_watchdog_transaction(
+    path: Path, state: SelfHealingState, *, allow_unavailable: bool = False
+) -> Iterator[USBOTGWatchdogStateError | None]:
     """Serialize reload, evaluation, outbox acknowledgement and delivery.
 
     Always acquire this lock before the notification outbox lock. The runtime
@@ -585,30 +587,38 @@ def usb_otg_watchdog_transaction(path: Path, state: SelfHealingState) -> Iterato
     try:
         # Missing state also replaces a stale process-local cache.
         current = new_self_healing_state()
-        load_usb_otg_watchdog_state(path, current)
+        initialization_error: USBOTGWatchdogStateError | None = None
         # A predecessor may have replaced JSON then failed directory fsync.
         # Establish durability before trusting an ACK observed from that file.
         try:
-            with path.open("rb") as state_file:
-                os.fsync(state_file.fileno())
-        except FileNotFoundError:
-            pass
-        except OSError as error:
-            raise USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state") from error
-        try:
+            load_usb_otg_watchdog_state(path, current)
+            try:
+                with path.open("rb") as state_file:
+                    os.fsync(state_file.fileno())
+            except FileNotFoundError:
+                pass
             descriptor = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
             try:
                 os.fsync(descriptor)
             finally:
                 os.close(descriptor)
-        except OSError as error:
-            raise USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state") from error
-        for name in vars(current):
-            if name.startswith("usb_otg_"):
-                setattr(state, name, getattr(current, name))
-        state.periodic_reboot_requested = current.periodic_reboot_requested
-        state.periodic_reboot_scheduled_boot_id = current.periodic_reboot_scheduled_boot_id
-        yield
+        except (USBOTGWatchdogStateError, OSError) as error:
+            initialization_error = (
+                error
+                if isinstance(error, USBOTGWatchdogStateError)
+                else USBOTGWatchdogStateError("Cannot persist USB OTG watchdog state")
+            )
+            if not allow_unavailable:
+                if initialization_error is error:
+                    raise
+                raise initialization_error from error
+        if initialization_error is None:
+            for name in vars(current):
+                if name.startswith("usb_otg_"):
+                    setattr(state, name, getattr(current, name))
+            state.periodic_reboot_requested = current.periodic_reboot_requested
+            state.periodic_reboot_scheduled_boot_id = current.periodic_reboot_scheduled_boot_id
+        yield initialization_error
     finally:
         handle.close()
 
