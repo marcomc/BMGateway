@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -180,10 +181,13 @@ def run_self_healing(
             before = replace(state)
             wifi_state_error: WiFiWatchdogStateError | None = None
             had_wifi_recovery_pending = state.wifi_recovery_pending
+            previous_retry_origin = state.wifi_retry_started_at
             try:
                 load_wifi_watchdog_state(wifi_path, state)
             except WiFiWatchdogStateError as error:
                 wifi_state_error = error
+            if wifi_state_error is None and previous_retry_origin != state.wifi_retry_started_at:
+                clear_wifi_recovery_transient_state(state)
             if wifi_state_error is None:
                 if wifi_path.exists():
                     confirm_wifi_watchdog_state_durable(wifi_path)
@@ -223,6 +227,8 @@ def run_self_healing(
                     state.wifi_reboot_scheduled_boot_id = reboot_boot_id()
                     wifi_handoff_changed = True
                 elif state.wifi_reboot_scheduled_boot_id != reboot_boot_id():
+                    state.wifi_retry_started_at = time.time()
+                    clear_wifi_recovery_transient_state(state)
                     state.wifi_recovery_phase = "pending"
                     state.wifi_reboot_scheduled_boot_id = ""
                     state.wifi_reboot_requested = False

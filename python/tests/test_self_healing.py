@@ -254,7 +254,7 @@ def test_persisted_wifi_reboot_authorization_is_retryable_immediately(tmp_path: 
     )
 
     assert [event.action for event in events] == ["wifi_reboot_requested"]
-    assert events[0].details["outage_seconds"] == 600
+    assert events[0].details["outage_seconds"] == 1000
     assert state.wifi_reboot_requested is True
 
 
@@ -487,6 +487,7 @@ def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume
     state.wifi_recovery_handoff_id = "incident"
     state.wifi_recovery_phase = "pending"
     state.wifi_recovery_observed = True
+    state.wifi_retry_started_at = 1200.0
     state.wifi_reconnect_notified_outcomes = ("failed", "completed")
     state.wifi_reboot_notified_boot_id = "boot-one"
     persist_wifi_watchdog_state(path, state, preserve_pending=False)
@@ -495,6 +496,7 @@ def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume
     assert loaded.wifi_reconnect_notified_outcomes == ("failed", "completed")
     assert loaded.wifi_reboot_notified_boot_id == "boot-one"
     assert loaded.wifi_recovery_observed is True
+    assert loaded.wifi_retry_started_at == 1200.0
     if consume:
         assert consume_wifi_recovery_notification(path, loaded, lambda _: None)
     else:
@@ -506,6 +508,7 @@ def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume
         assert current.wifi_reboot_notified_boot_id == ""
         assert current.wifi_recovery_handoff_id == ""
         assert current.wifi_recovery_observed is False
+        assert current.wifi_retry_started_at == 0.0
 
 
 @pytest.mark.parametrize("phase", ["pending", "reconnect_pending", "reboot_authorized"])
@@ -580,15 +583,18 @@ def test_wifi_notification_receipt_validation(tmp_path: Path, invalid: object) -
         load_wifi_watchdog_state(path, new_self_healing_state())
 
 
-@pytest.mark.parametrize("raw_timestamp", ["NaN", "Infinity", "-Infinity", str(10**400)])
+@pytest.mark.parametrize("field", ["recovery_started_at", "retry_started_at"])
+@pytest.mark.parametrize(
+    "raw_timestamp", ["NaN", "Infinity", "-Infinity", str(10**400), "true", "null", '"1"', "-1"]
+)
 def test_wifi_state_rejects_nonfinite_or_oversized_timestamp(
-    tmp_path: Path, raw_timestamp: str
+    tmp_path: Path, raw_timestamp: str, field: str
 ) -> None:
     state_path = wifi_watchdog_state_path(tmp_path)
     state_path.parent.mkdir(parents=True)
     state_path.write_text(
         '{"recovery_pending": true, "outage_seconds": 60, "wifi_interface": "wlan0", '
-        f'"recovery_started_at": {raw_timestamp}}}\n',
+        f'"{field}": {raw_timestamp}}}\n',
         encoding="utf-8",
     )
 

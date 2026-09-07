@@ -542,6 +542,10 @@ For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 reconnect attempts do not restore the link reliably. The reboot delay must be
 longer than the reconnect delay when both actions are enabled.
 
+After a scheduled Wi-Fi recovery reboot completes, reconnect and reboot delays
+start again. Service restarts preserve the retry timer; notification durations
+continue to describe the full outage, including time before the reboot.
+
 When system-mail Notifications are enabled, the Wi-Fi watchdog queues and
 attempts delivery for a reconnect attempt, a requested reboot, and the later
 connectivity restoration. `summary` and `individual` retain an undelivered

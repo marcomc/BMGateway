@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Completed Wi-Fi recovery reboots restart the configured retry delays without
+  losing the original outage duration. Service restarts preserve those delays
+  instead of triggering another immediate reboot while the network is offline.
 - Wi-Fi recovery notifications retain incident identities across legacy-state
   migration and process restarts. Repeated alerts for the same recovery outcome
   are suppressed while changed outcomes, new incidents, and reboot attempts
