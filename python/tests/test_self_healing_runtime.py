@@ -264,10 +264,12 @@ def test_runtime_resumes_persisted_periodic_reboot_authorization(
     )
     persisted = new_self_healing_state()
     persisted.periodic_reboot_requested = True
+    persisted.periodic_reboot_scheduled_boot_id = "boot-one"
     persist_usb_path = self_healing.usb_otg_watchdog_state_path(tmp_path)
     self_healing.persist_usb_otg_watchdog_state(persist_usb_path, persisted)
     scheduled: list[bool] = []
     monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [])
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
     monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
 
     events = runtime.run_self_healing(
@@ -276,6 +278,92 @@ def test_runtime_resumes_persisted_periodic_reboot_authorization(
 
     assert [event.action for event in events] == ["periodic_reboot_requested"]
     assert scheduled == [True]
+
+
+def test_periodic_authorization_is_consumed_after_a_new_boot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = replace(
+        _config(),
+        notifications=replace(_config().notifications, enabled=False),
+        self_healing=replace(_config().self_healing, periodic_reboot_enabled=True),
+    )
+    persisted = new_self_healing_state()
+    persisted.periodic_reboot_requested = True
+    persisted.periodic_reboot_scheduled_boot_id = "boot-before"
+    path = self_healing.usb_otg_watchdog_state_path(tmp_path)
+    self_healing.persist_usb_otg_watchdog_state(path, persisted)
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-after")
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [])
+    scheduled: list[bool] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    restored = new_self_healing_state()
+    self_healing.load_usb_otg_watchdog_state(path, restored)
+    assert scheduled == []
+    assert restored.periodic_reboot_requested is False
+    assert restored.periodic_reboot_scheduled_boot_id == ""
+
+
+@pytest.mark.parametrize("policy", ["periodic", "wifi"])
+def test_reboot_schedule_failure_retries_in_the_same_boot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, policy: str
+) -> None:
+    config = _config()
+    config = replace(
+        config,
+        notifications=replace(config.notifications, enabled=False),
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=policy == "periodic",
+            wifi_watchdog_enabled=policy == "wifi",
+            wifi_reboot_enabled=policy == "wifi",
+        ),
+    )
+    state = new_self_healing_state()
+    if policy == "periodic":
+        state.periodic_reboot_requested = True
+    else:
+        state.wifi_recovery_pending = True
+        state.wifi_recovery_handoff_id = "handoff-retry"
+        state.wifi_recovery_phase = "reboot_authorized"
+    if policy == "periodic":
+        self_healing.persist_usb_otg_watchdog_state(
+            self_healing.usb_otg_watchdog_state_path(tmp_path), state
+        )
+    else:
+        persist_wifi_watchdog_state(
+            wifi_watchdog_state_path(tmp_path), state, preserve_pending=False
+        )
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
+    event = SelfHealingEvent(
+        action=("periodic_reboot_requested" if policy == "periodic" else "wifi_reboot_requested"),
+        status="completed",
+        details={},
+    )
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [event])
+    attempts = 0
+
+    def schedule() -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise OSError("scheduler unavailable")
+
+    monkeypatch.setattr(runtime, "default_schedule_reboot", schedule)
+
+    first = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+    second = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+
+    assert first[-1].action == "reboot_schedule_failed"
+    assert second == [event]
+    assert attempts == 2
 
 
 def test_runtime_persists_new_periodic_reboot_authorization(
@@ -583,6 +671,96 @@ def test_repeated_wifi_reboot_events_use_one_idempotent_notification(
         notifications.notification_outbox_path(tmp_path)
     )
     assert [item.idempotency_key for item in queued] == ["wifi-reboot:handoff-reboot"]
+
+
+def test_wifi_reboot_authorization_is_consumed_after_a_new_boot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_outage_seconds = 900
+    persisted.wifi_recovery_started_at = 1000.0
+    persisted.wifi_recovery_interface = "wlan0"
+    persisted.wifi_recovery_handoff_id = "handoff-reboot"
+    persisted.wifi_recovery_phase = "reboot_authorized"
+    persisted.wifi_reboot_scheduled_boot_id = "boot-before"
+    path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(path, persisted, preserve_pending=False)
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-after")
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        lambda **_kwargs: (False, "No pending notifications"),
+    )
+    scheduled: list[bool] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    restored = new_self_healing_state()
+    self_healing.load_wifi_watchdog_state(path, restored)
+    assert scheduled == []
+    assert restored.wifi_recovery_pending is True
+    assert restored.wifi_recovery_phase == "pending"
+    assert restored.wifi_reboot_scheduled_boot_id == ""
+    assert restored.wifi_recovery_handoff_id == "handoff-reboot"
+
+
+def test_coalesced_periodic_and_wifi_reboots_share_one_scheduled_boot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    base = _config()
+    config = replace(
+        base,
+        notifications=replace(base.notifications, enabled=False),
+        self_healing=replace(
+            base.self_healing,
+            periodic_reboot_enabled=True,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+        ),
+    )
+    periodic_state = new_self_healing_state()
+    periodic_state.periodic_reboot_requested = True
+    self_healing.persist_usb_otg_watchdog_state(
+        self_healing.usb_otg_watchdog_state_path(tmp_path), periodic_state
+    )
+    wifi_state = new_self_healing_state()
+    wifi_state.wifi_recovery_pending = True
+    wifi_state.wifi_recovery_handoff_id = "handoff-coalesced"
+    wifi_state.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(
+        wifi_watchdog_state_path(tmp_path), wifi_state, preserve_pending=False
+    )
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-before")
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        lambda **_kwargs: [
+            SelfHealingEvent(action="wifi_reboot_requested", status="completed", details={})
+        ],
+    )
+    scheduled: list[bool] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    restored_periodic = new_self_healing_state()
+    self_healing.load_usb_otg_watchdog_state(
+        self_healing.usb_otg_watchdog_state_path(tmp_path), restored_periodic
+    )
+    restored_wifi = new_self_healing_state()
+    self_healing.load_wifi_watchdog_state(wifi_watchdog_state_path(tmp_path), restored_wifi)
+    assert scheduled == [True]
+    assert restored_periodic.periodic_reboot_scheduled_boot_id == "boot-before"
+    assert restored_wifi.wifi_reboot_scheduled_boot_id == "boot-before"
+
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-after")
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_kwargs: [])
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert scheduled == [True]
 
 
 def test_restoration_queue_failure_keeps_handoff_for_a_later_cycle(

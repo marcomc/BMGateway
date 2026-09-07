@@ -21,6 +21,7 @@ from .self_healing import (
     WiFiWatchdogStateError,
     clear_wifi_recovery_handoff,
     consume_wifi_recovery_notification,
+    default_reboot_boot_id,
     default_schedule_reboot,
     evaluate_self_healing,
     load_wifi_watchdog_state,
@@ -98,21 +99,56 @@ def run_self_healing(
                 load_wifi_watchdog_state(wifi_path, state)
             except WiFiWatchdogStateError as error:
                 wifi_state_error = error
+            current_boot_id: str | None = None
+
+            def reboot_boot_id() -> str:
+                nonlocal current_boot_id
+                if current_boot_id is None:
+                    current_boot_id = default_reboot_boot_id()
+                return current_boot_id
+
+            periodic_handoff_changed = False
+            wifi_handoff_changed = False
+            if state.periodic_reboot_requested:
+                if not state.periodic_reboot_scheduled_boot_id:
+                    state.periodic_reboot_scheduled_boot_id = reboot_boot_id()
+                    periodic_handoff_changed = True
+                elif state.periodic_reboot_scheduled_boot_id != reboot_boot_id():
+                    state.periodic_reboot_requested = False
+                    state.periodic_reboot_scheduled_boot_id = ""
+                    periodic_handoff_changed = True
+            if state.wifi_recovery_pending and state.wifi_recovery_phase == "reboot_authorized":
+                if not state.wifi_reboot_scheduled_boot_id:
+                    state.wifi_reboot_scheduled_boot_id = reboot_boot_id()
+                    wifi_handoff_changed = True
+                elif state.wifi_reboot_scheduled_boot_id != reboot_boot_id():
+                    state.wifi_recovery_phase = "pending"
+                    state.wifi_reboot_scheduled_boot_id = ""
+                    state.wifi_reboot_requested = False
+                    wifi_handoff_changed = True
+            if periodic_handoff_changed:
+                persist_usb_otg_watchdog_state(path, state)
+            if wifi_handoff_changed:
+                persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
             persisted_periodic_reboot = state.periodic_reboot_requested
             persisted_usb = replace(state)
             persisted_wifi = replace(state)
             persisted_periodic = state.periodic_reboot_requested
+            persisted_periodic_boot_id = state.periodic_reboot_scheduled_boot_id
+            before = replace(state)
 
             def usb_checkpoint() -> None:
-                nonlocal persisted_periodic, persisted_usb
+                nonlocal persisted_periodic, persisted_periodic_boot_id, persisted_usb
                 if any(
                     value != getattr(persisted_usb, name)
                     for name, value in vars(state).items()
-                    if name.startswith("usb_otg_") or name == "periodic_reboot_requested"
+                    if name.startswith("usb_otg_")
+                    or name in {"periodic_reboot_requested", "periodic_reboot_scheduled_boot_id"}
                 ):
                     persist_usb_otg_watchdog_state(path, state)
                     persisted_usb = replace(state)
                     persisted_periodic = state.periodic_reboot_requested
+                    persisted_periodic_boot_id = state.periodic_reboot_scheduled_boot_id
 
             def wifi_checkpoint() -> None:
                 nonlocal persisted_wifi
@@ -125,10 +161,14 @@ def run_self_healing(
                     persisted_wifi = replace(state)
 
             def periodic_checkpoint() -> None:
-                nonlocal persisted_periodic
-                if state.periodic_reboot_requested != persisted_periodic:
+                nonlocal persisted_periodic, persisted_periodic_boot_id
+                if (
+                    state.periodic_reboot_requested != persisted_periodic
+                    or state.periodic_reboot_scheduled_boot_id != persisted_periodic_boot_id
+                ):
                     persist_usb_otg_watchdog_state(path, state)
                     persisted_periodic = state.periodic_reboot_requested
+                    persisted_periodic_boot_id = state.periodic_reboot_scheduled_boot_id
 
             healing_config = config
             if wifi_state_error is not None:
@@ -336,6 +376,27 @@ def run_self_healing(
                 event.action for event in events if event.action in _REBOOT_ACTIONS
             ]
             if requested_actions:
+                boot_id = (
+                    reboot_boot_id()
+                    if any(
+                        action in {"periodic_reboot_requested", "wifi_reboot_requested"}
+                        for action in requested_actions
+                    )
+                    else ""
+                )
+                if (
+                    "periodic_reboot_requested" in requested_actions
+                    and state.periodic_reboot_requested
+                ):
+                    state.periodic_reboot_scheduled_boot_id = boot_id
+                    periodic_checkpoint()
+                if (
+                    "wifi_reboot_requested" in requested_actions
+                    and state.wifi_recovery_pending
+                    and state.wifi_recovery_phase == "reboot_authorized"
+                ):
+                    state.wifi_reboot_scheduled_boot_id = boot_id
+                    wifi_checkpoint()
                 try:
                     default_schedule_reboot()
                 except OSError:
@@ -389,6 +450,8 @@ def _defer_reboots(
     # overwrite a checkpoint that may already have reached disk before fsync
     # reported an error. Only process-local peer request flags are restored.
     state.periodic_reboot_requested = before.periodic_reboot_requested
+    state.periodic_reboot_scheduled_boot_id = before.periodic_reboot_scheduled_boot_id
     state.wifi_reconnect_attempted = before.wifi_reconnect_attempted
     state.wifi_reboot_requested = before.wifi_reboot_requested
+    state.wifi_reboot_scheduled_boot_id = before.wifi_reboot_scheduled_boot_id
     return [event for event in events if event.action not in _REBOOT_ACTIONS]

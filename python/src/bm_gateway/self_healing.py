@@ -6,6 +6,7 @@ import fcntl
 import json
 import math
 import os
+import platform
 import shutil
 import subprocess
 import tempfile
@@ -51,7 +52,9 @@ class SelfHealingState:
     wifi_recovery_started_at: float = 0.0
     wifi_recovery_handoff_id: str = ""
     wifi_recovery_phase: str = ""
+    wifi_reboot_scheduled_boot_id: str = ""
     periodic_reboot_requested: bool = False
+    periodic_reboot_scheduled_boot_id: str = ""
     usb_otg_rebind_attempted: bool = False
     usb_otg_reboot_attempts_used: int = 0
     usb_otg_escalated: bool = False
@@ -138,6 +141,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         recovery_started_at = raw.get("recovery_started_at", 0.0)
         recovery_handoff_id = raw.get("recovery_handoff_id", "")
         recovery_phase = raw.get("recovery_phase", "")
+        reboot_scheduled_boot_id = raw.get("reboot_scheduled_boot_id", "")
         if recovery_pending and not recovery_phase:
             recovery_phase = "pending"
     except (KeyError, TypeError, json.JSONDecodeError) as error:
@@ -157,6 +161,8 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or recovery_started_at_float < 0
         or not isinstance(recovery_handoff_id, str)
         or recovery_phase not in {"", "pending", "reconnect_pending", "reboot_authorized"}
+        or not isinstance(reboot_scheduled_boot_id, str)
+        or (recovery_phase != "reboot_authorized" and bool(reboot_scheduled_boot_id))
     ):
         raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
     state.wifi_recovery_pending = recovery_pending
@@ -165,6 +171,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.wifi_recovery_started_at = recovery_started_at_float
     state.wifi_recovery_handoff_id = recovery_handoff_id
     state.wifi_recovery_phase = recovery_phase
+    state.wifi_reboot_scheduled_boot_id = reboot_scheduled_boot_id
 
 
 def persist_wifi_watchdog_state(
@@ -185,6 +192,7 @@ def persist_wifi_watchdog_state(
             "recovery_started_at": state.wifi_recovery_started_at,
             "recovery_handoff_id": state.wifi_recovery_handoff_id,
             "recovery_phase": state.wifi_recovery_phase,
+            "reboot_scheduled_boot_id": state.wifi_reboot_scheduled_boot_id,
         }
         if preserve_pending:
             try:
@@ -238,6 +246,7 @@ def clear_wifi_recovery_handoff(
                 "recovery_started_at": 0.0,
                 "recovery_handoff_id": "",
                 "recovery_phase": "",
+                "reboot_scheduled_boot_id": "",
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -279,6 +288,7 @@ def consume_wifi_recovery_notification(
                     "recovery_started_at": current.wifi_recovery_started_at,
                     "recovery_handoff_id": current.wifi_recovery_handoff_id,
                     "recovery_phase": current.wifi_recovery_phase,
+                    "reboot_scheduled_boot_id": current.wifi_reboot_scheduled_boot_id,
                 },
                 WiFiWatchdogStateError,
                 "Cannot persist Wi-Fi watchdog state",
@@ -292,6 +302,7 @@ def consume_wifi_recovery_notification(
             wifi_recovery_started_at=0.0,
             wifi_recovery_handoff_id="",
             wifi_recovery_phase="",
+            wifi_reboot_scheduled_boot_id="",
         )
         _persist_watchdog_json(
             path,
@@ -302,6 +313,7 @@ def consume_wifi_recovery_notification(
                 "recovery_started_at": 0.0,
                 "recovery_handoff_id": "",
                 "recovery_phase": "",
+                "reboot_scheduled_boot_id": "",
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -324,6 +336,7 @@ def _copy_wifi_recovery_state(source: SelfHealingState, target: SelfHealingState
         "wifi_recovery_started_at",
         "wifi_recovery_handoff_id",
         "wifi_recovery_phase",
+        "wifi_reboot_scheduled_boot_id",
     ):
         setattr(target, name, getattr(source, name))
 
@@ -335,6 +348,7 @@ def _clear_wifi_recovery_state(state: SelfHealingState) -> None:
     state.wifi_recovery_started_at = 0.0
     state.wifi_recovery_handoff_id = ""
     state.wifi_recovery_phase = ""
+    state.wifi_reboot_scheduled_boot_id = ""
 
 
 def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -356,6 +370,7 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         escalation_reason = raw.get("escalation_reason", "")
         escalation_reboot_attempts = raw.get("escalation_reboot_attempts", reboot_attempts_used)
         periodic_reboot_requested = raw.get("periodic_reboot_requested", False)
+        periodic_reboot_scheduled_boot_id = raw.get("periodic_reboot_scheduled_boot_id", "")
     except (KeyError, TypeError, json.JSONDecodeError) as error:
         raise USBOTGWatchdogStateError("USB OTG watchdog state is invalid") from error
     if (
@@ -376,6 +391,8 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(escalation_reboot_attempts, int)
         or escalation_reboot_attempts < 0
         or not isinstance(periodic_reboot_requested, bool)
+        or not isinstance(periodic_reboot_scheduled_boot_id, str)
+        or (not periodic_reboot_requested and bool(periodic_reboot_scheduled_boot_id))
     ):
         raise USBOTGWatchdogStateError("USB OTG watchdog state has invalid values")
     state.usb_otg_rebind_attempted = rebind_attempted
@@ -388,6 +405,7 @@ def load_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.usb_otg_escalation_reason = escalation_reason
     state.usb_otg_escalation_reboot_attempts = escalation_reboot_attempts
     state.periodic_reboot_requested = periodic_reboot_requested
+    state.periodic_reboot_scheduled_boot_id = periodic_reboot_scheduled_boot_id
 
 
 def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
@@ -404,6 +422,7 @@ def persist_usb_otg_watchdog_state(path: Path, state: SelfHealingState) -> None:
                 "escalation_reason": state.usb_otg_escalation_reason,
                 "escalation_reboot_attempts": state.usb_otg_escalation_reboot_attempts,
                 "periodic_reboot_requested": state.periodic_reboot_requested,
+                "periodic_reboot_scheduled_boot_id": state.periodic_reboot_scheduled_boot_id,
             },
             sort_keys=True,
         )
@@ -475,6 +494,7 @@ def usb_otg_watchdog_transaction(path: Path, state: SelfHealingState) -> Iterato
             if name.startswith("usb_otg_"):
                 setattr(state, name, getattr(current, name))
         state.periodic_reboot_requested = current.periodic_reboot_requested
+        state.periodic_reboot_scheduled_boot_id = current.periodic_reboot_scheduled_boot_id
         yield
     finally:
         handle.close()
@@ -583,6 +603,20 @@ def default_usb_otg_rebind(image_path: str, gadget_name: str) -> bool:
         stderr=subprocess.DEVNULL,
     )
     return completed.returncode == 0
+
+
+def default_reboot_boot_id() -> str:
+    """Identify the current Linux boot before reserving or resuming a reboot."""
+    try:
+        boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="utf-8").strip()
+    except OSError:
+        # Unit tests and non-Linux development hosts do not expose procfs.  A
+        # stable host fallback still lets same-process scheduling be tested;
+        # appliance deployments use the kernel boot ID above.
+        boot_id = platform.node().strip()
+    if not boot_id:
+        raise USBOTGWatchdogStateError("Reboot boot identity is unavailable")
+    return boot_id
 
 
 def default_usb_otg_boot_id() -> str:
