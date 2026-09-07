@@ -102,9 +102,8 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> N
     data = _load(path)
     if not data["pending"]:
         return
-    cutoff = datetime.now(timezone.utc) - timedelta(
-        days=config.notifications.offline_retention_days
-    )
+    transfer_time = datetime.now(timezone.utc)
+    cutoff = transfer_time - timedelta(days=config.notifications.offline_retention_days)
     pending = data["pending"][-config.notifications.offline_max_events :]
     for event in pending:
         occurred_at = datetime.fromisoformat(event["occurred_at"])
@@ -117,6 +116,7 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> N
             detail="",
             idempotency_key=f"lifecycle:{event['boot_id']}:{event['action']}",
             now=occurred_at,
+            retention_now=transfer_time,
         )
     data["pending"] = []
     _save(path, data)

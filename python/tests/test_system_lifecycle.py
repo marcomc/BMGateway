@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email import message_from_string
 from functools import partial
 from pathlib import Path
@@ -472,6 +472,100 @@ def test_expired_intents_are_pruned_but_current_boot_receipts_survive(
     data = json.loads(path.read_text())
     assert data["recorded"] == ["boot"] and not data["pending"]
     assert not notifications.notification_outbox_path(tmp_path).exists()
+
+
+def test_older_lifecycle_replay_does_not_evict_newer_watchdog_events(
+    config: AppConfig, tmp_path: Path
+) -> None:
+    config = replace(
+        config,
+        notifications=replace(
+            config.notifications,
+            offline_retention_days=30,
+            offline_max_events=2,
+        ),
+    )
+    now = datetime.now(UTC)
+    outbox_path = notifications.notification_outbox_path(tmp_path)
+    for action, occurred_at in (
+        ("wifi_reconnect_attempted", now - timedelta(days=2)),
+        ("usb_otg_recovery_exhausted", now - timedelta(days=1)),
+    ):
+        notifications.queue_notification_event(
+            path=outbox_path,
+            config=config.notifications,
+            action=action,
+            detail=action,
+            now=occurred_at,
+            retention_now=now,
+        )
+    lifecycle_path = tmp_path / "runtime/system_lifecycle_state.json"
+    lifecycle._save(
+        lifecycle_path,
+        {
+            "boot_id": "a" * 32,
+            "recorded": ["boot"],
+            "pending": [
+                {
+                    "boot_id": "a" * 32,
+                    "action": "boot",
+                    "occurred_at": (now - timedelta(days=3)).isoformat(),
+                }
+            ],
+        },
+    )
+
+    lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+
+    assert [event.action for event in notifications.load_notification_outbox(outbox_path)] == [
+        "wifi_reconnect_attempted",
+        "usb_otg_recovery_exhausted",
+    ]
+    assert json.loads(lifecycle_path.read_text())["pending"] == []
+
+
+def test_lifecycle_transfer_retry_keeps_pending_then_succeeds_idempotently(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    now = datetime.now(UTC)
+    lifecycle_path = tmp_path / "runtime/system_lifecycle_state.json"
+    lifecycle._save(
+        lifecycle_path,
+        {
+            "boot_id": "a" * 32,
+            "recorded": ["boot"],
+            "pending": [
+                {
+                    "boot_id": "a" * 32,
+                    "action": "boot",
+                    "occurred_at": now.isoformat(),
+                }
+            ],
+        },
+    )
+    save = lifecycle._save
+
+    def fail_ack(path: Path, data: dict[str, object]) -> None:
+        if not data["pending"]:
+            raise notifications.NotificationOutboxError("lifecycle ACK failed")
+        save(path, data)
+
+    with monkeypatch.context() as failure:
+        failure.setattr(lifecycle, "_save", fail_ack)
+        with pytest.raises(notifications.NotificationOutboxError, match="lifecycle ACK failed"):
+            lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+    assert json.loads(lifecycle_path.read_text())["pending"]
+
+    lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+    lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+
+    assert json.loads(lifecycle_path.read_text())["pending"] == []
+    assert (
+        len(
+            notifications.load_notification_outbox(notifications.notification_outbox_path(tmp_path))
+        )
+        == 1
+    )
 
 
 def test_failed_reload_durability_does_not_deliver(

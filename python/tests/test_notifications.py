@@ -51,14 +51,23 @@ def test_queue_notification_event_prunes_by_retention_and_limit(tmp_path: Path) 
         action="old",
         detail="expired",
         now=now - timedelta(days=2),
+        retention_now=now,
     )
-    queue_notification_event(path=path, config=config, action="one", detail="first", now=now)
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="one",
+        detail="first",
+        now=now,
+        retention_now=now,
+    )
     queue_notification_event(
         path=path,
         config=config,
         action="two",
         detail="second",
         now=now + timedelta(minutes=1),
+        retention_now=now,
     )
     queue_notification_event(
         path=path,
@@ -66,9 +75,47 @@ def test_queue_notification_event_prunes_by_retention_and_limit(tmp_path: Path) 
         action="three",
         detail="third",
         now=now + timedelta(minutes=2),
+        retention_now=now,
     )
 
     assert [event.action for event in load_notification_outbox(path)] == ["two", "three"]
+
+
+@pytest.mark.parametrize("queue_once", [False, True])
+@pytest.mark.parametrize(
+    "offline_max_events,expected",
+    [(1, ["newest"]), (2, ["middle", "newest"])],
+)
+def test_queue_apis_sort_mixed_events_and_cap_by_newest_timestamp(
+    tmp_path: Path,
+    queue_once: bool,
+    offline_max_events: int,
+    expected: list[str],
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(
+        enabled=True,
+        offline_retention_days=30,
+        offline_max_events=offline_max_events,
+    )
+    retention_now = datetime.now(timezone.utc)
+    enqueue = queue_notification_event_once if queue_once else queue_notification_event
+    for action, occurred_at in (
+        ("newest", retention_now - timedelta(days=1)),
+        ("oldest", retention_now - timedelta(days=3)),
+        ("middle", retention_now - timedelta(days=2)),
+    ):
+        enqueue(
+            path=path,
+            config=config,
+            action=action,
+            detail=action,
+            idempotency_key=action,
+            now=occurred_at,
+            retention_now=retention_now,
+        )
+
+    assert [event.action for event in load_notification_outbox(path)] == expected
 
 
 def test_persistence_normalizes_events_and_rejects_blank_actions(tmp_path: Path) -> None:
@@ -151,6 +198,48 @@ def test_summary_delivery_sends_one_message_and_clears_outbox(tmp_path: Path) ->
     assert len(payloads) == 1
     assert "Events retained: 2" in payloads[0]
     assert not path.exists()
+
+
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_delivery_canonicalizes_unsorted_persisted_events_chronologically(
+    tmp_path: Path, mode: str
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    now = datetime.now(timezone.utc)
+    persist_notification_outbox(
+        path,
+        [
+            NotificationEvent("newest", "third", now - timedelta(hours=1)),
+            NotificationEvent("oldest", "first", now - timedelta(hours=3)),
+            NotificationEvent("middle", "second", now - timedelta(hours=2)),
+        ],
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    config = NotificationsConfig(
+        enabled=True,
+        recipient="operator@example.test",
+        offline_delivery=mode,
+    )
+    assert deliver_notification_outbox(path=path, config=config, runner=send, now=now)[0]
+    bodies = [Parser(policy=policy.default).parsestr(payload).get_content() for payload in payloads]
+    if mode == "summary":
+        assert len(bodies) == 1
+        assert bodies[0].index("oldest") < bodies[0].index("middle") < bodies[0].index("newest")
+    else:
+        assert len(bodies) == 3
+        assert [
+            next(action for action in ("oldest", "middle", "newest") if action in body)
+            for body in bodies
+        ] == [
+            "oldest",
+            "middle",
+            "newest",
+        ]
 
 
 def test_failed_delivery_keeps_outbox(tmp_path: Path) -> None:
@@ -339,7 +428,12 @@ def test_retention_prune_reports_outbox_deletion_failure(
     )
     queued_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
     queue_notification_event(
-        path=path, config=config, action="wifi", detail="offline", now=queued_at
+        path=path,
+        config=config,
+        action="wifi",
+        detail="offline",
+        now=queued_at,
+        retention_now=queued_at,
     )
 
     def fail_unlink(target: Path, *, missing_ok: bool = False) -> None:
@@ -363,6 +457,7 @@ def test_retention_prune_reports_outbox_deletion_failure(
             action="usb",
             detail="offline",
             now=queued_at + timedelta(days=2),
+            retention_now=queued_at + timedelta(days=2),
         )
 
 
@@ -522,7 +617,12 @@ def test_delivery_prunes_events_that_expire_after_queueing(tmp_path: Path) -> No
     )
     queued_at = datetime(2026, 8, 1, tzinfo=timezone.utc)
     queue_notification_event(
-        path=path, config=config, action="wifi", detail="offline", now=queued_at
+        path=path,
+        config=config,
+        action="wifi",
+        detail="offline",
+        now=queued_at,
+        retention_now=queued_at,
     )
 
     delivered, detail = deliver_notification_outbox(

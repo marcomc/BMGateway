@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Notification outbox retention and count limits now keep the newest events by
+  occurrence time, including lifecycle replays, and deliver retained summaries
+  or individual messages in chronological order.
 - Lifecycle notification failures no longer block independently checkpointed
   recovery reboots or prevent the installer from starting core services.
   Unsafe mail delivery remains deferred and hook failures remain visible.
