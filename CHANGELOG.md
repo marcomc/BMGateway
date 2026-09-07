@@ -28,6 +28,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Lifecycle retention and shared-mail delivery now defer until the appliance
+  wall clock is NTP synchronized, without delaying runtime or watchdog recovery.
+- Release preflight rejects malformed generic `Unreleased` headings instead of
+  silently ignoring pending changes.
 - Notification outbox retention and count limits now keep the newest events by
   occurrence time, including lifecycle replays, and deliver retained summaries
   or individual messages in chronological order.

@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 from bm_gateway import notifications, self_healing
 from bm_gateway import self_healing_runtime as runtime
+from bm_gateway import system_lifecycle as lifecycle
 from bm_gateway.config import AppConfig, NotificationsConfig, load_config
 from bm_gateway.localization import translation_for
 from bm_gateway.self_healing import (
@@ -133,6 +134,52 @@ def _wifi_mail_delivery(monkeypatch: pytest.MonkeyPatch) -> list[str]:
         partial(notifications.deliver_notification_outbox, runner=sendmail),
     )
     return delivered
+
+
+def test_runtime_defers_shared_delivery_until_lifecycle_clock_is_synchronized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _config()
+    lifecycle._save(
+        tmp_path / "runtime/system_lifecycle_state.json",
+        {
+            "boot_id": "a" * 32,
+            "recorded": ["boot"],
+            "pending": [
+                {
+                    "boot_id": "a" * 32,
+                    "action": "boot",
+                    "occurred_at": "2026-09-07T00:00:00+00:00",
+                }
+            ],
+        },
+    )
+    notifications.queue_notification_event(
+        path=notifications.notification_outbox_path(tmp_path),
+        config=config.notifications,
+        action="wifi_reconnect_attempted",
+        detail="",
+    )
+    delivered: list[bool] = []
+
+    def deliver(**_: object) -> tuple[bool, str]:
+        delivered.append(True)
+        return True, "ok"
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_: [])
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+    monkeypatch.setattr(runtime, "deliver_notification_outbox", deliver)
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    assert not delivered
+    assert json.loads((tmp_path / "runtime/system_lifecycle_state.json").read_text())["pending"]
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    assert delivered == [True]
+    assert not json.loads((tmp_path / "runtime/system_lifecycle_state.json").read_text())["pending"]
 
 
 @pytest.mark.parametrize("identity", [None, "", "existing-incident"])

@@ -474,6 +474,93 @@ def test_expired_intents_are_pruned_but_current_boot_receipts_survive(
     assert not notifications.notification_outbox_path(tmp_path).exists()
 
 
+def test_lifecycle_transfer_defers_until_wall_clock_is_synchronized(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / "runtime/system_lifecycle_state.json"
+    lifecycle._save(
+        path,
+        {
+            "boot_id": "a" * 32,
+            "recorded": ["boot"],
+            "pending": [
+                {
+                    "boot_id": "a" * 32,
+                    "action": "boot",
+                    "occurred_at": datetime.now(UTC).isoformat(),
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+
+    assert not lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+    assert json.loads(path.read_text())["pending"]
+    assert not notifications.notification_outbox_path(tmp_path).exists()
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    assert lifecycle.transfer_lifecycle_notifications(config=config, state_dir=tmp_path)
+    assert not json.loads(path.read_text())["pending"]
+    outbox_path = notifications.notification_outbox_path(tmp_path)
+    assert len(notifications.load_notification_outbox(outbox_path)) == 1
+
+
+def test_lifecycle_cli_defers_delivery_until_wall_clock_is_synchronized(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    delivered: list[bool] = []
+
+    def deliver(**_: object) -> tuple[bool, str]:
+        delivered.append(True)
+        return True, "ok"
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", deliver)
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    assert not delivered
+    assert json.loads((tmp_path / "runtime/system_lifecycle_state.json").read_text())["pending"]
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    assert delivered == [True]
+
+
+@pytest.mark.parametrize(
+    ("result", "synchronized"),
+    [
+        (subprocess.CompletedProcess([], 0, "yes\n", ""), True),
+        (subprocess.CompletedProcess([], 0, "no\n", ""), False),
+        (subprocess.CompletedProcess([], 1, "yes\n", ""), False),
+    ],
+)
+def test_lifecycle_wall_clock_probe_requires_ntp_confirmation(
+    monkeypatch: pytest.MonkeyPatch, result: subprocess.CompletedProcess[str], synchronized: bool
+) -> None:
+    monkeypatch.setattr(lifecycle, "_systemd_runtime_present", lambda: True)
+    monkeypatch.setattr(
+        "bm_gateway.system_lifecycle.subprocess.run", lambda *args, **kwargs: result
+    )
+
+    assert lifecycle.lifecycle_wall_clock_is_synchronized() is synchronized
+
+
+@pytest.mark.parametrize("error", [OSError(), subprocess.TimeoutExpired([], 5)])
+def test_lifecycle_wall_clock_probe_defers_on_errors(
+    monkeypatch: pytest.MonkeyPatch, error: OSError | subprocess.TimeoutExpired
+) -> None:
+    monkeypatch.setattr(lifecycle, "_systemd_runtime_present", lambda: True)
+
+    def fail(*args: object, **kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise error
+
+    monkeypatch.setattr("bm_gateway.system_lifecycle.subprocess.run", fail)
+
+    assert not lifecycle.lifecycle_wall_clock_is_synchronized()
+
+
 def test_older_lifecycle_replay_does_not_evict_newer_watchdog_events(
     config: AppConfig, tmp_path: Path
 ) -> None:

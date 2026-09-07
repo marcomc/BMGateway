@@ -189,6 +189,23 @@ def test_active_release_rejects_nonempty_generic_unreleased_section(tmp_path: Pa
         validate_release_version_state(tmp_path)
 
 
+@pytest.mark.parametrize("heading", ["## [Unreleased] - Candidate", "## [Unreleased] candidate"])
+def test_generic_unreleased_heading_must_not_have_a_suffix(tmp_path: Path, heading: str) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.2.2",
+        module_version="0.2.2",
+        documented_release="0.2.2",
+        changelog_text=(
+            f"# Changelog\n\n{heading}\n\n- Candidate fix under test.\n\n"
+            "## [0.2.2] - 2026-05-03 - Released changes\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Generic unreleased headings must use"):
+        validate_release_version_state(tmp_path)
+
+
 @pytest.mark.parametrize(
     "heading",
     [

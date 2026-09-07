@@ -96,12 +96,35 @@ def _load(path: Path) -> dict[str, Any]:
         raise NotificationOutboxError("Cannot load lifecycle notification state") from error
 
 
-def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> None:
+def _systemd_runtime_present() -> bool:
+    return Path("/run/systemd/system").is_dir()
+
+
+def lifecycle_wall_clock_is_synchronized() -> bool:
+    """Fail closed on appliances until systemd confirms NTP synchronization."""
+    if not _systemd_runtime_present():
+        return True
+    try:
+        result = subprocess.run(
+            ["/usr/bin/timedatectl", "show", "--property=NTPSynchronized", "--value"],
+            text=True,
+            capture_output=True,
+            check=False,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip().lower() == "yes"
+
+
+def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> bool:
     """Caller holds the shared watchdog lock through subsequent delivery."""
+    if not lifecycle_wall_clock_is_synchronized():
+        return False
     path = _path(state_dir)
     data = _load(path)
     if not data["pending"]:
-        return
+        return True
     transfer_time = datetime.now(timezone.utc)
     cutoff = transfer_time - timedelta(days=config.notifications.offline_retention_days)
     pending = data["pending"][-config.notifications.offline_max_events :]
@@ -120,6 +143,7 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> N
         )
     data["pending"] = []
     _save(path, data)
+    return True
 
 
 def shutdown_in_progress() -> bool:
@@ -164,7 +188,8 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
             )
             data["pending"] = data["pending"][-config.notifications.offline_max_events :]
             _save(_path(state_dir), data)
-        transfer_lifecycle_notifications(config=config, state_dir=state_dir)
+        if not transfer_lifecycle_notifications(config=config, state_dir=state_dir):
+            return
         if usb_error is not None or state.usb_otg_escalation_notification_pending:
             return
         wifi_path = wifi_watchdog_state_path(state_dir)

@@ -25,6 +25,7 @@ _UNRELEASED_SECTION_PATTERN = re.compile(
     r"^## \[Unreleased\]\s*$.*?(?=^## \[|\Z)",
     re.M | re.S,
 )
+_GENERIC_UNRELEASED_HEADING_PATTERN = re.compile(r"^## \[Unreleased\](.*)$", re.M)
 _MODULE_VERSION_PATTERN = re.compile(r'^__version__ = "([^"]+)"$', re.M)
 _README_RELEASE_PATTERN = re.compile(
     r"## Release Status.*?The current documented release is:\s*[-*] `([^`]+)`",
@@ -80,6 +81,13 @@ def latest_shipped_version_from_changelog(text: str) -> str:
 
 
 def unreleased_has_content_from_changelog(text: str) -> bool:
+    malformed_headings = [
+        heading
+        for heading in _GENERIC_UNRELEASED_HEADING_PATTERN.finditer(text)
+        if heading.group(1).strip()
+    ]
+    if malformed_headings:
+        raise ValueError("Generic unreleased headings must use: ## [Unreleased]")
     match = _UNRELEASED_SECTION_PATTERN.search(text)
     if match is None:
         return False

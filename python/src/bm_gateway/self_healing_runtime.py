@@ -179,8 +179,11 @@ def run_self_healing(
     try:
         with usb_otg_watchdog_transaction(path, state, allow_unavailable=True) as usb_state_error:
             lifecycle_error: NotificationOutboxError | None = None
+            lifecycle_time_ready = False
             try:
-                transfer_lifecycle_notifications(config=config, state_dir=state_dir)
+                lifecycle_time_ready = transfer_lifecycle_notifications(
+                    config=config, state_dir=state_dir
+                )
             except NotificationOutboxError as error:
                 lifecycle_error = error
             before = replace(state)
@@ -410,7 +413,7 @@ def run_self_healing(
             # Lifecycle receipts gate mail delivery, not independently durable
             # watchdog reboot authorization. Watchdog handoff failures retain
             # their stricter reboot gate below.
-            defer_notification_delivery = lifecycle_error is not None
+            defer_notification_delivery = lifecycle_error is not None or not lifecycle_time_ready
             defer_recovery_reboots = False
             if lifecycle_error is not None:
                 events.append(
