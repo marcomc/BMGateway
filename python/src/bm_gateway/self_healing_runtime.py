@@ -210,6 +210,12 @@ def run_self_healing(
                                 event=event,
                             )
                     except (NotificationOutboxError, WiFiWatchdogStateError):
+                        if not state.wifi_recovery_pending:
+                            state.wifi_outage_started_monotonic = (
+                                before.wifi_outage_started_monotonic
+                            )
+                            state.wifi_reconnect_attempted = before.wifi_reconnect_attempted
+                            state.wifi_reboot_requested = before.wifi_reboot_requested
                         defer_notification_delivery = True
                 elif event.action in {
                     "wifi_reconnect_attempted",

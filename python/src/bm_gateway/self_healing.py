@@ -661,6 +661,13 @@ def evaluate_self_healing(
         else:
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
+                if not state.wifi_recovery_pending:
+                    state.wifi_recovery_pending = True
+                    state.wifi_recovery_outage_seconds = 0
+                    state.wifi_recovery_interface = healing.wifi_interface
+                    state.wifi_recovery_started_at = wall_time
+                    state.wifi_recovery_handoff_id = uuid.uuid4().hex
+                    state.wifi_recovery_phase = "pending"
                 events.append(
                     SelfHealingEvent(
                         action="wifi_connectivity_lost",

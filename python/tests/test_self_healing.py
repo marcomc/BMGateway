@@ -180,6 +180,7 @@ def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
         config=config,
         state=first,
         now_monotonic=10.0,
+        now_wall_time=1000.0,
         connectivity_checker=lambda _host, _interface: False,
     )
     reboot = evaluate_self_healing(

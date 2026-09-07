@@ -17,6 +17,7 @@ from bm_gateway.localization import translation_for
 from bm_gateway.self_healing import (
     SelfHealingEvent,
     USBOTGHealth,
+    WiFiWatchdogStateError,
     new_self_healing_state,
     persist_wifi_watchdog_state,
     wifi_watchdog_state_path,
@@ -126,6 +127,102 @@ def test_runtime_queues_wifi_recovery_events(
     ]
 
 
+def test_non_reboot_wifi_restoration_retries_after_queue_failure(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    restored = SelfHealingEvent(
+        action="wifi_connectivity_restored",
+        status="completed",
+        details={"outage_seconds": 60},
+    )
+    calls = 0
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        nonlocal calls
+        calls += 1
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        state.wifi_outage_started_monotonic = 10.0
+        state.wifi_recovery_pending = False
+        return [restored]
+
+    def queue_once(**_kwargs: object) -> bool:
+        if calls == 1:
+            raise notifications.NotificationOutboxError("injected queue failure")
+        return True
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "queue_notification_event_once", queue_once)
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        lambda **_kwargs: (False, "No pending notifications"),
+    )
+    state = new_self_healing_state()
+
+    first = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert first == [restored]
+    assert state.wifi_outage_started_monotonic == 10.0
+
+    second = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert second == [restored]
+    assert calls == 2
+
+
+def test_same_cycle_reconnect_restoration_is_queued_before_peer_reboot(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    periodic = SelfHealingEvent(action="periodic_reboot_requested", status="completed", details={})
+    reconnect = SelfHealingEvent(
+        action="wifi_reconnect_attempted",
+        status="completed",
+        details={"wifi_interface": "wlan0", "outage_seconds": 60},
+    )
+    restored = SelfHealingEvent(
+        action="wifi_connectivity_restored",
+        status="completed",
+        details={"outage_seconds": 60},
+    )
+    order: list[str] = []
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        state.wifi_recovery_pending = True
+        state.wifi_recovery_handoff_id = "handoff-peer"
+        state.wifi_recovery_phase = "reconnect_pending"
+        state.wifi_recovery_outage_seconds = 60
+        state.wifi_recovery_interface = "wlan0"
+        return [periodic, reconnect, restored]
+
+    def queue_once(**kwargs: object) -> bool:
+        order.append(str(kwargs["action"]))
+        return True
+
+    def deliver(**_kwargs: object) -> tuple[bool, str]:
+        order.append("deliver")
+        return False, "No pending notifications"
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "queue_notification_event_once", queue_once)
+    monkeypatch.setattr(runtime, "deliver_notification_outbox", deliver)
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: order.append("schedule"))
+
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+
+    assert events == [periodic, reconnect, restored]
+    assert order == [
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+        "deliver",
+        "schedule",
+    ]
+
+
 def test_runtime_schedules_wifi_reboot_after_queueing_notification(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -188,6 +285,71 @@ def test_runtime_consumes_persisted_wifi_restoration_handoff(
     )
     assert [item.idempotency_key for item in queued] == ["wifi-recovery:handoff-a"]
     assert state.wifi_recovery_pending is False
+
+
+def test_initial_wifi_restoration_checkpoint_failure_is_retryable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    baseline = new_self_healing_state()
+    persist_wifi_watchdog_state(wifi_watchdog_state_path(tmp_path), baseline)
+    restored = SelfHealingEvent(
+        action="wifi_connectivity_restored",
+        status="completed",
+        details={"outage_seconds": 60},
+    )
+    evaluations = 0
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        nonlocal evaluations
+        evaluations += 1
+        state = kwargs["state"]
+        assert isinstance(state, self_healing.SelfHealingState)
+        state.wifi_recovery_pending = True
+        state.wifi_recovery_outage_seconds = 60
+        state.wifi_recovery_interface = "wlan0"
+        state.wifi_recovery_started_at = 1000.0
+        state.wifi_recovery_handoff_id = "handoff-initial-checkpoint"
+        state.wifi_recovery_phase = "pending"
+        return [restored]
+
+    original_persist = self_healing.persist_wifi_watchdog_state
+    persist_calls = 0
+
+    def fail_initial_checkpoint(
+        path: Path,
+        state: self_healing.SelfHealingState,
+        *,
+        preserve_pending: bool = True,
+    ) -> None:
+        nonlocal persist_calls
+        persist_calls += 1
+        if persist_calls == 1:
+            raise WiFiWatchdogStateError("injected initial checkpoint failure")
+        original_persist(path, state, preserve_pending=preserve_pending)
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "persist_wifi_watchdog_state", fail_initial_checkpoint)
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        lambda **_kwargs: (False, "No pending notifications"),
+    )
+    state = new_self_healing_state()
+
+    first = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert any(event.action == "wifi_watchdog_state_unavailable" for event in first)
+    assert not notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+
+    second = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert second == [restored]
+    assert evaluations == 2
+    queued = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [item.action for item in queued] == ["wifi_connectivity_restored"]
 
 
 def test_disabling_wifi_watchdog_clears_persisted_recovery_handoff(
