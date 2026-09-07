@@ -150,7 +150,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(recovery_started_at, (int, float))
         or recovery_started_at < 0
         or not isinstance(recovery_handoff_id, str)
-        or recovery_phase not in {"", "pending", "reboot_authorized"}
+        or recovery_phase not in {"", "pending", "reconnect_pending", "reboot_authorized"}
     ):
         raise WiFiWatchdogStateError("Wi-Fi watchdog state has invalid values")
     state.wifi_recovery_pending = recovery_pending
@@ -704,7 +704,7 @@ def evaluate_self_healing(
                         if not state.wifi_recovery_handoff_id:
                             state.wifi_recovery_started_at = wall_time - outage_duration
                             state.wifi_recovery_handoff_id = uuid.uuid4().hex
-                        state.wifi_recovery_phase = "pending"
+                        state.wifi_recovery_phase = "reconnect_pending"
                         events.append(
                             SelfHealingEvent(
                                 action="wifi_connectivity_restored",
