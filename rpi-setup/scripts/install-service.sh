@@ -564,8 +564,10 @@ WantedBy=multi-user.target
 EOF
 
 systemctl daemon-reload
-systemctl enable bm-gateway-lifecycle.service
-systemctl enable bm-gateway-boot-notification.service
+# Optional notification hooks retain systemctl diagnostics without blocking
+# critical gateway activation; apply the same policy to their restarts below.
+systemctl enable bm-gateway-lifecycle.service || true
+systemctl enable bm-gateway-boot-notification.service || true
 systemctl enable bm-gateway.service
 if [[ "${enable_web}" -eq 1 ]]; then
   systemctl enable bm-gateway-web.service
@@ -580,8 +582,8 @@ if [[ "${enable_cockpit}" -eq 1 ]]; then
 fi
 
 if [[ "${start_services}" -eq 1 ]]; then
-  systemctl restart bm-gateway-lifecycle.service
-  systemctl restart bm-gateway-boot-notification.service
+  systemctl restart bm-gateway-lifecycle.service || true
+  systemctl restart bm-gateway-boot-notification.service || true
   systemctl restart bm-gateway.service
   if [[ "${enable_web}" -eq 1 ]]; then
     systemctl restart bm-gateway-web.service

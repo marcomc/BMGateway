@@ -28,6 +28,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Lifecycle notification failures no longer block independently checkpointed
+  recovery reboots or prevent the installer from starting core services.
+  Unsafe mail delivery remains deferred and hook failures remain visible.
 - Wi-Fi recovery retains serialized state and notification handoffs when USB
   watchdog state cannot be read or synchronized. Shared delivery and reboots
   remain deferred until that state is available again.

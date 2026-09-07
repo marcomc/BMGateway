@@ -5,6 +5,7 @@ import json
 import os
 import subprocess
 from dataclasses import replace
+from datetime import UTC, datetime
 from email import message_from_string
 from functools import partial
 from pathlib import Path
@@ -407,3 +408,171 @@ def test_failed_reload_durability_does_not_deliver(
     )
     with pytest.raises(notifications.NotificationOutboxError):
         lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+
+@pytest.mark.parametrize("policy", ["periodic", "wifi", "usb_otg", "combined"])
+@pytest.mark.parametrize("failure", ["read", "ack_before", "ack_after"])
+def test_lifecycle_failure_preserves_independently_durable_reboots(
+    config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    policy: str,
+    failure: str,
+) -> None:
+    enabled = {"periodic", "wifi", "usb_otg"} if policy == "combined" else {policy}
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled="periodic" in enabled,
+            periodic_reboot_hours=1,
+            wifi_watchdog_enabled="wifi" in enabled,
+            wifi_reconnect_enabled=False,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            usb_otg_watchdog_enabled="usb_otg" in enabled,
+            usb_otg_reboot_enabled=True,
+            usb_otg_reboot_attempts=1,
+        ),
+    )
+    lifecycle_path = tmp_path / "runtime/system_lifecycle_state.json"
+    lifecycle._save(
+        lifecycle_path,
+        {"boot_id": "a" * 32, "recorded": ["boot"], "pending": []},
+    )
+    real_save = lifecycle._save
+
+    def fail_ack(path: Path, data: dict[str, object]) -> None:
+        if failure == "ack_after":
+            real_save(path, data)
+        raise notifications.NotificationOutboxError("lifecycle ACK failed")
+
+    monkeypatch.setattr(lifecycle, "_save", fail_ack)
+    state = self_healing.new_self_healing_state(now_monotonic=0)
+    state.wifi_outage_started_monotonic = 0
+    state.usb_otg_rebind_attempted = True
+    self_healing.persist_usb_otg_watchdog_state(
+        self_healing.usb_otg_watchdog_state_path(tmp_path), state
+    )
+    monkeypatch.setattr(self_healing_runtime, "default_reboot_boot_id", lambda: "boot-one")
+    monkeypatch.setattr(
+        self_healing_runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            now_monotonic=7200,
+            connectivity_checker=lambda *_: False,
+            usb_otg_health_checker=lambda *_: self_healing.USBOTGHealth(
+                False, "not attached", "controller", "powered"
+            ),
+            usb_otg_rebind_action=lambda *_: pytest.fail("unexpected rebind"),
+            usb_otg_boot_id_reader=lambda: "boot-one",
+        ),
+    )
+    monkeypatch.setattr(
+        self_healing_runtime, "deliver_notification_outbox", lambda **_: pytest.fail("delivery")
+    )
+    scheduled: list[bool] = []
+
+    def schedule() -> None:
+        durable = self_healing.new_self_healing_state()
+        with self_healing.usb_otg_watchdog_state_path(tmp_path).open() as source:
+            usb = json.load(source)
+        self_healing.load_wifi_watchdog_state(
+            self_healing.wifi_watchdog_state_path(tmp_path), durable
+        )
+        if "periodic" in enabled:
+            assert usb["periodic_reboot_requested"]
+            assert usb["periodic_reboot_scheduled_boot_id"] == "boot-one"
+        if "wifi" in enabled:
+            assert durable.wifi_recovery_phase == "reboot_authorized"
+            assert durable.wifi_reboot_scheduled_boot_id == "boot-one"
+        if "usb_otg" in enabled:
+            assert usb["pending_action"] == "reboot"
+            assert usb["pending_reboot_boot_id"] == "boot-one"
+            assert usb["reboot_attempts_used"] == 1
+        scheduled.append(True)
+
+    monkeypatch.setattr(self_healing_runtime, "default_schedule_reboot", schedule)
+    for cycle in range(2):
+        if failure == "read":
+            lifecycle_path.write_text("corrupt")
+        else:
+            real_save(
+                lifecycle_path,
+                {
+                    "boot_id": "a" * 32,
+                    "recorded": ["boot"],
+                    "pending": [
+                        {
+                            "boot_id": "a" * 32,
+                            "action": "boot",
+                            "occurred_at": datetime.now(UTC).isoformat(),
+                        }
+                    ],
+                },
+            )
+        if cycle:
+            state = self_healing.new_self_healing_state(now_monotonic=7200)
+        events = self_healing_runtime.run_self_healing(
+            config=config, state=state, state_dir=tmp_path
+        )
+        actions = {event.action for event in events}
+        assert "lifecycle_notification_handoff_failed" in actions
+        assert {f"{name}_reboot_requested" for name in enabled} <= actions
+    assert scheduled == [True, True]
+
+
+@pytest.mark.parametrize("start", [0, 1])
+@pytest.mark.parametrize("web", [0, 1])
+@pytest.mark.parametrize("action", ["enable", "restart"])
+@pytest.mark.parametrize(
+    "unit",
+    [
+        "bm-gateway-lifecycle.service",
+        "bm-gateway-boot-notification.service",
+        "bm-gateway.service",
+        "bm-gateway-web.service",
+    ],
+)
+def test_installer_notification_activation_failure_is_nonfatal(
+    start: int, web: int, action: str, unit: str
+) -> None:
+    source = Path("rpi-setup/scripts/install-service.sh").read_text()
+    block = source.split("\nsystemctl daemon-reload\n", 1)[1].split(
+        "\nprintf 'Installed runtime service", 1
+    )[0]
+    script = """set -euo pipefail
+systemctl() {
+  printf '%s\\n' "$*"
+  if [[ "$*" == "$failure" ]]; then
+    printf 'injected systemctl failure: %s\\n' "$*" >&2
+    return 1
+  fi
+}
+"""
+    result = subprocess.run(
+        ["bash", "-c", script + block],
+        env={
+            **os.environ,
+            "failure": f"{action} {unit}",
+            "start_services": str(start),
+            "enable_web": str(web),
+            "enable_glances": "0",
+            "enable_cockpit": "0",
+        },
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    attempted = (action == "enable" or start == 1) and (
+        unit != "bm-gateway-web.service" or web == 1
+    )
+    optional = unit in {"bm-gateway-lifecycle.service", "bm-gateway-boot-notification.service"}
+    fatal = attempted and not optional
+    assert result.returncode == int(fatal)
+    assert bool(result.stderr) == attempted
+    if not fatal:
+        assert "enable bm-gateway.service" in result.stdout
+        assert ("restart bm-gateway.service" in result.stdout) == bool(start)
+        assert ("restart bm-gateway-web.service" in result.stdout) == bool(start and web)

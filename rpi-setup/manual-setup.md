@@ -628,6 +628,12 @@ The installed CLI entrypoints are `bm-gateway lifecycle boot` and
 `--state-dir`. They do not initiate a reboot or shutdown. Notification delivery
 waits if another watchdog has an uncertain acknowledgement.
 
+Unreadable lifecycle notification state defers mail delivery without disabling
+independently checkpointed recovery reboots. Watchdog authorization and state
+checkpoint failures still prevent unsafe reboots. Notification-unit activation
+failures remain visible in `systemctl` diagnostics but do not prevent the
+installer from activating the runtime and web services.
+
 ## Optional: Prepare USB OTG Image Export
 
 `BMGateway` includes a disabled-by-default USB OTG image-export setting for

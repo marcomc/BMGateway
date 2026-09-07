@@ -407,7 +407,11 @@ def run_self_healing(
                     ),
                 )
 
+            # Lifecycle receipts gate mail delivery, not independently durable
+            # watchdog reboot authorization. Watchdog handoff failures retain
+            # their stricter reboot gate below.
             defer_notification_delivery = lifecycle_error is not None
+            defer_recovery_reboots = False
             if lifecycle_error is not None:
                 events.append(
                     SelfHealingEvent(
@@ -446,6 +450,7 @@ def run_self_healing(
                             state.wifi_reconnect_attempted = before.wifi_reconnect_attempted
                             state.wifi_reboot_requested = before.wifi_reboot_requested
                         defer_notification_delivery = True
+                        defer_recovery_reboots = True
                 elif event.action in {
                     "wifi_reconnect_attempted",
                     "wifi_reboot_requested",
@@ -463,10 +468,12 @@ def run_self_healing(
                         )
                     except NotificationOutboxError:
                         defer_notification_delivery = True
+                        defer_recovery_reboots = True
                     except WiFiWatchdogStateError:
                         defer_notification_delivery = True
+                        defer_recovery_reboots = True
 
-            if defer_notification_delivery:
+            if defer_recovery_reboots:
                 return transferred_events + _defer_reboots(events, state, before)
 
             if usb_checkpoint_failed:
