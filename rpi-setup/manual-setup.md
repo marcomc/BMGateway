@@ -545,6 +545,9 @@ longer than the reconnect delay when both actions are enabled.
 After a scheduled Wi-Fi recovery reboot completes, reconnect and reboot delays
 start again. Service restarts preserve the retry timer; notification durations
 continue to describe the full outage, including time before the reboot.
+If the initial state write fails, later cycles retry it while preserving the
+in-process outage timer; a process exit before any successful write cannot
+preserve that unsaved observation.
 
 When system-mail Notifications are enabled, the Wi-Fi watchdog queues and
 attempts delivery for a reconnect attempt, a requested reboot, and the later

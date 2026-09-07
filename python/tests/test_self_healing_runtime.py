@@ -791,6 +791,236 @@ def test_retry_origin_checkpoint_failure_preserves_pacing_on_resume(
     assert scheduled == [origin + 60]
 
 
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("after_replace", [False, True])
+@pytest.mark.parametrize("healthy", [False, True])
+@pytest.mark.parametrize("observed_duration", [0, 60])
+def test_initial_wifi_checkpoint_retry_preserves_outage_origin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    existing: bool,
+    after_replace: bool,
+    healthy: bool,
+    observed_duration: int,
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_reconnect_enabled=False,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=2,
+        ),
+    )
+    path = wifi_watchdog_state_path(tmp_path)
+    state = new_self_healing_state()
+    if existing:
+        persist_wifi_watchdog_state(path, state)
+    if healthy:
+        state.wifi_outage_started_monotonic = 1000.0 - observed_duration
+    clock = 1000.0
+    online = healthy
+    monkeypatch.setattr(time, "time", lambda: clock)
+    monkeypatch.setattr(time, "monotonic", lambda: clock)
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            connectivity_checker=lambda *_: online,
+        ),
+    )
+    scheduled: list[float] = []
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(clock))
+    delivered = _wifi_mail_delivery(monkeypatch)
+    real_persist = self_healing._persist_watchdog_json
+    attempts = 0
+
+    def persist(
+        target: Path,
+        payload: dict[str, object],
+        error_type: type[self_healing.USBOTGWatchdogStateError] | type[WiFiWatchdogStateError],
+        message: str,
+    ) -> None:
+        nonlocal attempts
+        if target == path and attempts < (1 if after_replace else 2):
+            attempts += 1
+            if after_replace:
+                original_fsync = os.fsync
+                calls = 0
+
+                def fail_directory_sync(fd: int) -> None:
+                    nonlocal calls
+                    calls += 1
+                    if calls == 2:
+                        raise OSError("injected directory failure")
+                    original_fsync(fd)
+
+                with monkeypatch.context() as injection:
+                    injection.setattr(os, "fsync", fail_directory_sync)
+                    real_persist(target, payload, error_type, message)
+            raise WiFiWatchdogStateError("injected initial write failure")
+        real_persist(target, payload, error_type, message)
+
+    monkeypatch.setattr(self_healing, "_persist_watchdog_json", persist)
+    first = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert any(event.action == "wifi_watchdog_state_unavailable" for event in first)
+    assert delivered == []
+    first_id = json.loads(path.read_text())["recovery_handoff_id"] if after_replace else None
+    if after_replace:
+        state = new_self_healing_state()
+    online = False
+    clock = 1010.0
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    clock = 1020.0
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    # A post-replace healthy handoff may need its ACK retried separately.
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert attempts == (1 if after_replace else 2)
+    if healthy:
+        assert len(delivered) == 1
+        expected_duration = observed_duration
+        assert f"Wi-Fi connectivity restored after {expected_duration} seconds." in delivered[0]
+        assert state.wifi_outage_ended_monotonic is None
+        renewed = json.loads(path.read_text())
+        assert renewed["recovery_started_at"] in (1010.0, 1020.0)
+        if first_id:
+            assert renewed["recovery_handoff_id"] != first_id
+    else:
+        pending = json.loads(path.read_text())
+        assert pending["recovery_started_at"] == 1000.0
+        if first_id:
+            assert pending["recovery_handoff_id"] == first_id
+        clock = 1119.0
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+        assert scheduled == []
+        clock = 1120.0
+        runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+        assert scheduled == [1120.0]
+
+
+@pytest.mark.parametrize("phase", ["pending", "reconnect_pending", "reboot_authorized"])
+@pytest.mark.parametrize("identity", ["", "cached-incident"])
+def test_absent_cached_wifi_handoff_is_saved_before_evaluation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    phase: str,
+    identity: str,
+) -> None:
+    state = new_self_healing_state()
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_phase = phase
+    state.wifi_recovery_started_at = 1000.0
+    state.wifi_retry_started_at = 1100.0
+    state.wifi_recovery_handoff_id = identity
+    path = wifi_watchdog_state_path(tmp_path)
+    config = _wifi_config()
+    config = replace(config, self_healing=replace(config.self_healing, wifi_reboot_enabled=True))
+
+    def evaluate(**_kwargs: object) -> list[SelfHealingEvent]:
+        payload = json.loads(path.read_text())
+        assert payload["recovery_handoff_id"]
+        if identity:
+            assert payload["recovery_handoff_id"] == identity
+        assert payload["recovery_started_at"] == 1000.0
+        assert payload["retry_started_at"] == 1100.0
+        return []
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    _wifi_mail_delivery(monkeypatch)
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_idle_wifi_without_state_does_not_create_checkpoint(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, enabled: bool
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=enabled,
+        ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            connectivity_checker=lambda *_: True,
+        ),
+    )
+    _wifi_mail_delivery(monkeypatch)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert not wifi_watchdog_state_path(tmp_path).exists()
+
+
+@pytest.mark.parametrize("after_replace", [False, True])
+def test_initial_reconnect_checkpoint_failure_retains_observed_duration(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, after_replace: bool
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=False,
+        ),
+    )
+    clock = 1000.0
+    online = False
+    monkeypatch.setattr(time, "time", lambda: clock)
+    monkeypatch.setattr(time, "monotonic", lambda: clock)
+
+    def reconnect(_interface: str) -> bool:
+        nonlocal online
+        online = True
+        return True
+
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            connectivity_checker=lambda *_: online,
+            reconnect_action=reconnect,
+        ),
+    )
+    real_persist = self_healing.persist_wifi_watchdog_state
+    attempts = 0
+
+    def persist(
+        target: Path, state: self_healing.SelfHealingState, *, preserve_pending: bool = True
+    ) -> None:
+        nonlocal attempts
+        attempts += 1
+        if attempts <= 2:
+            if attempts == 2 and after_replace:
+                real_persist(target, state, preserve_pending=preserve_pending)
+            raise WiFiWatchdogStateError("initial save interrupted")
+        real_persist(target, state, preserve_pending=preserve_pending)
+
+    monkeypatch.setattr(runtime, "persist_wifi_watchdog_state", persist)
+    delivered = _wifi_mail_delivery(monkeypatch)
+    state = new_self_healing_state()
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    clock = 1060.0
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert delivered == []
+    online = False
+    clock = 1070.0
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+    assert len(delivered) == 1
+    assert "Wi-Fi connectivity restored after 60 seconds." in delivered[0]
+    assert "Wi-Fi reconnect succeeded after 60 seconds" in delivered[0]
+    assert state.wifi_outage_ended_monotonic is None
+    assert state.wifi_outage_reconnected is False
+
+
 def test_runtime_queues_wifi_recovery_events(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -1196,6 +1426,7 @@ def test_runtime_clears_stale_transient_wifi_state_after_peer_consumes_handoff(
     config = _wifi_config()
     state = new_self_healing_state()
     state.wifi_outage_started_monotonic = 10.0
+    state.wifi_outage_ended_monotonic = 20.0
     state.wifi_reconnect_attempted = True
     state.wifi_reboot_requested = True
     state.wifi_recovery_pending = True
@@ -1208,6 +1439,7 @@ def test_runtime_clears_stale_transient_wifi_state_after_peer_consumes_handoff(
         current = kwargs["state"]
         assert isinstance(current, self_healing.SelfHealingState)
         assert current.wifi_outage_started_monotonic is None
+        assert current.wifi_outage_ended_monotonic is None
         assert current.wifi_reconnect_attempted is False
         assert current.wifi_reboot_requested is False
         return []

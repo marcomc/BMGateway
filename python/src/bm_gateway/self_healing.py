@@ -44,6 +44,8 @@ class WiFiWatchdogStateError(RuntimeError):
 class SelfHealingState:
     started_monotonic: float
     wifi_outage_started_monotonic: float | None = None
+    wifi_outage_ended_monotonic: float | None = None
+    wifi_outage_reconnected: bool = False
     wifi_reconnect_attempted: bool = False
     wifi_reboot_requested: bool = False
     wifi_recovery_pending: bool = False
@@ -430,9 +432,19 @@ def _copy_wifi_recovery_state(source: SelfHealingState, target: SelfHealingState
         setattr(target, name, getattr(source, name))
 
 
+def rollback_initial_wifi_checkpoint(state: SelfHealingState, baseline: SelfHealingState) -> None:
+    """Keep an unsaved initial outage retryable without pretending disk acknowledged it."""
+    if not baseline.wifi_recovery_pending:
+        if state.wifi_outage_started_monotonic is None:
+            state.wifi_outage_started_monotonic = baseline.wifi_outage_started_monotonic
+        _copy_wifi_recovery_state(baseline, state)
+
+
 def clear_wifi_recovery_transient_state(state: SelfHealingState) -> None:
     """Clear process-local guards after another process consumes a handoff."""
     state.wifi_outage_started_monotonic = None
+    state.wifi_outage_ended_monotonic = None
+    state.wifi_outage_reconnected = False
     state.wifi_reconnect_attempted = False
     state.wifi_reboot_requested = False
 
@@ -769,9 +781,6 @@ def evaluate_self_healing(
             )
 
     if not healing.wifi_watchdog_enabled:
-        state.wifi_outage_started_monotonic = None
-        state.wifi_reconnect_attempted = False
-        state.wifi_reboot_requested = False
         _clear_wifi_recovery_state(state)
     else:
         if not healing.wifi_reboot_enabled and state.wifi_recovery_phase == "reboot_authorized":
@@ -780,20 +789,30 @@ def evaluate_self_healing(
         ensure_wifi_recovery_identity(state)
         if state.wifi_recovery_phase == "reconnect_pending":
             observe_wifi_recovery(state, state.wifi_recovery_outage_seconds)
-        if state.wifi_recovery_observed or connectivity_checker(
-            healing.connectivity_check_host, healing.wifi_interface
+        if (
+            state.wifi_recovery_observed
+            or state.wifi_outage_ended_monotonic is not None
+            or connectivity_checker(healing.connectivity_check_host, healing.wifi_interface)
         ):
             if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
                 outage_seconds = wifi_incident_outage_seconds(state, now, wall_time)
                 if not state.wifi_recovery_pending:
                     assert state.wifi_outage_started_monotonic is not None
-                    outage_seconds = int(now - state.wifi_outage_started_monotonic)
+                    if state.wifi_outage_ended_monotonic is None:
+                        state.wifi_outage_ended_monotonic = now
+                    outage_seconds = int(
+                        state.wifi_outage_ended_monotonic - state.wifi_outage_started_monotonic
+                    )
                     state.wifi_recovery_pending = True
                     state.wifi_recovery_outage_seconds = outage_seconds
                     state.wifi_recovery_interface = healing.wifi_interface
-                    state.wifi_recovery_started_at = wall_time - outage_seconds
+                    state.wifi_recovery_started_at = wall_time - (
+                        now - state.wifi_outage_started_monotonic
+                    )
                     ensure_wifi_recovery_identity(state)
-                    state.wifi_recovery_phase = "pending"
+                    state.wifi_recovery_phase = (
+                        "reconnect_pending" if state.wifi_outage_reconnected else "pending"
+                    )
                 observe_wifi_recovery(state, outage_seconds)
                 events.append(
                     SelfHealingEvent(
@@ -909,6 +928,8 @@ def evaluate_self_healing(
                         )
                     )
                     if reconnected:
+                        state.wifi_outage_ended_monotonic = now
+                        state.wifi_outage_reconnected = True
                         state.wifi_recovery_pending = True
                         observe_wifi_recovery(state, total_outage_seconds)
                         state.wifi_recovery_interface = healing.wifi_interface

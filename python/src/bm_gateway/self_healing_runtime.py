@@ -31,6 +31,7 @@ from .self_healing import (
     load_wifi_watchdog_state,
     persist_usb_otg_watchdog_state,
     persist_wifi_watchdog_state,
+    rollback_initial_wifi_checkpoint,
     usb_otg_watchdog_state_path,
     usb_otg_watchdog_transaction,
     wifi_watchdog_state_path,
@@ -191,7 +192,8 @@ def run_self_healing(
             if wifi_state_error is None:
                 if wifi_path.exists():
                     confirm_wifi_watchdog_state_durable(wifi_path)
-                if ensure_wifi_recovery_identity(state):
+                identity_changed = ensure_wifi_recovery_identity(state)
+                if identity_changed or (state.wifi_recovery_pending and not wifi_path.exists()):
                     persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
                 if state.wifi_recovery_pending and state.wifi_recovery_observed:
                     wifi_transfer_in_progress = True
@@ -264,7 +266,13 @@ def run_self_healing(
                     for name in vars(state)
                     if name.startswith("wifi_")
                 ):
-                    persist_wifi_watchdog_state(wifi_path, state, preserve_pending=preserve_pending)
+                    try:
+                        persist_wifi_watchdog_state(
+                            wifi_path, state, preserve_pending=preserve_pending
+                        )
+                    except WiFiWatchdogStateError:
+                        rollback_initial_wifi_checkpoint(state, persisted_wifi)
+                        raise
                     persisted_wifi = replace(state)
 
             def periodic_checkpoint() -> None:

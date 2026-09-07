@@ -25,6 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Initial Wi-Fi outage checkpoints are retried after storage errors without
+  losing the outage timer or mistaking unsaved state for a completed handoff.
 - Completed Wi-Fi recovery reboots restart the configured retry delays without
   losing the original outage duration. Service restarts preserve those delays
   instead of triggering another immediate reboot while the network is offline.

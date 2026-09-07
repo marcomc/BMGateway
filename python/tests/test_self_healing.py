@@ -497,6 +497,8 @@ def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume
     assert loaded.wifi_reboot_notified_boot_id == "boot-one"
     assert loaded.wifi_recovery_observed is True
     assert loaded.wifi_retry_started_at == 1200.0
+    loaded.wifi_outage_ended_monotonic = 1300.0
+    loaded.wifi_outage_reconnected = True
     if consume:
         assert consume_wifi_recovery_notification(path, loaded, lambda _: None)
     else:
@@ -509,6 +511,8 @@ def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume
         assert current.wifi_recovery_handoff_id == ""
         assert current.wifi_recovery_observed is False
         assert current.wifi_retry_started_at == 0.0
+        assert current.wifi_outage_ended_monotonic is None
+        assert current.wifi_outage_reconnected is False
 
 
 @pytest.mark.parametrize("phase", ["pending", "reconnect_pending", "reboot_authorized"])
