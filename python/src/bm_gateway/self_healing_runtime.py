@@ -162,6 +162,24 @@ def run_self_healing(
                     )
                 )
 
+            if (
+                state.wifi_recovery_pending
+                and state.wifi_recovery_phase == "reconnect_pending"
+                and any(event.action == "wifi_connectivity_restored" for event in events)
+                and not any(event.action == "wifi_reconnect_attempted" for event in events)
+            ):
+                events.insert(
+                    0,
+                    SelfHealingEvent(
+                        action="wifi_reconnect_attempted",
+                        status="completed",
+                        details={
+                            "wifi_interface": state.wifi_recovery_interface,
+                            "outage_seconds": state.wifi_recovery_outage_seconds,
+                        },
+                    ),
+                )
+
             def enqueue_wifi_recovery(recovery_state: SelfHealingState) -> None:
                 translate = translation_for(config.notifications.locale).gettext
                 detail = translate(
@@ -178,6 +196,8 @@ def run_self_healing(
             defer_notification_delivery = False
             for event in events:
                 if event.action == "wifi_connectivity_restored":
+                    if defer_notification_delivery:
+                        continue
                     try:
                         if state.wifi_recovery_pending:
                             consume_wifi_recovery_notification(
@@ -197,9 +217,17 @@ def run_self_healing(
                 }:
                     try:
                         idempotency_key = ""
-                        if event.action == "wifi_reboot_requested":
+                        if event.action in {
+                            "wifi_reconnect_attempted",
+                            "wifi_reboot_requested",
+                        }:
+                            notification_kind = (
+                                "reconnect"
+                                if event.action == "wifi_reconnect_attempted"
+                                else "reboot"
+                            )
                             idempotency_key = (
-                                f"wifi-reboot:{state.wifi_recovery_handoff_id}"
+                                f"wifi-{notification_kind}:{state.wifi_recovery_handoff_id}"
                                 if state.wifi_recovery_handoff_id
                                 else ""
                             )
@@ -209,7 +237,15 @@ def run_self_healing(
                             event=event,
                             idempotency_key=idempotency_key,
                         )
+                        if (
+                            event.action == "wifi_reconnect_attempted"
+                            and event.status == "completed"
+                        ):
+                            state.wifi_recovery_phase = "pending"
+                            persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
                     except NotificationOutboxError:
+                        defer_notification_delivery = True
+                    except WiFiWatchdogStateError:
                         defer_notification_delivery = True
 
             if defer_notification_delivery:
