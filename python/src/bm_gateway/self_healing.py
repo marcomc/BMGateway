@@ -191,6 +191,8 @@ def persist_wifi_watchdog_state(
                 current = json.loads(path.read_text(encoding="utf-8"))
             except FileNotFoundError:
                 current = None
+            except json.JSONDecodeError as error:
+                raise WiFiWatchdogStateError("Wi-Fi watchdog state is invalid") from error
             if (
                 isinstance(current, dict)
                 and current.get("recovery_pending") is True
@@ -665,6 +667,9 @@ def evaluate_self_healing(
             if not state.wifi_recovery_pending:
                 _clear_wifi_recovery_state(state)
         else:
+            reboot_authorized = (
+                state.wifi_recovery_pending and state.wifi_recovery_phase == "reboot_authorized"
+            )
             if state.wifi_outage_started_monotonic is None:
                 state.wifi_outage_started_monotonic = now
                 if not state.wifi_recovery_pending:
@@ -674,16 +679,30 @@ def evaluate_self_healing(
                     state.wifi_recovery_started_at = wall_time
                     state.wifi_recovery_handoff_id = uuid.uuid4().hex
                     state.wifi_recovery_phase = "pending"
-                events.append(
-                    SelfHealingEvent(
-                        action="wifi_connectivity_lost",
-                        status="failed",
-                        details={
-                            "connectivity_check_host": healing.connectivity_check_host,
-                            "wifi_interface": healing.wifi_interface,
-                        },
+                elif reboot_authorized:
+                    state.wifi_reboot_requested = True
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_reboot_requested",
+                            status="completed",
+                            details={
+                                "wifi_interface": healing.wifi_interface,
+                                "connectivity_check_host": healing.connectivity_check_host,
+                                "outage_seconds": state.wifi_recovery_outage_seconds,
+                            },
+                        )
                     )
-                )
+                if not reboot_authorized:
+                    events.append(
+                        SelfHealingEvent(
+                            action="wifi_connectivity_lost",
+                            status="failed",
+                            details={
+                                "connectivity_check_host": healing.connectivity_check_host,
+                                "wifi_interface": healing.wifi_interface,
+                            },
+                        )
+                    )
             else:
                 outage_duration = now - state.wifi_outage_started_monotonic
                 reconnect_succeeded = False

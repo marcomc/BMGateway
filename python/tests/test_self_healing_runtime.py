@@ -352,6 +352,25 @@ def test_initial_wifi_restoration_checkpoint_failure_is_retryable(
     assert [item.action for item in queued] == ["wifi_connectivity_restored"]
 
 
+def test_invalid_wifi_state_preservation_returns_unavailable_event(
+    tmp_path: Path,
+) -> None:
+    config = _wifi_config()
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_watchdog_enabled=False),
+    )
+    path = wifi_watchdog_state_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("{invalid\n", encoding="utf-8")
+
+    events = runtime.run_self_healing(
+        config=config, state=new_self_healing_state(), state_dir=tmp_path
+    )
+
+    assert any(event.action == "wifi_watchdog_state_unavailable" for event in events)
+
+
 def test_disabling_wifi_watchdog_clears_persisted_recovery_handoff(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

@@ -216,6 +216,52 @@ def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
     assert restarted.wifi_recovery_pending is False
 
 
+def test_persisted_wifi_reboot_authorization_is_retryable_immediately(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=10,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_outage_seconds = 600
+    persisted.wifi_recovery_interface = "wlan0"
+    persisted.wifi_recovery_started_at = 1000.0
+    persisted.wifi_recovery_handoff_id = "handoff-authorized"
+    persisted.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(state_path, persisted, preserve_pending=False)
+
+    state = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, state)
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=5.0,
+        now_wall_time=2000.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert [event.action for event in events] == ["wifi_reboot_requested"]
+    assert events[0].details["outage_seconds"] == 600
+    assert state.wifi_reboot_requested is True
+
+
+def test_wifi_state_preservation_reports_invalid_json(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text("{invalid\n", encoding="utf-8")
+
+    with pytest.raises(WiFiWatchdogStateError):
+        persist_wifi_watchdog_state(state_path, new_self_healing_state())
+
+
 def test_wifi_reconnect_requires_a_successful_post_reconnect_probe() -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(
