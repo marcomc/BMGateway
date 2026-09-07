@@ -543,8 +543,8 @@ cat > /etc/systemd/system/bm-gateway-boot-notification.service <<EOF
 [Unit]
 Description=BMGateway Boot Notification
 Wants=network-online.target
-After=network-online.target
-Before=bm-gateway.service
+Requires=systemd-time-wait-sync.service
+After=network-online.target systemd-time-wait-sync.service
 StartLimitIntervalSec=300
 StartLimitBurst=3
 
@@ -583,7 +583,7 @@ fi
 
 if [[ "${start_services}" -eq 1 ]]; then
   systemctl restart bm-gateway-lifecycle.service || true
-  systemctl restart bm-gateway-boot-notification.service || true
+  systemctl restart --no-block bm-gateway-boot-notification.service || true
   systemctl restart bm-gateway.service
   if [[ "${enable_web}" -eq 1 ]]; then
     systemctl restart bm-gateway-web.service

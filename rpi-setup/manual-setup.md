@@ -616,6 +616,8 @@ ID, and independently arms `bm-gateway-lifecycle.service` for shutdown. Shutdown
 is recorded only when systemd reports that the host is stopping. Ordinary
 service restarts do not produce shutdown mail. Installing this feature on a
 running host reports that the current boot was observed, not a new reboot.
+Boot recording waits for synchronized wall-clock time without delaying runtime
+or web activation.
 
 Pending lifecycle events survive process restarts and follow the configured
 retention and event-count limits. Shutdown mail is best effort: sudden power

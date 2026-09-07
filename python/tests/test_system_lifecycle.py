@@ -359,7 +359,16 @@ def test_generated_shutdown_unit_is_armed_independently_of_boot_delivery() -> No
     assert "RemainAfterExit=yes" in shutdown
     assert " lifecycle shutdown " in shutdown
     assert " lifecycle boot " not in shutdown
+    assert "Requires=systemd-time-wait-sync.service" not in shutdown
+    assert "systemd-time-wait-sync.service" not in shutdown
+    assert "Before=bm-gateway.service" in shutdown
+    assert "Requires=systemd-time-wait-sync.service" in boot
+    assert "After=network-online.target systemd-time-wait-sync.service" in boot
+    assert "time-sync.target" not in boot
+    assert "Before=bm-gateway.service" not in boot
+    assert "systemctl enable systemd-time-wait-sync.service" not in source
     assert "Restart=on-failure" in boot
+    assert "StartLimitIntervalSec=300" in boot
     assert "StartLimitBurst=3" in boot
     assert " lifecycle boot " in boot
 
@@ -377,6 +386,11 @@ def test_operator_docs_cover_lifecycle_units_and_validation() -> None:
     }
 
     manual_setup = documents["rpi-setup/manual-setup.md"]
+    normalized_manual_setup = " ".join(manual_setup.split())
+    assert (
+        "Boot recording waits for synchronized wall-clock time without delaying "
+        "runtime or web activation."
+    ) in normalized_manual_setup
     for unit in (lifecycle_unit, boot_unit):
         assert f"- `/etc/systemd/system/{unit}`" in manual_setup
         assert f"sudo systemctl status {unit}" in manual_setup
@@ -621,11 +635,14 @@ systemctl() {
   fi
 }
 """
+    systemctl_action = action
+    if action == "restart" and unit == "bm-gateway-boot-notification.service":
+        systemctl_action = "restart --no-block"
     result = subprocess.run(
         ["bash", "-c", script + block],
         env={
             **os.environ,
-            "failure": f"{action} {unit}",
+            "failure": f"{systemctl_action} {unit}",
             "start_services": str(start),
             "enable_web": str(web),
             "enable_glances": "0",
@@ -646,3 +663,8 @@ systemctl() {
         assert "enable bm-gateway.service" in result.stdout
         assert ("restart bm-gateway.service" in result.stdout) == bool(start)
         assert ("restart bm-gateway-web.service" in result.stdout) == bool(start and web)
+        assert ("restart --no-block bm-gateway-boot-notification.service" in result.stdout) == bool(
+            start
+        )
+        assert "restart --no-block bm-gateway.service" not in result.stdout
+        assert "restart --no-block bm-gateway-web.service" not in result.stdout
