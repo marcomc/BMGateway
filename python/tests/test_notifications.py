@@ -583,6 +583,9 @@ _USB_HEALTH_REASONS = (
     "USB OTG controller state is unreadable",
     "UDC state is not configured",
 )
+_USB_DETAIL_TEMPLATE = (
+    "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}"
+)
 
 
 @pytest.mark.parametrize("reason", _USB_HEALTH_REASONS)
@@ -638,7 +641,7 @@ def test_replayed_usb_escalation_localizes_production_reason_in_email(
     assert not load_notification_outbox(notification_outbox_path(tmp_path))
 
 
-def test_replayed_usb_escalation_preserves_already_queued_legacy_detail(
+def test_replayed_usb_escalation_translates_known_queued_legacy_detail(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     config = load_config(Path("python/config/config.toml.example"))
@@ -684,7 +687,359 @@ def test_replayed_usb_escalation_preserves_already_queued_legacy_detail(
     )
     assert len(payloads) == 1
     message = Parser(policy=policy.default).parsestr(payloads[0])
-    assert legacy_detail in message.get_content()
+    text = translation_for("it").gettext
+    expected = text(_USB_DETAIL_TEMPLATE).format(
+        attempts=2, reason=text("UDC state is not configured")
+    )
+    assert expected in message.get_content()
+
+
+@pytest.mark.parametrize("source,target", [("en", "it"), ("it", "en")])
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_queued_usb_detail_uses_delivery_locale(
+    tmp_path: Path, source: str, target: str, mode: str
+) -> None:
+    source_text = translation_for(source).gettext
+    target_text = translation_for(target).gettext
+    reason = "UDC state is not configured"
+    path = tmp_path / "outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", locale=source, offline_delivery=mode
+    )
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="usb_otg_recovery_exhausted",
+        detail=source_text(_USB_DETAIL_TEMPLATE).format(attempts=99, reason="stale detail"),
+        usb_otg_reason=reason,
+        usb_otg_reboot_attempts=2,
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(
+        path=path, config=replace(config, locale=target), runner=send
+    )[0]
+    body = Parser(policy=policy.default).parsestr(payloads[0]).get_content()
+    assert target_text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=target_text(reason)) in body
+
+
+@pytest.mark.parametrize("source", supported_locale_codes())
+@pytest.mark.parametrize("reason", _USB_HEALTH_REASONS)
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_legacy_usb_delivery_relocalizes_all_shipped_templates(
+    tmp_path: Path, source: str, reason: str, mode: str
+) -> None:
+    path = tmp_path / "outbox.json"
+    text = translation_for(source).gettext
+    occurred_at = datetime.now(timezone.utc).isoformat()
+    for source_reason in {reason, text(reason)}:
+        legacy = {
+            "action": "usb_otg_recovery_exhausted",
+            "detail": text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=source_reason),
+            "occurred_at": occurred_at,
+            "idempotency_key": "original-episode",
+        }
+        for target in supported_locale_codes():
+            path.write_text(json.dumps([legacy]))
+            unchanged = path.read_bytes()
+            event = load_notification_outbox(path)[0]
+            assert path.read_bytes() == unchanged  # Reading compatibility data is not a migration.
+            assert event.usb_otg_reason == reason
+            assert event.usb_otg_reboot_attempts == 2
+            assert event.occurred_at.isoformat() == occurred_at
+            assert event.idempotency_key == "original-episode"
+            config = NotificationsConfig(
+                enabled=True,
+                recipient="operator@example.test",
+                locale=target,
+                offline_delivery=mode,
+            )
+            payloads: list[str] = []
+
+            def send(
+                payload: str, captured: list[str] = payloads
+            ) -> subprocess.CompletedProcess[str]:
+                captured.append(payload)
+                return _success(payload)
+
+            assert deliver_notification_outbox(path=path, config=config, runner=send)[0]
+            assert len(payloads) == 1
+            message = Parser(policy=policy.default).parsestr(payloads[0])
+            target_text = translation_for(target).gettext
+            expected = target_text(_USB_DETAIL_TEMPLATE).format(
+                attempts=2, reason=target_text(reason)
+            )
+            assert expected in message.get_content()
+            assert target_text("USB OTG recovery exhausted") in message.get_content()
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"usb_otg_reason": "UDC state is not configured"},
+        {"usb_otg_reboot_attempts": 2},
+        {"usb_otg_reason": None, "usb_otg_reboot_attempts": None},
+        {"usb_otg_reason": None, "usb_otg_reboot_attempts": 2},
+        {"usb_otg_reason": 1, "usb_otg_reboot_attempts": 2},
+        {"usb_otg_reason": "known", "usb_otg_reboot_attempts": None},
+        {"usb_otg_reason": "known", "usb_otg_reboot_attempts": True},
+        {"usb_otg_reason": "known", "usb_otg_reboot_attempts": -1},
+        {"usb_otg_reason": "known", "usb_otg_reboot_attempts": 1.5},
+        {"usb_otg_reason": "known", "usb_otg_reboot_attempts": "2"},
+        {"action": "other_action", "usb_otg_reason": "known", "usb_otg_reboot_attempts": 2},
+    ],
+)
+def test_outbox_rejects_invalid_usb_metadata_without_writing(
+    tmp_path: Path, metadata: dict[str, object]
+) -> None:
+    path = tmp_path / "outbox.json"
+    raw = {
+        "action": "usb_otg_recovery_exhausted",
+        "detail": "original opaque detail",
+        "occurred_at": datetime.now(timezone.utc).isoformat(),
+        **metadata,
+    }
+    path.write_text(json.dumps([raw]))
+    original = path.read_bytes()
+    with pytest.raises(NotificationOutboxError, match="contains an invalid event"):
+        load_notification_outbox(path)
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("attempts", [0, 2, 2**40])
+@pytest.mark.parametrize("reason", ["UDC state is not configured", "unrecognized diagnostic", ""])
+def test_structured_usb_serialization_derives_detail_from_original_metadata(
+    tmp_path: Path, attempts: int, reason: str
+) -> None:
+    original = NotificationEvent(
+        action="usb_otg_recovery_exhausted",
+        detail="conflicting detail must not become a second source of truth",
+        occurred_at=datetime.now(timezone.utc),
+        idempotency_key="original-episode",
+        usb_otg_reason=reason,
+        usb_otg_reboot_attempts=attempts,
+    )
+    expected = _USB_DETAIL_TEMPLATE.format(attempts=attempts, reason=reason)
+    serialized = original.to_dict()
+    assert serialized["detail"] == expected
+    assert serialized["usb_otg_reason"] == reason
+    assert serialized["usb_otg_reboot_attempts"] == attempts
+    path = tmp_path / "outbox.json"
+    persist_notification_outbox(path, [original])
+    assert load_notification_outbox(path) == [replace(original, detail=expected)]
+
+
+@pytest.mark.parametrize("once", [False, True])
+def test_both_queue_apis_reject_partial_usb_metadata(tmp_path: Path, once: bool) -> None:
+    queue = queue_notification_event_once if once else queue_notification_event
+    with pytest.raises(NotificationOutboxError, match="contains an invalid event"):
+        queue(
+            path=tmp_path / "outbox.json",
+            config=NotificationsConfig(enabled=True),
+            action="usb_otg_recovery_exhausted",
+            detail="opaque",
+            idempotency_key="episode",
+            usb_otg_reason="UDC state is not configured",
+        )
+    assert not (tmp_path / "outbox.json").exists()
+
+
+@pytest.mark.parametrize("reason", ["Reboot scheduling failed", "unknown diagnostic"])
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_structured_usb_reason_uses_catalog_without_legacy_allowlist(
+    tmp_path: Path, reason: str, mode: str
+) -> None:
+    path = tmp_path / "outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", locale="it", offline_delivery=mode
+    )
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="usb_otg_recovery_exhausted",
+        detail="",
+        usb_otg_reason=reason,
+        usb_otg_reboot_attempts=2,
+    )
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(path=path, config=config, runner=send)[0]
+    text = translation_for("it").gettext
+    expected = text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=text(reason))
+    assert expected in Parser(policy=policy.default).parsestr(payloads[0]).get_content()
+
+
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_failed_delivery_and_duplicate_preserve_usb_facts_for_new_locale(
+    tmp_path: Path, mode: str
+) -> None:
+    path = tmp_path / "outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", locale="it", offline_delivery=mode
+    )
+    reason = "USB OTG gadget is detached"
+    occurred_at = datetime.now(timezone.utc)
+    assert queue_notification_event_once(
+        path=path,
+        config=config,
+        action="usb_otg_recovery_exhausted",
+        detail="",
+        idempotency_key="original-episode",
+        usb_otg_reason=reason,
+        usb_otg_reboot_attempts=2,
+        now=occurred_at,
+    )
+    original = load_notification_outbox(path)
+    assert not deliver_notification_outbox(path=path, config=config, runner=_failure)[0]
+    assert not queue_notification_event_once(
+        path=path,
+        config=replace(config, locale="de"),
+        action="usb_otg_recovery_exhausted",
+        detail="replacement payload",
+        idempotency_key="original-episode",
+        usb_otg_reason="USB OTG backing image is missing",
+        usb_otg_reboot_attempts=4,
+        now=occurred_at + timedelta(seconds=1),
+    )
+    assert load_notification_outbox(path) == original
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(path=path, config=replace(config, locale="de"), runner=send)[
+        0
+    ]
+    text = translation_for("de").gettext
+    body = Parser(policy=policy.default).parsestr(payloads[0]).get_content()
+    assert text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=text(reason)) in body
+    assert occurred_at.isoformat() in body
+
+
+@pytest.mark.parametrize("legacy", [False, True])
+def test_partial_individual_delivery_preserves_canonical_usb_metadata(
+    tmp_path: Path, legacy: bool
+) -> None:
+    path = tmp_path / "outbox.json"
+    config = NotificationsConfig(
+        enabled=True, recipient="operator@example.test", locale="it", offline_delivery="individual"
+    )
+    queue_notification_event(path=path, config=config, action="first", detail="deliver first")
+    reason = "USB OTG gadget is detached"
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="usb_otg_recovery_exhausted",
+        detail="",
+        idempotency_key="second-event",
+        usb_otg_reason=reason,
+        usb_otg_reboot_attempts=2,
+    )
+    if legacy:
+        rows = json.loads(path.read_text())
+        rows[1].pop("usb_otg_reason")
+        rows[1].pop("usb_otg_reboot_attempts")
+        text = translation_for("it").gettext
+        rows[1]["detail"] = text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=text(reason))
+        path.write_text(json.dumps(rows))
+    second = load_notification_outbox(path)[1]
+    sent: list[str] = []
+
+    def partial_send(payload: str) -> subprocess.CompletedProcess[str]:
+        sent.append(payload)
+        return _success(payload) if len(sent) == 1 else _failure(payload)
+
+    assert not deliver_notification_outbox(path=path, config=config, runner=partial_send)[0]
+    assert load_notification_outbox(path) == [second]
+    retained = json.loads(path.read_text())[0]
+    assert retained["usb_otg_reason"] == reason
+    assert retained["usb_otg_reboot_attempts"] == 2
+    sent.clear()
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        sent.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(path=path, config=replace(config, locale="fr"), runner=send)[
+        0
+    ]
+    text = translation_for("fr").gettext
+    body = Parser(policy=policy.default).parsestr(sent[0]).get_content()
+    assert text(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=text(reason)) in body
+
+
+@pytest.mark.parametrize(
+    "action,detail",
+    [
+        ("usb_otg_recovery_exhausted", "operator-provided arbitrary detail"),
+        (
+            "other_action",
+            _USB_DETAIL_TEMPLATE.format(attempts=2, reason="UDC state is not configured"),
+        ),
+        ("usb_otg_recovery_exhausted", _USB_DETAIL_TEMPLATE.format(attempts=2, reason="unknown")),
+        (
+            "usb_otg_recovery_exhausted",
+            "Earlier: "
+            + _USB_DETAIL_TEMPLATE.format(attempts=2, reason="UDC state is not configured"),
+        ),
+        *[
+            (
+                "usb_otg_recovery_exhausted",
+                _USB_DETAIL_TEMPLATE.format(attempts=count, reason="UDC state is not configured"),
+            )
+            for count in ["-1", "1.5", "02", "9" * 5000]
+        ],
+    ],
+    ids=["freeform", "non-usb", "unknown-reason", "prefix", "negative", "float", "zero", "huge"],
+)
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_unrecognized_legacy_notification_remains_unchanged(
+    tmp_path: Path, action: str, detail: str, mode: str
+) -> None:
+    path = tmp_path / "outbox.json"
+    event = NotificationEvent(action=action, detail=detail, occurred_at=datetime.now(timezone.utc))
+    persist_notification_outbox(path, [event])
+    assert load_notification_outbox(path) == [event]
+    assert "usb_otg_reason" not in json.loads(path.read_text())[0]
+    payloads: list[str] = []
+
+    def send(payload: str) -> subprocess.CompletedProcess[str]:
+        payloads.append(payload)
+        return _success(payload)
+
+    assert deliver_notification_outbox(
+        path=path,
+        config=NotificationsConfig(
+            enabled=True, recipient="operator@example.test", locale="it", offline_delivery=mode
+        ),
+        runner=send,
+    )[0]
+    assert detail in Parser(policy=policy.default).parsestr(payloads[0]).get_content()
+
+
+def test_ambiguous_legacy_usb_reason_is_not_reinterpreted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    translation = translation_for("it")
+    repeated = "diagnostica ambigua"
+    for reason in _USB_HEALTH_REASONS[:2]:
+        monkeypatch.setitem(translation.catalog, reason, repeated)
+    detail = translation.gettext(_USB_DETAIL_TEMPLATE).format(attempts=2, reason=repeated)
+    event = NotificationEvent(
+        action="usb_otg_recovery_exhausted", detail=detail, occurred_at=datetime.now(timezone.utc)
+    )
+    path = tmp_path / "outbox.json"
+    persist_notification_outbox(path, [event])
+    assert load_notification_outbox(path) == [event]
 
 
 @pytest.mark.parametrize("failure_stage", ["file", "directory"])

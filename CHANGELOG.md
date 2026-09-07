@@ -33,8 +33,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Healthy and disabled USB watchdog transitions preserve pending notifications
   while resetting recovery state. USB checkpoint failures defer same-cycle
   reboots and remain visible in the audit log without disabling Wi-Fi reconnect.
-- USB escalation email details and action labels now use the selected
-  notification language in every supported locale, including the failure reason.
+- USB escalation email details and action labels use the selected delivery
+  locale, including the failure reason. Queued incidents retain canonical reason
+  and reboot count, so language changes apply to pending mail; recognized legacy
+  USB details are migrated when loaded.
 - Notification delivery audits now retain distinct successful deliveries while
   suppressing only consecutive identical failures.
 

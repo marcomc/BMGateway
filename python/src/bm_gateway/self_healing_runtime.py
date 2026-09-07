@@ -73,19 +73,14 @@ def run_self_healing(
             for event in events:
                 if event.action != "usb_otg_recovery_exhausted":
                     continue
-                text = translation_for(config.notifications.locale).gettext
                 queue_notification_event_once(
                     path=notification_outbox_path(state_dir),
                     config=config.notifications,
                     action=event.action,
-                    detail=text(
-                        "USB OTG frame enumeration remained unavailable after "
-                        "{attempts} reboot attempt(s): {reason}"
-                    ).format(
-                        attempts=state.usb_otg_escalation_reboot_attempts,
-                        reason=text(state.usb_otg_escalation_reason),
-                    ),
+                    detail="",
                     idempotency_key=f"usb-otg-escalation:{state.usb_otg_escalation_id}",
+                    usb_otg_reason=state.usb_otg_escalation_reason,
+                    usb_otg_reboot_attempts=state.usb_otg_escalation_reboot_attempts,
                 )
                 state.usb_otg_escalation_notification_pending = False
                 checkpoint()

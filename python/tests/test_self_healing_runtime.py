@@ -13,6 +13,7 @@ import pytest
 from bm_gateway import notifications, self_healing
 from bm_gateway import self_healing_runtime as runtime
 from bm_gateway.config import AppConfig, load_config
+from bm_gateway.localization import translation_for
 from bm_gateway.self_healing import USBOTGHealth, new_self_healing_state
 
 
@@ -806,3 +807,52 @@ def test_duplicate_queue_failure_defers_ack_delivery_and_peer_reboot(
     assert len(delivered) == 1
     assert reboots == [True]
     assert notifications.load_notification_outbox(outbox_path) == []
+
+
+@pytest.mark.parametrize("mode", ["summary", "individual"])
+def test_pending_mail_uses_delivery_locale_after_watchdog_recovers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str
+) -> None:
+    config = _config()
+    config = replace(
+        config, notifications=replace(config.notifications, locale="it", offline_delivery=mode)
+    )
+    path = _seed(tmp_path)
+    reason = "USB OTG backing image is missing"
+    monkeypatch.setattr(
+        runtime,
+        "evaluate_self_healing",
+        partial(
+            self_healing.evaluate_self_healing,
+            usb_otg_health_checker=lambda *_: USBOTGHealth(False, reason, None, None),
+        ),
+    )
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        partial(
+            notifications.deliver_notification_outbox,
+            runner=lambda payload: subprocess.CompletedProcess(["sendmail"], 75, "", "offline"),
+        ),
+    )
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert not json.loads(path.read_text())["escalation_notification_pending"]
+    queued = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert len(queued) == 1
+    assert queued[0].usb_otg_reason == reason
+    assert queued[0].usb_otg_reboot_attempts == 2
+    assert queued[0].idempotency_key.startswith("usb-otg-escalation:")
+    _evaluate(monkeypatch, healthy=True)
+    delivered = _delivery(monkeypatch, path)
+    config = replace(config, notifications=replace(config.notifications, locale="de"))
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+    assert len(delivered) == 1
+    assert translation_for("de").gettext(reason) in delivered[0]
+    assert translation_for("it").gettext(reason) not in delivered[0]
+    assert json.loads(path.read_text())["reboot_attempts_used"] == 0
+    assert (
+        notifications.load_notification_outbox(notifications.notification_outbox_path(tmp_path))
+        == []
+    )
