@@ -49,30 +49,21 @@ def _queue_wifi_watchdog_notification(
     outage_value = details.get("outage_seconds", 0)
     outage_seconds = outage_value if isinstance(outage_value, int) else 0
     interface = str(details.get("wifi_interface", ""))
-    translate = translation_for(config.notifications.locale).gettext
-    if event.action == "wifi_reconnect_attempted":
-        template = (
-            "Wi-Fi reconnect succeeded after {outage_seconds} seconds on {wifi_interface}."
-            if event.status == "completed"
-            else "Wi-Fi reconnect failed after {outage_seconds} seconds on {wifi_interface}."
-        )
-        detail = translate(template).format(outage_seconds=outage_seconds, wifi_interface=interface)
-    elif event.action == "wifi_reboot_requested":
-        detail = translate(
-            "Wi-Fi reboot requested after {outage_seconds} seconds on {wifi_interface}."
-        ).format(outage_seconds=outage_seconds, wifi_interface=interface)
-    elif event.action == "wifi_connectivity_restored":
-        detail = translate("Wi-Fi connectivity restored after {outage_seconds} seconds.").format(
-            outage_seconds=outage_seconds
-        )
-    else:
+    if event.action not in {
+        "wifi_reconnect_attempted",
+        "wifi_reboot_requested",
+        "wifi_connectivity_restored",
+    }:
         return
     if idempotency_key:
         queue_notification_event_once(
             path=path,
             config=config.notifications,
             action=event.action,
-            detail=detail,
+            detail="",
+            wifi_outcome=event.status,
+            wifi_interface=interface,
+            wifi_outage_seconds=outage_seconds,
             idempotency_key=idempotency_key,
         )
     else:
@@ -80,8 +71,96 @@ def _queue_wifi_watchdog_notification(
             path=path,
             config=config.notifications,
             action=event.action,
-            detail=detail,
+            detail="",
+            wifi_outcome=event.status,
+            wifi_interface=interface,
+            wifi_outage_seconds=outage_seconds,
         )
+
+
+def _queue_wifi_recovery_action(
+    *,
+    config: AppConfig,
+    state: SelfHealingState,
+    wifi_path: Path,
+    outbox_path: Path,
+    event: SelfHealingEvent,
+    boot_id: str = "",
+) -> None:
+    reconnect = event.action == "wifi_reconnect_attempted"
+    notification_kind = "reconnect" if reconnect else "reboot"
+    notification_instance = event.status if reconnect else boot_id
+    acknowledged = (
+        notification_instance in state.wifi_reconnect_notified_outcomes
+        if reconnect
+        else notification_instance == state.wifi_reboot_notified_boot_id
+    )
+    if not acknowledged:
+        key = (
+            f"wifi-{notification_kind}:{state.wifi_recovery_handoff_id}:{notification_instance}"
+            if state.wifi_recovery_handoff_id
+            else ""
+        )
+        _queue_wifi_watchdog_notification(
+            path=outbox_path, config=config, event=event, idempotency_key=key
+        )
+        if (
+            state.wifi_recovery_pending
+            and config.notifications.enabled
+            and config.notifications.offline_delivery != "drop"
+        ):
+            if reconnect:
+                state.wifi_reconnect_notified_outcomes += (event.status,)
+            else:
+                state.wifi_reboot_notified_boot_id = notification_instance
+            persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
+    if reconnect and event.status == "completed":
+        state.wifi_recovery_phase = "pending"
+        persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
+
+
+def _transfer_wifi_restoration(
+    *, config: AppConfig, state: SelfHealingState, wifi_path: Path, outbox_path: Path
+) -> list[SelfHealingEvent]:
+    """Transfer one ended incident before a later outage can replace its state."""
+    transferred: list[SelfHealingEvent] = []
+    if state.wifi_recovery_phase == "reconnect_pending":
+        reconnect = SelfHealingEvent(
+            action="wifi_reconnect_attempted",
+            status="completed",
+            details={
+                "wifi_interface": state.wifi_recovery_interface,
+                "outage_seconds": state.wifi_recovery_outage_seconds,
+            },
+        )
+        _queue_wifi_recovery_action(
+            config=config,
+            state=state,
+            wifi_path=wifi_path,
+            outbox_path=outbox_path,
+            event=reconnect,
+        )
+        transferred.append(reconnect)
+    restored = SelfHealingEvent(
+        action="wifi_connectivity_restored",
+        status="completed",
+        details={
+            "wifi_interface": state.wifi_recovery_interface,
+            "outage_seconds": state.wifi_recovery_outage_seconds,
+        },
+    )
+
+    def enqueue(current: SelfHealingState) -> None:
+        _queue_wifi_watchdog_notification(
+            path=outbox_path,
+            config=config,
+            event=restored,
+            idempotency_key=f"wifi-recovery:{current.wifi_recovery_handoff_id}",
+        )
+
+    if consume_wifi_recovery_notification(wifi_path, state, enqueue):
+        transferred.append(restored)
+    return transferred
 
 
 def run_self_healing(
@@ -89,6 +168,8 @@ def run_self_healing(
 ) -> list[SelfHealingEvent]:
     """Run one serialized watchdog transaction for daemon and one-shot callers."""
     events: list[SelfHealingEvent] = []
+    transferred_events: list[SelfHealingEvent] = []
+    wifi_transfer_in_progress = False
     path = usb_otg_watchdog_state_path(state_dir)
     wifi_path = wifi_watchdog_state_path(state_dir)
     before = replace(state)
@@ -108,6 +189,15 @@ def run_self_healing(
                     confirm_wifi_watchdog_state_durable(wifi_path)
                 if ensure_wifi_recovery_identity(state):
                     persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
+                if state.wifi_recovery_pending and state.wifi_recovery_observed:
+                    wifi_transfer_in_progress = True
+                    transferred_events = _transfer_wifi_restoration(
+                        config=config,
+                        state=state,
+                        wifi_path=wifi_path,
+                        outbox_path=notification_outbox_path(state_dir),
+                    )
+                    wifi_transfer_in_progress = False
             if had_wifi_recovery_pending and not state.wifi_recovery_pending:
                 clear_wifi_recovery_transient_state(state)
             current_boot_id: str | None = None
@@ -274,19 +364,6 @@ def run_self_healing(
                     ),
                 )
 
-            def enqueue_wifi_recovery(recovery_state: SelfHealingState) -> None:
-                translate = translation_for(config.notifications.locale).gettext
-                detail = translate(
-                    "Wi-Fi connectivity restored after {outage_seconds} seconds."
-                ).format(outage_seconds=recovery_state.wifi_recovery_outage_seconds)
-                queue_notification_event_once(
-                    path=notification_outbox_path(state_dir),
-                    config=config.notifications,
-                    action="wifi_connectivity_restored",
-                    detail=detail,
-                    idempotency_key=(f"wifi-recovery:{recovery_state.wifi_recovery_handoff_id}"),
-                )
-
             defer_notification_delivery = False
             for event in events:
                 if event.action == "wifi_connectivity_restored":
@@ -294,8 +371,11 @@ def run_self_healing(
                         continue
                     try:
                         if state.wifi_recovery_pending:
-                            consume_wifi_recovery_notification(
-                                wifi_path, state, enqueue_wifi_recovery
+                            _transfer_wifi_restoration(
+                                config=config,
+                                state=state,
+                                wifi_path=wifi_path,
+                                outbox_path=notification_outbox_path(state_dir),
                             )
                         else:
                             _queue_wifi_watchdog_notification(
@@ -316,57 +396,28 @@ def run_self_healing(
                     "wifi_reboot_requested",
                 }:
                     try:
-                        reconnect = event.action == "wifi_reconnect_attempted"
-                        notification_kind = "reconnect" if reconnect else "reboot"
-                        notification_instance = event.status if reconnect else reboot_boot_id()
-                        acknowledged = (
-                            notification_instance in state.wifi_reconnect_notified_outcomes
-                            if reconnect
-                            else notification_instance == state.wifi_reboot_notified_boot_id
+                        _queue_wifi_recovery_action(
+                            config=config,
+                            state=state,
+                            wifi_path=wifi_path,
+                            outbox_path=notification_outbox_path(state_dir),
+                            event=event,
+                            boot_id=reboot_boot_id()
+                            if event.action == "wifi_reboot_requested"
+                            else "",
                         )
-                        idempotency_key = ""
-                        if state.wifi_recovery_handoff_id:
-                            idempotency_key = (
-                                f"wifi-{notification_kind}:{state.wifi_recovery_handoff_id}:"
-                                f"{notification_instance}"
-                            )
-                        if not acknowledged:
-                            _queue_wifi_watchdog_notification(
-                                path=notification_outbox_path(state_dir),
-                                config=config,
-                                event=event,
-                                idempotency_key=idempotency_key,
-                            )
-                            if (
-                                state.wifi_recovery_pending
-                                and config.notifications.enabled
-                                and config.notifications.offline_delivery != "drop"
-                            ):
-                                if reconnect:
-                                    state.wifi_reconnect_notified_outcomes += (event.status,)
-                                else:
-                                    state.wifi_reboot_notified_boot_id = notification_instance
-                                persist_wifi_watchdog_state(
-                                    wifi_path, state, preserve_pending=False
-                                )
-                        if (
-                            event.action == "wifi_reconnect_attempted"
-                            and event.status == "completed"
-                        ):
-                            state.wifi_recovery_phase = "pending"
-                            persist_wifi_watchdog_state(wifi_path, state, preserve_pending=False)
                     except NotificationOutboxError:
                         defer_notification_delivery = True
                     except WiFiWatchdogStateError:
                         defer_notification_delivery = True
 
             if defer_notification_delivery:
-                return _defer_reboots(events, state, before)
+                return transferred_events + _defer_reboots(events, state, before)
 
             if usb_checkpoint_failed:
                 # Wi-Fi notifications are independent of a failed USB
                 # checkpoint, but no reboot may be scheduled in this cycle.
-                return _defer_reboots(events, state, before)
+                return transferred_events + _defer_reboots(events, state, before)
 
             for event in events:
                 if event.action != "usb_otg_recovery_exhausted":
@@ -456,7 +507,9 @@ def run_self_healing(
         events.append(
             SelfHealingEvent(
                 action=(
-                    "usb_otg_recovery_notification_queue"
+                    "wifi_recovery_notification_queue"
+                    if isinstance(error, NotificationOutboxError) and wifi_transfer_in_progress
+                    else "usb_otg_recovery_notification_queue"
                     if isinstance(error, NotificationOutboxError)
                     else "wifi_watchdog_state_unavailable"
                     if isinstance(error, WiFiWatchdogStateError)
@@ -468,7 +521,7 @@ def run_self_healing(
                 },
             )
         )
-    return events
+    return transferred_events + events
 
 
 def _defer_reboots(

@@ -560,6 +560,13 @@ An upgrade with older Wi-Fi alerts still queued can produce a one-time duplicate
 legacy alerts lack the outcome or boot identity needed to match them safely.
 They remain deliverable so migration cannot discard a genuine failure.
 
+Outage duration ends when connectivity is observed to recover. Notification
+retries retain that duration. An ended incident is transferred to the outbox
+before a new incident is evaluated; a failed state/queue write preserves the
+old incident and reports an error while deferring evaluation. Wi-Fi details and
+labels use the notification language selected at delivery. Unrecognized legacy
+freeform details remain unchanged.
+
 The USB OTG watchdog considers the frame enumerated only when the gadget is
 attached and its UDC state is `configured`. This is a useful host-side signal,
 but it does not prove that the picture-frame application is displaying the

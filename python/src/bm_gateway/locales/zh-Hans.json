@@ -533,6 +533,7 @@
   "Choose the fixed language used for unattended notification emails.": "选择自动通知邮件使用的固定语言。",
   "[BMGateway] notification test: {hostname}": "[BMGateway] 通知测试：{hostname}", "BMGateway system-mail notification delivery is working.": "BMGateway 系统邮件通知发送正常。",
   "BMGateway notification summary on {hostname}.": "{hostname} 上的 BMGateway 通知摘要。", "Events retained: {count}": "保留的事件：{count}", "First event: {timestamp}": "首个事件：{timestamp}", "Last event: {timestamp}": "最后事件：{timestamp}",
+  "Notification outbox contains an invalid event": "通知发件箱包含无效事件",
   "Wi-Fi reconnect attempted": "已尝试重新连接 Wi-Fi",
   "Wi-Fi reboot requested": "已请求重启以恢复 Wi-Fi",
   "Wi-Fi connectivity restored": "Wi-Fi 连接已恢复",

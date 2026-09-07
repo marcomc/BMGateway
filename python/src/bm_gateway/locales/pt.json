@@ -534,6 +534,7 @@
   "[BMGateway] notification test: {hostname}": "[BMGateway] teste de notificação: {hostname}",
   "BMGateway system-mail notification delivery is working.": "O envio de notificações do BMGateway pelo correio do sistema está funcionando.",
   "BMGateway notification summary on {hostname}.": "Resumo de notificações do BMGateway em {hostname}.",
+  "Notification outbox contains an invalid event": "A caixa de saída de notificações contém um evento inválido",
   "Wi-Fi reconnect attempted": "Tentativa de reconexão Wi-Fi",
   "Wi-Fi reboot requested": "Reinício solicitado para restaurar o Wi-Fi",
   "Wi-Fi connectivity restored": "Conectividade Wi-Fi restaurada",

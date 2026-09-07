@@ -36,6 +36,24 @@ _LEGACY_USB_HEALTH_REASONS = (
     "UDC state is not configured",
 )
 _MISSING = object()
+_WIFI_TEMPLATES = {
+    (
+        "wifi_reconnect_attempted",
+        "completed",
+    ): "Wi-Fi reconnect succeeded after {outage_seconds} seconds on {wifi_interface}.",
+    (
+        "wifi_reconnect_attempted",
+        "failed",
+    ): "Wi-Fi reconnect failed after {outage_seconds} seconds on {wifi_interface}.",
+    (
+        "wifi_reboot_requested",
+        "completed",
+    ): "Wi-Fi reboot requested after {outage_seconds} seconds on {wifi_interface}.",
+    (
+        "wifi_connectivity_restored",
+        "completed",
+    ): "Wi-Fi connectivity restored after {outage_seconds} seconds.",
+}
 
 
 class NotificationOutboxError(RuntimeError):
@@ -50,6 +68,9 @@ class NotificationEvent:
     idempotency_key: str = ""
     usb_otg_reason: str | None = None
     usb_otg_reboot_attempts: int | None = None
+    wifi_outcome: str | None = None
+    wifi_interface: str | None = None
+    wifi_outage_seconds: int | None = None
 
     def to_dict(self) -> dict[str, str | int]:
         event = _canonical_event(
@@ -63,6 +84,11 @@ class NotificationEvent:
                 if self.usb_otg_reboot_attempts is not None
                 else _MISSING
             ),
+            wifi_outcome=self.wifi_outcome if self.wifi_outcome is not None else _MISSING,
+            wifi_interface=self.wifi_interface if self.wifi_interface is not None else _MISSING,
+            wifi_outage_seconds=(
+                self.wifi_outage_seconds if self.wifi_outage_seconds is not None else _MISSING
+            ),
         )
         payload: dict[str, str | int] = {
             "action": event.action,
@@ -74,6 +100,11 @@ class NotificationEvent:
         if event.usb_otg_reason is not None and event.usb_otg_reboot_attempts is not None:
             payload["usb_otg_reason"] = event.usb_otg_reason
             payload["usb_otg_reboot_attempts"] = event.usb_otg_reboot_attempts
+        if event.wifi_outcome is not None:
+            assert event.wifi_interface is not None and event.wifi_outage_seconds is not None
+            payload["wifi_outcome"] = event.wifi_outcome
+            payload["wifi_interface"] = event.wifi_interface
+            payload["wifi_outage_seconds"] = event.wifi_outage_seconds
         return payload
 
 
@@ -137,6 +168,9 @@ def _canonical_event(
     idempotency_key: object = "",
     usb_otg_reason: object = _MISSING,
     usb_otg_reboot_attempts: object = _MISSING,
+    wifi_outcome: object = _MISSING,
+    wifi_interface: object = _MISSING,
+    wifi_outage_seconds: object = _MISSING,
 ) -> NotificationEvent:
     normalized_action = str(action).strip()
     if not normalized_action:
@@ -160,6 +194,24 @@ def _canonical_event(
             reason, attempts = legacy
     if reason is not None and attempts is not None:
         normalized_detail = _USB_ESCALATION_TEMPLATE.format(attempts=attempts, reason=reason)
+    wifi: tuple[str, str, int] | None = None
+    if any(value is not _MISSING for value in (wifi_outcome, wifi_interface, wifi_outage_seconds)):
+        if (
+            not isinstance(wifi_outcome, str)
+            or (normalized_action, wifi_outcome) not in _WIFI_TEMPLATES
+            or not isinstance(wifi_interface, str)
+            or not isinstance(wifi_outage_seconds, int)
+            or isinstance(wifi_outage_seconds, bool)
+            or wifi_outage_seconds < 0
+        ):
+            raise NotificationOutboxError("Notification outbox contains an invalid event")
+        wifi = wifi_outcome, wifi_interface, wifi_outage_seconds
+    else:
+        wifi = _legacy_wifi_detail(normalized_action, normalized_detail)
+    if wifi is not None:
+        normalized_detail = _WIFI_TEMPLATES[(normalized_action, wifi[0])].format(
+            wifi_interface=wifi[1], outage_seconds=wifi[2]
+        )
     return NotificationEvent(
         action=normalized_action,
         detail=normalized_detail,
@@ -167,7 +219,31 @@ def _canonical_event(
         idempotency_key=str(idempotency_key).strip(),
         usb_otg_reason=reason,
         usb_otg_reboot_attempts=attempts,
+        wifi_outcome=wifi[0] if wifi else None,
+        wifi_interface=wifi[1] if wifi else None,
+        wifi_outage_seconds=wifi[2] if wifi else None,
     )
+
+
+def _legacy_wifi_detail(action: str, detail: str) -> tuple[str, str, int] | None:
+    matches: set[tuple[str, str, int]] = set()
+    for (candidate, outcome), template in _WIFI_TEMPLATES.items():
+        if candidate != action:
+            continue
+        for locale in supported_locale_codes():
+            pattern = (
+                re.escape(translation_for(locale).gettext(template))
+                .replace(re.escape("{outage_seconds}"), r"(?P<seconds>0|[1-9][0-9]*)")
+                .replace(re.escape("{wifi_interface}"), r"(?P<interface>[A-Za-z0-9_.-]{1,15})")
+            )
+            match = re.fullmatch(pattern, detail)
+            if match is not None:
+                try:
+                    seconds = int(match["seconds"])
+                except ValueError:
+                    continue
+                matches.add((outcome, match.groupdict().get("interface", ""), seconds))
+    return next(iter(matches)) if len(matches) == 1 else None
 
 
 def _legacy_usb_detail(detail: str) -> tuple[str, int] | None:
@@ -225,6 +301,9 @@ def _load_notification_outbox_unlocked(path: Path) -> list[NotificationEvent]:
                 idempotency_key=item.get("idempotency_key", ""),
                 usb_otg_reason=item.get("usb_otg_reason", _MISSING),
                 usb_otg_reboot_attempts=item.get("usb_otg_reboot_attempts", _MISSING),
+                wifi_outcome=item.get("wifi_outcome", _MISSING),
+                wifi_interface=item.get("wifi_interface", _MISSING),
+                wifi_outage_seconds=item.get("wifi_outage_seconds", _MISSING),
             )
         )
     return events
@@ -291,6 +370,9 @@ def queue_notification_event(
     idempotency_key: str = "",
     usb_otg_reason: str | None = None,
     usb_otg_reboot_attempts: int | None = None,
+    wifi_outcome: str | None = None,
+    wifi_interface: str | None = None,
+    wifi_outage_seconds: int | None = None,
     now: datetime | None = None,
 ) -> None:
     if not config.enabled or config.offline_delivery == "drop":
@@ -306,6 +388,9 @@ def queue_notification_event(
                 idempotency_key=idempotency_key,
                 usb_otg_reason=usb_otg_reason,
                 usb_otg_reboot_attempts=usb_otg_reboot_attempts,
+                wifi_outcome=wifi_outcome,
+                wifi_interface=wifi_interface,
+                wifi_outage_seconds=wifi_outage_seconds,
             )
         )
         _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
@@ -320,6 +405,9 @@ def queue_notification_event_once(
     idempotency_key: str,
     usb_otg_reason: str | None = None,
     usb_otg_reboot_attempts: int | None = None,
+    wifi_outcome: str | None = None,
+    wifi_interface: str | None = None,
+    wifi_outage_seconds: int | None = None,
     now: datetime | None = None,
 ) -> bool:
     """Durably queue an event unless its stable identity is already pending."""
@@ -340,6 +428,9 @@ def queue_notification_event_once(
                 idempotency_key=idempotency_key,
                 usb_otg_reason=usb_otg_reason,
                 usb_otg_reboot_attempts=usb_otg_reboot_attempts,
+                wifi_outcome=wifi_outcome,
+                wifi_interface=wifi_interface,
+                wifi_outage_seconds=wifi_outage_seconds,
             )
         )
         _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
@@ -382,6 +473,13 @@ def _action_label(config: NotificationsConfig, action: str) -> str:
 
 
 def _event_detail(config: NotificationsConfig, event: NotificationEvent) -> str:
+    if event.wifi_outcome is not None:
+        return _text(
+            config,
+            _WIFI_TEMPLATES[(event.action, event.wifi_outcome)],
+            wifi_interface=event.wifi_interface,
+            outage_seconds=event.wifi_outage_seconds,
+        )
     if event.usb_otg_reason is None or event.usb_otg_reboot_attempts is None:
         return event.detail
     reason = translation_for(config.locale).gettext(event.usb_otg_reason)

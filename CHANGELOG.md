@@ -29,6 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   migration and process restarts. Repeated alerts for the same recovery outcome
   are suppressed while changed outcomes, new incidents, and reboot attempts
   from later boots remain visible.
+- Wi-Fi outage duration stops at the observed recovery, even when notification
+  handoff is retried later. Queued Wi-Fi details use the language selected at
+  delivery, including after a language change while mail is pending.
 - Notification summaries include every retained event within the configured
   outbox limits and no longer imply that mail delivery previously failed.
   Wi-Fi event labels follow the selected notification language in both summary

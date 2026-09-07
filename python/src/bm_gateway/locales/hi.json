@@ -533,6 +533,7 @@
   "Choose the fixed language used for unattended notification emails.": "स्वचालित सूचना ईमेल के लिए निश्चित भाषा चुनें।",
   "[BMGateway] notification test: {hostname}": "[BMGateway] सूचना परीक्षण: {hostname}", "BMGateway system-mail notification delivery is working.": "BMGateway सिस्टम-मेल सूचना वितरण काम कर रहा है।",
   "BMGateway notification summary on {hostname}.": "{hostname} पर BMGateway सूचनाओं का सारांश।", "Events retained: {count}": "रखे गए इवेंट: {count}", "First event: {timestamp}": "पहला इवेंट: {timestamp}", "Last event: {timestamp}": "अंतिम इवेंट: {timestamp}",
+  "Notification outbox contains an invalid event": "सूचना आउटबॉक्स में एक अमान्य इवेंट है",
   "Wi-Fi reconnect attempted": "Wi-Fi पुनः कनेक्शन का प्रयास किया गया",
   "Wi-Fi reboot requested": "Wi-Fi बहाल करने के लिए रीबूट का अनुरोध किया गया",
   "Wi-Fi connectivity restored": "Wi-Fi कनेक्टिविटी बहाल हुई",
