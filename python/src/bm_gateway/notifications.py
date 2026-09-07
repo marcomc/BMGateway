@@ -10,7 +10,7 @@ import socket
 import subprocess
 import tempfile
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -351,8 +351,13 @@ def _canonicalize_outbox(
     config: NotificationsConfig,
     retention_reference: datetime,
 ) -> list[NotificationEvent]:
-    cutoff = _aware_utc(retention_reference) - timedelta(days=config.offline_retention_days)
-    retained = [event for event in events if event.occurred_at >= cutoff]
+    reference = _aware_utc(retention_reference)
+    cutoff = reference - timedelta(days=config.offline_retention_days)
+    retained = [
+        replace(event, occurred_at=min(event.occurred_at, reference))
+        for event in events
+        if event.occurred_at >= cutoff
+    ]
     retained.sort(key=lambda event: event.occurred_at)
     return retained[-config.offline_max_events :]
 

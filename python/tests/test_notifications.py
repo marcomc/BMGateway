@@ -82,6 +82,38 @@ def test_queue_notification_event_prunes_by_retention_and_limit(tmp_path: Path) 
 
 
 @pytest.mark.parametrize("queue_once", [False, True])
+def test_queue_clamps_persisted_future_events_before_applying_the_limit(
+    tmp_path: Path, queue_once: bool
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, offline_retention_days=30, offline_max_events=1)
+    now = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    persist_notification_outbox(
+        path,
+        [
+            NotificationEvent(
+                action="future",
+                detail="stale clock",
+                occurred_at=now + timedelta(days=365),
+            )
+        ],
+    )
+    enqueue = queue_notification_event_once if queue_once else queue_notification_event
+
+    enqueue(
+        path=path,
+        config=config,
+        action="current",
+        detail="corrected clock",
+        idempotency_key="current",
+        now=now,
+        retention_now=now,
+    )
+
+    assert [event.action for event in load_notification_outbox(path)] == ["current"]
+
+
+@pytest.mark.parametrize("queue_once", [False, True])
 @pytest.mark.parametrize(
     "offline_max_events,expected",
     [(1, ["newest"]), (2, ["middle", "newest"])],

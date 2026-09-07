@@ -206,6 +206,24 @@ def test_generic_unreleased_heading_must_not_have_a_suffix(tmp_path: Path, headi
         validate_release_version_state(tmp_path)
 
 
+@pytest.mark.parametrize("later_body", ["", "- Hidden pending change.\n"])
+def test_generic_unreleased_heading_must_not_be_duplicated(tmp_path: Path, later_body: str) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.2.2",
+        module_version="0.2.2",
+        documented_release="0.2.2",
+        changelog_text=(
+            "# Changelog\n\n## [Unreleased]\n\n"
+            f"## [Unreleased]\n\n{later_body}\n"
+            "## [0.2.2] - 2026-05-03 - Released changes\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="more than one generic"):
+        validate_release_version_state(tmp_path)
+
+
 @pytest.mark.parametrize(
     "heading",
     ["## [0.5] - Unreleased - Candidate", "## [v0.5.0] - 2026-09-07 - Candidate"],

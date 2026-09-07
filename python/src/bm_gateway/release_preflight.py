@@ -110,10 +110,12 @@ def unreleased_has_content_from_changelog(text: str) -> bool:
     ]
     if malformed_headings:
         raise ValueError("Generic unreleased headings must use: ## [Unreleased]")
-    match = _UNRELEASED_SECTION_PATTERN.search(text)
-    if match is None:
+    sections = list(_UNRELEASED_SECTION_PATTERN.finditer(text))
+    if len(sections) > 1:
+        raise ValueError("CHANGELOG.md contains more than one generic [Unreleased] section")
+    if not sections:
         return False
-    body = match.group(0).splitlines()[1:]
+    body = sections[0].group(0).splitlines()[1:]
     return any(line.strip() for line in body)
 
 
