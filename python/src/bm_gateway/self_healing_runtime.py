@@ -20,6 +20,7 @@ from .self_healing import (
     USBOTGWatchdogStateError,
     WiFiWatchdogStateError,
     clear_wifi_recovery_handoff,
+    clear_wifi_recovery_transient_state,
     consume_wifi_recovery_notification,
     default_reboot_boot_id,
     default_schedule_reboot,
@@ -95,10 +96,13 @@ def run_self_healing(
             loaded = True
             before = replace(state)
             wifi_state_error: WiFiWatchdogStateError | None = None
+            had_wifi_recovery_pending = state.wifi_recovery_pending
             try:
                 load_wifi_watchdog_state(wifi_path, state)
             except WiFiWatchdogStateError as error:
                 wifi_state_error = error
+            if had_wifi_recovery_pending and not state.wifi_recovery_pending:
+                clear_wifi_recovery_transient_state(state)
             current_boot_id: str | None = None
 
             def reboot_boot_id() -> str:

@@ -497,6 +497,38 @@ def test_runtime_consumes_persisted_wifi_restoration_handoff(
     assert state.wifi_recovery_pending is False
 
 
+def test_runtime_clears_stale_transient_wifi_state_after_peer_consumes_handoff(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    state = new_self_healing_state()
+    state.wifi_outage_started_monotonic = 10.0
+    state.wifi_reconnect_attempted = True
+    state.wifi_reboot_requested = True
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_handoff_id = "consumed-by-peer"
+    persist_wifi_watchdog_state(
+        wifi_watchdog_state_path(tmp_path), new_self_healing_state(), preserve_pending=False
+    )
+
+    def evaluate(**kwargs: object) -> list[SelfHealingEvent]:
+        current = kwargs["state"]
+        assert isinstance(current, self_healing.SelfHealingState)
+        assert current.wifi_outage_started_monotonic is None
+        assert current.wifi_reconnect_attempted is False
+        assert current.wifi_reboot_requested is False
+        return []
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(
+        runtime,
+        "deliver_notification_outbox",
+        lambda **_kwargs: (False, "No pending notifications"),
+    )
+
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+
 def test_initial_wifi_restoration_checkpoint_failure_is_retryable(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:

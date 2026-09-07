@@ -179,6 +179,12 @@ def test_self_healing_labels_are_translated_in_all_supported_locales() -> None:
         "Wi-Fi reboot",
         "Wi-Fi reconnect",
         "Wi-Fi watchdog",
+        "Cannot read Wi-Fi watchdog state",
+        "Wi-Fi watchdog state is invalid",
+        "Wi-Fi watchdog state has invalid values",
+        "Cannot persist Wi-Fi watchdog state",
+        "Cannot lock Wi-Fi watchdog state",
+        "Reboot boot identity is unavailable",
         "self-healing values must be numeric",
     )
 

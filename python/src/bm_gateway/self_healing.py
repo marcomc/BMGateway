@@ -325,6 +325,7 @@ def consume_wifi_recovery_notification(
             lock_handle.close()
     if acknowledged is not None:
         _copy_wifi_recovery_state(acknowledged, state)
+        clear_wifi_recovery_transient_state(state)
     return acknowledged is not None
 
 
@@ -341,7 +342,15 @@ def _copy_wifi_recovery_state(source: SelfHealingState, target: SelfHealingState
         setattr(target, name, getattr(source, name))
 
 
+def clear_wifi_recovery_transient_state(state: SelfHealingState) -> None:
+    """Clear process-local guards after another process consumes a handoff."""
+    state.wifi_outage_started_monotonic = None
+    state.wifi_reconnect_attempted = False
+    state.wifi_reboot_requested = False
+
+
 def _clear_wifi_recovery_state(state: SelfHealingState) -> None:
+    clear_wifi_recovery_transient_state(state)
     state.wifi_recovery_pending = False
     state.wifi_recovery_outage_seconds = 0
     state.wifi_recovery_interface = ""
