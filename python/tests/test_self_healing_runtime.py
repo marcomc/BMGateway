@@ -6,6 +6,7 @@ import multiprocessing
 import os
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import replace
 from email import message_from_string
 from functools import partial
@@ -180,6 +181,86 @@ def test_runtime_defers_shared_delivery_until_lifecycle_clock_is_synchronized(
 
     assert delivered == [True]
     assert not json.loads((tmp_path / "runtime/system_lifecycle_state.json").read_text())["pending"]
+
+
+def test_runtime_defers_prequeued_lifecycle_mail_until_clock_is_synchronized(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _config()
+    lifecycle._save(
+        tmp_path / "runtime/system_lifecycle_state.json",
+        {"boot_id": "a" * 32, "recorded": ["boot"], "pending": []},
+    )
+    notifications.queue_notification_event(
+        path=notifications.notification_outbox_path(tmp_path),
+        config=config.notifications,
+        action="system_boot",
+        detail="",
+    )
+    delivered: list[bool] = []
+
+    def deliver(**_: object) -> tuple[bool, str]:
+        delivered.append(True)
+        return True, "ok"
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_: [])
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+    monkeypatch.setattr(runtime, "deliver_notification_outbox", deliver)
+
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    assert not delivered
+    assert (
+        len(
+            notifications.load_notification_outbox(notifications.notification_outbox_path(tmp_path))
+        )
+        == 1
+    )
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    assert delivered == [True]
+
+
+def test_runtime_keeps_periodic_reboot_authorized_while_lifecycle_mail_defers(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _config()
+    config = replace(
+        config, self_healing=replace(config.self_healing, periodic_reboot_enabled=True)
+    )
+    state = new_self_healing_state()
+    scheduled: list[bool] = []
+    delivered: list[bool] = []
+
+    def deliver(**_: object) -> tuple[bool, str]:
+        delivered.append(True)
+        return True, "ok"
+
+    def evaluate(
+        *,
+        state: self_healing.SelfHealingState,
+        usb_otg_state_checkpoint: Callable[[], None],
+        **_: object,
+    ) -> list[SelfHealingEvent]:
+        state.periodic_reboot_requested = True
+        usb_otg_state_checkpoint()
+        return [
+            SelfHealingEvent(action="periodic_reboot_requested", status="completed", details={})
+        ]
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
+    monkeypatch.setattr(runtime, "deliver_notification_outbox", deliver)
+
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+    assert scheduled == [True]
+    assert not delivered
+    assert state.periodic_reboot_scheduled_boot_id == "boot-one"
 
 
 @pytest.mark.parametrize("identity", [None, "", "existing-incident"])
