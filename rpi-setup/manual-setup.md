@@ -779,6 +779,8 @@ This installs:
 - `/home/<user>/.config/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/etc/systemd/system/bm-gateway-lifecycle.service`
+- `/etc/systemd/system/bm-gateway-boot-notification.service`
 - `/etc/systemd/system/glances-web.service` when `--enable-glances` is used
 - `cockpit.socket` when `--enable-cockpit` is used
 - `/usr/local/bin/bm-gateway` as a stable systemd-facing symlink
@@ -788,6 +790,8 @@ Review the config, then check the service state:
 ```bash
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
+sudo systemctl status bm-gateway-lifecycle.service
+sudo systemctl status bm-gateway-boot-notification.service
 sudo systemctl status glances-web.service
 sudo systemctl status cockpit.socket
 ```
@@ -833,7 +837,10 @@ Validate service state, config loading, and the installed device registry:
 
 ```bash
 ssh "admin@${GATEWAY_HOST}" 'bash -lc "
-  systemctl is-active bm-gateway.service bm-gateway-web.service bluetooth.service avahi-daemon.service
+  systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-notification.service
+  systemctl is-active bm-gateway.service bm-gateway-web.service bm-gateway-lifecycle.service bluetooth.service avahi-daemon.service
+  test \$(systemctl show --property=Result --value bm-gateway-boot-notification.service) = success
+  test \$(systemctl show --property=ExecMainStatus --value bm-gateway-boot-notification.service) -eq 0
   bm-gateway config validate --json
   bm-gateway devices list --json
 "'

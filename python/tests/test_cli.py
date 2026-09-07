@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tomllib
@@ -289,16 +290,25 @@ def test_run_dry_run_export_now_skips_usb_otg_drive_update(
     assert (state_dir / "runtime" / "latest_snapshot.json").exists()
 
 
-def test_bm_gateway_main_help_does_not_advertise_web_commands(
+def test_bm_gateway_main_help_advertises_every_registered_command(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     result = cli.main(["--help"])
 
     captured = capsys.readouterr()
+    command_lines = captured.out.split("Commands:\n", 1)[1].split("\n\n", 1)[0]
+    advertised_commands = {line.split()[0] for line in command_lines.splitlines()}
+    subparsers = next(
+        action
+        for action in cli.build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
 
     assert result == 0
+    assert advertised_commands == set(subparsers.choices)
+    assert "lifecycle" in advertised_commands
     assert "bm-gateway-web" not in captured.out
-    assert "  web " not in captured.out
+    assert "web" not in advertised_commands
 
 
 def test_removed_web_command_falls_back_to_main_help(

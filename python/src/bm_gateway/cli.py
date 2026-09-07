@@ -84,6 +84,7 @@ def format_main_help() -> str:
             "  devices  Inspect the configured device registry",
             "  ha       Render the Home Assistant MQTT contract",
             "  history  Inspect persisted and imported device history",
+            "  lifecycle Record system boot or orderly shutdown notifications",
             "  protocol Probe bounded read-only BM6/BM7 BLE protocol commands",
             "  run      Execute the gateway runtime and persist snapshots",
             "",
@@ -1303,6 +1304,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         try:
             config = load_config(args.config)
             lifecycle_config = config
+            config_errors = validate_config(config)
+            if config_errors:
+                text = translation_for(config.notifications.locale).gettext
+                for error in config_errors:
+                    print(text(error), file=sys.stderr)
+                return 1
             notify_system_lifecycle(
                 config=config,
                 state_dir=database_file_path(config, state_dir=args.state_dir).parent.parent,

@@ -317,6 +317,36 @@ def test_lifecycle_cli_errors_use_configured_locale(
     )
 
 
+@pytest.mark.parametrize("event", ["boot", "shutdown"])
+@pytest.mark.parametrize("locale", supported_locale_codes())
+def test_lifecycle_cli_rejects_invalid_config_before_mutation(
+    config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    event: str,
+    locale: str,
+) -> None:
+    from bm_gateway import cli
+
+    config = replace(
+        config,
+        notifications=replace(config.notifications, locale=locale, offline_max_events=0),
+    )
+    monkeypatch.setattr(cli, "load_config", lambda _: config)
+    monkeypatch.setattr(
+        lifecycle,
+        "notify_system_lifecycle",
+        lambda **_: pytest.fail("lifecycle state mutated for invalid config"),
+    )
+
+    assert main(["lifecycle", event, "--state-dir", str(tmp_path)]) == 1
+    assert capsys.readouterr().err.strip() == translation_for(locale).gettext(
+        "notifications.offline_max_events must be between 1 and 1000"
+    )
+    assert not (tmp_path / "runtime").exists()
+
+
 def test_generated_shutdown_unit_is_armed_independently_of_boot_delivery() -> None:
     source = Path("rpi-setup/scripts/install-service.sh").read_text()
     shutdown = source.split("cat > /etc/systemd/system/bm-gateway-lifecycle.service <<EOF", 1)[
@@ -332,6 +362,46 @@ def test_generated_shutdown_unit_is_armed_independently_of_boot_delivery() -> No
     assert "Restart=on-failure" in boot
     assert "StartLimitBurst=3" in boot
     assert " lifecycle boot " in boot
+
+
+def test_operator_docs_cover_lifecycle_units_and_validation() -> None:
+    lifecycle_unit = "bm-gateway-lifecycle.service"
+    boot_unit = "bm-gateway-boot-notification.service"
+    documents = {
+        path: Path(path).read_text()
+        for path in (
+            "rpi-setup/README.md",
+            "rpi-setup/macos-imager-cli.md",
+            "rpi-setup/manual-setup.md",
+        )
+    }
+
+    manual_setup = documents["rpi-setup/manual-setup.md"]
+    for unit in (lifecycle_unit, boot_unit):
+        assert f"- `/etc/systemd/system/{unit}`" in manual_setup
+        assert f"sudo systemctl status {unit}" in manual_setup
+
+    rpi_readme = documents["rpi-setup/README.md"]
+    for unit in (lifecycle_unit, boot_unit):
+        assert f"- `/etc/systemd/system/{unit}`" in rpi_readme
+        assert f'"{unit}<br/>' in rpi_readme
+    assert f"- `{lifecycle_unit}` for shutdown notifications" in rpi_readme
+    assert f"- `{boot_unit}` for boot notifications" in rpi_readme
+
+    macos_setup = documents["rpi-setup/macos-imager-cli.md"]
+    assert f"- installs and enables `{lifecycle_unit}`" in macos_setup
+    assert f"- installs and enables `{boot_unit}`" in macos_setup
+
+    for path in ("rpi-setup/macos-imager-cli.md", "rpi-setup/manual-setup.md"):
+        document = documents[path]
+        assert f"systemctl is-enabled {lifecycle_unit} {boot_unit}" in document
+        assert (
+            f"systemctl is-active bm-gateway.service bm-gateway-web.service {lifecycle_unit}"
+            in document
+        )
+        assert f"--value {boot_unit}" in document
+        assert "--property=Result" in document
+        assert "--property=ExecMainStatus" in document
 
 
 @pytest.mark.parametrize("locale", supported_locale_codes())
