@@ -87,6 +87,20 @@ report_update_result() {
   fi
 }
 
+detect_update_revision_change() {
+  local observed_revision
+
+  update_current_revision=""
+  update_changed=0
+  observed_revision="$(git -C "${repo_dir}" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "${update_previous_revision}" ]] \
+    && [[ -n "${observed_revision}" ]] \
+    && [[ "${observed_revision}" != "${update_previous_revision}" ]]; then
+    update_current_revision="${observed_revision}"
+    update_changed=1
+  fi
+}
+
 looks_like_checkout() {
   local candidate="$1"
   if [[ -f "${candidate}/pyproject.toml" ]] \
@@ -337,11 +351,17 @@ if [[ -e "${repo_dir}/.git" ]]; then
   update_previous_revision="$(git -C "${repo_dir}" rev-parse HEAD)"
   if [[ -n "${repo_url}" ]] && [[ "${repo_dir}" != "${script_repo_dir}" ]]; then
     if ! git -C "${repo_dir}" fetch --all --tags --prune; then
-      report_update_result failed "${update_previous_revision}" "" "" fetch
+      detect_update_revision_change
+      if [[ "${update_changed}" -eq 1 ]]; then
+        report_update_result failed "${update_previous_revision}" "" "" fetch
+      fi
       exit 1
     fi
     if ! git -C "${repo_dir}" pull --ff-only; then
-      report_update_result failed "${update_previous_revision}" "" "" fetch
+      detect_update_revision_change
+      if [[ "${update_changed}" -eq 1 ]]; then
+        report_update_result failed "${update_previous_revision}" "" "" fetch
+      fi
       exit 1
     fi
   fi
@@ -353,7 +373,8 @@ fi
 
 if [[ -n "${git_ref}" ]]; then
   if ! git -C "${repo_dir}" checkout "${git_ref}"; then
-    if [[ -n "${update_previous_revision}" ]]; then
+    detect_update_revision_change
+    if [[ "${update_changed}" -eq 1 ]]; then
       report_update_result failed "${update_previous_revision}" "" "" fetch
     fi
     exit 1

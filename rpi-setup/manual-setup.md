@@ -160,9 +160,9 @@ revision, it records a durable system-mail outcome after the package and service
 refresh finish. The notification names the old and new revisions and always
 states whether `/var/run/reboot-required` requires an operator reboot. Failed
 repository, package-install, and service-refresh stages are queued as failed
-outcomes when the notification CLI is available. Delivery uses the same bounded
-outbox as lifecycle and watchdog events, so a mail outage does not invalidate a
-successful update.
+outcomes only when the checkout changed first and the notification CLI is
+available. Delivery uses the same bounded outbox as lifecycle and watchdog
+events, so a mail outage does not invalidate a successful update.
 
 Use **Send test email** only after saving an enabled notification recipient and
 verifying the system mail configuration. The recipient is intentionally stored
