@@ -55,10 +55,11 @@ def bump_last_component(version: str) -> str:
 
 
 def active_release_version_from_changelog(text: str) -> str | None:
-    active_versions = _ACTIVE_RELEASE_HEADING_PATTERN.findall(text)
+    current_prefix = _current_release_prefix(text)
+    active_versions = _ACTIVE_RELEASE_HEADING_PATTERN.findall(current_prefix)
     malformed_active = [
         heading
-        for heading in _VERSIONED_CHANGELOG_HEADING_PATTERN.finditer(text)
+        for heading in _VERSIONED_CHANGELOG_HEADING_PATTERN.finditer(current_prefix)
         if heading.group(2).startswith(" - Unreleased")
         and _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None
     ]
@@ -67,6 +68,15 @@ def active_release_version_from_changelog(text: str) -> str | None:
     if len(active_versions) > 1:
         raise ValueError("CHANGELOG.md contains more than one active release section")
     return str(active_versions[0]) if active_versions else None
+
+
+def _first_shipped_release_heading(text: str) -> re.Match[str] | None:
+    return _SHIPPED_RELEASE_HEADING_PATTERN.search(text)
+
+
+def _current_release_prefix(text: str) -> str:
+    shipped = _first_shipped_release_heading(text)
+    return text if shipped is None else text[: shipped.start()]
 
 
 def validate_current_release_heading(text: str) -> None:
@@ -87,15 +97,16 @@ def validate_current_release_heading(text: str) -> None:
 
 
 def latest_shipped_version_from_changelog(text: str) -> str:
-    for heading in _VERSIONED_CHANGELOG_HEADING_PATTERN.finditer(text):
-        if _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is not None:
-            continue
-        if _SHIPPED_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None:
-            raise ValueError(
-                "Current shipped release heading must use: ## [X.Y.Z] - YYYY-MM-DD - Title"
-            )
-        return str(heading.group(1))
-    raise ValueError("No shipped release section found in CHANGELOG.md")
+    shipped = _first_shipped_release_heading(text)
+    if shipped is None:
+        raise ValueError("No shipped release section found in CHANGELOG.md")
+    version = str(shipped.group(1))
+    historical_versions = _VERSIONED_CHANGELOG_HEADING_PATTERN.findall(text[shipped.end() :])
+    if any(
+        version_key(version) <= version_key(historical) for historical, _ in historical_versions
+    ):
+        raise ValueError("Current shipped release version must be newer than preserved history")
+    return version
 
 
 def unreleased_has_content_from_changelog(text: str) -> bool:
