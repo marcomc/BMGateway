@@ -1,16 +1,36 @@
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from _pytest.monkeypatch import MonkeyPatch
-from bm_gateway.config import load_config
+from bm_gateway.config import NotificationsConfig, load_config
+from bm_gateway.notifications import (
+    load_notification_outbox,
+    notification_outbox_path,
+    queue_notification_event,
+)
 from bm_gateway.self_healing import (
+    SelfHealingState,
+    USBOTGHealth,
+    WiFiWatchdogStateError,
+    clear_wifi_recovery_handoff,
+    consume_wifi_recovery_notification,
     default_connectivity_checker,
     default_schedule_reboot,
+    default_usb_otg_health_check,
+    default_usb_otg_rebind,
     default_wifi_reconnect,
     evaluate_self_healing,
+    load_usb_otg_watchdog_state,
+    load_wifi_watchdog_state,
     new_self_healing_state,
+    persist_usb_otg_watchdog_state,
+    persist_wifi_watchdog_state,
+    usb_otg_watchdog_state_path,
+    wifi_watchdog_state_path,
 )
 
 
@@ -49,7 +69,7 @@ def test_self_healing_requests_periodic_reboot_once() -> None:
     assert reboot_calls == 1
 
 
-def test_self_healing_reconnects_wifi_before_rebooting() -> None:
+def test_self_healing_reconnects_wifi_before_rebooting(tmp_path: Path) -> None:
     config = load_config(Path("python/config/config.toml.example"))
     config = replace(
         config,
@@ -67,9 +87,10 @@ def test_self_healing_reconnects_wifi_before_rebooting() -> None:
     state = new_self_healing_state(now_monotonic=0.0)
     reconnect_calls: list[str] = []
     reboot_calls = 0
+    connectivity_results = iter([False, False, True, False])
 
     def _offline(_host: str, _interface: str) -> bool:
-        return False
+        return next(connectivity_results)
 
     def _reconnect(interface: str) -> bool:
         reconnect_calls.append(interface)
@@ -95,6 +116,9 @@ def test_self_healing_reconnects_wifi_before_rebooting() -> None:
         reconnect_action=_reconnect,
         reboot_action=_reboot,
     )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(state_path, state, preserve_pending=False)
+    consume_wifi_recovery_notification(state_path, state, lambda _: None)
     reboot = evaluate_self_healing(
         config=config,
         state=state,
@@ -105,11 +129,14 @@ def test_self_healing_reconnects_wifi_before_rebooting() -> None:
     )
 
     assert [event.action for event in lost] == ["wifi_connectivity_lost"]
-    assert [event.action for event in reconnect] == ["wifi_reconnect_attempted"]
+    assert [event.action for event in reconnect] == [
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+    ]
     assert reconnect[0].status == "completed"
-    assert [event.action for event in reboot] == ["wifi_reboot_requested"]
+    assert [event.action for event in reboot] == ["wifi_connectivity_lost"]
     assert reconnect_calls == ["wlan1"]
-    assert reboot_calls == 1
+    assert reboot_calls == 0
 
 
 def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
@@ -136,6 +163,818 @@ def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
     assert [event.action for event in lost] == ["wifi_connectivity_lost"]
     assert [event.action for event in restored] == ["wifi_connectivity_restored"]
     assert state.wifi_outage_started_monotonic is None
+
+
+def test_wifi_watchdog_emits_restoration_after_a_persisted_reboot_request(
+    tmp_path: Path,
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    first = new_self_healing_state(now_monotonic=0.0)
+
+    evaluate_self_healing(
+        config=config,
+        state=first,
+        now_monotonic=10.0,
+        now_wall_time=1000.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    reboot = evaluate_self_healing(
+        config=config,
+        state=first,
+        now_monotonic=70.0,
+        now_wall_time=1060.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    persist_wifi_watchdog_state(state_path, first)
+
+    restarted = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, restarted)
+    restored = evaluate_self_healing(
+        config=config,
+        state=restarted,
+        now_monotonic=10.0,
+        now_wall_time=1100.0,
+        connectivity_checker=lambda _host, _interface: True,
+    )
+
+    assert [event.action for event in reboot] == ["wifi_reboot_requested"]
+    assert [event.action for event in restored] == ["wifi_connectivity_restored"]
+    assert restored[0].details["outage_seconds"] == 100
+    assert restarted.wifi_recovery_pending is True
+    assert restarted.wifi_recovery_outage_seconds == 100
+    delivered: list[str] = []
+    assert consume_wifi_recovery_notification(
+        state_path, restarted, lambda _state: delivered.append("queued")
+    )
+    assert delivered == ["queued"]
+    assert restarted.wifi_recovery_pending is False
+
+
+def test_persisted_wifi_reboot_authorization_is_retryable_immediately(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=10,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_outage_seconds = 600
+    persisted.wifi_recovery_interface = "wlan0"
+    persisted.wifi_recovery_started_at = 1000.0
+    persisted.wifi_recovery_handoff_id = "handoff-authorized"
+    persisted.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(state_path, persisted, preserve_pending=False)
+
+    state = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, state)
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=5.0,
+        now_wall_time=2000.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert [event.action for event in events] == ["wifi_reboot_requested"]
+    assert events[0].details["outage_seconds"] == 1000
+    assert state.wifi_reboot_requested is True
+
+
+def test_persisted_wifi_reboot_authorization_is_cancelled_when_disabled(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=False,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_outage_seconds = 600
+    persisted.wifi_recovery_handoff_id = "handoff-disabled"
+    persisted.wifi_recovery_phase = "reboot_authorized"
+    persist_wifi_watchdog_state(state_path, persisted, preserve_pending=False)
+
+    state = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, state)
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=5.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert [event.action for event in events] == ["wifi_connectivity_lost"]
+    assert state.wifi_reboot_requested is False
+    assert state.wifi_recovery_phase == "pending"
+
+
+def test_wifi_state_preservation_reports_invalid_json(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text("{invalid\n", encoding="utf-8")
+
+    with pytest.raises(WiFiWatchdogStateError):
+        persist_wifi_watchdog_state(state_path, new_self_healing_state())
+
+
+def test_wifi_reconnect_requires_a_successful_post_reconnect_probe() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=False,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    connectivity_results = iter([False, False, False])
+
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        connectivity_checker=lambda _host, _interface: next(connectivity_results),
+    )
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=60.0,
+        connectivity_checker=lambda _host, _interface: next(connectivity_results),
+        reconnect_action=lambda _interface: True,
+    )
+
+    assert events[0].action == "wifi_reconnect_attempted"
+    assert events[0].status == "failed"
+
+
+def test_successful_wifi_reconnect_does_not_request_a_same_cycle_reboot() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    connectivity_results = iter([False, True])
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=60.0,
+        connectivity_checker=lambda _host, _interface: next(connectivity_results),
+        reconnect_action=lambda _interface: True,
+    )
+
+    assert [event.action for event in events] == [
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+    ]
+    assert events[0].status == "completed"
+
+
+def test_successful_wifi_reconnect_preserves_restoration_before_peer_reboot() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            periodic_reboot_enabled=True,
+            periodic_reboot_hours=1,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=False,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    connectivity_results = iter([False, True])
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=3600.0,
+        connectivity_checker=lambda _host, _interface: next(connectivity_results),
+        reconnect_action=lambda _interface: True,
+        reboot_action=lambda: None,
+    )
+
+    assert [event.action for event in events] == [
+        "periodic_reboot_requested",
+        "wifi_reconnect_attempted",
+        "wifi_connectivity_restored",
+    ]
+    assert state.wifi_recovery_pending is True
+
+
+def test_stale_wifi_state_write_preserves_a_concurrent_pending_recovery(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    pending = new_self_healing_state()
+    pending.wifi_recovery_pending = True
+    pending.wifi_recovery_outage_seconds = 60
+    pending.wifi_recovery_started_at = 1000.0
+    persist_wifi_watchdog_state(state_path, pending)
+
+    stale = new_self_healing_state()
+    persist_wifi_watchdog_state(state_path, stale)
+    reloaded = new_self_healing_state()
+    load_wifi_watchdog_state(state_path, reloaded)
+
+    assert reloaded.wifi_recovery_pending is True
+    assert reloaded.wifi_recovery_started_at == 1000.0
+
+
+def test_legacy_pending_wifi_handoff_gets_a_persisted_id_before_enqueue(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"recovery_pending": true, "outage_seconds": 60, "wifi_interface": "wlan0", '
+        '"recovery_started_at": 1000.0}\n',
+        encoding="utf-8",
+    )
+    state = new_self_healing_state()
+    load_wifi_watchdog_state(state_path, state)
+    observed_ids: list[str] = []
+
+    def enqueue(current: SelfHealingState) -> None:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+        assert payload["recovery_handoff_id"] == current.wifi_recovery_handoff_id
+        observed_ids.append(current.wifi_recovery_handoff_id)
+
+    assert consume_wifi_recovery_notification(state_path, state, enqueue)
+    assert len(observed_ids) == 1
+    assert observed_ids[0]
+
+
+@pytest.mark.parametrize("phase", ["pending", "reboot_authorized", "reconnect_pending"])
+@pytest.mark.parametrize("healthy", [False, True])
+def test_legacy_wifi_evaluation_assigns_identity_without_changing_origin(
+    phase: str, healthy: bool
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0)
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_started_at = 1000.0
+    state.wifi_recovery_phase = phase
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=1000.0,
+        now_wall_time=2000.0,
+        connectivity_checker=lambda *_: healthy,
+        reboot_action=lambda: None,
+    )
+    assert state.wifi_recovery_handoff_id
+    assert state.wifi_recovery_started_at == 1000.0
+
+
+@pytest.mark.parametrize("consume", [False, True])
+def test_wifi_notification_receipts_round_trip_and_clear(tmp_path: Path, consume: bool) -> None:
+    path = wifi_watchdog_state_path(tmp_path)
+    state = new_self_healing_state()
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_handoff_id = "incident"
+    state.wifi_recovery_phase = "pending"
+    state.wifi_recovery_observed = True
+    state.wifi_retry_started_at = 1200.0
+    state.wifi_reconnect_notified_outcomes = ("failed", "completed")
+    state.wifi_reboot_notified_boot_id = "boot-one"
+    persist_wifi_watchdog_state(path, state, preserve_pending=False)
+    loaded = new_self_healing_state()
+    load_wifi_watchdog_state(path, loaded)
+    assert loaded.wifi_reconnect_notified_outcomes == ("failed", "completed")
+    assert loaded.wifi_reboot_notified_boot_id == "boot-one"
+    assert loaded.wifi_recovery_observed is True
+    assert loaded.wifi_retry_started_at == 1200.0
+    loaded.wifi_outage_ended_monotonic = 1300.0
+    loaded.wifi_outage_reconnected = True
+    if consume:
+        assert consume_wifi_recovery_notification(path, loaded, lambda _: None)
+    else:
+        assert clear_wifi_recovery_handoff(path, loaded, force=True)
+    reloaded = new_self_healing_state()
+    load_wifi_watchdog_state(path, reloaded)
+    for current in (loaded, reloaded):
+        assert current.wifi_reconnect_notified_outcomes == ()
+        assert current.wifi_reboot_notified_boot_id == ""
+        assert current.wifi_recovery_handoff_id == ""
+        assert current.wifi_recovery_observed is False
+        assert current.wifi_retry_started_at == 0.0
+        assert current.wifi_outage_ended_monotonic is None
+        assert current.wifi_outage_reconnected is False
+
+
+@pytest.mark.parametrize("phase", ["pending", "reconnect_pending", "reboot_authorized"])
+@pytest.mark.parametrize("origin", [0.0, 1000.0])
+def test_wifi_recovery_duration_freezes_across_legacy_reload_and_clock_changes(
+    tmp_path: Path, phase: str, origin: float
+) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing, wifi_watchdog_enabled=True, wifi_reboot_enabled=True
+        ),
+    )
+    path = wifi_watchdog_state_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text(
+        json.dumps(
+            {
+                "recovery_pending": True,
+                "recovery_phase": phase,
+                "recovery_started_at": origin,
+                "outage_seconds": 123,
+                "wifi_interface": "wlan0",
+                "recovery_handoff_id": "legacy-ended",
+            }
+        )
+    )
+    state = new_self_healing_state()
+    load_wifi_watchdog_state(path, state)
+    expected = 123 if phase == "reconnect_pending" or origin == 0 else 600
+    for wall_time in (1600.0, 9000.0, 500.0):
+        events = evaluate_self_healing(
+            config=config,
+            state=state,
+            now_monotonic=1000.0,
+            now_wall_time=wall_time,
+            connectivity_checker=lambda *_: True,
+            reboot_action=lambda: None,
+        )
+        restored = next(event for event in events if event.action == "wifi_connectivity_restored")
+        assert restored.details["outage_seconds"] == expected
+        assert state.wifi_recovery_outage_seconds == expected
+        assert state.wifi_recovery_started_at == origin
+        persist_wifi_watchdog_state(path, state, preserve_pending=False)
+        state = new_self_healing_state()
+        load_wifi_watchdog_state(path, state)
+        assert state.wifi_recovery_observed is True
+
+
+@pytest.mark.parametrize("invalid", [None, 1, "true", []])
+def test_wifi_recovery_observation_marker_rejects_invalid_values(
+    tmp_path: Path, invalid: object
+) -> None:
+    path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(path, new_self_healing_state())
+    payload = json.loads(path.read_text())
+    payload["recovery_observed"] = invalid
+    path.write_text(json.dumps(payload))
+    with pytest.raises(WiFiWatchdogStateError):
+        load_wifi_watchdog_state(path, new_self_healing_state())
+
+
+@pytest.mark.parametrize("invalid", [None, "failed", ["unknown"], [None], [True]])
+def test_wifi_notification_receipt_validation(tmp_path: Path, invalid: object) -> None:
+    path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(path, new_self_healing_state())
+    payload = json.loads(path.read_text())
+    payload["reconnect_notified_outcomes"] = invalid
+    path.write_text(json.dumps(payload))
+    with pytest.raises(WiFiWatchdogStateError):
+        load_wifi_watchdog_state(path, new_self_healing_state())
+
+
+@pytest.mark.parametrize("field", ["recovery_started_at", "retry_started_at"])
+@pytest.mark.parametrize(
+    "raw_timestamp", ["NaN", "Infinity", "-Infinity", str(10**400), "true", "null", '"1"', "-1"]
+)
+def test_wifi_state_rejects_nonfinite_or_oversized_timestamp(
+    tmp_path: Path, raw_timestamp: str, field: str
+) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text(
+        '{"recovery_pending": true, "outage_seconds": 60, "wifi_interface": "wlan0", '
+        f'"{field}": {raw_timestamp}}}\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(WiFiWatchdogStateError):
+        load_wifi_watchdog_state(state_path, new_self_healing_state())
+
+
+def test_distinct_wifi_handoffs_queue_distinct_outbox_events(tmp_path: Path) -> None:
+    state_path = wifi_watchdog_state_path(tmp_path)
+    outbox_path = notification_outbox_path(tmp_path)
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+
+    def consume(handoff_id: str) -> None:
+        state = new_self_healing_state()
+        state.wifi_recovery_pending = True
+        state.wifi_recovery_handoff_id = handoff_id
+        persist_wifi_watchdog_state(state_path, state, preserve_pending=False)
+        loaded = new_self_healing_state()
+        load_wifi_watchdog_state(state_path, loaded)
+        assert consume_wifi_recovery_notification(
+            state_path,
+            loaded,
+            lambda current: queue_notification_event(
+                path=outbox_path,
+                config=config,
+                action="wifi_connectivity_restored",
+                detail=current.wifi_recovery_handoff_id,
+                idempotency_key=f"wifi-recovery:{current.wifi_recovery_handoff_id}",
+            ),
+        )
+
+    consume("handoff-a")
+    consume("handoff-b")
+    assert [event.idempotency_key for event in load_notification_outbox(outbox_path)] == [
+        "wifi-recovery:handoff-a",
+        "wifi-recovery:handoff-b",
+    ]
+
+
+def test_repeated_wifi_reboots_preserve_the_original_outage_origin() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=1,
+            wifi_reconnect_enabled=False,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=0.0,
+        now_wall_time=1000.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=60.0,
+        now_wall_time=1060.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    original_start = state.wifi_recovery_started_at
+    state.wifi_reboot_requested = False
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=120.0,
+        now_wall_time=1120.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert state.wifi_recovery_started_at == original_start
+
+
+def test_pending_wifi_handoff_resumes_outage_timer_after_restart() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=5,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=15,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_outage_seconds = 120
+    state.wifi_recovery_started_at = 1_000.0
+    state.wifi_recovery_handoff_id = "pending-after-restart"
+    state.wifi_recovery_phase = "pending"
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=10_000.0,
+        now_wall_time=1_360.0,
+        connectivity_checker=lambda _host, _interface: False,
+        reconnect_action=lambda _interface: False,
+    )
+
+    assert [event.action for event in events] == [
+        "wifi_connectivity_lost",
+        "wifi_reconnect_attempted",
+    ]
+    assert state.wifi_outage_started_monotonic == 9_640.0
+    assert state.wifi_recovery_outage_seconds == 360
+    assert state.wifi_recovery_started_at == 1_000.0
+
+
+def test_pending_wifi_handoff_reconnect_threshold_survives_restarts(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=5,
+            wifi_reboot_enabled=False,
+        ),
+    )
+    state_path = wifi_watchdog_state_path(tmp_path)
+    persisted = new_self_healing_state()
+    persisted.wifi_recovery_pending = True
+    persisted.wifi_recovery_started_at = 1_000.0
+    persisted.wifi_recovery_handoff_id = "pending-reconnect"
+    persisted.wifi_recovery_phase = "pending"
+    persist_wifi_watchdog_state(state_path, persisted)
+    state = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, state)
+
+    first = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=2_000.0,
+        now_wall_time=1_200.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+    persist_wifi_watchdog_state(state_path, state)
+    restarted = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(state_path, restarted)
+    second = evaluate_self_healing(
+        config=config,
+        state=restarted,
+        now_monotonic=2_101.0,
+        now_wall_time=1_301.0,
+        connectivity_checker=lambda _host, _interface: False,
+        reconnect_action=lambda _interface: False,
+    )
+
+    assert [event.action for event in first] == ["wifi_connectivity_lost"]
+    assert [event.action for event in second] == [
+        "wifi_connectivity_lost",
+        "wifi_reconnect_attempted",
+    ]
+    assert second[1].status == "failed"
+    assert second[1].details["outage_seconds"] == 301
+
+
+def test_pending_wifi_handoff_reboot_threshold_survives_restart() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=False,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=5,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_started_at = 1_000.0
+    state.wifi_recovery_handoff_id = "pending-reboot"
+    state.wifi_recovery_phase = "pending"
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=2_300.0,
+        now_wall_time=1_301.0,
+        connectivity_checker=lambda _host, _interface: False,
+    )
+
+    assert [event.action for event in events] == [
+        "wifi_connectivity_lost",
+        "wifi_reboot_requested",
+    ]
+    assert events[1].details["outage_seconds"] == 301
+    assert state.wifi_recovery_phase == "reboot_authorized"
+
+
+def test_self_healing_rebinds_usb_otg_then_reboots_once_and_escalates() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(config.usb_otg, enabled=True),
+        self_healing=replace(
+            config.self_healing,
+            usb_otg_watchdog_enabled=True,
+            usb_otg_reboot_enabled=True,
+            usb_otg_reboot_attempts=1,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    rebind_calls: list[tuple[str, str]] = []
+    checkpoints: list[tuple[bool, int]] = []
+
+    def _unhealthy(_image_path: str, _gadget_name: str) -> USBOTGHealth:
+        return USBOTGHealth(
+            healthy=False,
+            reason="UDC state is not configured",
+            udc_name="3f980000.usb",
+            udc_state="not attached",
+        )
+
+    def _rebind(image_path: str, gadget_name: str) -> bool:
+        rebind_calls.append((image_path, gadget_name))
+        return True
+
+    def _checkpoint() -> None:
+        checkpoints.append((state.usb_otg_rebind_attempted, state.usb_otg_reboot_attempts_used))
+
+    first = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=10.0,
+        usb_otg_health_checker=_unhealthy,
+        usb_otg_rebind_action=_rebind,
+        usb_otg_state_checkpoint=_checkpoint,
+    )
+    second = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=20.0,
+        usb_otg_boot_id_reader=lambda: "boot-one",
+        usb_otg_health_checker=_unhealthy,
+        usb_otg_rebind_action=_rebind,
+        usb_otg_state_checkpoint=_checkpoint,
+    )
+    third = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=30.0,
+        usb_otg_boot_id_reader=lambda: "boot-two",
+        usb_otg_health_checker=_unhealthy,
+        usb_otg_rebind_action=_rebind,
+        usb_otg_state_checkpoint=_checkpoint,
+    )
+
+    assert [event.action for event in first] == [
+        "usb_otg_not_enumerated",
+        "usb_otg_rebind_attempted",
+    ]
+    assert [event.action for event in second] == ["usb_otg_reboot_requested"]
+    assert [event.action for event in third] == ["usb_otg_recovery_exhausted"]
+    assert rebind_calls == [("/var/lib/bm-gateway/usb-otg/bmgateway-frame.img", "bmgw_frame")]
+    assert state.usb_otg_reboot_attempts_used == 1
+    assert checkpoints == [(True, 0), (True, 0), (True, 1)]
+
+
+def test_self_healing_resets_usb_otg_recovery_after_enumeration_returns() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        usb_otg=replace(config.usb_otg, enabled=True),
+        self_healing=replace(config.self_healing, usb_otg_watchdog_enabled=True),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    unhealthy = USBOTGHealth(False, "UDC state is not configured", "udc0", "not attached")
+    healthy = USBOTGHealth(True, "", "udc0", "configured")
+
+    evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=10.0,
+        usb_otg_health_checker=lambda _image_path, _gadget_name: unhealthy,
+        usb_otg_rebind_action=lambda _image_path, _gadget_name: True,
+    )
+    restored = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=20.0,
+        usb_otg_health_checker=lambda _image_path, _gadget_name: healthy,
+    )
+
+    assert [event.action for event in restored] == ["usb_otg_enumeration_restored"]
+    assert state.usb_otg_rebind_attempted is False
+    assert state.usb_otg_reboot_attempts_used == 0
+    assert state.usb_otg_escalated is False
+
+
+def test_usb_otg_watchdog_state_survives_a_runtime_restart(tmp_path: Path) -> None:
+    state_path = usb_otg_watchdog_state_path(tmp_path)
+    initial = new_self_healing_state(now_monotonic=0.0)
+    initial.usb_otg_rebind_attempted = True
+    initial.usb_otg_reboot_attempts_used = 1
+    initial.usb_otg_escalated = True
+
+    persist_usb_otg_watchdog_state(state_path, initial)
+
+    restored = new_self_healing_state(now_monotonic=0.0)
+    load_usb_otg_watchdog_state(state_path, restored)
+
+    assert restored.usb_otg_rebind_attempted is True
+    assert restored.usb_otg_reboot_attempts_used == 1
+    assert restored.usb_otg_escalated is True
+
+
+def test_default_usb_otg_health_check_requires_configured_udc(
+    tmp_path: Path,
+) -> None:
+    image_path = tmp_path / "frame.img"
+    image_path.write_bytes(b"image")
+    gadget_path = tmp_path / "configfs" / "usb_gadget" / "bmgw_frame"
+    gadget_path.mkdir(parents=True)
+    (gadget_path / "UDC").write_text("udc0\n", encoding="utf-8")
+    state_path = tmp_path / "udc" / "udc0" / "state"
+    state_path.parent.mkdir(parents=True)
+    state_path.write_text("configured\n", encoding="utf-8")
+
+    health = default_usb_otg_health_check(
+        str(image_path),
+        "bmgw_frame",
+        configfs_root=tmp_path / "configfs",
+        udc_root=tmp_path / "udc",
+    )
+
+    assert health == USBOTGHealth(True, "", "udc0", "configured")
+
+    state_path.write_text("not attached\n", encoding="utf-8")
+    assert (
+        default_usb_otg_health_check(
+            str(image_path),
+            "bmgw_frame",
+            configfs_root=tmp_path / "configfs",
+            udc_root=tmp_path / "udc",
+        ).reason
+        == "UDC state is not configured"
+    )
+
+
+def test_default_usb_otg_rebind_uses_scoped_helper(monkeypatch: MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    def _run(command: list[str], **kwargs: object) -> object:
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+        class _Completed:
+            returncode = 0
+
+        return _Completed()
+
+    monkeypatch.setattr("bm_gateway.self_healing.subprocess.run", _run)
+
+    assert default_usb_otg_rebind("/var/lib/bm-gateway/usb-otg/frame.img", "bmgw_frame")
+    assert captured["command"] == [
+        "sudo",
+        "-n",
+        "/usr/local/bin/bm-gateway-usb-otg-frame-test",
+        "refresh",
+        "--image-path",
+        "/var/lib/bm-gateway/usb-otg/frame.img",
+        "--gadget-name",
+        "bmgw_frame",
+    ]
 
 
 def test_default_connectivity_checker_checks_configured_interface(

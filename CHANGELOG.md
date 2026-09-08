@@ -4,6 +4,96 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.0] - 2026-09-08 - Notification Foundation and USB OTG Recovery
+
+### Added
+
+- System boot and orderly shutdown notifications share the existing mail
+  settings and bounded outbox. Same-boot service restarts do not repeat boot
+  messages or generate false shutdown messages.
+- Added an optional system-mail notification foundation using the host
+  `sendmail` compatibility interface from `msmtp-mta`, with Settings controls,
+  a test-email action, and no SMTP credentials stored in the repository.
+- Added bounded offline-delivery primitives for upcoming lifecycle and watchdog
+  notification producers. Operators select a fixed `summary`, `individual`, or
+  `drop` mode; the default summary prevents a long offline period from
+  generating an unbounded mail burst. Notification emails use an explicit
+  fixed locale and bounded system-mail execution.
+- Added an opt-in USB OTG watchdog that detects whether the virtual frame drive
+  is enumerated (UDC state `configured`), attempts one rebind, performs a bounded
+  number of reboot recoveries, preserves the recovery counter across reboots,
+  and sends an escalation notification when recovery is exhausted.
+- Wi-Fi watchdog recovery now queues system-mail notifications when a reconnect
+  is attempted, a reboot is requested, and connectivity is restored.
+- Bootstrap updates now queue a localized, durable outcome with the old and new
+  Git revisions and an explicit reboot-required status; failed update stages use
+  the same bounded outbox without changing the update command's exit result.
+
+### Fixed
+
+- Release preflight rejects duplicate generic `Unreleased` sections instead of
+  overlooking later pending entries.
+- Release preflight now rejects unknown, competing, duplicate, and downgraded
+  current release headings before they can hide pending work, while preserving
+  legacy versioned and generic `Unreleased` history below the latest shipped
+  release boundary.
+- Future-dated offline notifications are normalized to the trusted retention
+  time before bounded outbox retention, so corrected-clock events are retained.
+- Watchdog events raised before NTP synchronization retain their durable
+  intent without a stale timestamp; only a trusted pass normalizes the shared
+  outbox before retention, ordering, and delivery.
+- The macOS Imager first-run path now restarts its optional boot hook after
+  applying a supplied notification configuration, so the first boot is recorded.
+- Shutdown intents observed before NTP synchronization retain no stale wall
+  timestamp and are assigned a trusted time when transferred later.
+- Release preflight rejects malformed current version fields instead of falling
+  back to an older shipped release.
+- Lifecycle retention and shared-mail delivery now defer until the appliance
+  wall clock is NTP synchronized, without delaying runtime or watchdog recovery.
+- Release preflight rejects malformed generic `Unreleased` headings instead of
+  silently ignoring pending changes.
+- Notification outbox retention and count limits now keep the newest events by
+  occurrence time, including lifecycle replays, and deliver retained summaries
+  or individual messages in chronological order.
+- Lifecycle notification failures no longer block independently checkpointed
+  recovery reboots or prevent the installer from starting core services.
+  Unsafe mail delivery remains deferred and hook failures remain visible.
+- Wi-Fi recovery retains serialized state and notification handoffs when USB
+  watchdog state cannot be read or synchronized. Shared delivery and reboots
+  remain deferred until that state is available again.
+- Initial Wi-Fi outage checkpoints are retried after storage errors without
+  losing the outage timer or mistaking unsaved state for a completed handoff.
+- Completed Wi-Fi recovery reboots restart the configured retry delays without
+  losing the original outage duration. Service restarts preserve those delays
+  instead of triggering another immediate reboot while the network is offline.
+- Wi-Fi recovery notifications retain incident identities across legacy-state
+  migration and process restarts. Repeated alerts for the same recovery outcome
+  are suppressed while changed outcomes, new incidents, and reboot attempts
+  from later boots remain visible.
+- Wi-Fi outage duration stops at the observed recovery, even when notification
+  handoff is retried later. Queued Wi-Fi details use the language selected at
+  delivery, including after a language change while mail is pending.
+- Notification summaries include every retained event within the configured
+  outbox limits and no longer imply that mail delivery previously failed.
+  Wi-Fi event labels follow the selected notification language in both summary
+  and individual messages.
+- USB OTG escalation now retains one incident identity and its original reason
+  and reboot count across queue failures, restarts, and concurrent runtime
+  invocations. State acknowledgement completes before any runtime delivers
+  the alert, including after an interrupted state-file replacement. Recovery
+  action intents survive uncertain checkpoints, and same-boot reboot retries
+  reuse their reserved attempt. Duplicate queue requests independently confirm
+  durable storage before returning.
+- Healthy and disabled USB watchdog transitions preserve pending notifications
+  while resetting recovery state. USB checkpoint failures defer same-cycle
+  reboots and remain visible in the audit log without disabling Wi-Fi reconnect.
+- USB escalation email details and action labels use the selected delivery
+  locale, including the failure reason. Queued incidents retain canonical reason
+  and reboot count, so language changes apply to pending mail; recognized legacy
+  USB details are migrated when loaded.
+- Notification delivery audits now retain distinct successful deliveries while
+  suppressing only consecutive identical failures.
+
 ## [0.3.3] - 2026-07-17 - Windowed History Charts
 
 ### Fixed

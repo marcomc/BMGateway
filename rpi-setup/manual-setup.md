@@ -119,6 +119,10 @@ sudo apt install -y \
   rfkill \
   util-linux \
   zlib1g-dev
+
+if [[ ! -x /usr/sbin/sendmail ]]; then
+  sudo apt install -y msmtp msmtp-mta
+fi
 ```
 
 Package purpose:
@@ -135,6 +139,34 @@ Package purpose:
 | `kmod` | `modprobe libcomposite` for USB gadget setup |
 | `libjpeg-dev`, `python3-dev`, `zlib1g-dev` | Native build headers for optional image dependencies |
 | `util-linux` | `findmnt`, `mount`, and `umount` used by USB OTG helpers |
+| `msmtp`, `msmtp-mta` | Fallback `sendmail` transport, installed only when the system has none |
+
+## System Mail Notifications
+
+When no system `sendmail` interface exists, the installer provides `msmtp` and
+its compatibility wrapper; an existing Postfix, Exim, or other transport is
+preserved. The installer does not create mail credentials. For `msmtp`,
+configure `/etc/msmtprc` separately; the installer hardens an existing regular
+file to `root:msmtp` and mode `0640`, and applies the matching setgid override.
+Then enable Notifications in Settings. It also prepares the fixed bounded
+offline-delivery mode for watchdog and system lifecycle notifications:
+`summary`, `individual`, or `drop`; `summary` is the default and avoids a long
+outage producing a burst of individual emails. Select a fixed notification
+language for unattended email; this setting intentionally does not inherit the
+browser-dependent `auto` web language.
+
+When `bootstrap-install.sh` updates an existing checkout to a different Git
+revision, it records a durable system-mail outcome after the package and service
+refresh finish. The notification names the old and new revisions and always
+states whether `/var/run/reboot-required` requires an operator reboot. Failed
+repository, package-install, and service-refresh stages are queued as failed
+outcomes only when the checkout changed first and the notification CLI is
+available. Delivery uses the same bounded outbox as lifecycle and watchdog
+events, so a mail outage does not invalidate a successful update.
+
+Use **Send test email** only after saving an enabled notification recipient and
+verifying the system mail configuration. The recipient is intentionally stored
+in BMGateway configuration, while SMTP credentials remain outside the checkout.
 
 Optional integrations install their own extra packages when enabled:
 
@@ -498,13 +530,19 @@ and error-heavy history.
 Self-healing is disabled by default and can be configured from Settings or
 `config.toml`.
 
-There are two independent recovery paths:
+There are three independent recovery paths:
 
 - periodic reboot: set `self_healing.periodic_reboot_enabled = true` and choose
   `self_healing.periodic_reboot_hours` from `1` to `48`
 - Wi-Fi watchdog: set `self_healing.wifi_watchdog_enabled = true`, choose a
   reachable `self_healing.connectivity_check_host`, and tune the reconnect and
   reboot delays in minutes
+- USB OTG watchdog: enable USB OTG image export first, then set
+  `self_healing.usb_otg_watchdog_enabled = true` to monitor the USB device
+  controller. It first refreshes the virtual drive, can then reboot up to
+  `self_healing.usb_otg_reboot_attempts` times when
+  `self_healing.usb_otg_reboot_enabled = true`, and sends a system-mail
+  escalation after recovery is exhausted.
 
 For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 `self_healing.wifi_watchdog_enabled = true`,
@@ -512,6 +550,105 @@ For a Raspberry Pi installed where Wi-Fi occasionally disappears, start with
 `self_healing.wifi_reboot_enabled = false`. Enable Wi-Fi reboot only if
 reconnect attempts do not restore the link reliably. The reboot delay must be
 longer than the reconnect delay when both actions are enabled.
+
+After a scheduled Wi-Fi recovery reboot completes, reconnect and reboot delays
+start again. Service restarts preserve the retry timer; notification durations
+continue to describe the full outage, including time before the reboot.
+If the initial state write fails, later cycles retry it while preserving the
+in-process outage timer; a process exit before any successful write cannot
+preserve that unsaved observation.
+
+When system-mail Notifications are enabled, the Wi-Fi watchdog queues and
+attempts delivery for a reconnect attempt, a requested reboot, and the later
+connectivity restoration. `summary` and `individual` retain an undelivered
+alert in the bounded outbox; `drop` discards it. A requested reboot is queued
+and delivery is attempted before its reboot is scheduled.
+
+Wi-Fi notification acknowledgements survive service restarts. Repeated reports
+of the same reconnect outcome or same-boot reboot request are suppressed within
+one incident. A changed reconnect outcome, a reboot requested from a later boot,
+or a new outage after recovery remains reportable. This does not delay recovery
+actions or impose an alert cooldown. Summaries include all events retained by
+the configured age and count limits; their heading does not imply a prior mail
+delivery failure.
+
+An upgrade with older Wi-Fi alerts still queued can produce a one-time duplicate:
+legacy alerts lack the outcome or boot identity needed to match them safely.
+They remain deliverable so migration cannot discard a genuine failure.
+
+Outage duration ends when connectivity is observed to recover. Notification
+retries retain that duration. An ended incident is transferred to the outbox
+before a new incident is evaluated; a failed state/queue write preserves the
+old incident and reports an error while deferring evaluation. Wi-Fi details and
+labels use the notification language selected at delivery. Unrecognized legacy
+freeform details remain unchanged.
+
+The USB OTG watchdog considers the frame enumerated only when the gadget is
+attached and its UDC state is `configured`. This is a useful host-side signal,
+but it does not prove that the picture-frame application is displaying the
+images. Recovery counters survive a Raspberry Pi reboot, preventing a reboot
+loop; configure `notifications` for an email escalation after the final
+attempt.
+
+USB recovery state and notification handoff are serialized across the service
+and `run --once`. A pending escalation retains its original reason and reboot
+count, including when the frame reconnects or the watchdog is disabled before
+queuing completes. USB email details use the notification locale selected at
+delivery time, including after a language change while mail is pending. Known
+legacy USB message formats are migrated automatically; unrecognized freeform
+history remains unchanged.
+
+Queue or state-write failures appear in the audit log and are retried on the
+next cycle; same-cycle reboots wait for a safe handoff. Rebind and reboot intents
+survive interrupted checkpoints. Reissuing a reboot request during the same Linux boot reuses its
+reserved attempt; a new boot can consume the next attempt if USB remains
+unavailable. Disabling reboot recovery cancels its pending intent, and lowering
+the budget cancels a pending request that exceeds the new limit.
+
+Disabling notifications acknowledges pending watchdog state without adding an
+alert; existing queued mail remains retained. Selecting `drop` discards queued
+alerts. An unreadable or unsynchronized USB state suspends USB recovery, shared
+outbox delivery, and reboot scheduling. Wi-Fi reconnect checks continue under
+the shared lock, saving recovery events and notification acknowledgements for
+delivery after USB state becomes available. If the shared lock itself cannot be
+acquired, recovery checks are skipped rather than run without serialization.
+
+The handoff prevents duplicate alerts caused by concurrent runtimes or failed
+state acknowledgement. Duplicate queue requests re-confirm durable outbox
+storage before returning. System-mail delivery can still repeat if the process
+stops after `sendmail` accepts a message but before the outbox records success.
+
+System lifecycle notifications use the same Notifications enable switch,
+recipient, language, and offline-delivery policy. The installer enables
+`bm-gateway-boot-notification.service`, which records a boot once per Linux boot
+ID, and independently arms `bm-gateway-lifecycle.service` for shutdown. Shutdown
+is recorded only when systemd reports that the host is stopping. Ordinary
+service restarts do not produce shutdown mail. Installing this feature on a
+running host reports that the current boot was observed, not a new reboot.
+Boot recording waits for synchronized wall-clock time without delaying runtime
+or web activation. The runtime keeps watchdog recovery active while lifecycle
+retention and shared-mail delivery defer until the clock is synchronized;
+pre-sync watchdog notifications retain durable intent without an untrusted
+timestamp until the same trusted outbox pass.
+An orderly shutdown observed before synchronization is retained without an
+untrusted timestamp and receives its notification time after synchronization.
+
+Pending lifecycle events survive process restarts and follow the configured
+retention and event-count limits. Shutdown mail is best effort: sudden power
+loss cannot run the hook, and network teardown or the service timeout can defer
+delivery until the next boot. Events describe an observed boot or an orderly
+shutdown/reboot, not the cause of the event.
+
+The installed CLI entrypoints are `bm-gateway lifecycle boot` and
+`bm-gateway lifecycle shutdown`, with the usual `--config` option and an optional
+`--state-dir`. They do not initiate a reboot or shutdown. Notification delivery
+waits if another watchdog has an uncertain acknowledgement.
+
+Unreadable lifecycle notification state defers mail delivery without disabling
+independently checkpointed recovery reboots. Watchdog authorization and state
+checkpoint failures still prevent unsafe reboots. Notification-unit activation
+failures remain visible in `systemctl` diagnostics but do not prevent the
+installer from activating the runtime and web services.
 
 ## Optional: Prepare USB OTG Image Export
 
@@ -658,6 +795,8 @@ This installs:
 - `/home/<user>/.config/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/etc/systemd/system/bm-gateway-lifecycle.service`
+- `/etc/systemd/system/bm-gateway-boot-notification.service`
 - `/etc/systemd/system/glances-web.service` when `--enable-glances` is used
 - `cockpit.socket` when `--enable-cockpit` is used
 - `/usr/local/bin/bm-gateway` as a stable systemd-facing symlink
@@ -667,6 +806,8 @@ Review the config, then check the service state:
 ```bash
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
+sudo systemctl status bm-gateway-lifecycle.service
+sudo systemctl status bm-gateway-boot-notification.service
 sudo systemctl status glances-web.service
 sudo systemctl status cockpit.socket
 ```
@@ -712,7 +853,10 @@ Validate service state, config loading, and the installed device registry:
 
 ```bash
 ssh "admin@${GATEWAY_HOST}" 'bash -lc "
-  systemctl is-active bm-gateway.service bm-gateway-web.service bluetooth.service avahi-daemon.service
+  systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-notification.service
+  systemctl is-active bm-gateway.service bm-gateway-web.service bm-gateway-lifecycle.service bluetooth.service avahi-daemon.service
+  test \$(systemctl show --property=Result --value bm-gateway-boot-notification.service) = success
+  test \$(systemctl show --property=ExecMainStatus --value bm-gateway-boot-notification.service) -eq 0
   bm-gateway config validate --json
   bm-gateway devices list --json
 "'

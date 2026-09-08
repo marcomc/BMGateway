@@ -42,6 +42,64 @@ install_usb_otg_tools=1
 web_port="80"
 glances_port="61208"
 hostname_override=""
+update_previous_revision=""
+update_current_revision=""
+update_changed=0
+
+report_update_result() {
+  local outcome="$1"
+  local previous_revision="$2"
+  local current_revision="${3:-}"
+  local reboot_required="${4:-}"
+  local failure_stage="${5:-}"
+  local service_home
+  local config_path
+  local cli_path
+  local uv_path
+  local -a report_args
+  local -a report_command
+
+  service_home="$(getent passwd "${service_user}" 2>/dev/null | cut -d: -f6 || true)"
+  if [[ -z "${service_home}" ]]; then
+    printf 'Unable to report BMGateway update outcome: service user home is unavailable\n' >&2
+    return 0
+  fi
+  config_path="${service_home}/.config/bm-gateway/config.toml"
+  cli_path="${service_home}/.local/bin/bm-gateway"
+  uv_path="$(command -v uv || true)"
+  if [[ -n "${uv_path}" ]]; then
+    report_command=("${uv_path}" run --project "${repo_dir}" bm-gateway)
+  elif [[ -x "${cli_path}" ]]; then
+    report_command=("${cli_path}")
+  else
+    printf 'Unable to report BMGateway update outcome: no compatible CLI is available\n' >&2
+    return 0
+  fi
+
+  report_args=(--config "${config_path}" update report --previous-revision "${previous_revision}")
+  if [[ "${outcome}" = "completed" ]]; then
+    report_args+=(--current-revision "${current_revision}" --reboot-required "${reboot_required}")
+  else
+    report_args+=(--failure-stage "${failure_stage}")
+  fi
+  if ! sudo -u "${service_user}" "${report_command[@]}" "${report_args[@]}" --state-dir /var/lib/bm-gateway; then
+    printf 'Unable to queue BMGateway update notification; the update result is unchanged\n' >&2
+  fi
+}
+
+detect_update_revision_change() {
+  local observed_revision
+
+  update_current_revision=""
+  update_changed=0
+  observed_revision="$(git -C "${repo_dir}" rev-parse HEAD 2>/dev/null || true)"
+  if [[ -n "${update_previous_revision}" ]] \
+    && [[ -n "${observed_revision}" ]] \
+    && [[ "${observed_revision}" != "${update_previous_revision}" ]]; then
+    update_current_revision="${observed_revision}"
+    update_changed=1
+  fi
+}
 
 looks_like_checkout() {
   local candidate="$1"
@@ -230,6 +288,7 @@ while [[ "$#" -gt 0 ]]; do
 done
 
 export PATH="${HOME}/.local/bin:${PATH}"
+system_sendmail_path="${BM_GATEWAY_SENDMAIL_PATH:-/usr/sbin/sendmail}"
 
 script_repo_dir_is_checkout="$(looks_like_checkout "${script_repo_dir}")"
 repo_dir_is_checkout="$(looks_like_checkout "${repo_dir}")"
@@ -259,6 +318,9 @@ if [[ "${skip_apt}" -eq 0 ]]; then
     rfkill
     python3-venv
   )
+  if [[ ! -x "${system_sendmail_path}" ]]; then
+    apt_packages+=(msmtp msmtp-mta)
+  fi
   if [[ "${install_usb_otg_tools}" -eq 1 ]]; then
     apt_packages+=(chromium dosfstools kmod libjpeg-dev python3-dev util-linux zlib1g-dev)
   fi
@@ -286,9 +348,22 @@ fi
 mkdir -p "$(dirname "${repo_dir}")"
 
 if [[ -e "${repo_dir}/.git" ]]; then
+  update_previous_revision="$(git -C "${repo_dir}" rev-parse HEAD)"
   if [[ -n "${repo_url}" ]] && [[ "${repo_dir}" != "${script_repo_dir}" ]]; then
-    git -C "${repo_dir}" fetch --all --tags --prune
-    git -C "${repo_dir}" pull --ff-only
+    if ! git -C "${repo_dir}" fetch --all --tags --prune; then
+      detect_update_revision_change
+      if [[ "${update_changed}" -eq 1 ]]; then
+        report_update_result failed "${update_previous_revision}" "" "" fetch
+      fi
+      exit 1
+    fi
+    if ! git -C "${repo_dir}" pull --ff-only; then
+      detect_update_revision_change
+      if [[ "${update_changed}" -eq 1 ]]; then
+        report_update_result failed "${update_previous_revision}" "" "" fetch
+      fi
+      exit 1
+    fi
   fi
 elif [[ "${repo_dir_is_checkout}" -eq 1 ]]; then
   :
@@ -297,7 +372,20 @@ else
 fi
 
 if [[ -n "${git_ref}" ]]; then
-  git -C "${repo_dir}" checkout "${git_ref}"
+  if ! git -C "${repo_dir}" checkout "${git_ref}"; then
+    detect_update_revision_change
+    if [[ "${update_changed}" -eq 1 ]]; then
+      report_update_result failed "${update_previous_revision}" "" "" fetch
+    fi
+    exit 1
+  fi
+fi
+
+if [[ -n "${update_previous_revision}" ]]; then
+  update_current_revision="$(git -C "${repo_dir}" rev-parse HEAD)"
+  if [[ "${update_current_revision}" != "${update_previous_revision}" ]]; then
+    update_changed=1
+  fi
 fi
 
 python_path="$(command -v python3)"
@@ -307,7 +395,12 @@ make_args=("PYTHON_VERSION=${python_path}")
 if [[ "${install_usb_otg_tools}" -eq 0 ]]; then
   make_args+=("INSTALL_EXTRAS=")
 fi
-make install "${make_args[@]}"
+if ! make install "${make_args[@]}"; then
+  if [[ "${update_changed}" -eq 1 ]]; then
+    report_update_result failed "${update_previous_revision}" "" "" install
+  fi
+  exit 1
+fi
 
 if [[ "${install_services}" -eq 1 ]]; then
   service_args=(--user "${service_user}" --web-port "${web_port}")
@@ -326,7 +419,25 @@ if [[ "${install_services}" -eq 1 ]]; then
   if [[ "${install_usb_otg_tools}" -eq 0 ]]; then
     service_args+=(--skip-usb-otg-tools)
   fi
-  sudo bash "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"
+  if [[ "${skip_apt}" -eq 1 ]]; then
+    service_args+=(--skip-apt)
+  fi
+  if ! sudo bash "${repo_dir}/rpi-setup/scripts/install-service.sh" "${service_args[@]}"; then
+    if [[ "${update_changed}" -eq 1 ]]; then
+      report_update_result failed "${update_previous_revision}" "" "" services
+    fi
+    exit 1
+  fi
+fi
+
+if [[ "${update_changed}" -eq 1 ]]; then
+  reboot_required="no"
+  if [[ -e "${BM_GATEWAY_REBOOT_REQUIRED_PATH:-/var/run/reboot-required}" ]]; then
+    reboot_required="yes"
+  fi
+  report_update_result completed "${update_previous_revision}" "${update_current_revision}" "${reboot_required}"
+  printf 'BMGateway update completed: %s -> %s; reboot required: %s.\n' \
+    "${update_previous_revision}" "${update_current_revision}" "${reboot_required}"
 fi
 
 hostname_name="$(hostname)"

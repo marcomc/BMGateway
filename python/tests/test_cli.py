@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tomllib
@@ -9,6 +10,8 @@ import pytest
 from bm_gateway import __version__, cli
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.models import DeviceReading, GatewaySnapshot
+from bm_gateway.self_healing import SelfHealingEvent, USBOTGWatchdogStateError
+from bm_gateway.update_notifications import UpdateNotificationResult
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -288,16 +291,91 @@ def test_run_dry_run_export_now_skips_usb_otg_drive_update(
     assert (state_dir / "runtime" / "latest_snapshot.json").exists()
 
 
-def test_bm_gateway_main_help_does_not_advertise_web_commands(
+def test_bm_gateway_main_help_advertises_every_registered_command(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     result = cli.main(["--help"])
 
     captured = capsys.readouterr()
+    command_lines = captured.out.split("Commands:\n", 1)[1].split("\n\n", 1)[0]
+    advertised_commands = {line.split()[0] for line in command_lines.splitlines()}
+    subparsers = next(
+        action
+        for action in cli.build_parser()._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
 
     assert result == 0
+    assert advertised_commands == set(subparsers.choices)
+    assert "lifecycle" in advertised_commands
     assert "bm-gateway-web" not in captured.out
-    assert "  web " not in captured.out
+    assert "web" not in advertised_commands
+
+
+def test_update_report_records_a_completed_bootstrap_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    captured: dict[str, object] = {}
+
+    def record(**kwargs: object) -> UpdateNotificationResult:
+        captured.update(kwargs)
+        return UpdateNotificationResult(queued=True, delivered=False, detail="offline")
+
+    monkeypatch.setattr("bm_gateway.update_notifications.record_update_notification", record)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "update",
+                "report",
+                "--previous-revision",
+                "a" * 40,
+                "--current-revision",
+                "b" * 40,
+                "--reboot-required",
+                "yes",
+                "--state-dir",
+                str(tmp_path / "state"),
+            ]
+        )
+        == 0
+    )
+    assert captured["previous_revision"] == "a" * 40
+    assert captured["current_revision"] == "b" * 40
+    assert captured["reboot_required"] is True
+    assert captured["failure_stage"] is None
+
+
+def test_update_report_returns_operational_failure_for_watchdog_lock_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+
+    def record(**_kwargs: object) -> UpdateNotificationResult:
+        raise USBOTGWatchdogStateError("Cannot lock USB OTG watchdog state")
+
+    monkeypatch.setattr("bm_gateway.update_notifications.record_update_notification", record)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "update",
+            "report",
+            "--previous-revision",
+            "a" * 40,
+            "--current-revision",
+            "b" * 40,
+            "--reboot-required",
+            "no",
+        ]
+    )
+
+    assert result == 1
+    assert "Cannot lock USB OTG watchdog state" in capsys.readouterr().err
 
 
 def test_removed_web_command_falls_back_to_main_help(
@@ -609,3 +687,107 @@ def test_run_requests_bluetooth_recovery_after_consecutive_all_timeout_cycles(
         "readings were timeout or device_not_found."
     ]
     assert "Bluetooth recovery requested" in captured.err
+
+
+@pytest.mark.parametrize("dry_run", [False, True])
+def test_run_once_routes_self_healing_only_outside_dry_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, dry_run: bool
+) -> None:
+    config_path, _ = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace("[mqtt]\nenabled = true", "[mqtt]\nenabled = false")
+    )
+    calls: list[Path] = []
+
+    def healing(**kwargs: object) -> list[object]:
+        state_dir = kwargs["state_dir"]
+        assert isinstance(state_dir, Path)
+        calls.append(state_dir)
+        return []
+
+    monkeypatch.setattr(cli, "run_self_healing", healing)
+    state_dir = tmp_path / "state"
+    argv = ["--config", str(config_path), "run", "--once", "--state-dir", str(state_dir)]
+    if dry_run:
+        argv.append("--dry-run")
+    assert cli.main(argv) == 0
+    assert calls == ([] if dry_run else [state_dir])
+
+
+@pytest.mark.parametrize(
+    ("deliveries", "expected"),
+    [
+        (["completed", "completed"], ["completed", "completed"]),
+        (["completed", None, "completed"], ["completed", "completed"]),
+        (["failed", "failed"], ["failed"]),
+        (["failed", None, "failed"], ["failed", "failed"]),
+        (["failed", "completed", "failed"], ["failed", "completed", "failed"]),
+        (["failed", "other_failure"], ["failed", "other_failure"]),
+    ],
+    ids=[
+        "consecutive-successes",
+        "successes-separated-by-idle",
+        "consecutive-identical-failures",
+        "identical-failures-separated-by-idle",
+        "identical-failures-separated-by-success",
+        "distinct-failures",
+    ],
+)
+def test_run_audits_distinct_notification_deliveries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    deliveries: list[str | None],
+    expected: list[str],
+) -> None:
+    config_path, _ = _write_example_files(tmp_path)
+    config_path.write_text(
+        config_path.read_text().replace("[mqtt]\nenabled = true", "[mqtt]\nenabled = false")
+    )
+    pending_deliveries = iter(deliveries)
+
+    def healing(**_kwargs: object) -> list[SelfHealingEvent]:
+        delivery = next(pending_deliveries)
+        if delivery is None:
+            return [SelfHealingEvent(action="usb_otg_healthy", status="completed", details={})]
+        return [
+            SelfHealingEvent(
+                action="notification_outbox_delivery",
+                status="completed" if delivery == "completed" else "failed",
+                details={"detail": delivery},
+            )
+        ]
+
+    monkeypatch.setattr(cli, "run_self_healing", healing)
+    monkeypatch.setattr(cli, "sleep_interval", lambda _seconds: None)
+    state_dir = tmp_path / "state"
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "run",
+                "--iterations",
+                str(len(deliveries)),
+                "--state-dir",
+                str(state_dir),
+            ]
+        )
+        == 0
+    )
+
+    audit_events = [
+        json.loads(line)
+        for path in sorted((state_dir / "runtime" / "audit").glob("*.jsonl"))
+        for line in path.read_text().splitlines()
+    ]
+    delivery_events = [
+        event for event in audit_events if event["action"] == "notification_outbox_delivery"
+    ]
+    assert [event["details"]["detail"] for event in delivery_events] == expected
+    assert [event["status"] for event in delivery_events] == [
+        "completed" if delivery == "completed" else "failed" for delivery in expected
+    ]
+    assert all(event["source"] == "runtime" for event in delivery_events)
+    assert all(event["trigger"] == "automatic" for event in delivery_events)
+    assert next(pending_deliveries, "exhausted") == "exhausted"

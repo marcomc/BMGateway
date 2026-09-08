@@ -166,7 +166,21 @@
         "wifi_reconnect_enabled": { "type": "boolean" },
         "wifi_reconnect_after_minutes": { "type": "integer", "minimum": 1 },
         "wifi_reboot_enabled": { "type": "boolean" },
-        "wifi_reboot_after_minutes": { "type": "integer", "minimum": 1 }
+        "wifi_reboot_after_minutes": { "type": "integer", "minimum": 1 },
+        "usb_otg_watchdog_enabled": { "type": "boolean" },
+        "usb_otg_reboot_enabled": { "type": "boolean" },
+        "usb_otg_reboot_attempts": { "type": "integer", "minimum": 0, "maximum": 5 }
+      }
+    },
+    "notifications": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "recipient": { "type": "string" },
+        "locale": { "type": "string", "enum": ["en", "zh-Hans", "hi", "es", "ar", "fr", "bn", "pt", "ru", "ur", "de", "it"], "default": "en" },
+        "offline_delivery": { "type": "string", "enum": ["summary", "individual", "drop"] },
+        "offline_retention_days": { "type": "integer", "minimum": 1, "maximum": 30 },
+        "offline_max_events": { "type": "integer", "minimum": 1, "maximum": 1000 }
       }
     },
     "retention": {

@@ -10,7 +10,7 @@ from zoneinfo import available_timezones
 from . import display_version
 from . import web_pages as shared
 from .config import AppConfig
-from .localization import locale_options
+from .localization import fixed_locale_options, locale_options
 from .usb_otg import (
     usb_otg_boot_mode_prepared as detect_usb_otg_boot_mode_prepared,
 )
@@ -60,20 +60,22 @@ def _self_healing_settings_script() -> str:
     return """
 <script>
 (() => {
-  const watchdogToggle = document.getElementById("wifi-watchdog-enabled-input");
-  const dependentFields = document.getElementById("wifi-watchdog-dependent-fields");
-  const disabledHelp = document.getElementById("wifi-watchdog-disabled-help");
-  if (!watchdogToggle || !dependentFields) {
-    return;
-  }
-  const syncWatchdogFields = () => {
-    dependentFields.disabled = !watchdogToggle.checked;
-    if (disabledHelp) {
-      disabledHelp.hidden = watchdogToggle.checked;
+  for (const prefix of ["wifi-watchdog", "usb-otg-watchdog"]) {
+    const watchdogToggle = document.getElementById(`${prefix}-enabled-input`);
+    const dependentFields = document.getElementById(`${prefix}-dependent-fields`);
+    const disabledHelp = document.getElementById(`${prefix}-disabled-help`);
+    if (!watchdogToggle || !dependentFields) {
+      continue;
     }
-  };
-  watchdogToggle.addEventListener("change", syncWatchdogFields);
-  syncWatchdogFields();
+    const syncWatchdogFields = () => {
+      dependentFields.disabled = !watchdogToggle.checked;
+      if (disabledHelp) {
+        disabledHelp.hidden = watchdogToggle.checked;
+      }
+    };
+    watchdogToggle.addEventListener("change", syncWatchdogFields);
+    syncWatchdogFields();
+  }
 })();
 </script>
 """
@@ -465,6 +467,12 @@ def render_settings_html(
         if config.self_healing.wifi_watchdog_enabled and config.self_healing.wifi_reboot_enabled
         else "Disabled"
     )
+    usb_otg_reboot_summary = (
+        f"Up to {config.self_healing.usb_otg_reboot_attempts} reboot attempts"
+        if config.self_healing.usb_otg_watchdog_enabled
+        and config.self_healing.usb_otg_reboot_enabled
+        else "Disabled"
+    )
     self_healing_section_body = (
         settings_row(
             "Periodic reboot",
@@ -482,6 +490,11 @@ def render_settings_html(
         + settings_row("Connectivity check host", config.self_healing.connectivity_check_host)
         + settings_row("Wi-Fi reconnect", wifi_reconnect_summary)
         + settings_row("Wi-Fi reboot", wifi_reboot_summary)
+        + settings_row(
+            "USB OTG watchdog",
+            "Enabled" if config.self_healing.usb_otg_watchdog_enabled else "Disabled",
+        )
+        + settings_row("USB OTG recovery reboots", usb_otg_reboot_summary)
     )
     usb_otg_warning = (
         banner_strip(
@@ -645,6 +658,37 @@ def render_settings_html(
         + settings_row("Home Assistant status topic", config.home_assistant.status_topic)
         + settings_row("Home Assistant gateway device id", config.home_assistant.gateway_device_id)
     )
+    notifications_section_body = (
+        settings_row("Notifications", "Enabled" if config.notifications.enabled else "Disabled")
+        + settings_row(
+            "Notification recipient",
+            config.notifications.recipient or "Not configured",
+        )
+        + settings_row(
+            "Notification language",
+            dict(fixed_locale_options()).get(
+                config.notifications.locale, config.notifications.locale
+            ),
+        )
+        + settings_row(
+            "Offline delivery",
+            {"summary": "Summary", "individual": "Individual", "drop": "Drop"}.get(
+                config.notifications.offline_delivery, config.notifications.offline_delivery
+            ),
+        )
+        + settings_row(
+            "Offline notification retention",
+            (
+                "1 day"
+                if config.notifications.offline_retention_days == 1
+                else f"{config.notifications.offline_retention_days} days"
+            ),
+        )
+        + settings_row(
+            "Maximum pending notifications",
+            str(config.notifications.offline_max_events),
+        )
+    )
     if edit_mode:
         reader_mode_options = "".join(
             _option_html(value, value, config.gateway.reader_mode) for value in ("fake", "live")
@@ -675,6 +719,18 @@ def render_settings_html(
         )
         language_options = "".join(
             _option_html(value, label, config.web.language) for value, label in locale_options()
+        )
+        offline_delivery_options = "".join(
+            _option_html(value, label, config.notifications.offline_delivery)
+            for value, label in (
+                ("summary", "Summary"),
+                ("individual", "Individual"),
+                ("drop", "Drop"),
+            )
+        )
+        notification_locale_options = "".join(
+            _option_html(value, label, config.notifications.locale)
+            for value, label in fixed_locale_options()
         )
         timezone_choices = _available_timezone_options()
         timezone_options = (
@@ -1188,9 +1244,130 @@ def render_settings_html(
                 help_text="Wait this many outage minutes before rebooting the Raspberry Pi.",
             )
             + "</fieldset>"
+            + settings_control_row(
+                "USB OTG watchdog",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input id="usb-otg-watchdog-enabled-input" type="checkbox" '
+                    'name="usb_otg_watchdog_enabled"'
+                    f"{shared._checked_attr(config.self_healing.usb_otg_watchdog_enabled)}>"
+                    "<span>Monitor USB OTG frame enumeration</span></label>"
+                ),
+                help_text=(
+                    "Checks that the configured USB device controller is in the configured "
+                    "state. It does not verify that the picture frame is displaying images."
+                ),
+            )
+            + (
+                '<fieldset id="usb-otg-watchdog-dependent-fields" '
+                'class="settings-dependent-fieldset" '
+                'aria-describedby="usb-otg-watchdog-disabled-help"'
+                f"{' disabled' if not config.self_healing.usb_otg_watchdog_enabled else ''}>"
+                '<div id="usb-otg-watchdog-disabled-help" class="inline-field-help"'
+                f"{'' if not config.self_healing.usb_otg_watchdog_enabled else ' hidden'}>"
+                "Enable USB OTG watchdog to edit these recovery options."
+                "</div>"
+            )
+            + settings_control_row(
+                "USB OTG reboot",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="usb_otg_reboot_enabled"'
+                    f"{shared._checked_attr(config.self_healing.usb_otg_reboot_enabled)}>"
+                    "<span>Reboot Raspberry Pi after failed USB OTG recovery</span></label>"
+                ),
+                help_text="A rebind is always attempted before this recovery action.",
+            )
+            + settings_control_row(
+                "Maximum reboot attempts",
+                (
+                    '<input id="usb-otg-reboot-attempts-input" type="text" '
+                    'name="usb_otg_reboot_attempts" '
+                    f'value="{config.self_healing.usb_otg_reboot_attempts}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Limit recovery reboots to a value from 0 to 5 before escalating.",
+            )
+            + "</fieldset>"
             + '<div style="margin-top:1rem">'
             + f"{button('Save self-healing settings', kind='primary')}"
             + "</div>"
+            + "</form>"
+        )
+        notifications_section_body = (
+            '<form method="post" action="/settings/notifications">'
+            + settings_control_row(
+                "Notifications",
+                (
+                    f'<label class="settings-value" style="{shared.TOGGLE_LABEL_STYLE}">'
+                    '<input type="checkbox" name="notifications_enabled"'
+                    f"{shared._checked_attr(config.notifications.enabled)}>"
+                    "<span>Enable system-mail notifications</span></label>"
+                ),
+                help_text="Uses the operator-managed msmtp system sendmail transport.",
+            )
+            + settings_control_row(
+                "Notification recipient",
+                (
+                    '<input id="notification-recipient-input" type="email" '
+                    'name="notification_recipient" '
+                    f'value="{html.escape(config.notifications.recipient)}" autocomplete="email">'
+                ),
+                help_text="Set the email address that receives gateway notifications.",
+            )
+            + settings_control_row(
+                "Notification language",
+                (
+                    '<select id="notification-locale-input" name="notification_locale" '
+                    'autocomplete="off">'
+                    f"{notification_locale_options}"
+                    "</select>"
+                ),
+                help_text="Choose the fixed language used for unattended notification emails.",
+            )
+            + settings_control_row(
+                "Offline delivery",
+                (
+                    '<select id="offline-delivery-input" name="offline_delivery" '
+                    'autocomplete="off">'
+                    f"{offline_delivery_options}"
+                    "</select>"
+                ),
+                help_text=(
+                    "Choose summary, individual, or drop for events queued while mail is "
+                    "unavailable."
+                ),
+            )
+            + settings_control_row(
+                "Offline notification retention",
+                (
+                    '<input id="offline-retention-days-input" type="text" '
+                    'name="offline_retention_days" '
+                    f'value="{config.notifications.offline_retention_days}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text="Keep pending notification events for 1 to 30 days.",
+            )
+            + settings_control_row(
+                "Maximum pending notifications",
+                (
+                    '<input id="offline-max-events-input" type="text" '
+                    'name="offline_max_events" '
+                    f'value="{config.notifications.offline_max_events}" '
+                    'inputmode="numeric" autocomplete="off">'
+                ),
+                help_text=(
+                    "Limit pending events to prevent a prolonged outage from creating an "
+                    "unbounded queue."
+                ),
+            )
+            + '<div style="margin-top:1rem">'
+            + f"{button('Save notification settings', kind='primary')}"
+            + "</div>"
+            + "</form>"
+            + '<form method="post" action="/settings/notifications/test" '
+            'style="margin-top:0.75rem">'
+            + f"{button('Send test email', kind='secondary')}"
             + "</form>"
         )
         archive_sync_section_body = (
@@ -1559,6 +1736,10 @@ def render_settings_html(
         + section_card(
             title="Self-Healing",
             body=self_healing_section_body,
+        )
+        + section_card(
+            title="Notifications",
+            body=notifications_section_body,
         )
         + section_card(
             title="USB OTG Image Export",

@@ -101,6 +101,19 @@ wifi_reconnect_enabled = true
 wifi_reconnect_after_minutes = 5
 wifi_reboot_enabled = false
 wifi_reboot_after_minutes = 15
+usb_otg_watchdog_enabled = false
+usb_otg_reboot_enabled = false
+usb_otg_reboot_attempts = 1
+
+[notifications]
+# Uses the operator-managed system sendmail/msmtp transport when installed.
+enabled = false
+recipient = ""
+locale = "en"
+# Choose one of: summary, individual, drop.
+offline_delivery = "summary"
+offline_retention_days = 7
+offline_max_events = 100
 
 [retention]
 raw_retention_days = 730

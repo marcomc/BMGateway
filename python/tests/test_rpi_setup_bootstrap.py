@@ -5,6 +5,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
 
 def test_bootstrap_installs_reproducible_raspberry_pi_dependencies() -> None:
     script = Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8")
@@ -28,6 +30,8 @@ def test_bootstrap_installs_reproducible_raspberry_pi_dependencies() -> None:
         "dosfstools",
         "kmod",
         "libjpeg-dev",
+        "msmtp",
+        "msmtp-mta",
         "python3-dev",
         "util-linux",
         "zlib1g-dev",
@@ -43,11 +47,27 @@ def test_service_installer_installs_usb_otg_helper_dependencies() -> None:
         "dosfstools",
         "kmod",
         "libjpeg-dev",
+        "msmtp",
+        "msmtp-mta",
         "python3-dev",
         "util-linux",
         "zlib1g-dev",
     ):
         assert package in script
+
+
+def test_installers_preserve_an_existing_system_sendmail_transport() -> None:
+    bootstrap = Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8")
+    service_installer = Path("rpi-setup/scripts/install-service.sh").read_text(encoding="utf-8")
+
+    for script in (bootstrap, service_installer):
+        assert 'system_sendmail_path="${BM_GATEWAY_SENDMAIL_PATH:-/usr/sbin/sendmail}"' in script
+        assert 'if [[ ! -x "${system_sendmail_path}" ]]; then' in script
+    assert "apt_packages+=(msmtp msmtp-mta)" in bootstrap
+    assert "notification_packages=(msmtp msmtp-mta)" in service_installer
+    manual_setup = Path("rpi-setup/manual-setup.md").read_text(encoding="utf-8")
+    assert "if [[ ! -x /usr/sbin/sendmail ]]; then" in manual_setup
+    assert "sudo apt install -y msmtp msmtp-mta" in manual_setup
 
 
 def _service_installer_config_rewrite_program() -> str:
@@ -102,7 +122,60 @@ def test_service_installer_defaults_absent_bm200_archive_page_cap_to_85(tmp_path
     assert config["archive_sync"]["bm200_max_pages_per_sync"] == 85
 
 
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("enabled", '"false"', "notifications.enabled must be a boolean"),
+        (
+            "offline_retention_days",
+            '"7"',
+            "notifications.offline_retention_days must be an integer",
+        ),
+        (
+            "offline_max_events",
+            "true",
+            "notifications.offline_max_events must be an integer",
+        ),
+    ],
+)
+def test_service_installer_rejects_non_native_notification_values(
+    tmp_path: Path, key: str, value: str, message: str
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f"[notifications]\n{key} = {value}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _service_installer_config_rewrite_program(),
+            str(config_path),
+            str(tmp_path / "state"),
+            "0.0.0.0",
+            "80",
+            "1",
+            "1",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
+
+
 def test_imager_first_run_delegates_full_dependency_install_to_bootstrap() -> None:
     script = Path("rpi-setup/examples/imager/bm-gateway-first-run.sh").read_text(encoding="utf-8")
 
     assert "--skip-apt" not in script
+
+
+def test_imager_first_run_restarts_boot_hook_after_config_overlay() -> None:
+    script = Path("rpi-setup/examples/imager/bm-gateway-first-run.sh").read_text(encoding="utf-8")
+
+    overlay = script.index('install -m 0644 "${BOOT_DIR}/bm-gateway-config.toml"')
+    boot_restart = script.index(
+        "systemctl restart --no-block bm-gateway-boot-notification.service || true"
+    )
+    assert overlay < boot_restart
