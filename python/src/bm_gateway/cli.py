@@ -87,6 +87,7 @@ def format_main_help() -> str:
             "  lifecycle Record system boot or orderly shutdown notifications",
             "  protocol Probe bounded read-only BM6/BM7 BLE protocol commands",
             "  run      Execute the gateway runtime and persist snapshots",
+            "  update   Record a bootstrap-driven software update notification",
             "",
             "Run `bm-gateway <command> --help` for command-specific help.",
         ]
@@ -237,6 +238,19 @@ def build_parser() -> argparse.ArgumentParser:
     lifecycle_parser = subparsers.add_parser("lifecycle")
     lifecycle_parser.add_argument("event", choices=("boot", "shutdown"))
     lifecycle_parser.add_argument("--state-dir", type=Path)
+
+    update_parser = subparsers.add_parser(
+        "update", help="Record the outcome of a bootstrap-driven software update."
+    )
+    update_subparsers = update_parser.add_subparsers(dest="update_command")
+    update_report = update_subparsers.add_parser(
+        "report", help="Queue a durable software-update notification."
+    )
+    update_report.add_argument("--previous-revision", required=True)
+    update_report.add_argument("--current-revision")
+    update_report.add_argument("--reboot-required", choices=("yes", "no"))
+    update_report.add_argument("--failure-stage", choices=("fetch", "install", "services"))
+    update_report.add_argument("--state-dir", type=Path)
 
     run_parser = subparsers.add_parser("run", help="Execute the gateway runtime.")
     run_parser.add_argument("--once", action="store_true", help="Run one iteration and exit.")
@@ -450,6 +464,46 @@ def _handle_config_validate(path: Path, *, verbose: bool, as_json: bool) -> int:
 
     print("Configuration is valid.")
     print(f"{len(serialized_devices)} devices loaded from {config.device_registry_path}")
+    return 0
+
+
+def _handle_update_report(
+    path: Path,
+    *,
+    previous_revision: str,
+    current_revision: str | None,
+    reboot_required: str | None,
+    failure_stage: str | None,
+    state_dir: Path | None,
+) -> int:
+    from .notifications import NotificationOutboxError
+    from .update_notifications import record_update_notification
+
+    reboot_status: bool | None
+    if reboot_required == "yes":
+        reboot_status = True
+    elif reboot_required == "no":
+        reboot_status = False
+    else:
+        reboot_status = None
+    try:
+        config = load_config(path)
+        config_errors = validate_config(config)
+        if config_errors:
+            for error in config_errors:
+                print(error, file=sys.stderr)
+            return 1
+        record_update_notification(
+            config=config,
+            state_dir=database_file_path(config, state_dir=state_dir).parent.parent,
+            previous_revision=previous_revision,
+            current_revision=current_revision,
+            reboot_required=reboot_status,
+            failure_stage=failure_stage,
+        )
+    except (OSError, ValueError, NotificationOutboxError) as error:
+        print(str(error), file=sys.stderr)
+        return 1
     return 0
 
 
@@ -1326,6 +1380,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(translation_for(locale).gettext(str(error)), file=sys.stderr)
             return 1
         return 0
+
+    if args.command == "update" and args.update_command == "report":
+        return _handle_update_report(
+            args.config,
+            previous_revision=args.previous_revision,
+            current_revision=args.current_revision,
+            reboot_required=args.reboot_required,
+            failure_stage=args.failure_stage,
+            state_dir=args.state_dir,
+        )
 
     if args.command == "config":
         if args.config_command == "show":

@@ -24,6 +24,9 @@ SYSTEM_SENDMAIL_PATH = "/usr/sbin/sendmail"
 OFFLINE_DELIVERY_MODES = ("summary", "individual", "drop")
 SENDMAIL_TIMEOUT_SECONDS = 30
 _USB_ESCALATION_ACTION = "usb_otg_recovery_exhausted"
+_UPDATE_ACTIONS = frozenset({"software_update_completed", "software_update_failed"})
+_UPDATE_FAILURE_STAGES = frozenset({"fetch", "install", "services"})
+_UPDATE_REVISION_PATTERN = re.compile(r"[0-9a-f]{7,64}")
 _USB_ESCALATION_TEMPLATE = (
     "USB OTG frame enumeration remained unavailable after {attempts} reboot attempt(s): {reason}"
 )
@@ -71,8 +74,14 @@ class NotificationEvent:
     wifi_outcome: str | None = None
     wifi_interface: str | None = None
     wifi_outage_seconds: int | None = None
+    update_outcome: str | None = None
+    update_from_revision: str | None = None
+    update_to_revision: str | None = None
+    update_reboot_required: bool | None = None
+    update_stage: str | None = None
 
     def to_dict(self) -> dict[str, str | int | None]:
+        has_update_fields = self.update_outcome is not None
         event = _canonical_event(
             action=self.action,
             detail=self.detail,
@@ -89,6 +98,11 @@ class NotificationEvent:
             wifi_outage_seconds=(
                 self.wifi_outage_seconds if self.wifi_outage_seconds is not None else _MISSING
             ),
+            update_outcome=self.update_outcome if has_update_fields else _MISSING,
+            update_from_revision=self.update_from_revision if has_update_fields else _MISSING,
+            update_to_revision=self.update_to_revision if has_update_fields else _MISSING,
+            update_reboot_required=self.update_reboot_required if has_update_fields else _MISSING,
+            update_stage=self.update_stage if has_update_fields else _MISSING,
         )
         payload: dict[str, str | int | None] = {
             "action": event.action,
@@ -105,6 +119,12 @@ class NotificationEvent:
             payload["wifi_outcome"] = event.wifi_outcome
             payload["wifi_interface"] = event.wifi_interface
             payload["wifi_outage_seconds"] = event.wifi_outage_seconds
+        if event.update_outcome is not None:
+            payload["update_outcome"] = event.update_outcome
+            payload["update_from_revision"] = event.update_from_revision
+            payload["update_to_revision"] = event.update_to_revision
+            payload["update_reboot_required"] = event.update_reboot_required
+            payload["update_stage"] = event.update_stage
         return payload
 
 
@@ -171,6 +191,11 @@ def _canonical_event(
     wifi_outcome: object = _MISSING,
     wifi_interface: object = _MISSING,
     wifi_outage_seconds: object = _MISSING,
+    update_outcome: object = _MISSING,
+    update_from_revision: object = _MISSING,
+    update_to_revision: object = _MISSING,
+    update_reboot_required: object = _MISSING,
+    update_stage: object = _MISSING,
 ) -> NotificationEvent:
     normalized_action = str(action).strip()
     if not normalized_action:
@@ -212,6 +237,55 @@ def _canonical_event(
         normalized_detail = _WIFI_TEMPLATES[(normalized_action, wifi[0])].format(
             wifi_interface=wifi[1], outage_seconds=wifi[2]
         )
+    update_values = (
+        update_outcome,
+        update_from_revision,
+        update_to_revision,
+        update_reboot_required,
+        update_stage,
+    )
+    update: tuple[str, str, str | None, bool | None, str | None] | None = None
+    if any(value is not _MISSING for value in update_values):
+        if normalized_action not in _UPDATE_ACTIONS:
+            raise NotificationOutboxError("Notification outbox contains an invalid event")
+        if (
+            not isinstance(update_outcome, str)
+            or update_outcome not in {"completed", "failed"}
+            or not isinstance(update_from_revision, str)
+            or _UPDATE_REVISION_PATTERN.fullmatch(update_from_revision) is None
+        ):
+            raise NotificationOutboxError("Notification outbox contains an invalid event")
+        if update_outcome == "completed":
+            if (
+                normalized_action != "software_update_completed"
+                or not isinstance(update_to_revision, str)
+                or _UPDATE_REVISION_PATTERN.fullmatch(update_to_revision) is None
+                or not isinstance(update_reboot_required, bool)
+                or update_stage is not None
+            ):
+                raise NotificationOutboxError("Notification outbox contains an invalid event")
+            update = (
+                update_outcome,
+                update_from_revision,
+                update_to_revision,
+                update_reboot_required,
+                None,
+            )
+            normalized_detail = (
+                f"BMGateway updated from {update_from_revision} to {update_to_revision}; "
+                f"reboot required={str(update_reboot_required).lower()}."
+            )
+        else:
+            if (
+                normalized_action != "software_update_failed"
+                or update_to_revision is not None
+                or update_reboot_required is not None
+                or not isinstance(update_stage, str)
+                or update_stage not in _UPDATE_FAILURE_STAGES
+            ):
+                raise NotificationOutboxError("Notification outbox contains an invalid event")
+            update = (update_outcome, update_from_revision, None, None, update_stage)
+            normalized_detail = f"BMGateway update failed during {update_stage}."
     return NotificationEvent(
         action=normalized_action,
         detail=normalized_detail,
@@ -222,6 +296,11 @@ def _canonical_event(
         wifi_outcome=wifi[0] if wifi else None,
         wifi_interface=wifi[1] if wifi else None,
         wifi_outage_seconds=wifi[2] if wifi else None,
+        update_outcome=update[0] if update else None,
+        update_from_revision=update[1] if update else None,
+        update_to_revision=update[2] if update else None,
+        update_reboot_required=update[3] if update else None,
+        update_stage=update[4] if update else None,
     )
 
 
@@ -310,6 +389,11 @@ def _load_notification_outbox_unlocked(path: Path) -> list[NotificationEvent]:
                 wifi_outcome=item.get("wifi_outcome", _MISSING),
                 wifi_interface=item.get("wifi_interface", _MISSING),
                 wifi_outage_seconds=item.get("wifi_outage_seconds", _MISSING),
+                update_outcome=item.get("update_outcome", _MISSING),
+                update_from_revision=item.get("update_from_revision", _MISSING),
+                update_to_revision=item.get("update_to_revision", _MISSING),
+                update_reboot_required=item.get("update_reboot_required", _MISSING),
+                update_stage=item.get("update_stage", _MISSING),
             )
         )
     return events
@@ -414,6 +498,11 @@ def queue_notification_event(
     wifi_outcome: str | None = None,
     wifi_interface: str | None = None,
     wifi_outage_seconds: int | None = None,
+    update_outcome: str | None = None,
+    update_from_revision: str | None = None,
+    update_to_revision: str | None = None,
+    update_reboot_required: bool | None = None,
+    update_stage: str | None = None,
     now: datetime | None = None,
     retention_now: datetime | None = None,
     time_trusted: bool = True,
@@ -440,6 +529,11 @@ def queue_notification_event(
             wifi_outcome=wifi_outcome,
             wifi_interface=wifi_interface,
             wifi_outage_seconds=wifi_outage_seconds,
+            update_outcome=update_outcome,
+            update_from_revision=update_from_revision,
+            update_to_revision=update_to_revision,
+            update_reboot_required=update_reboot_required,
+            update_stage=update_stage,
         )
         event.to_dict()
         events.append(event)
@@ -467,6 +561,11 @@ def queue_notification_event_once(
     wifi_outcome: str | None = None,
     wifi_interface: str | None = None,
     wifi_outage_seconds: int | None = None,
+    update_outcome: str | None = None,
+    update_from_revision: str | None = None,
+    update_to_revision: str | None = None,
+    update_reboot_required: bool | None = None,
+    update_stage: str | None = None,
     now: datetime | None = None,
     retention_now: datetime | None = None,
     time_trusted: bool = True,
@@ -498,6 +597,11 @@ def queue_notification_event_once(
             wifi_outcome=wifi_outcome,
             wifi_interface=wifi_interface,
             wifi_outage_seconds=wifi_outage_seconds,
+            update_outcome=update_outcome,
+            update_from_revision=update_from_revision,
+            update_to_revision=update_to_revision,
+            update_reboot_required=update_reboot_required,
+            update_stage=update_stage,
         )
         event.to_dict()
         events.append(event)
@@ -550,6 +654,10 @@ def _action_label(config: NotificationsConfig, action: str) -> str:
         return _text(config, "Wi-Fi reboot requested")
     if action == "wifi_connectivity_restored":
         return _text(config, "Wi-Fi connectivity restored")
+    if action == "software_update_completed":
+        return _text(config, "Software update completed")
+    if action == "software_update_failed":
+        return _text(config, "Software update failed")
     return action
 
 
@@ -564,6 +672,32 @@ def _event_detail(config: NotificationsConfig, event: NotificationEvent) -> str:
             _WIFI_TEMPLATES[(event.action, event.wifi_outcome)],
             wifi_interface=event.wifi_interface,
             outage_seconds=event.wifi_outage_seconds,
+        )
+    if event.update_outcome == "completed":
+        assert event.update_from_revision is not None
+        assert event.update_to_revision is not None
+        template = (
+            "BMGateway updated from {previous_revision} to {current_revision}. "
+            "A reboot is required."
+            if event.update_reboot_required
+            else "BMGateway updated from {previous_revision} to {current_revision}. "
+            "No reboot is required."
+        )
+        return _text(
+            config,
+            template,
+            previous_revision=event.update_from_revision,
+            current_revision=event.update_to_revision,
+        )
+    if event.update_outcome == "failed":
+        assert event.update_stage is not None
+        return _text(
+            config,
+            (
+                "BMGateway update failed during {stage}. "
+                "Review the local update output and service status."
+            ),
+            stage=event.update_stage,
         )
     if event.usb_otg_reason is None or event.usb_otg_reboot_attempts is None:
         return event.detail

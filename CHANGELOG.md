@@ -25,6 +25,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and sends an escalation notification when recovery is exhausted.
 - Wi-Fi watchdog recovery now queues system-mail notifications when a reconnect
   is attempted, a reboot is requested, and connectivity is restored.
+- Bootstrap updates now queue a localized, durable outcome with the old and new
+  Git revisions and an explicit reboot-required status; failed update stages use
+  the same bounded outbox without changing the update command's exit result.
 
 ### Fixed
 

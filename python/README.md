@@ -46,6 +46,7 @@ Main runtime CLI for:
 - runtime execution
 - history inspection and pruning
 - bounded BM6/BM7 protocol probes for live debugging
+- durable update-outcome recording for the Raspberry Pi bootstrap path
 
 The command reference is maintained in
 [Application surfaces](../docs/application-surfaces.md#command-line).
