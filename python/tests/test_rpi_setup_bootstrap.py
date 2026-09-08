@@ -124,3 +124,13 @@ def test_imager_first_run_delegates_full_dependency_install_to_bootstrap() -> No
     script = Path("rpi-setup/examples/imager/bm-gateway-first-run.sh").read_text(encoding="utf-8")
 
     assert "--skip-apt" not in script
+
+
+def test_imager_first_run_restarts_boot_hook_after_config_overlay() -> None:
+    script = Path("rpi-setup/examples/imager/bm-gateway-first-run.sh").read_text(encoding="utf-8")
+
+    overlay = script.index('install -m 0644 "${BOOT_DIR}/bm-gateway-config.toml"')
+    boot_restart = script.index(
+        "systemctl restart --no-block bm-gateway-boot-notification.service || true"
+    )
+    assert overlay < boot_restart

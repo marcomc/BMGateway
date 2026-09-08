@@ -4,10 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.0] - 2026-09-06 - Notification Foundation and USB OTG Recovery
+## [0.4.0] - Unreleased - Notification Foundation and USB OTG Recovery
 
 ### Added
 
+- System boot and orderly shutdown notifications share the existing mail
+  settings and bounded outbox. Same-boot service restarts do not repeat boot
+  messages or generate false shutdown messages.
 - Added an optional system-mail notification foundation using the host
   `sendmail` compatibility interface from `msmtp-mta`, with Settings controls,
   a test-email action, and no SMTP credentials stored in the repository.
@@ -25,6 +28,33 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Release preflight rejects duplicate generic `Unreleased` sections instead of
+  overlooking later pending entries.
+- Release preflight now rejects unknown, competing, duplicate, and downgraded
+  current release headings before they can hide pending work, while preserving
+  legacy versioned and generic `Unreleased` history below the latest shipped
+  release boundary.
+- Future-dated offline notifications are normalized to the trusted retention
+  time before bounded outbox retention, so corrected-clock events are retained.
+- Watchdog events raised before NTP synchronization retain their durable
+  intent without a stale timestamp; only a trusted pass normalizes the shared
+  outbox before retention, ordering, and delivery.
+- The macOS Imager first-run path now restarts its optional boot hook after
+  applying a supplied notification configuration, so the first boot is recorded.
+- Shutdown intents observed before NTP synchronization retain no stale wall
+  timestamp and are assigned a trusted time when transferred later.
+- Release preflight rejects malformed current version fields instead of falling
+  back to an older shipped release.
+- Lifecycle retention and shared-mail delivery now defer until the appliance
+  wall clock is NTP synchronized, without delaying runtime or watchdog recovery.
+- Release preflight rejects malformed generic `Unreleased` headings instead of
+  silently ignoring pending changes.
+- Notification outbox retention and count limits now keep the newest events by
+  occurrence time, including lifecycle replays, and deliver retained summaries
+  or individual messages in chronological order.
+- Lifecycle notification failures no longer block independently checkpointed
+  recovery reboots or prevent the installer from starting core services.
+  Unsafe mail delivery remains deferred and hook failures remain visible.
 - Wi-Fi recovery retains serialized state and notification handoffs when USB
   watchdog state cannot be read or synchronized. Shared delivery and reboots
   remain deferred until that state is available again.

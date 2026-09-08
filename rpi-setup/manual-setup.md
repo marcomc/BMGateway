@@ -149,7 +149,7 @@ preserved. The installer does not create mail credentials. For `msmtp`,
 configure `/etc/msmtprc` separately; the installer hardens an existing regular
 file to `root:msmtp` and mode `0640`, and applies the matching setgid override.
 Then enable Notifications in Settings. It also prepares the fixed bounded
-offline-delivery mode for current watchdog and future lifecycle notifications:
+offline-delivery mode for watchdog and system lifecycle notifications:
 `summary`, `individual`, or `drop`; `summary` is the default and avoids a long
 outage producing a burst of individual emails. Select a fixed notification
 language for unattended email; this setting intentionally does not inherit the
@@ -609,6 +609,38 @@ state acknowledgement. Duplicate queue requests re-confirm durable outbox
 storage before returning. System-mail delivery can still repeat if the process
 stops after `sendmail` accepts a message but before the outbox records success.
 
+System lifecycle notifications use the same Notifications enable switch,
+recipient, language, and offline-delivery policy. The installer enables
+`bm-gateway-boot-notification.service`, which records a boot once per Linux boot
+ID, and independently arms `bm-gateway-lifecycle.service` for shutdown. Shutdown
+is recorded only when systemd reports that the host is stopping. Ordinary
+service restarts do not produce shutdown mail. Installing this feature on a
+running host reports that the current boot was observed, not a new reboot.
+Boot recording waits for synchronized wall-clock time without delaying runtime
+or web activation. The runtime keeps watchdog recovery active while lifecycle
+retention and shared-mail delivery defer until the clock is synchronized;
+pre-sync watchdog notifications retain durable intent without an untrusted
+timestamp until the same trusted outbox pass.
+An orderly shutdown observed before synchronization is retained without an
+untrusted timestamp and receives its notification time after synchronization.
+
+Pending lifecycle events survive process restarts and follow the configured
+retention and event-count limits. Shutdown mail is best effort: sudden power
+loss cannot run the hook, and network teardown or the service timeout can defer
+delivery until the next boot. Events describe an observed boot or an orderly
+shutdown/reboot, not the cause of the event.
+
+The installed CLI entrypoints are `bm-gateway lifecycle boot` and
+`bm-gateway lifecycle shutdown`, with the usual `--config` option and an optional
+`--state-dir`. They do not initiate a reboot or shutdown. Notification delivery
+waits if another watchdog has an uncertain acknowledgement.
+
+Unreadable lifecycle notification state defers mail delivery without disabling
+independently checkpointed recovery reboots. Watchdog authorization and state
+checkpoint failures still prevent unsafe reboots. Notification-unit activation
+failures remain visible in `systemctl` diagnostics but do not prevent the
+installer from activating the runtime and web services.
+
 ## Optional: Prepare USB OTG Image Export
 
 `BMGateway` includes a disabled-by-default USB OTG image-export setting for
@@ -754,6 +786,8 @@ This installs:
 - `/home/<user>/.config/bm-gateway/devices.toml`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/etc/systemd/system/bm-gateway-lifecycle.service`
+- `/etc/systemd/system/bm-gateway-boot-notification.service`
 - `/etc/systemd/system/glances-web.service` when `--enable-glances` is used
 - `cockpit.socket` when `--enable-cockpit` is used
 - `/usr/local/bin/bm-gateway` as a stable systemd-facing symlink
@@ -763,6 +797,8 @@ Review the config, then check the service state:
 ```bash
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
+sudo systemctl status bm-gateway-lifecycle.service
+sudo systemctl status bm-gateway-boot-notification.service
 sudo systemctl status glances-web.service
 sudo systemctl status cockpit.socket
 ```
@@ -808,7 +844,10 @@ Validate service state, config loading, and the installed device registry:
 
 ```bash
 ssh "admin@${GATEWAY_HOST}" 'bash -lc "
-  systemctl is-active bm-gateway.service bm-gateway-web.service bluetooth.service avahi-daemon.service
+  systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-notification.service
+  systemctl is-active bm-gateway.service bm-gateway-web.service bm-gateway-lifecycle.service bluetooth.service avahi-daemon.service
+  test \$(systemctl show --property=Result --value bm-gateway-boot-notification.service) = success
+  test \$(systemctl show --property=ExecMainStatus --value bm-gateway-boot-notification.service) -eq 0
   bm-gateway config validate --json
   bm-gateway devices list --json
 "'

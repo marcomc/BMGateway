@@ -10,7 +10,7 @@ import socket
 import subprocess
 import tempfile
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from email.message import EmailMessage
 from pathlib import Path
@@ -64,7 +64,7 @@ class NotificationOutboxError(RuntimeError):
 class NotificationEvent:
     action: str
     detail: str
-    occurred_at: datetime
+    occurred_at: datetime | None
     idempotency_key: str = ""
     usb_otg_reason: str | None = None
     usb_otg_reboot_attempts: int | None = None
@@ -72,7 +72,7 @@ class NotificationEvent:
     wifi_interface: str | None = None
     wifi_outage_seconds: int | None = None
 
-    def to_dict(self) -> dict[str, str | int]:
+    def to_dict(self) -> dict[str, str | int | None]:
         event = _canonical_event(
             action=self.action,
             detail=self.detail,
@@ -90,10 +90,10 @@ class NotificationEvent:
                 self.wifi_outage_seconds if self.wifi_outage_seconds is not None else _MISSING
             ),
         )
-        payload: dict[str, str | int] = {
+        payload: dict[str, str | int | None] = {
             "action": event.action,
             "detail": event.detail,
-            "occurred_at": event.occurred_at.isoformat(),
+            "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
         }
         if event.idempotency_key:
             payload["idempotency_key"] = event.idempotency_key
@@ -164,7 +164,7 @@ def _canonical_event(
     *,
     action: object,
     detail: object,
-    occurred_at: datetime,
+    occurred_at: datetime | None,
     idempotency_key: object = "",
     usb_otg_reason: object = _MISSING,
     usb_otg_reboot_attempts: object = _MISSING,
@@ -215,7 +215,7 @@ def _canonical_event(
     return NotificationEvent(
         action=normalized_action,
         detail=normalized_detail,
-        occurred_at=_aware_utc(occurred_at),
+        occurred_at=_aware_utc(occurred_at) if occurred_at is not None else None,
         idempotency_key=str(idempotency_key).strip(),
         usb_otg_reason=reason,
         usb_otg_reboot_attempts=attempts,
@@ -287,12 +287,18 @@ def _load_notification_outbox_unlocked(path: Path) -> list[NotificationEvent]:
     for item in payload:
         if not isinstance(item, dict):
             raise NotificationOutboxError("Notification outbox contains an invalid event")
-        try:
-            occurred_at = datetime.fromisoformat(str(item["occurred_at"]))
-        except (KeyError, TypeError, ValueError):
-            raise NotificationOutboxError(
-                "Notification outbox contains an invalid timestamp"
-            ) from None
+        raw_occurred_at = item.get("occurred_at", _MISSING)
+        if raw_occurred_at is None:
+            occurred_at = None
+        elif isinstance(raw_occurred_at, str):
+            try:
+                occurred_at = datetime.fromisoformat(raw_occurred_at)
+            except ValueError:
+                raise NotificationOutboxError(
+                    "Notification outbox contains an invalid timestamp"
+                ) from None
+        else:
+            raise NotificationOutboxError("Notification outbox contains an invalid timestamp")
         events.append(
             _canonical_event(
                 action=item.get("action", ""),
@@ -345,15 +351,50 @@ def persist_notification_outbox(path: Path, events: list[NotificationEvent]) -> 
         _persist_notification_outbox_unlocked(path, events)
 
 
-def _retained_events(
-    *, path: Path, config: NotificationsConfig, now: datetime
+def _canonicalize_outbox(
+    *,
+    events: list[NotificationEvent],
+    config: NotificationsConfig,
+    retention_reference: datetime,
+    time_trusted: bool,
 ) -> list[NotificationEvent]:
-    now = _aware_utc(now)
+    reference = _aware_utc(retention_reference)
+    if not time_trusted:
+        # A restored but unsynchronized clock is not a retention reference.
+        # Keep existing timestamps intact and bound only by durable FIFO order.
+        return events[-config.offline_max_events :]
+    cutoff = reference - timedelta(days=config.offline_retention_days)
+    timestamped = [
+        replace(
+            event,
+            occurred_at=(
+                reference
+                if event.occurred_at is None or event.occurred_at > reference
+                else event.occurred_at
+            ),
+        )
+        for event in events
+    ]
+    retained = [event for event in timestamped if _event_timestamp(event) >= cutoff]
+    retained.sort(key=_event_timestamp)
+    return retained[-config.offline_max_events :]
+
+
+def _retained_events(
+    *,
+    path: Path,
+    config: NotificationsConfig,
+    retention_reference: datetime,
+    time_trusted: bool,
+) -> list[NotificationEvent]:
     events = _load_notification_outbox_unlocked(path)
-    cutoff = now - timedelta(days=config.offline_retention_days)
-    retained = [event for event in events if event.occurred_at >= cutoff]
-    retained = retained[-config.offline_max_events :]
-    if len(retained) != len(events):
+    retained = _canonicalize_outbox(
+        events=events,
+        config=config,
+        retention_reference=retention_reference,
+        time_trusted=time_trusted,
+    )
+    if retained != events:
         if retained:
             _persist_notification_outbox_unlocked(path, retained)
         else:
@@ -374,26 +415,44 @@ def queue_notification_event(
     wifi_interface: str | None = None,
     wifi_outage_seconds: int | None = None,
     now: datetime | None = None,
+    retention_now: datetime | None = None,
+    time_trusted: bool = True,
 ) -> None:
     if not config.enabled or config.offline_delivery == "drop":
         return
     with _notification_outbox_lock(path):
-        current = _aware_utc(now or datetime.now(timezone.utc))
-        events = _retained_events(path=path, config=config, now=current)
-        events.append(
-            NotificationEvent(
-                action=action,
-                detail=detail,
-                occurred_at=current,
-                idempotency_key=idempotency_key,
-                usb_otg_reason=usb_otg_reason,
-                usb_otg_reboot_attempts=usb_otg_reboot_attempts,
-                wifi_outcome=wifi_outcome,
-                wifi_interface=wifi_interface,
-                wifi_outage_seconds=wifi_outage_seconds,
-            )
+        current = datetime.now(timezone.utc)
+        occurred_at = _aware_utc(now or current) if time_trusted else None
+        retention_reference = _aware_utc(retention_now or current)
+        events = _retained_events(
+            path=path,
+            config=config,
+            retention_reference=retention_reference,
+            time_trusted=time_trusted,
         )
-        _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
+        event = NotificationEvent(
+            action=action,
+            detail=detail,
+            occurred_at=occurred_at,
+            idempotency_key=idempotency_key,
+            usb_otg_reason=usb_otg_reason,
+            usb_otg_reboot_attempts=usb_otg_reboot_attempts,
+            wifi_outcome=wifi_outcome,
+            wifi_interface=wifi_interface,
+            wifi_outage_seconds=wifi_outage_seconds,
+        )
+        event.to_dict()
+        events.append(event)
+        retained = _canonicalize_outbox(
+            events=events,
+            config=config,
+            retention_reference=retention_reference,
+            time_trusted=time_trusted,
+        )
+        if retained:
+            _persist_notification_outbox_unlocked(path, retained)
+        else:
+            _remove_notification_outbox(path)
 
 
 def queue_notification_event_once(
@@ -409,31 +468,49 @@ def queue_notification_event_once(
     wifi_interface: str | None = None,
     wifi_outage_seconds: int | None = None,
     now: datetime | None = None,
+    retention_now: datetime | None = None,
+    time_trusted: bool = True,
 ) -> bool:
     """Durably queue an event unless its stable identity is already pending."""
     if not config.enabled or config.offline_delivery == "drop":
         return False
     with _notification_outbox_lock(path):
-        current = now or datetime.now(timezone.utc)
-        events = _retained_events(path=path, config=config, now=current)
+        current = datetime.now(timezone.utc)
+        occurred_at = _aware_utc(now or current) if time_trusted else None
+        retention_reference = _aware_utc(retention_now or current)
+        events = _retained_events(
+            path=path,
+            config=config,
+            retention_reference=retention_reference,
+            time_trusted=time_trusted,
+        )
         if any(event.idempotency_key == idempotency_key for event in events):
             # A visible earlier replacement may still lack directory durability.
             _persist_notification_outbox_unlocked(path, events)
             return False
-        events.append(
-            NotificationEvent(
-                action=action,
-                detail=detail,
-                occurred_at=_aware_utc(current),
-                idempotency_key=idempotency_key,
-                usb_otg_reason=usb_otg_reason,
-                usb_otg_reboot_attempts=usb_otg_reboot_attempts,
-                wifi_outcome=wifi_outcome,
-                wifi_interface=wifi_interface,
-                wifi_outage_seconds=wifi_outage_seconds,
-            )
+        event = NotificationEvent(
+            action=action,
+            detail=detail,
+            occurred_at=occurred_at,
+            idempotency_key=idempotency_key,
+            usb_otg_reason=usb_otg_reason,
+            usb_otg_reboot_attempts=usb_otg_reboot_attempts,
+            wifi_outcome=wifi_outcome,
+            wifi_interface=wifi_interface,
+            wifi_outage_seconds=wifi_outage_seconds,
         )
-        _persist_notification_outbox_unlocked(path, events[-config.offline_max_events :])
+        event.to_dict()
+        events.append(event)
+        retained = _canonicalize_outbox(
+            events=events,
+            config=config,
+            retention_reference=retention_reference,
+            time_trusted=time_trusted,
+        )
+        if retained:
+            _persist_notification_outbox_unlocked(path, retained)
+        else:
+            _remove_notification_outbox(path)
         return True
 
 
@@ -461,6 +538,10 @@ def _text(config: NotificationsConfig, key: str, **values: object) -> str:
 
 
 def _action_label(config: NotificationsConfig, action: str) -> str:
+    if action == "system_boot":
+        return _text(config, "System started")
+    if action == "system_shutdown":
+        return _text(config, "System shutting down")
     if action == "usb_otg_recovery_exhausted":
         return _text(config, "USB OTG recovery exhausted")
     if action == "wifi_reconnect_attempted":
@@ -473,6 +554,10 @@ def _action_label(config: NotificationsConfig, action: str) -> str:
 
 
 def _event_detail(config: NotificationsConfig, event: NotificationEvent) -> str:
+    if event.action == "system_boot":
+        return _text(config, "A system boot was observed. This is not an application restart.")
+    if event.action == "system_shutdown":
+        return _text(config, "The system is shutting down or rebooting.")
     if event.wifi_outcome is not None:
         return _text(
             config,
@@ -486,6 +571,14 @@ def _event_detail(config: NotificationsConfig, event: NotificationEvent) -> str:
     return _text(
         config, _USB_ESCALATION_TEMPLATE, attempts=event.usb_otg_reboot_attempts, reason=reason
     )
+
+
+def _event_timestamp(event: NotificationEvent) -> datetime:
+    if event.occurred_at is None:
+        raise NotificationOutboxError(
+            "Notification event timestamp is pending clock synchronization"
+        )
+    return event.occurred_at
 
 
 def send_test_notification(
@@ -523,9 +616,17 @@ def _deliver_notification_outbox_unlocked(
     config: NotificationsConfig,
     runner: SendmailRunner = _default_sendmail,
     now: datetime | None = None,
+    time_trusted: bool = True,
 ) -> tuple[bool, str]:
+    if not time_trusted:
+        return False, "Notification delivery is waiting for clock synchronization"
     try:
-        events = _retained_events(path=path, config=config, now=now or datetime.now(timezone.utc))
+        events = _retained_events(
+            path=path,
+            config=config,
+            retention_reference=now or datetime.now(timezone.utc),
+            time_trusted=True,
+        )
     except NotificationOutboxError as error:
         return False, str(error)
     if not events:
@@ -551,14 +652,18 @@ def _deliver_notification_outbox_unlocked(
                 "",
                 _text(config, "Events retained: {count}", count=len(events)),
                 _text(
-                    config, "First event: {timestamp}", timestamp=events[0].occurred_at.isoformat()
+                    config,
+                    "First event: {timestamp}",
+                    timestamp=_event_timestamp(events[0]).isoformat(),
                 ),
                 _text(
-                    config, "Last event: {timestamp}", timestamp=events[-1].occurred_at.isoformat()
+                    config,
+                    "Last event: {timestamp}",
+                    timestamp=_event_timestamp(events[-1]).isoformat(),
                 ),
                 "",
                 *[
-                    f"- {event.occurred_at.isoformat()} "
+                    f"- {_event_timestamp(event).isoformat()} "
                     f"{_action_label(config, event.action)}: {_event_detail(config, event)}"
                     for event in events
                 ],
@@ -589,7 +694,7 @@ def _deliver_notification_outbox_unlocked(
                             _text(
                                 config,
                                 "Occurred at: {timestamp}",
-                                timestamp=event.occurred_at.isoformat(),
+                                timestamp=_event_timestamp(event).isoformat(),
                             ),
                             _text(
                                 config,
@@ -638,6 +743,7 @@ def deliver_notification_outbox(
     config: NotificationsConfig,
     runner: SendmailRunner = _default_sendmail,
     now: datetime | None = None,
+    time_trusted: bool = True,
 ) -> tuple[bool, str]:
     try:
         with _notification_outbox_lock(path):
@@ -646,6 +752,7 @@ def deliver_notification_outbox(
                 config=config,
                 runner=runner,
                 now=now,
+                time_trusted=time_trusted,
             )
     except NotificationOutboxError as error:
         return False, str(error)

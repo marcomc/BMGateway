@@ -50,6 +50,8 @@ The install helper places these files:
 - `~/.local/bin/bm-gateway-web`
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
+- `/etc/systemd/system/bm-gateway-lifecycle.service`
+- `/etc/systemd/system/bm-gateway-boot-notification.service`
 - `/usr/local/bin/bm-gateway`
 - `/usr/local/bin/bm-gateway-web`
 
@@ -60,6 +62,8 @@ The one-line bootstrap installs the full appliance by default:
 - standalone CLI runtime
 - runtime service
 - management web service
+- `bm-gateway-lifecycle.service` for shutdown notifications
+- `bm-gateway-boot-notification.service` for boot notifications
 - optional Glances API service for Home Assistant
 - optional Cockpit HTTPS host administration on port `9090`
 - live-ready config with an empty device registry
@@ -76,12 +80,16 @@ flowchart LR
     Services["systemd services"]
     Runtime["bm-gateway.service"]
     Web["bm-gateway-web.service"]
+    Lifecycle["bm-gateway-lifecycle.service<br/>shutdown notifications"]
+    Boot["bm-gateway-boot-notification.service<br/>boot notifications"]
 
     Bootstrap --> Install
     Install --> Config
     Config --> Services
     Services --> Runtime
     Services --> Web
+    Services --> Lifecycle
+    Services --> Boot
 ```
 
 ## Default Hostname Behavior

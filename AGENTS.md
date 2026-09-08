@@ -61,6 +61,11 @@ At the start of every new AI agent chat for this repository, read:
 - For watchdog notification handoffs, serialize state reload, evaluation,
   outbox acknowledgement, and delivery across daemon and one-shot entrypoints.
   Test checkpoint failures both before and after atomic file replacement.
+- Keep shutdown-hook arming independent of fallible boot notification work.
+  Lifecycle-only state failures defer unsafe mail delivery, not independently
+  checkpointed hardware recovery reboots. Preserve watchdog authorization and
+  checkpoint failure gates. Optional notification enable/restart failures must
+  retain diagnostics without aborting core service activation.
 - When a recovery action can restart the process before its outcome is known,
   persist the minimal pending recovery state before scheduling it and test the
   first healthy cycle of a fresh process.
@@ -118,7 +123,9 @@ Expected checks:
   terminology, duplication, and diagram rules.
 - Keep `README.md` accurate for end users.
 - Keep component `README.md` files accurate for contributors.
-- Keep `CHANGELOG.md` updated in `Unreleased` for user-visible changes.
+- Keep `CHANGELOG.md` updated in the active unreleased section for user-visible
+  changes: either generic `## [Unreleased]` or versioned
+  `## [X.Y.Z] - Unreleased - Title`.
 - Remove completed items from `TODO.md` when they ship.
 - Update config documentation when adding or changing config keys.
 - When code changes add, remove, or materially alter functionality or
@@ -158,5 +165,14 @@ When cutting a release, update the version consistently in:
 - `CHANGELOG.md`
 - tests that assert the version string
 
-Use the release-preflight-compatible headings exactly: `## [Unreleased]` for
-pending work, or `## [X.Y.Z] - YYYY-MM-DD - Title` for a release candidate.
+Use exactly one release-preflight-compatible heading mode for pending or shipped
+work:
+
+- `## [Unreleased]` for generic pending work
+- `## [X.Y.Z] - Unreleased - Title` for an active release body
+- `## [X.Y.Z] - YYYY-MM-DD - Title` for a shipped release
+
+Release preflight validates every current bracketed heading through the latest
+shipped release and compares its version with parseable historical versions;
+preserve all legacy headings, including generic `Unreleased` markers, below
+that boundary unless a separate history-migration decision is made.

@@ -1,4 +1,10 @@
 {
+"Cannot load lifecycle notification state": "सिस्टम जीवनचक्र सूचना की स्थिति लोड नहीं की जा सकी",
+"Cannot persist lifecycle notification state": "सिस्टम जीवनचक्र सूचना की स्थिति सहेजी नहीं जा सकी",
+"System started": "सिस्टम शुरू हुआ",
+"System shutting down": "सिस्टम बंद हो रहा है",
+"A system boot was observed. This is not an application restart.": "सिस्टम बूट देखा गया। यह एप्लिकेशन का पुनः आरंभ नहीं है।",
+"The system is shutting down or rebooting.": "सिस्टम बंद हो रहा है या पुनः आरंभ हो रहा है।",
   "; the UI normalizes it to Bluetooth MAC format.": "; the UI normalizes it to Bluetooth MAC format.",
   "AGM Battery": "AGM Battery",
   "ATV / Quad": "ATV / Quad",

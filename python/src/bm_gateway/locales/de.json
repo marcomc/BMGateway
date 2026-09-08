@@ -1,4 +1,10 @@
 {
+"Cannot load lifecycle notification state": "Status der Systemereignis-Benachrichtigungen kann nicht geladen werden",
+"Cannot persist lifecycle notification state": "Status der Systemereignis-Benachrichtigungen kann nicht gespeichert werden",
+"System started": "System gestartet",
+"System shutting down": "System wird heruntergefahren",
+"A system boot was observed. This is not an application restart.": "Ein Systemstart wurde erkannt. Dies ist kein Neustart der Anwendung.",
+"The system is shutting down or rebooting.": "Das System wird heruntergefahren oder neu gestartet.",
   "; the UI normalizes it to Bluetooth MAC format.": "; the UI normalizes it to Bluetooth MAC format.",
   "AGM Battery": "AGM Battery",
   "ATV / Quad": "ATV / Quad",

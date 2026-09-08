@@ -1,4 +1,10 @@
 {
+"Cannot load lifecycle notification state": "Impossible de charger l’état des notifications du cycle de vie",
+"Cannot persist lifecycle notification state": "Impossible d’enregistrer l’état des notifications du cycle de vie",
+"System started": "Système démarré",
+"System shutting down": "Arrêt du système en cours",
+"A system boot was observed. This is not an application restart.": "Un démarrage du système a été détecté. Il ne s’agit pas d’un redémarrage de l’application.",
+"The system is shutting down or rebooting.": "Le système est en cours d’arrêt ou de redémarrage.",
   "; the UI normalizes it to Bluetooth MAC format.": "; the UI normalizes it to Bluetooth MAC format.",
   "AGM Battery": "AGM Battery",
   "ATV / Quad": "ATV / Quad",

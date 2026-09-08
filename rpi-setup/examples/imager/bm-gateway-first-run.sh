@@ -42,6 +42,7 @@ if [ -f "${BOOT_DIR}/bm-gateway-devices.toml" ]; then
     install -m 0644 "${BOOT_DIR}/bm-gateway-devices.toml" "${CONFIG_DIR}/devices.toml"
 fi
 chown "${SERVICE_USER}:${SERVICE_USER}" "${CONFIG_DIR}/config.toml" "${CONFIG_DIR}/devices.toml" 2>/dev/null || true
+systemctl restart --no-block bm-gateway-boot-notification.service || true
 systemctl restart bm-gateway.service bm-gateway-web.service
 
 printf 'BMGateway first-run bootstrap completed\n'

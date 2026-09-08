@@ -1,4 +1,10 @@
 {
+"Cannot load lifecycle notification state": "无法加载生命周期通知状态",
+"Cannot persist lifecycle notification state": "无法保存生命周期通知状态",
+"System started": "系统已启动",
+"System shutting down": "系统正在关闭",
+"A system boot was observed. This is not an application restart.": "检测到系统启动。这不是应用程序重启。",
+"The system is shutting down or rebooting.": "系统正在关闭或重新启动。",
   "; the UI normalizes it to Bluetooth MAC format.": "; UI 将其标准化为蓝牙 MAC 格式。",
   "AGM Battery": "AGM 电池",
   "ATV / Quad": "全地形车/四轮车",
