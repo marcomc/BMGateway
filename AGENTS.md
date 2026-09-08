@@ -171,3 +171,7 @@ work:
 - `## [Unreleased]` for generic pending work
 - `## [X.Y.Z] - Unreleased - Title` for an active release body
 - `## [X.Y.Z] - YYYY-MM-DD - Title` for a shipped release
+
+Release preflight validates every current bracketed heading through the latest
+shipped release; preserve legacy headings below that boundary unless a separate
+history-migration decision is made.

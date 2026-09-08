@@ -168,16 +168,18 @@ def test_collect_release_version_state_uses_active_unreleased_release(
     assert state.unreleased_has_content is False
 
 
-def test_active_release_rejects_nonempty_generic_unreleased_section(tmp_path: Path) -> None:
+@pytest.mark.parametrize("generic_body", ["", "- Ambiguous next change.\n"])
+def test_active_release_rejects_any_generic_unreleased_section(
+    tmp_path: Path, generic_body: str
+) -> None:
     _write_release_files(
         tmp_path,
         package_version="0.4.0",
         module_version="0.4.0",
         documented_release="0.4.0",
         changelog_text=(
-            "# Changelog\n\n"
-            "## [Unreleased]\n\n"
-            "- Ambiguous next change.\n\n"
+            "# Changelog\n\n## [Unreleased]\n\n"
+            f"{generic_body}\n"
             "## [0.4.0] - Unreleased - Candidate release\n\n"
             "- Candidate fix under test.\n\n"
             "## [0.3.3] - 2026-07-17 - Previous release\n\n"
@@ -185,7 +187,26 @@ def test_active_release_rejects_nonempty_generic_unreleased_section(tmp_path: Pa
         ),
     )
 
-    with pytest.raises(ValueError, match="both an active release section and nonempty generic"):
+    with pytest.raises(ValueError, match="both an active release section and generic"):
+        validate_release_version_state(tmp_path)
+
+
+def test_active_release_rejects_a_later_empty_generic_unreleased_section(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [Unreleased]\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="both an active release section and generic"):
         validate_release_version_state(tmp_path)
 
 
@@ -241,6 +262,80 @@ def test_current_release_heading_must_have_a_semantic_version(tmp_path: Path, he
     )
 
     with pytest.raises(ValueError, match="Current release heading must use"):
+        validate_release_version_state(tmp_path)
+
+
+def test_current_release_heading_rejects_unknown_bracketed_name(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n## [Next]\n\n- Hidden pending change.\n\n"
+            "## [0.4.0] - 2026-05-03 - Released changes\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Current release heading must use"):
+        validate_release_version_state(tmp_path)
+
+
+def test_current_release_heading_rejects_unknown_name_after_active_release(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [Next]\n\n- Hidden pending change.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="Current release heading must use"):
+        validate_release_version_state(tmp_path)
+
+
+def test_current_heading_validation_stops_after_latest_shipped_release(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n\n"
+            "## [0.2.0]\n\n- Legacy history without a release title.\n"
+        ),
+    )
+
+    assert validate_release_version_state(tmp_path).latest_shipped_version == "0.3.3"
+
+
+@pytest.mark.parametrize("active_version", ["0.3.2", "0.3.3"])
+def test_active_release_version_must_exceed_latest_shipped(
+    tmp_path: Path, active_version: str
+) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version=active_version,
+        module_version=active_version,
+        documented_release=active_version,
+        changelog_text=(
+            "# Changelog\n\n"
+            f"## [{active_version}] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n"
+        ),
+    )
+
+    with pytest.raises(ValueError, match="must be newer than the latest shipped"):
         validate_release_version_state(tmp_path)
 
 

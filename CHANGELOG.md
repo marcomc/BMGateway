@@ -30,6 +30,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Release preflight rejects duplicate generic `Unreleased` sections instead of
   overlooking later pending entries.
+- Release preflight now rejects unknown, competing, duplicate, and downgraded
+  current release headings before they can hide pending work.
 - Future-dated offline notifications are normalized to the trusted retention
   time before bounded outbox retention, so corrected-clock events are retained.
 - Watchdog events raised before NTP synchronization retain their durable

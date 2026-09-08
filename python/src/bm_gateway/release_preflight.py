@@ -22,7 +22,6 @@ _VERSIONED_CHANGELOG_HEADING_PATTERN = re.compile(
     re.M,
 )
 _RELEASE_HEADING_CANDIDATE_PATTERN = re.compile(r"^## \[([^]]+)\](.*)$", re.M)
-_VERSION_LIKE_FIELD_PATTERN = re.compile(r"^(?:v|V)?\d")
 _UNRELEASED_SECTION_PATTERN = re.compile(
     r"^## \[Unreleased\]\s*$.*?(?=^## \[|\Z)",
     re.M | re.S,
@@ -76,18 +75,15 @@ def validate_current_release_heading(text: str) -> None:
         version, _suffix = heading.groups()
         if version == "Unreleased":
             continue
-        if not _VERSION_LIKE_FIELD_PATTERN.match(version):
+        if _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is not None:
             continue
-        if (
-            _ACTIVE_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None
-            and _SHIPPED_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is None
-        ):
-            raise ValueError(
-                "Current release heading must use: "
-                "## [X.Y.Z] - Unreleased - Title or "
-                "## [X.Y.Z] - YYYY-MM-DD - Title"
-            )
-        return
+        if _SHIPPED_RELEASE_HEADING_PATTERN.fullmatch(heading.group(0)) is not None:
+            return
+        raise ValueError(
+            "Current release heading must use: "
+            "## [Unreleased], ## [X.Y.Z] - Unreleased - Title, or "
+            "## [X.Y.Z] - YYYY-MM-DD - Title"
+        )
 
 
 def latest_shipped_version_from_changelog(text: str) -> str:
@@ -119,6 +115,10 @@ def unreleased_has_content_from_changelog(text: str) -> bool:
     return any(line.strip() for line in body)
 
 
+def version_key(version: str) -> tuple[int, ...]:
+    return tuple(int(component) for component in version.split("."))
+
+
 def documented_release_version_from_readme(text: str) -> str | None:
     match = _README_RELEASE_PATTERN.search(text)
     if match is None:
@@ -147,10 +147,16 @@ def collect_release_version_state(root: Path) -> ReleaseVersionState:
     active_release_version = active_release_version_from_changelog(changelog_text)
     latest_shipped_version = latest_shipped_version_from_changelog(changelog_text)
     unreleased_has_content = unreleased_has_content_from_changelog(changelog_text)
-    if active_release_version is not None and unreleased_has_content:
+    generic_unreleased_present = _UNRELEASED_SECTION_PATTERN.search(changelog_text) is not None
+    if active_release_version is not None and generic_unreleased_present:
         raise ValueError(
-            "CHANGELOG.md cannot contain both an active release section and "
-            "nonempty generic [Unreleased] content"
+            "CHANGELOG.md cannot contain both an active release section and generic [Unreleased]"
+        )
+    if active_release_version is not None and version_key(active_release_version) <= version_key(
+        latest_shipped_version
+    ):
+        raise ValueError(
+            "Active changelog release version must be newer than the latest shipped release"
         )
     if active_release_version is not None:
         expected_working_version = active_release_version
