@@ -4,6 +4,7 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from bm_gateway.config import (
     is_valid_notification_recipient,
     load_config,
@@ -157,6 +158,28 @@ def test_shipped_config_examples_share_notification_defaults() -> None:
     gateway = load_config(Path("python/config/gateway.toml.example"))
 
     assert gateway.notifications == standard.notifications
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("enabled", '"false"', "notifications.enabled must be a boolean"),
+        (
+            "offline_retention_days",
+            '"7"',
+            "notifications.offline_retention_days must be an integer",
+        ),
+        ("offline_max_events", "true", "notifications.offline_max_events must be an integer"),
+    ],
+)
+def test_load_config_rejects_non_native_notification_types(
+    tmp_path: Path, key: str, value: str, message: str
+) -> None:
+    path = tmp_path / "config.toml"
+    path.write_text(f"[notifications]\n{key} = {value}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match=message):
+        load_config(path)
 
 
 def test_load_config_accepts_legacy_per_driver_live_hard_timeout_keys(tmp_path: Path) -> None:

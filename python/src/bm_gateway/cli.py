@@ -51,9 +51,7 @@ from .runtime import (
     sleep_interval,
     state_file_path,
 )
-from .self_healing import (
-    new_self_healing_state,
-)
+from .self_healing import USBOTGWatchdogStateError, new_self_healing_state
 from .self_healing_runtime import run_self_healing
 from .state_store import (
     fetch_archive_history,
@@ -501,7 +499,7 @@ def _handle_update_report(
             reboot_required=reboot_status,
             failure_stage=failure_stage,
         )
-    except (OSError, ValueError, NotificationOutboxError) as error:
+    except (OSError, ValueError, NotificationOutboxError, USBOTGWatchdogStateError) as error:
         print(str(error), file=sys.stderr)
         return 1
     return 0

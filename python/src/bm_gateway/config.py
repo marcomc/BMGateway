@@ -50,6 +50,22 @@ def is_valid_notification_recipient(value: str) -> bool:
     )
 
 
+def _toml_bool(value: object, *, key: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
+    return value
+
+
+def _toml_int(value: object, *, key: str, default: int) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{key} must be an integer")
+    return value
+
+
 @dataclass(frozen=True)
 class GatewayConfig:
     name: str = "BMGateway"
@@ -588,12 +604,22 @@ def load_config(path: Path) -> AppConfig:
         usb_otg_reboot_attempts=int(self_healing_table.get("usb_otg_reboot_attempts", 1)),
     )
     notifications = NotificationsConfig(
-        enabled=bool(notifications_table.get("enabled", False)),
+        enabled=_toml_bool(
+            notifications_table.get("enabled"), key="notifications.enabled", default=False
+        ),
         recipient=str(notifications_table.get("recipient", "")),
         locale=str(notifications_table.get("locale", "en")),
         offline_delivery=str(notifications_table.get("offline_delivery", "summary")),
-        offline_retention_days=int(notifications_table.get("offline_retention_days", 7)),
-        offline_max_events=int(notifications_table.get("offline_max_events", 100)),
+        offline_retention_days=_toml_int(
+            notifications_table.get("offline_retention_days"),
+            key="notifications.offline_retention_days",
+            default=7,
+        ),
+        offline_max_events=_toml_int(
+            notifications_table.get("offline_max_events"),
+            key="notifications.offline_max_events",
+            default=100,
+        ),
     )
     source_path = path.resolve()
     device_registry_path = _resolve_registry_path(source_path, gateway.device_registry)

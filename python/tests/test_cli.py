@@ -10,7 +10,7 @@ import pytest
 from bm_gateway import __version__, cli
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.models import DeviceReading, GatewaySnapshot
-from bm_gateway.self_healing import SelfHealingEvent
+from bm_gateway.self_healing import SelfHealingEvent, USBOTGWatchdogStateError
 from bm_gateway.update_notifications import UpdateNotificationResult
 
 
@@ -347,6 +347,35 @@ def test_update_report_records_a_completed_bootstrap_update(
     assert captured["current_revision"] == "b" * 40
     assert captured["reboot_required"] is True
     assert captured["failure_stage"] is None
+
+
+def test_update_report_returns_operational_failure_for_watchdog_lock_error(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+
+    def record(**_kwargs: object) -> UpdateNotificationResult:
+        raise USBOTGWatchdogStateError("Cannot lock USB OTG watchdog state")
+
+    monkeypatch.setattr("bm_gateway.update_notifications.record_update_notification", record)
+
+    result = cli.main(
+        [
+            "--config",
+            str(config_path),
+            "update",
+            "report",
+            "--previous-revision",
+            "a" * 40,
+            "--current-revision",
+            "b" * 40,
+            "--reboot-required",
+            "no",
+        ]
+    )
+
+    assert result == 1
+    assert "Cannot lock USB OTG watchdog state" in capsys.readouterr().err
 
 
 def test_removed_web_command_falls_back_to_main_help(

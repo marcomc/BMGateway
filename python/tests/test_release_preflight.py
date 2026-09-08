@@ -137,8 +137,8 @@ def test_validate_release_version_state_accepts_current_repository() -> None:
     assert state.package_version == "0.4.0"
     assert state.module_version == "0.4.0"
     assert state.documented_release_version == "0.4.0"
-    assert state.active_release_version == "0.4.0"
-    assert state.latest_shipped_version == "0.3.3"
+    assert state.active_release_version is None
+    assert state.latest_shipped_version == "0.4.0"
     assert state.expected_working_version == "0.4.0"
     assert state.unreleased_has_content is False
 
@@ -489,13 +489,13 @@ def test_current_shipped_release_heading_must_be_dated_and_titled(
         validate_release_version_state(tmp_path)
 
 
-def test_cli_reports_active_release_state(capsys: pytest.CaptureFixture[str]) -> None:
+def test_cli_reports_current_shipped_release_state(capsys: pytest.CaptureFixture[str]) -> None:
     root = Path(__file__).resolve().parents[2]
 
     assert main(["--root", str(root)]) == 0
 
     output = capsys.readouterr().out
     assert "working=0.4.0" in output
-    assert "latest_shipped=0.3.3" in output
-    assert "active_release=0.4.0" in output
+    assert "latest_shipped=0.4.0" in output
+    assert "active_release=none" in output
     assert "generic_unreleased_has_content=false" in output

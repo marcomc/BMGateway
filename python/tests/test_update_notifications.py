@@ -11,6 +11,13 @@ import pytest
 from bm_gateway import notifications, update_notifications
 from bm_gateway.config import AppConfig, NotificationsConfig, load_config
 from bm_gateway.localization import supported_locale_codes, translation_for
+from bm_gateway.self_healing import (
+    new_self_healing_state,
+    persist_usb_otg_watchdog_state,
+    persist_wifi_watchdog_state,
+    usb_otg_watchdog_state_path,
+    wifi_watchdog_state_path,
+)
 
 
 def _config() -> AppConfig:
@@ -138,6 +145,93 @@ def test_failed_update_is_queued_without_a_reboot_claim(
     assert event.update_to_revision is None
     assert event.update_reboot_required is None
     assert event.occurred_at is None
+
+
+def test_update_delivery_waits_for_pending_usb_watchdog_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = new_self_healing_state()
+    state.usb_otg_escalation_notification_pending = True
+    state.usb_otg_escalation_id = "pending-usb-alert"
+    state.usb_otg_escalation_reason = "USB watchdog handoff"
+    persist_usb_otg_watchdog_state(usb_otg_watchdog_state_path(tmp_path), state)
+    monkeypatch.setattr(update_notifications, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    monkeypatch.setattr(
+        update_notifications,
+        "deliver_notification_outbox",
+        lambda **kwargs: pytest.fail(f"delivery called with {kwargs}"),
+    )
+
+    result = update_notifications.record_update_notification(
+        config=_config(),
+        state_dir=tmp_path,
+        previous_revision="a" * 40,
+        current_revision="b" * 40,
+        reboot_required=False,
+    )
+
+    assert result.queued is True
+    assert result.delivered is False
+    assert result.detail == "Notification delivery is waiting for watchdog handoff"
+    queued = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in queued] == ["software_update_completed"]
+
+
+def test_update_delivery_waits_for_pending_wifi_watchdog_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = new_self_healing_state()
+    state.wifi_recovery_pending = True
+    state.wifi_recovery_interface = "wlan0"
+    state.wifi_recovery_handoff_id = "pending-wifi-alert"
+    state.wifi_recovery_phase = "pending"
+    persist_wifi_watchdog_state(wifi_watchdog_state_path(tmp_path), state, preserve_pending=False)
+    monkeypatch.setattr(update_notifications, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    monkeypatch.setattr(
+        update_notifications,
+        "deliver_notification_outbox",
+        lambda **kwargs: pytest.fail(f"delivery called with {kwargs}"),
+    )
+
+    result = update_notifications.record_update_notification(
+        config=_config(),
+        state_dir=tmp_path,
+        previous_revision="a" * 40,
+        current_revision="b" * 40,
+        reboot_required=False,
+    )
+
+    assert result.queued is True
+    assert result.delivered is False
+    assert result.detail == "Notification delivery is waiting for watchdog handoff"
+
+
+def test_update_delivery_waits_for_an_unreadable_wifi_watchdog_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = wifi_watchdog_state_path(tmp_path)
+    path.parent.mkdir(parents=True)
+    path.write_text("not-json", encoding="utf-8")
+    monkeypatch.setattr(update_notifications, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    monkeypatch.setattr(
+        update_notifications,
+        "deliver_notification_outbox",
+        lambda **kwargs: pytest.fail(f"delivery called with {kwargs}"),
+    )
+
+    result = update_notifications.record_update_notification(
+        config=_config(),
+        state_dir=tmp_path,
+        previous_revision="a" * 40,
+        current_revision="b" * 40,
+        reboot_required=False,
+    )
+
+    assert result.queued is True
+    assert result.delivered is False
+    assert result.detail == "Notification delivery is waiting for watchdog handoff"
 
 
 @pytest.mark.parametrize(

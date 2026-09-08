@@ -205,6 +205,22 @@ def bool_to_toml(value: bool) -> str:
     return "true" if value else "false"
 
 
+def toml_bool(value: object, *, key: str, default: bool) -> bool:
+    if value is None:
+        return default
+    if not isinstance(value, bool):
+        raise ValueError(f"{key} must be a boolean")
+    return value
+
+
+def toml_int(value: object, *, key: str, default: int) -> int:
+    if value is None:
+        return default
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ValueError(f"{key} must be an integer")
+    return value
+
+
 def string_to_toml(value: str) -> str:
     escaped = (
         str(value)
@@ -371,12 +387,12 @@ payload = "\n".join(
         ),
         "",
         "[notifications]",
-        f'enabled = {bool_to_toml(bool(notifications.get("enabled", False)))}',
+        f'enabled = {bool_to_toml(toml_bool(notifications.get("enabled"), key="notifications.enabled", default=False))}',
         f'recipient = {string_to_toml(notifications.get("recipient", ""))}',
         f'locale = {string_to_toml(notifications.get("locale", "en"))}',
         f'offline_delivery = {string_to_toml(notifications.get("offline_delivery", "summary"))}',
-        f'offline_retention_days = {int(notifications.get("offline_retention_days", 7))}',
-        f'offline_max_events = {int(notifications.get("offline_max_events", 100))}',
+        f'offline_retention_days = {toml_int(notifications.get("offline_retention_days"), key="notifications.offline_retention_days", default=7)}',
+        f'offline_max_events = {toml_int(notifications.get("offline_max_events"), key="notifications.offline_max_events", default=100)}',
         "",
         "[retention]",
         f'raw_retention_days = {int(retention.get("raw_retention_days", 730))}',

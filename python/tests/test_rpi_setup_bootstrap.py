@@ -5,6 +5,8 @@ import sys
 import tomllib
 from pathlib import Path
 
+import pytest
+
 
 def test_bootstrap_installs_reproducible_raspberry_pi_dependencies() -> None:
     script = Path("scripts/bootstrap-install.sh").read_text(encoding="utf-8")
@@ -118,6 +120,49 @@ def test_service_installer_defaults_absent_bm200_archive_page_cap_to_85(tmp_path
     config = _rewrite_service_config(tmp_path, "[archive_sync]\nenabled = true\n")
 
     assert config["archive_sync"]["bm200_max_pages_per_sync"] == 85
+
+
+@pytest.mark.parametrize(
+    ("key", "value", "message"),
+    [
+        ("enabled", '"false"', "notifications.enabled must be a boolean"),
+        (
+            "offline_retention_days",
+            '"7"',
+            "notifications.offline_retention_days must be an integer",
+        ),
+        (
+            "offline_max_events",
+            "true",
+            "notifications.offline_max_events must be an integer",
+        ),
+    ],
+)
+def test_service_installer_rejects_non_native_notification_values(
+    tmp_path: Path, key: str, value: str, message: str
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f"[notifications]\n{key} = {value}\n", encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            _service_installer_config_rewrite_program(),
+            str(config_path),
+            str(tmp_path / "state"),
+            "0.0.0.0",
+            "80",
+            "1",
+            "1",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode != 0
+    assert message in result.stderr
 
 
 def test_imager_first_run_delegates_full_dependency_install_to_bootstrap() -> None:
