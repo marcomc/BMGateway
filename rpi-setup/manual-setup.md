@@ -155,6 +155,15 @@ outage producing a burst of individual emails. Select a fixed notification
 language for unattended email; this setting intentionally does not inherit the
 browser-dependent `auto` web language.
 
+When `bootstrap-install.sh` updates an existing checkout to a different Git
+revision, it records a durable system-mail outcome after the package and service
+refresh finish. The notification names the old and new revisions and always
+states whether `/var/run/reboot-required` requires an operator reboot. Failed
+repository, package-install, and service-refresh stages are queued as failed
+outcomes when the notification CLI is available. Delivery uses the same bounded
+outbox as lifecycle and watchdog events, so a mail outage does not invalidate a
+successful update.
+
 Use **Send test email** only after saving an enabled notification recipient and
 verifying the system mail configuration. The recipient is intentionally stored
 in BMGateway configuration, while SMTP credentials remain outside the checkout.

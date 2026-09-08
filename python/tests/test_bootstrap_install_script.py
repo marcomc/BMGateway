@@ -21,7 +21,12 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
 
     _write_executable(
         fake_bin / "sudo",
-        "#!/bin/sh\n" + logger + 'exec "$@"\n',
+        "#!/bin/sh\n"
+        + logger
+        + 'if [ "$1" = "-u" ]; then\n'
+        + "  shift 2\n"
+        + "fi\n"
+        + 'exec "$@"\n',
     )
     _write_executable(
         fake_bin / "apt-get",
@@ -77,6 +82,16 @@ def _make_fake_environment(tmp_path: Path) -> tuple[Path, Path]:
     _write_executable(
         fake_bin / "hciconfig",
         "#!/bin/sh\n" + logger + "exit 0\n",
+    )
+    _write_executable(
+        fake_bin / "getent",
+        "#!/bin/sh\n"
+        + logger
+        + 'if [ "$1" = "passwd" ]; then\n'
+        + '  printf "gateway:x:1000:1000::%s:/bin/sh\\n" "$HOME"\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + "exit 1\n",
     )
 
     return fake_bin, command_log
@@ -243,6 +258,133 @@ def test_bootstrap_install_script_updates_existing_checkout(tmp_path: Path) -> N
     assert "git clone https://example.invalid/BMGateway.git" not in commands
     assert f"git -C {repo_dir} fetch --all --tags --prune" in commands
     assert f"git -C {repo_dir} pull --ff-only" in commands
+
+
+def test_bootstrap_reports_a_changed_checkout_and_reboot_requirement(tmp_path: Path) -> None:
+    script_path = Path("scripts/bootstrap-install.sh").resolve()
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+    repo_dir = tmp_path / "BMGateway"
+    (repo_dir / ".git").mkdir(parents=True)
+    reboot_marker = tmp_path / "reboot-required"
+    reboot_marker.touch()
+    logger = f'printf "%s\\n" "$0 $*" >> "{command_log}"\n'
+    _write_executable(
+        fake_bin / "git",
+        "#!/bin/sh\n"
+        + logger
+        + 'if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then\n'
+        + '  if [ -f "$2/.updated" ]; then\n'
+        + '    printf "%040d\\n" 2\n'
+        + "  else\n"
+        + '    printf "%040d\\n" 1\n'
+        + "  fi\n"
+        + "  exit 0\n"
+        + "fi\n"
+        + 'if [ "$1" = "-C" ] && [ "$3" = "pull" ]; then\n'
+        + '  touch "$2/.updated"\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + 'if [ "$1" = "-C" ]; then\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + "exit 1\n",
+    )
+    _write_executable(fake_bin / "uv", "#!/bin/sh\n" + logger + "exit 0\n")
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+    env["BM_GATEWAY_REBOOT_REQUIRED_PATH"] = str(reboot_marker)
+
+    result = subprocess.run(
+        [
+            str(script_path),
+            "--repo-url",
+            "https://example.invalid/BMGateway.git",
+            "--repo-dir",
+            str(repo_dir),
+            "--skip-apt",
+            "--skip-uv",
+            "--skip-services",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "BMGateway update completed:" in result.stdout
+    assert "reboot required: yes" in result.stdout
+    commands = command_log.read_text(encoding="utf-8")
+    assert f"uv run --project {repo_dir} bm-gateway" in commands
+    assert "update report" in commands
+    assert "--previous-revision 0000000000000000000000000000000000000001" in commands
+    assert "--current-revision 0000000000000000000000000000000000000002" in commands
+    assert "--reboot-required yes" in commands
+
+
+def test_bootstrap_records_a_failed_changed_update(tmp_path: Path) -> None:
+    script_path = Path("scripts/bootstrap-install.sh").resolve()
+    fake_bin, command_log = _make_fake_environment(tmp_path)
+    repo_dir = tmp_path / "BMGateway"
+    (repo_dir / ".git").mkdir(parents=True)
+    logger = f'printf "%s\\n" "$0 $*" >> "{command_log}"\n'
+    _write_executable(
+        fake_bin / "git",
+        "#!/bin/sh\n"
+        + logger
+        + 'if [ "$1" = "-C" ] && [ "$3" = "rev-parse" ]; then\n'
+        + '  if [ -f "$2/.updated" ]; then\n'
+        + '    printf "%040d\\n" 2\n'
+        + "  else\n"
+        + '    printf "%040d\\n" 1\n'
+        + "  fi\n"
+        + "  exit 0\n"
+        + "fi\n"
+        + 'if [ "$1" = "-C" ] && [ "$3" = "pull" ]; then\n'
+        + '  touch "$2/.updated"\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + 'if [ "$1" = "-C" ]; then\n'
+        + "  exit 0\n"
+        + "fi\n"
+        + "exit 1\n",
+    )
+    _write_executable(fake_bin / "make", "#!/bin/sh\n" + logger + "exit 1\n")
+    _write_executable(fake_bin / "uv", "#!/bin/sh\n" + logger + "exit 0\n")
+
+    env = os.environ.copy()
+    env["HOME"] = str(tmp_path / "home")
+    env["PATH"] = f"{fake_bin}:/usr/bin:/bin"
+
+    result = subprocess.run(
+        [
+            str(script_path),
+            "--repo-url",
+            "https://example.invalid/BMGateway.git",
+            "--repo-dir",
+            str(repo_dir),
+            "--skip-apt",
+            "--skip-uv",
+            "--skip-services",
+        ],
+        cwd=tmp_path,
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=20,
+    )
+
+    assert result.returncode == 1
+    commands = command_log.read_text(encoding="utf-8")
+    assert "update report" in commands
+    assert "--failure-stage install" in commands
+    assert "--current-revision" not in commands
+    assert "--reboot-required" not in commands
 
 
 def test_bootstrap_install_script_can_set_hostname(tmp_path: Path) -> None:

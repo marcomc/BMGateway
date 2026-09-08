@@ -11,6 +11,7 @@ from bm_gateway import __version__, cli
 from bm_gateway.bluetooth_recovery import BluetoothRecoveryRequiredError
 from bm_gateway.models import DeviceReading, GatewaySnapshot
 from bm_gateway.self_healing import SelfHealingEvent
+from bm_gateway.update_notifications import UpdateNotificationResult
 
 
 def _write_example_files(tmp_path: Path) -> tuple[Path, Path]:
@@ -309,6 +310,43 @@ def test_bm_gateway_main_help_advertises_every_registered_command(
     assert "lifecycle" in advertised_commands
     assert "bm-gateway-web" not in captured.out
     assert "web" not in advertised_commands
+
+
+def test_update_report_records_a_completed_bootstrap_update(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path, _devices_path = _write_example_files(tmp_path)
+    captured: dict[str, object] = {}
+
+    def record(**kwargs: object) -> UpdateNotificationResult:
+        captured.update(kwargs)
+        return UpdateNotificationResult(queued=True, delivered=False, detail="offline")
+
+    monkeypatch.setattr("bm_gateway.update_notifications.record_update_notification", record)
+
+    assert (
+        cli.main(
+            [
+                "--config",
+                str(config_path),
+                "update",
+                "report",
+                "--previous-revision",
+                "a" * 40,
+                "--current-revision",
+                "b" * 40,
+                "--reboot-required",
+                "yes",
+                "--state-dir",
+                str(tmp_path / "state"),
+            ]
+        )
+        == 0
+    )
+    assert captured["previous_revision"] == "a" * 40
+    assert captured["current_revision"] == "b" * 40
+    assert captured["reboot_required"] is True
+    assert captured["failure_stage"] is None
 
 
 def test_removed_web_command_falls_back_to_main_help(

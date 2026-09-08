@@ -90,10 +90,15 @@ The shared core is the Python package under `python/src/bm_gateway/`. It owns:
   `protocol_probe.py`, `protocol_analysis.py`, `bm300_multipage.py`
 - self-healing and gateway alerts: `self_healing.py`, `system_alerts.py`,
   `bluetooth_recovery.py`
+- durable bootstrap-update outcomes: `update_notifications.py`
 
 The runtime path is `bm-gateway run`. It can run once, run forever under
 `bm-gateway.service`, publish Home Assistant discovery, persist snapshots, and
 write SQLite history.
+
+`bm-gateway update report` is the internal bootstrap handoff for a changed Git
+revision. It queues a localized, durable completion or failure notification;
+completion records whether the host requires a reboot.
 
 This diagram shows the runtime inputs and the artifacts it writes each cycle.
 
