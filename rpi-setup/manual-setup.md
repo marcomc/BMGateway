@@ -618,7 +618,9 @@ service restarts do not produce shutdown mail. Installing this feature on a
 running host reports that the current boot was observed, not a new reboot.
 Boot recording waits for synchronized wall-clock time without delaying runtime
 or web activation. The runtime keeps watchdog recovery active while lifecycle
-retention and shared-mail delivery defer until the clock is synchronized.
+retention and shared-mail delivery defer until the clock is synchronized;
+pre-sync watchdog notifications retain durable intent without an untrusted
+timestamp until the same trusted outbox pass.
 An orderly shutdown observed before synchronization is retained without an
 untrusted timestamp and receives its notification time after synchronization.
 

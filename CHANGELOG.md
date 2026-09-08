@@ -32,6 +32,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   overlooking later pending entries.
 - Future-dated offline notifications are normalized to the trusted retention
   time before bounded outbox retention, so corrected-clock events are retained.
+- Watchdog events raised before NTP synchronization retain their durable
+  intent without a stale timestamp; only a trusted pass normalizes the shared
+  outbox before retention, ordering, and delivery.
 - The macOS Imager first-run path now restarts its optional boot hook after
   applying a supplied notification configuration, so the first boot is recorded.
 - Shutdown intents observed before NTP synchronization retain no stale wall

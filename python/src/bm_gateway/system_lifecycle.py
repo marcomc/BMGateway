@@ -148,6 +148,7 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> b
             idempotency_key=f"lifecycle:{event['boot_id']}:{event['action']}",
             now=occurred_at,
             retention_now=transfer_time,
+            time_trusted=True,
         )
     data["pending"] = []
     _save(path, data)
@@ -210,7 +211,9 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
         if state.wifi_recovery_pending:
             return
         delivered, detail = deliver_notification_outbox(
-            path=notification_outbox_path(state_dir), config=config.notifications
+            path=notification_outbox_path(state_dir),
+            config=config.notifications,
+            time_trusted=True,
         )
         if not delivered:
             # Durable intent/outbox is retained; keep ExecStop armed while the

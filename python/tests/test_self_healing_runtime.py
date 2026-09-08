@@ -8,6 +8,7 @@ import subprocess
 import time
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from email import message_from_string
 from functools import partial
 from pathlib import Path
@@ -263,6 +264,111 @@ def test_runtime_keeps_periodic_reboot_authorized_while_lifecycle_mail_defers(
     assert state.periodic_reboot_scheduled_boot_id == "boot-one"
 
 
+def test_runtime_queues_watchdog_intents_without_untrusted_timestamps(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    base_config = _config()
+    config = replace(
+        base_config,
+        self_healing=replace(base_config.self_healing, periodic_reboot_enabled=True),
+        notifications=replace(base_config.notifications, offline_max_events=5),
+    )
+    outbox_path = notifications.notification_outbox_path(tmp_path)
+    future = datetime.now(timezone.utc) + timedelta(days=365)
+    notifications.persist_notification_outbox(
+        outbox_path,
+        [
+            notifications.NotificationEvent(
+                action="future", detail="restored clock", occurred_at=future
+            )
+        ],
+    )
+    state = new_self_healing_state()
+    scheduled: list[bool] = []
+
+    def evaluate(
+        *,
+        state: self_healing.SelfHealingState,
+        usb_otg_state_checkpoint: Callable[[], None],
+        **_: object,
+    ) -> list[SelfHealingEvent]:
+        state.periodic_reboot_requested = True
+        usb_otg_state_checkpoint()
+        return [
+            SelfHealingEvent(
+                action="wifi_reconnect_attempted",
+                status="completed",
+                details={"wifi_interface": "wlan0", "outage_seconds": 30},
+            ),
+            SelfHealingEvent(
+                action="wifi_reboot_requested",
+                status="completed",
+                details={"wifi_interface": "wlan0", "outage_seconds": 30},
+            ),
+            SelfHealingEvent(
+                action="wifi_connectivity_restored",
+                status="completed",
+                details={"wifi_interface": "wlan0", "outage_seconds": 30},
+            ),
+            SelfHealingEvent(action="usb_otg_recovery_exhausted", status="failed", details={}),
+            SelfHealingEvent(action="periodic_reboot_requested", status="completed", details={}),
+        ]
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+    monkeypatch.setattr(runtime, "default_reboot_boot_id", lambda: "boot-one")
+    monkeypatch.setattr(runtime, "default_schedule_reboot", lambda: scheduled.append(True))
+    delivered = _wifi_mail_delivery(monkeypatch)
+
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+    pending = notifications.load_notification_outbox(outbox_path)
+    assert [(event.action, event.occurred_at) for event in pending] == [
+        ("future", future),
+        ("wifi_reconnect_attempted", None),
+        ("wifi_reboot_requested", None),
+        ("wifi_connectivity_restored", None),
+        ("usb_otg_recovery_exhausted", None),
+    ]
+    assert scheduled == [True]
+    assert not delivered
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_: [])
+    runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+    assert len(delivered) == 1
+    assert not outbox_path.exists()
+
+
+def test_runtime_transfers_observed_wifi_handoff_before_ntp_without_a_timestamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = _wifi_config()
+    wifi_path = _legacy_wifi_state(tmp_path, phase="reconnect_pending", identity="observed")
+    delivered = _wifi_mail_delivery(monkeypatch)
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", lambda **_: [])
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: False)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    pending = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [(event.action, event.occurred_at) for event in pending] == [
+        ("wifi_reconnect_attempted", None),
+        ("wifi_connectivity_restored", None),
+    ]
+    assert json.loads(wifi_path.read_text())["recovery_pending"] is False
+    assert not delivered
+
+    monkeypatch.setattr(lifecycle, "lifecycle_wall_clock_is_synchronized", lambda: True)
+    runtime.run_self_healing(config=config, state=new_self_healing_state(), state_dir=tmp_path)
+
+    assert len(delivered) == 1
+    assert not notifications.notification_outbox_path(tmp_path).exists()
+
+
 @pytest.mark.parametrize("identity", [None, "", "existing-incident"])
 @pytest.mark.parametrize(
     "scenario", ["reconnect_failed", "reconnect_success", "reboot", "authorized", "healthy"]
@@ -316,6 +422,7 @@ def test_legacy_wifi_identity_is_durable_before_actions_and_alerts(
         wifi_outcome: str,
         wifi_interface: str,
         wifi_outage_seconds: int,
+        time_trusted: bool = True,
     ) -> bool:
         assert_identity()
         return notifications.queue_notification_event_once(
@@ -327,6 +434,7 @@ def test_legacy_wifi_identity_is_durable_before_actions_and_alerts(
             wifi_outcome=wifi_outcome,
             wifi_interface=wifi_interface,
             wifi_outage_seconds=wifi_outage_seconds,
+            time_trusted=time_trusted,
         )
 
     monkeypatch.setattr(runtime, "queue_notification_event_once", queue)
@@ -599,6 +707,7 @@ def test_ended_wifi_outage_transfers_before_new_offline_incident(
         wifi_outcome: str,
         wifi_interface: str,
         wifi_outage_seconds: int,
+        time_trusted: bool = True,
     ) -> bool:
         nonlocal failed
 
@@ -612,6 +721,7 @@ def test_ended_wifi_outage_transfers_before_new_offline_incident(
                 wifi_outcome=wifi_outcome,
                 wifi_interface=wifi_interface,
                 wifi_outage_seconds=wifi_outage_seconds,
+                time_trusted=time_trusted,
             )
 
         if failure == "queue" and action == handoff_action and not failed:

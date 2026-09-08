@@ -114,6 +114,131 @@ def test_queue_clamps_persisted_future_events_before_applying_the_limit(
 
 
 @pytest.mark.parametrize("queue_once", [False, True])
+def test_untrusted_queue_preserves_existing_timestamps_until_a_trusted_pass(
+    tmp_path: Path, queue_once: bool
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, offline_retention_days=1, offline_max_events=3)
+    stale = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    trusted = stale + timedelta(days=2)
+    future = trusted + timedelta(days=365)
+    persist_notification_outbox(
+        path, [NotificationEvent(action="future", detail="restored clock", occurred_at=future)]
+    )
+    enqueue = queue_notification_event_once if queue_once else queue_notification_event
+
+    enqueue(
+        path=path,
+        config=config,
+        action="pending",
+        detail="pre-NTP watchdog event",
+        idempotency_key="pending",
+        now=stale,
+        retention_now=stale,
+        time_trusted=False,
+    )
+
+    pending = load_notification_outbox(path)
+    assert [(event.action, event.occurred_at) for event in pending] == [
+        ("future", future),
+        ("pending", None),
+    ]
+    assert json.loads(path.read_text())[1]["occurred_at"] is None
+
+    enqueue(
+        path=path,
+        config=config,
+        action="trusted",
+        detail="after NTP synchronization",
+        idempotency_key="trusted",
+        now=trusted,
+        retention_now=trusted,
+        time_trusted=True,
+    )
+
+    normalized = load_notification_outbox(path)
+    assert [event.action for event in normalized] == ["future", "pending", "trusted"]
+    assert [event.occurred_at for event in normalized] == [trusted, trusted, trusted]
+
+
+@pytest.mark.parametrize("queue_once", [False, True])
+def test_untrusted_queue_applies_only_fifo_bounding_before_trusted_normalization(
+    tmp_path: Path, queue_once: bool
+) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, offline_retention_days=1, offline_max_events=2)
+    stale = datetime(2026, 9, 7, tzinfo=timezone.utc)
+    trusted = stale + timedelta(days=2)
+    second = trusted + timedelta(days=2)
+    persist_notification_outbox(
+        path,
+        [
+            NotificationEvent(
+                action="first", detail="old", occurred_at=trusted + timedelta(days=1)
+            ),
+            NotificationEvent(action="second", detail="new", occurred_at=second),
+        ],
+    )
+    enqueue = queue_notification_event_once if queue_once else queue_notification_event
+
+    enqueue(
+        path=path,
+        config=config,
+        action="pending",
+        detail="pre-NTP watchdog event",
+        idempotency_key="pending",
+        now=stale,
+        retention_now=stale,
+        time_trusted=False,
+    )
+
+    pending = load_notification_outbox(path)
+    assert [(event.action, event.occurred_at) for event in pending] == [
+        ("second", second),
+        ("pending", None),
+    ]
+
+    enqueue(
+        path=path,
+        config=config,
+        action="trusted",
+        detail="after NTP synchronization",
+        idempotency_key="trusted",
+        now=trusted,
+        retention_now=trusted,
+        time_trusted=True,
+    )
+
+    normalized = load_notification_outbox(path)
+    assert [event.action for event in normalized] == ["pending", "trusted"]
+    assert [event.occurred_at for event in normalized] == [trusted, trusted]
+
+
+def test_untrusted_delivery_does_not_run_or_mutate_pending_events(tmp_path: Path) -> None:
+    path = tmp_path / "notification_outbox.json"
+    config = NotificationsConfig(enabled=True, recipient="operator@example.test")
+    queue_notification_event(
+        path=path,
+        config=config,
+        action="pending",
+        detail="pre-NTP watchdog event",
+        time_trusted=False,
+    )
+    original = path.read_bytes()
+
+    def fail_if_called(_: str) -> subprocess.CompletedProcess[str]:
+        pytest.fail("delivery must wait for a trusted clock")
+
+    delivered, detail = deliver_notification_outbox(
+        path=path, config=config, runner=fail_if_called, time_trusted=False
+    )
+
+    assert not delivered
+    assert detail == "Notification delivery is waiting for clock synchronization"
+    assert path.read_bytes() == original
+
+
+@pytest.mark.parametrize("queue_once", [False, True])
 @pytest.mark.parametrize(
     "offline_max_events,expected",
     [(1, ["newest"]), (2, ["middle", "newest"])],
@@ -996,6 +1121,7 @@ def test_legacy_usb_delivery_relocalizes_all_shipped_templates(
             assert path.read_bytes() == unchanged  # Reading compatibility data is not a migration.
             assert event.usb_otg_reason == reason
             assert event.usb_otg_reboot_attempts == 2
+            assert event.occurred_at is not None
             assert event.occurred_at.isoformat() == occurred_at
             assert event.idempotency_key == "original-episode"
             config = NotificationsConfig(
@@ -1299,6 +1425,7 @@ def test_recognized_legacy_wifi_templates_relocalize_on_retry(
     assert event.wifi_outcome == outcome
     assert event.wifi_outage_seconds == 123
     assert event.idempotency_key == "legacy-incident"
+    assert event.occurred_at is not None
     assert event.occurred_at.isoformat() == occurred_at
     bodies: list[str] = []
 
