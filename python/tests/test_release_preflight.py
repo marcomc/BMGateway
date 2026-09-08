@@ -345,6 +345,68 @@ def test_legacy_active_marker_below_latest_shipped_release_is_ignored(
     assert validate_release_version_state(tmp_path).active_release_version == "0.4.0"
 
 
+def test_legacy_generic_unreleased_section_below_latest_shipped_is_ignored(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n\n"
+            "## [Unreleased]\n\n- Historical marker.\n"
+        ),
+    )
+
+    assert validate_release_version_state(tmp_path).active_release_version == "0.4.0"
+
+
+@pytest.mark.parametrize(
+    "legacy_history",
+    [
+        "## [Unreleased] - Historical marker\n\n- Legacy history.\n",
+        "## [Unreleased]\n\n- Historical marker.\n\n## [Unreleased]\n\n- Older marker.\n",
+    ],
+)
+def test_legacy_malformed_or_duplicate_generic_headings_are_ignored(
+    tmp_path: Path, legacy_history: str
+) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.4.0",
+        module_version="0.4.0",
+        documented_release="0.4.0",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [0.4.0] - Unreleased - Candidate release\n\n"
+            "- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n\n"
+            f"{legacy_history}"
+        ),
+    )
+
+    assert validate_release_version_state(tmp_path).active_release_version == "0.4.0"
+
+
+def test_current_generic_unreleased_section_ignores_legacy_duplicate(tmp_path: Path) -> None:
+    _write_release_files(
+        tmp_path,
+        package_version="0.3.4",
+        module_version="0.3.4",
+        documented_release="0.3.3",
+        changelog_text=(
+            "# Changelog\n\n"
+            "## [Unreleased]\n\n- Candidate fix under test.\n\n"
+            "## [0.3.3] - 2026-07-17 - Previous release\n\n- Released changes.\n\n"
+            "## [Unreleased]\n\n- Historical marker.\n"
+        ),
+    )
+
+    assert validate_release_version_state(tmp_path).unreleased_has_content
+
+
 @pytest.mark.parametrize("current_version", ["0.3.2", "0.3.3"])
 def test_current_shipped_release_version_must_exceed_preserved_history(
     tmp_path: Path, current_version: str

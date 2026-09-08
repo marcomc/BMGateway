@@ -109,17 +109,23 @@ def latest_shipped_version_from_changelog(text: str) -> str:
     return version
 
 
-def unreleased_has_content_from_changelog(text: str) -> bool:
+def generic_unreleased_sections_from_changelog(text: str) -> list[re.Match[str]]:
+    current_prefix = _current_release_prefix(text)
     malformed_headings = [
         heading
-        for heading in _GENERIC_UNRELEASED_HEADING_PATTERN.finditer(text)
+        for heading in _GENERIC_UNRELEASED_HEADING_PATTERN.finditer(current_prefix)
         if heading.group(1).strip()
     ]
     if malformed_headings:
         raise ValueError("Generic unreleased headings must use: ## [Unreleased]")
-    sections = list(_UNRELEASED_SECTION_PATTERN.finditer(text))
+    sections = list(_UNRELEASED_SECTION_PATTERN.finditer(current_prefix))
     if len(sections) > 1:
         raise ValueError("CHANGELOG.md contains more than one generic [Unreleased] section")
+    return sections
+
+
+def unreleased_has_content_from_changelog(text: str) -> bool:
+    sections = generic_unreleased_sections_from_changelog(text)
     if not sections:
         return False
     body = sections[0].group(0).splitlines()[1:]
@@ -158,7 +164,7 @@ def collect_release_version_state(root: Path) -> ReleaseVersionState:
     active_release_version = active_release_version_from_changelog(changelog_text)
     latest_shipped_version = latest_shipped_version_from_changelog(changelog_text)
     unreleased_has_content = unreleased_has_content_from_changelog(changelog_text)
-    generic_unreleased_present = _UNRELEASED_SECTION_PATTERN.search(changelog_text) is not None
+    generic_unreleased_present = bool(generic_unreleased_sections_from_changelog(changelog_text))
     if active_release_version is not None and generic_unreleased_present:
         raise ValueError(
             "CHANGELOG.md cannot contain both an active release section and generic [Unreleased]"

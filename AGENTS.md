@@ -174,5 +174,5 @@ work:
 
 Release preflight validates every current bracketed heading through the latest
 shipped release and compares its version with parseable historical versions;
-preserve legacy heading syntax below that boundary unless a separate
-history-migration decision is made.
+preserve all legacy headings, including generic `Unreleased` markers, below
+that boundary unless a separate history-migration decision is made.
