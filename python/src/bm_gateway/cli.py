@@ -234,7 +234,7 @@ def build_parser() -> argparse.ArgumentParser:
         )
 
     lifecycle_parser = subparsers.add_parser("lifecycle")
-    lifecycle_parser.add_argument("event", choices=("boot", "shutdown"))
+    lifecycle_parser.add_argument("event", choices=("boot", "shutdown", "receipt"))
     lifecycle_parser.add_argument("--state-dir", type=Path)
 
     update_parser = subparsers.add_parser(

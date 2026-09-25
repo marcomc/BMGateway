@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -15,7 +16,7 @@ from .notifications import (
     queue_notification_event,
     queue_notification_event_once,
 )
-from .reboot_intent import clear_reboot_intent, record_reboot_intent
+from .reboot_intent import clear_reboot_intent, observe_boot, record_reboot_intent
 from .self_healing import (
     SelfHealingEvent,
     SelfHealingState,
@@ -198,6 +199,12 @@ def run_self_healing(
     before = replace(state)
     try:
         with usb_otg_watchdog_transaction(path, state, allow_unavailable=True) as usb_state_error:
+            boot_receipt_error: OSError | ValueError | None = None
+            try:
+                observe_boot(state_dir, default_reboot_boot_id())
+            except (OSError, ValueError) as error:
+                boot_receipt_error = error
+                logging.warning("Cannot checkpoint boot receipt: %s", error)
             lifecycle_error: NotificationOutboxError | None = None
             lifecycle_time_ready = False
             try:
@@ -562,6 +569,8 @@ def run_self_healing(
                     state.wifi_reboot_scheduled_boot_id = boot_id
                     wifi_checkpoint()
                 try:
+                    if boot_receipt_error is not None:
+                        raise OSError("Cannot checkpoint boot receipt") from boot_receipt_error
                     record_reboot_intent(state_dir, boot_id, requested_actions)
                     default_schedule_reboot()
                 except (OSError, ValueError):

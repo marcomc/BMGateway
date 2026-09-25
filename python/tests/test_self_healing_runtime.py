@@ -2978,6 +2978,37 @@ def test_shared_scheduler_failure_identifies_requested_policies(
     assert not state.wifi_reboot_requested
 
 
+def test_boot_receipt_failure_defers_reboot_without_blocking_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config = _config()
+    config = replace(config, notifications=replace(config.notifications, enabled=False))
+    state = new_self_healing_state()
+
+    def evaluate(**kwargs: object) -> list[self_healing.SelfHealingEvent]:
+        state.periodic_reboot_requested = True
+        return [
+            self_healing.SelfHealingEvent(
+                action="periodic_reboot_requested", status="requested", details={}
+            )
+        ]
+
+    def fail_receipt(*_: object) -> None:
+        raise OSError("disk")
+
+    monkeypatch.setattr(runtime, "evaluate_self_healing", evaluate)
+    monkeypatch.setattr(runtime, "observe_boot", fail_receipt)
+    monkeypatch.setattr(
+        runtime, "default_schedule_reboot", lambda: pytest.fail("unsafe reboot scheduled")
+    )
+
+    events = runtime.run_self_healing(config=config, state=state, state_dir=tmp_path)
+
+    assert [event.action for event in events] == ["reboot_schedule_failed"]
+    assert not state.periodic_reboot_requested
+    assert not (tmp_path / "runtime" / "reboot_intent.json").exists()
+
+
 @pytest.mark.parametrize("mode", ["summary", "individual"])
 def test_duplicate_queue_failure_defers_ack_delivery_and_peer_reboot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mode: str

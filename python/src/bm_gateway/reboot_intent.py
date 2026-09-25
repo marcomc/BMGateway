@@ -14,6 +14,77 @@ def reboot_intent_path(state_dir: Path) -> Path:
     return state_dir / "runtime" / "reboot_intent.json"
 
 
+def boot_receipt_path(state_dir: Path) -> Path:
+    return state_dir / "runtime" / "boot_receipt.json"
+
+
+def _sync_directory(path: Path) -> None:
+    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def observe_boot(state_dir: Path, boot_id: str) -> str | None:
+    """Durably capture the immediate predecessor's request on first observation.
+
+    Callers serialize this with reboot scheduling using the watchdog transaction.
+    The receipt is independent of notification delivery and clock synchronization.
+    """
+    if not boot_id:
+        raise ValueError("Missing boot identity")
+    try:
+        boot_id = str(UUID(boot_id))
+    except ValueError:
+        # Runtime tests and alternate boot-ID providers may use opaque IDs.
+        pass
+    path = boot_receipt_path(state_dir)
+    try:
+        prior = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(prior, dict) or not isinstance(prior.get("boot_id"), str):
+            raise ValueError("Invalid boot receipt")
+        if prior.get("reboot_request") not in (None, "wifi", "other"):
+            raise ValueError("Invalid boot receipt")
+        if not isinstance(prior.get("previous_boot_id", ""), str):
+            raise ValueError("Invalid boot receipt")
+        try:
+            prior["boot_id"] = str(UUID(prior["boot_id"]))
+        except ValueError:
+            pass
+    except FileNotFoundError:
+        prior = {"boot_id": "", "reboot_request": None}
+    if prior["boot_id"] == boot_id:
+        _sync_directory(path)
+        request = prior["reboot_request"]
+        return request if isinstance(request, str) else None
+    request = (
+        reboot_request_for_boot(state_dir, boot_id, prior["boot_id"]) if prior["boot_id"] else None
+    )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as handle:
+            temporary = handle.name
+            json.dump(
+                {
+                    "boot_id": boot_id,
+                    "previous_boot_id": prior["boot_id"],
+                    "reboot_request": request,
+                },
+                handle,
+            )
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        _sync_directory(path)
+    finally:
+        if temporary is not None:
+            Path(temporary).unlink(missing_ok=True)
+    return request
+
+
 def record_reboot_intent(state_dir: Path, boot_id: str, actions: list[str]) -> None:
     """Checkpoint the request before scheduling a reboot."""
     path = reboot_intent_path(state_dir)
@@ -34,27 +105,26 @@ def record_reboot_intent(state_dir: Path, boot_id: str, actions: list[str]) -> N
             os.fsync(handle.fileno())
         os.replace(temporary, path)
         temporary = None
-        directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
+        _sync_directory(path)
     finally:
         if temporary is not None:
             Path(temporary).unlink(missing_ok=True)
 
 
-def clear_reboot_intent(state_dir: Path) -> None:
+def clear_reboot_intent(state_dir: Path, *, consumed_by_boot_id: str = "") -> None:
     """Durably discard a failed or consumed request."""
     path = reboot_intent_path(state_dir)
     if not path.exists():
         return
+    if consumed_by_boot_id:
+        receipt = json.loads(boot_receipt_path(state_dir).read_text(encoding="utf-8"))
+        intent = json.loads(path.read_text(encoding="utf-8"))
+        if str(UUID(receipt["boot_id"])) != str(UUID(consumed_by_boot_id)) or str(
+            UUID(intent["boot_id"])
+        ) != str(UUID(receipt["previous_boot_id"])):
+            return
     path.unlink()
-    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
-    try:
-        os.fsync(directory)
-    finally:
-        os.close(directory)
+    _sync_directory(path)
 
 
 def reboot_request_for_boot(
@@ -70,7 +140,7 @@ def reboot_request_for_boot(
             return None
         if requested_at.tzinfo is None or prior_boot_id == str(UUID(current_boot_id)):
             return None
-        if previous_boot_id and prior_boot_id != str(UUID(previous_boot_id)):
+        if not previous_boot_id or prior_boot_id != str(UUID(previous_boot_id)):
             return None
         if "wifi_reboot_requested" in actions:
             return "wifi"
