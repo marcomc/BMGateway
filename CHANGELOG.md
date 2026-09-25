@@ -4,13 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [0.4.1] - Unreleased - Connectivity and Reboot Reporting
+## [0.4.1] - 2026-09-25 - Connectivity and Reboot Reporting
 
 ### Fixed
 
-- Boot notifications now identify a recent, durable BMGateway reboot request,
-  including Wi-Fi recovery, instead of presenting every system boot without
-  its known context.
+- Boot notifications now identify a durable BMGateway reboot request from the
+  preceding boot, including Wi-Fi recovery, instead of presenting every system
+  boot without its known context.
 - The Wi-Fi watchdog checks the local gateway separately from the configured
   Internet target, preventing an Internet-only ping failure from triggering
   local Wi-Fi reconnect and reboot actions.

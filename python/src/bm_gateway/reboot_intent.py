@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -45,12 +45,22 @@ def record_reboot_intent(state_dir: Path, boot_id: str, actions: list[str]) -> N
 
 
 def clear_reboot_intent(state_dir: Path) -> None:
-    """Discard a request when scheduling itself fails."""
-    reboot_intent_path(state_dir).unlink(missing_ok=True)
+    """Durably discard a failed or consumed request."""
+    path = reboot_intent_path(state_dir)
+    if not path.exists():
+        return
+    path.unlink()
+    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
 
 
-def reboot_request_for_boot(state_dir: Path, current_boot_id: str) -> str | None:
-    """Return a recent prior-boot request, without claiming causal certainty."""
+def reboot_request_for_boot(
+    state_dir: Path, current_boot_id: str, previous_boot_id: str = ""
+) -> str | None:
+    """Return an unconsumed prior-boot request without claiming causality."""
     try:
         raw = json.loads(reboot_intent_path(state_dir).read_text(encoding="utf-8"))
         prior_boot_id = str(UUID(raw["boot_id"]))
@@ -60,8 +70,7 @@ def reboot_request_for_boot(state_dir: Path, current_boot_id: str) -> str | None
             return None
         if requested_at.tzinfo is None or prior_boot_id == str(UUID(current_boot_id)):
             return None
-        age = datetime.now(timezone.utc) - requested_at
-        if not timedelta(0) <= age <= timedelta(minutes=15):
+        if previous_boot_id and prior_boot_id != str(UUID(previous_boot_id)):
             return None
         if "wifi_reboot_requested" in actions:
             return "wifi"

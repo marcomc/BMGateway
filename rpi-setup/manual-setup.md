@@ -639,7 +639,7 @@ untrusted timestamp and receives its notification time after synchronization.
 Pending lifecycle events survive process restarts and follow the configured
 retention and event-count limits. Shutdown mail is best effort: sudden power
 loss cannot run the hook, and network teardown or the service timeout can defer
-delivery until the next boot. A boot notification identifies a recent Wi-Fi,
+delivery until the next boot. A boot notification identifies a Wi-Fi,
 periodic, or USB watchdog reboot request if its durable request came from the
 preceding Linux boot. This records sequence, not proof that the request caused
 the reboot. Without a matching request, it reports only the observed boot.

@@ -23,7 +23,7 @@ from .notifications import (
     notification_outbox_path,
     queue_notification_event_once,
 )
-from .reboot_intent import reboot_request_for_boot
+from .reboot_intent import clear_reboot_intent, reboot_request_for_boot
 from .self_healing import (
     confirm_wifi_watchdog_state_durable,
     default_reboot_boot_id,
@@ -190,6 +190,7 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
         usb_otg_watchdog_state_path(state_dir), state, allow_unavailable=True
     ) as usb_error:
         data = _load(_path(state_dir))
+        previous_boot_id = data["boot_id"]
         if data["boot_id"] != boot_id:
             data["boot_id"] = boot_id
             data["recorded"] = []
@@ -203,10 +204,17 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
                 ),
             }
             if action == "boot":
-                pending_event["reboot_request"] = reboot_request_for_boot(state_dir, boot_id)
+                pending_event["reboot_request"] = reboot_request_for_boot(
+                    state_dir, boot_id, previous_boot_id
+                )
             data["pending"].append(pending_event)
             data["pending"] = data["pending"][-config.notifications.offline_max_events :]
             _save(_path(state_dir), data)
+            if action == "boot" and pending_event.get("reboot_request") is not None:
+                try:
+                    clear_reboot_intent(state_dir)
+                except OSError as error:
+                    logging.warning("Cannot clear consumed reboot request: %s", error)
         if not transfer_lifecycle_notifications(config=config, state_dir=state_dir):
             return
         if usb_error is not None or state.usb_otg_escalation_notification_pending:
