@@ -14,6 +14,7 @@ from email import policy
 from email.parser import Parser
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 import pytest
 from bm_gateway import notifications, self_healing, self_healing_runtime
@@ -1154,7 +1155,6 @@ def test_legacy_usb_delivery_relocalizes_all_shipped_templates(
     [
         {"usb_otg_reason": "UDC state is not configured"},
         {"usb_otg_reboot_attempts": 2},
-        {"usb_otg_reason": None, "usb_otg_reboot_attempts": None},
         {"usb_otg_reason": None, "usb_otg_reboot_attempts": 2},
         {"usb_otg_reason": 1, "usb_otg_reboot_attempts": 2},
         {"usb_otg_reason": "known", "usb_otg_reboot_attempts": None},
@@ -1203,6 +1203,95 @@ def test_structured_usb_serialization_derives_detail_from_original_metadata(
     path = tmp_path / "outbox.json"
     persist_notification_outbox(path, [original])
     assert load_notification_outbox(path) == [replace(original, detail=expected)]
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        NotificationEvent(
+            "system_boot_after_wifi_reboot_request", "", datetime(2026, 9, 25, tzinfo=timezone.utc)
+        ),
+        NotificationEvent(
+            "system_boot_after_other_reboot_request", "", datetime(2026, 9, 25, tzinfo=timezone.utc)
+        ),
+        NotificationEvent(
+            "usb_otg_recovery_exhausted",
+            "",
+            datetime(2026, 9, 25, tzinfo=timezone.utc),
+            usb_otg_reason="UDC state is not configured",
+            usb_otg_reboot_attempts=1,
+        ),
+        NotificationEvent(
+            "wifi_reconnect_attempted",
+            "",
+            datetime(2026, 9, 25, tzinfo=timezone.utc),
+            wifi_outcome="failed",
+            wifi_interface="wlan0",
+            wifi_outage_seconds=15,
+        ),
+        NotificationEvent(
+            "software_update_completed",
+            "",
+            datetime(2026, 9, 25, tzinfo=timezone.utc),
+            update_outcome="completed",
+            update_from_revision="abcdef0",
+            update_to_revision="1234567",
+            update_reboot_required=True,
+        ),
+        NotificationEvent(
+            "software_update_failed",
+            "",
+            datetime(2026, 9, 25, tzinfo=timezone.utc),
+            update_outcome="failed",
+            update_from_revision="abcdef0",
+            update_stage="fetch",
+        ),
+    ],
+    ids=["boot-wifi", "boot-other", "usb", "wifi", "update-completed", "update-failed"],
+)
+def test_complete_outbox_shape_round_trips_for_each_action(
+    tmp_path: Path, event: NotificationEvent
+) -> None:
+    path = tmp_path / "outbox.json"
+    persist_notification_outbox(path, [event])
+
+    raw = json.loads(path.read_text())[0]
+    assert set(raw) == set(NotificationEvent.__dataclass_fields__)
+    assert raw["action"] == event.action
+    assert load_notification_outbox(path)[0].to_dict() == raw
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        {"update_outcome": "completed"},
+        {"update_from_revision": "abcdef0"},
+        {"update_to_revision": "1234567"},
+        {"update_reboot_required": True},
+        {"update_stage": "fetch"},
+    ],
+)
+@pytest.mark.parametrize("once", [False, True])
+def test_partial_update_metadata_is_rejected_for_other_actions(
+    tmp_path: Path, metadata: dict[str, Any], once: bool
+) -> None:
+    path = tmp_path / "outbox.json"
+    event = NotificationEvent(
+        action="system_boot", detail="", occurred_at=datetime.now(timezone.utc), **metadata
+    )
+    with pytest.raises(NotificationOutboxError, match="invalid event"):
+        event.to_dict()
+    queue = queue_notification_event_once if once else queue_notification_event
+    with pytest.raises(NotificationOutboxError, match="invalid event"):
+        queue(
+            path=path,
+            config=NotificationsConfig(enabled=True, recipient="operator@example.test"),
+            action="system_boot",
+            detail="",
+            idempotency_key="partial-update",
+            **metadata,
+        )
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("once", [False, True])
@@ -1631,7 +1720,7 @@ def test_unrecognized_legacy_notification_remains_unchanged(
     event = NotificationEvent(action=action, detail=detail, occurred_at=datetime.now(timezone.utc))
     persist_notification_outbox(path, [event])
     assert load_notification_outbox(path) == [event]
-    assert "usb_otg_reason" not in json.loads(path.read_text())[0]
+    assert json.loads(path.read_text())[0]["usb_otg_reason"] is None
     payloads: list[str] = []
 
     def send(payload: str) -> subprocess.CompletedProcess[str]:

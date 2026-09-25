@@ -98,33 +98,42 @@ class NotificationEvent:
             wifi_outage_seconds=(
                 self.wifi_outage_seconds if self.wifi_outage_seconds is not None else _MISSING
             ),
-            update_outcome=self.update_outcome if has_update_fields else _MISSING,
-            update_from_revision=self.update_from_revision if has_update_fields else _MISSING,
-            update_to_revision=self.update_to_revision if has_update_fields else _MISSING,
-            update_reboot_required=self.update_reboot_required if has_update_fields else _MISSING,
-            update_stage=self.update_stage if has_update_fields else _MISSING,
+            update_outcome=self.update_outcome if self.update_outcome is not None else _MISSING,
+            update_from_revision=(
+                self.update_from_revision if self.update_from_revision is not None else _MISSING
+            ),
+            update_to_revision=(
+                self.update_to_revision
+                if has_update_fields or self.update_to_revision is not None
+                else _MISSING
+            ),
+            update_reboot_required=(
+                self.update_reboot_required
+                if has_update_fields or self.update_reboot_required is not None
+                else _MISSING
+            ),
+            update_stage=(
+                self.update_stage
+                if has_update_fields or self.update_stage is not None
+                else _MISSING
+            ),
         )
         payload: dict[str, str | int | None] = {
             "action": event.action,
             "detail": event.detail,
             "occurred_at": event.occurred_at.isoformat() if event.occurred_at else None,
+            "idempotency_key": event.idempotency_key,
+            "usb_otg_reason": event.usb_otg_reason,
+            "usb_otg_reboot_attempts": event.usb_otg_reboot_attempts,
+            "wifi_outcome": event.wifi_outcome,
+            "wifi_interface": event.wifi_interface,
+            "wifi_outage_seconds": event.wifi_outage_seconds,
+            "update_outcome": event.update_outcome,
+            "update_from_revision": event.update_from_revision,
+            "update_to_revision": event.update_to_revision,
+            "update_reboot_required": event.update_reboot_required,
+            "update_stage": event.update_stage,
         }
-        if event.idempotency_key:
-            payload["idempotency_key"] = event.idempotency_key
-        if event.usb_otg_reason is not None and event.usb_otg_reboot_attempts is not None:
-            payload["usb_otg_reason"] = event.usb_otg_reason
-            payload["usb_otg_reboot_attempts"] = event.usb_otg_reboot_attempts
-        if event.wifi_outcome is not None:
-            assert event.wifi_interface is not None and event.wifi_outage_seconds is not None
-            payload["wifi_outcome"] = event.wifi_outcome
-            payload["wifi_interface"] = event.wifi_interface
-            payload["wifi_outage_seconds"] = event.wifi_outage_seconds
-        if event.update_outcome is not None:
-            payload["update_outcome"] = event.update_outcome
-            payload["update_from_revision"] = event.update_from_revision
-            payload["update_to_revision"] = event.update_to_revision
-            payload["update_reboot_required"] = event.update_reboot_required
-            payload["update_stage"] = event.update_stage
         return payload
 
 
@@ -201,6 +210,19 @@ def _canonical_event(
     if not normalized_action:
         raise NotificationOutboxError("Notification outbox contains an event without an action")
     normalized_detail = str(detail).strip()
+    if (usb_otg_reason, usb_otg_reboot_attempts) == (None, None):
+        usb_otg_reason = usb_otg_reboot_attempts = _MISSING
+    if (wifi_outcome, wifi_interface, wifi_outage_seconds) == (None, None, None):
+        wifi_outcome = wifi_interface = wifi_outage_seconds = _MISSING
+    if (
+        update_outcome,
+        update_from_revision,
+        update_to_revision,
+        update_reboot_required,
+        update_stage,
+    ) == (None, None, None, None, None):
+        update_outcome = update_from_revision = update_to_revision = _MISSING
+        update_reboot_required = update_stage = _MISSING
     reason: str | None = None
     attempts: int | None = None
     if usb_otg_reason is not _MISSING or usb_otg_reboot_attempts is not _MISSING:

@@ -76,6 +76,10 @@ def test_boot_notification_attributes_prior_reboot_request(
         notifications.notification_outbox_path(tmp_path)
     )
     assert [event.action for event in events] == [expected_action]
+    raw_events = json.loads(notifications.notification_outbox_path(tmp_path).read_text())
+    assert len(raw_events) == 1
+    assert set(raw_events[0]) == set(notifications.NotificationEvent.__dataclass_fields__)
+    assert events[0].to_dict() == raw_events[0]
 
 
 def test_same_boot_request_does_not_attribute_new_boot(

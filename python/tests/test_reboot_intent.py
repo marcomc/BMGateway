@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
@@ -64,3 +65,18 @@ def test_missing_prior_receipt_fails_closed(tmp_path: Path) -> None:
 
     assert reboot_intent.observe_boot(tmp_path, "b" * 32) is None
     assert reboot_intent.observe_boot(tmp_path, "c" * 32) is None
+
+
+def test_only_valid_current_boot_request_is_reused(tmp_path: Path) -> None:
+    current = "a" * 32
+    path = reboot_intent.reboot_intent_path(tmp_path)
+    assert not reboot_intent.has_reboot_intent_for_boot(tmp_path, current)
+    reboot_intent.record_reboot_intent(tmp_path, current, ["wifi_reboot_requested"])
+    assert reboot_intent.has_reboot_intent_for_boot(tmp_path, current)
+    assert not reboot_intent.has_reboot_intent_for_boot(tmp_path, "b" * 32)
+    raw = json.loads(path.read_text())
+    raw["actions"] = ["unknown_action"]
+    path.write_text(json.dumps(raw))
+    assert not reboot_intent.has_reboot_intent_for_boot(tmp_path, current)
+    path.write_text("{invalid")
+    assert not reboot_intent.has_reboot_intent_for_boot(tmp_path, current)

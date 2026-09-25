@@ -16,7 +16,12 @@ from .notifications import (
     queue_notification_event,
     queue_notification_event_once,
 )
-from .reboot_intent import clear_reboot_intent, observe_boot, record_reboot_intent
+from .reboot_intent import (
+    clear_reboot_intent,
+    has_reboot_intent_for_boot,
+    observe_boot,
+    record_reboot_intent,
+)
 from .self_healing import (
     SelfHealingEvent,
     SelfHealingState,
@@ -568,16 +573,20 @@ def run_self_healing(
                 ):
                     state.wifi_reboot_scheduled_boot_id = boot_id
                     wifi_checkpoint()
+                wrote_intent = False
                 try:
                     if boot_receipt_error is not None:
                         raise OSError("Cannot checkpoint boot receipt") from boot_receipt_error
-                    record_reboot_intent(state_dir, boot_id, requested_actions)
+                    if not has_reboot_intent_for_boot(state_dir, boot_id):
+                        wrote_intent = True
+                        record_reboot_intent(state_dir, boot_id, requested_actions)
                     default_schedule_reboot()
                 except (OSError, ValueError):
-                    try:
-                        clear_reboot_intent(state_dir)
-                    except OSError:
-                        pass
+                    if wrote_intent:
+                        try:
+                            clear_reboot_intent(state_dir)
+                        except OSError:
+                            pass
                     events = _defer_reboots(events, state, before)
                     events.append(
                         SelfHealingEvent(

@@ -111,6 +111,41 @@ def record_reboot_intent(state_dir: Path, boot_id: str, actions: list[str]) -> N
             Path(temporary).unlink(missing_ok=True)
 
 
+def has_reboot_intent_for_boot(state_dir: Path, boot_id: str) -> bool:
+    """Return whether a durable request for this boot can be reused by a retry."""
+    path = reboot_intent_path(state_dir)
+    try:
+        with path.open(encoding="utf-8") as handle:
+            raw = json.load(handle)
+            os.fsync(handle.fileno())
+    except FileNotFoundError:
+        return False
+    except json.JSONDecodeError:
+        return False
+    _sync_directory(path)
+    try:
+        if str(UUID(raw["boot_id"])) != str(UUID(boot_id)):
+            return False
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+    try:
+        requested_at = datetime.fromisoformat(raw["requested_at"])
+        actions = raw["actions"]
+    except (ValueError, TypeError, KeyError):
+        return False
+    recognized = {
+        "wifi_reboot_requested",
+        "periodic_reboot_requested",
+        "usb_otg_reboot_requested",
+    }
+    return (
+        requested_at.tzinfo is not None
+        and isinstance(actions, list)
+        and bool(actions)
+        and all(isinstance(action, str) and action in recognized for action in actions)
+    )
+
+
 def clear_reboot_intent(state_dir: Path, *, consumed_by_boot_id: str = "") -> None:
     """Durably discard a failed or consumed request."""
     path = reboot_intent_path(state_dir)

@@ -11,7 +11,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Boot notifications now identify a durable BMGateway reboot request from the
   immediately preceding boot, including Wi-Fi recovery. An early boot receipt
   preserves that attribution when mail is disabled or delayed, and prevents a
-  stale request from being attached to a later unrelated boot.
+  stale request from being attached to a later unrelated boot. A failed retry
+  cannot erase an earlier reboot request already scheduled in the same boot.
+- Notification outbox events persist a complete schema with explicit nulls for
+  fields unavailable to that event type, while retaining legacy sparse input.
 - The Wi-Fi watchdog checks the local gateway separately from the configured
   Internet target, preventing an Internet-only ping failure from triggering
   local Wi-Fi reconnect and reboot actions.
