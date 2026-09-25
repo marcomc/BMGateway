@@ -16,6 +16,7 @@ from bm_gateway import system_lifecycle as lifecycle
 from bm_gateway.cli import main
 from bm_gateway.config import AppConfig, load_config
 from bm_gateway.localization import supported_locale_codes, translation_for
+from bm_gateway.reboot_intent import observe_boot, reboot_intent_path, record_reboot_intent
 
 
 @pytest.fixture
@@ -47,6 +48,194 @@ def test_repeated_boot_does_not_requeue_after_delivery(
         lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
     assert len(sent) == 1
     assert "system_boot" in sent[0]
+
+
+@pytest.mark.parametrize(
+    ("request_action", "expected_action"),
+    [
+        ("wifi_reboot_requested", "system_boot_after_wifi_reboot_request"),
+        ("periodic_reboot_requested", "system_boot_after_other_reboot_request"),
+        ("usb_otg_reboot_requested", "system_boot_after_other_reboot_request"),
+    ],
+)
+def test_boot_notification_attributes_prior_reboot_request(
+    config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    request_action: str,
+    expected_action: str,
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, [request_action])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == [expected_action]
+    raw_events = json.loads(notifications.notification_outbox_path(tmp_path).read_text())
+    assert len(raw_events) == 1
+    assert set(raw_events[0]) == set(notifications.NotificationEvent.__dataclass_fields__)
+    assert events[0].to_dict() == raw_events[0]
+
+
+def test_same_boot_request_does_not_attribute_new_boot(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == ["system_boot"]
+    assert reboot_intent_path(tmp_path).exists()
+
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == [
+        "system_boot",
+        "system_boot_after_wifi_reboot_request",
+    ]
+
+
+@pytest.mark.parametrize("requested_at", ["2026-09-24T00:00:00+00:00", "2020-01-01T00:00:00+00:00"])
+def test_delayed_clock_sync_does_not_lose_prior_boot_request(
+    config: AppConfig,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    requested_at: str,
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    path = reboot_intent_path(tmp_path)
+    intent = json.loads(path.read_text(encoding="utf-8"))
+    intent["requested_at"] = requested_at
+    path.write_text(json.dumps(intent), encoding="utf-8")
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == ["system_boot_after_wifi_reboot_request"]
+    assert not path.exists()
+
+
+def test_consumed_request_does_not_attribute_another_boot(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "c" * 32)
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == [
+        "system_boot_after_wifi_reboot_request",
+        "system_boot",
+    ]
+
+
+def test_previous_boot_identity_rejects_request_when_cleanup_failed(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+
+    def fail_cleanup(_state_dir: Path, *, consumed_by_boot_id: str = "") -> None:
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(lifecycle, "clear_reboot_intent", fail_cleanup)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "c" * 32)
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == [
+        "system_boot_after_wifi_reboot_request",
+        "system_boot",
+    ]
+
+
+def test_disabled_intervening_boot_consumes_attribution_without_mail(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    disabled = replace(config, notifications=replace(config.notifications, enabled=False))
+    lifecycle.notify_system_lifecycle(config=disabled, state_dir=tmp_path, action="receipt")
+    lifecycle.notify_system_lifecycle(config=disabled, state_dir=tmp_path, action="boot")
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "c" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == ["system_boot"]
+
+
+def test_runtime_receipt_preserves_attribution_before_delayed_boot_notification(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    observe_boot(tmp_path, "a" * 32)
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    observe_boot(tmp_path, "b" * 32)
+    record_reboot_intent(tmp_path, "b" * 32, ["periodic_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "c" * 32)
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == [
+        "system_boot_after_wifi_reboot_request",
+        "system_boot_after_other_reboot_request",
+    ]
+
+
+def test_first_observed_boot_does_not_claim_unverified_prior_request(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == ["system_boot"]
 
 
 @pytest.mark.parametrize("stopping", [False, True])
@@ -355,6 +544,9 @@ def test_generated_shutdown_unit_is_armed_independently_of_boot_delivery() -> No
     boot = source.split("cat > /etc/systemd/system/bm-gateway-boot-notification.service <<EOF", 1)[
         1
     ].split("\nEOF", 1)[0]
+    receipt = source.split("cat > /etc/systemd/system/bm-gateway-boot-receipt.service <<EOF", 1)[
+        1
+    ].split("\nEOF", 1)[0]
     assert "ExecStart=/usr/bin/true" in shutdown
     assert "RemainAfterExit=yes" in shutdown
     assert " lifecycle shutdown " in shutdown
@@ -371,10 +563,15 @@ def test_generated_shutdown_unit_is_armed_independently_of_boot_delivery() -> No
     assert "StartLimitIntervalSec=300" in boot
     assert "StartLimitBurst=3" in boot
     assert " lifecycle boot " in boot
+    assert " lifecycle receipt " in receipt
+    assert "Before=bm-gateway.service" in receipt
+    assert "systemd-time-wait-sync.service" not in receipt
+    assert "After=network-online.target bluetooth.service bm-gateway-boot-receipt.service" in source
 
 
 def test_operator_docs_cover_lifecycle_units_and_validation() -> None:
     lifecycle_unit = "bm-gateway-lifecycle.service"
+    receipt_unit = "bm-gateway-boot-receipt.service"
     boot_unit = "bm-gateway-boot-notification.service"
     documents = {
         path: Path(path).read_text()
@@ -388,27 +585,29 @@ def test_operator_docs_cover_lifecycle_units_and_validation() -> None:
     manual_setup = documents["rpi-setup/manual-setup.md"]
     normalized_manual_setup = " ".join(manual_setup.split())
     assert (
-        "Boot recording waits for synchronized wall-clock time without delaying "
+        "Boot notification waits for synchronized wall-clock time without delaying "
         "runtime or web activation."
     ) in normalized_manual_setup
-    for unit in (lifecycle_unit, boot_unit):
+    for unit in (lifecycle_unit, receipt_unit, boot_unit):
         assert f"- `/etc/systemd/system/{unit}`" in manual_setup
         assert f"sudo systemctl status {unit}" in manual_setup
 
     rpi_readme = documents["rpi-setup/README.md"]
-    for unit in (lifecycle_unit, boot_unit):
+    for unit in (lifecycle_unit, receipt_unit, boot_unit):
         assert f"- `/etc/systemd/system/{unit}`" in rpi_readme
         assert f'"{unit}<br/>' in rpi_readme
     assert f"- `{lifecycle_unit}` for shutdown notifications" in rpi_readme
+    assert f"- `{receipt_unit}` for early reboot attribution" in rpi_readme
     assert f"- `{boot_unit}` for boot notifications" in rpi_readme
 
     macos_setup = documents["rpi-setup/macos-imager-cli.md"]
     assert f"- installs and enables `{lifecycle_unit}`" in macos_setup
+    assert f"- installs and enables `{receipt_unit}`" in macos_setup
     assert f"- installs and enables `{boot_unit}`" in macos_setup
 
     for path in ("rpi-setup/macos-imager-cli.md", "rpi-setup/manual-setup.md"):
         document = documents[path]
-        assert f"systemctl is-enabled {lifecycle_unit} {boot_unit}" in document
+        assert f"systemctl is-enabled {lifecycle_unit} {receipt_unit} {boot_unit}" in document
         assert (
             f"systemctl is-active bm-gateway.service bm-gateway-web.service {lifecycle_unit}"
             in document
@@ -423,7 +622,12 @@ def test_lifecycle_mail_renders_in_delivery_locale(
     config: AppConfig, tmp_path: Path, locale: str
 ) -> None:
     outbox = notifications.notification_outbox_path(tmp_path)
-    for action in ["system_boot", "system_shutdown"]:
+    for action in [
+        "system_boot",
+        "system_boot_after_wifi_reboot_request",
+        "system_boot_after_other_reboot_request",
+        "system_shutdown",
+    ]:
         notifications.queue_notification_event_once(
             path=outbox,
             config=config.notifications,
@@ -444,6 +648,8 @@ def test_lifecycle_mail_renders_in_delivery_locale(
     )[0]
     text = translation_for(locale).gettext
     assert text("System started") in rendered[0]
+    assert text("A system boot was observed after a Wi-Fi recovery reboot request.") in rendered[0]
+    assert text("A system boot was observed after a BMGateway reboot request.") in rendered[0]
     assert text("The system is shutting down or rebooting.") in rendered[0]
 
 

@@ -536,7 +536,10 @@ There are three independent recovery paths:
   `self_healing.periodic_reboot_hours` from `1` to `48`
 - Wi-Fi watchdog: set `self_healing.wifi_watchdog_enabled = true`, choose a
   reachable `self_healing.connectivity_check_host`, and tune the reconnect and
-  reboot delays in minutes
+  reboot delays in minutes. It probes both that Internet target and the default
+  gateway through the configured Wi-Fi interface. A reachable gateway with an
+  unreachable Internet target is logged as an Internet outage and does not
+  trigger Wi-Fi recovery; failure of both probes starts local recovery.
 - USB OTG watchdog: enable USB OTG image export first, then set
   `self_healing.usb_otg_watchdog_enabled = true` to monitor the USB device
   controller. It first refreshes the virtual drive, can then reboot up to
@@ -620,12 +623,15 @@ stops after `sendmail` accepts a message but before the outbox records success.
 
 System lifecycle notifications use the same Notifications enable switch,
 recipient, language, and offline-delivery policy. The installer enables
-`bm-gateway-boot-notification.service`, which records a boot once per Linux boot
-ID, and independently arms `bm-gateway-lifecycle.service` for shutdown. Shutdown
+`bm-gateway-boot-receipt.service` to capture the boot ID and preceding reboot
+request before runtime recovery, even when notifications are disabled or time
+synchronization is delayed. `bm-gateway-boot-notification.service` records a
+notification once per Linux boot ID, and `bm-gateway-lifecycle.service` is
+independently armed for shutdown. Shutdown
 is recorded only when systemd reports that the host is stopping. Ordinary
 service restarts do not produce shutdown mail. Installing this feature on a
 running host reports that the current boot was observed, not a new reboot.
-Boot recording waits for synchronized wall-clock time without delaying runtime
+Boot notification waits for synchronized wall-clock time without delaying runtime
 or web activation. The runtime keeps watchdog recovery active while lifecycle
 retention and shared-mail delivery defer until the clock is synchronized;
 pre-sync watchdog notifications retain durable intent without an untrusted
@@ -636,8 +642,12 @@ untrusted timestamp and receives its notification time after synchronization.
 Pending lifecycle events survive process restarts and follow the configured
 retention and event-count limits. Shutdown mail is best effort: sudden power
 loss cannot run the hook, and network teardown or the service timeout can defer
-delivery until the next boot. Events describe an observed boot or an orderly
-shutdown/reboot, not the cause of the event.
+delivery until the next boot. A boot notification identifies a Wi-Fi,
+periodic, or USB watchdog reboot request if its durable request came from the
+preceding Linux boot. This records sequence, not proof that the request caused
+the reboot. Without a matching request, it reports only the observed boot.
+Shutdown notifications can arrive after the next boot when delivery was
+deferred; compare event timestamps rather than email order.
 
 The installed CLI entrypoints are `bm-gateway lifecycle boot` and
 `bm-gateway lifecycle shutdown`, with the usual `--config` option and an optional
@@ -796,6 +806,7 @@ This installs:
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
 - `/etc/systemd/system/bm-gateway-lifecycle.service`
+- `/etc/systemd/system/bm-gateway-boot-receipt.service`
 - `/etc/systemd/system/bm-gateway-boot-notification.service`
 - `/etc/systemd/system/glances-web.service` when `--enable-glances` is used
 - `cockpit.socket` when `--enable-cockpit` is used
@@ -807,6 +818,7 @@ Review the config, then check the service state:
 sudo systemctl status bm-gateway.service
 sudo systemctl status bm-gateway-web.service
 sudo systemctl status bm-gateway-lifecycle.service
+sudo systemctl status bm-gateway-boot-receipt.service
 sudo systemctl status bm-gateway-boot-notification.service
 sudo systemctl status glances-web.service
 sudo systemctl status cockpit.socket
@@ -853,7 +865,7 @@ Validate service state, config loading, and the installed device registry:
 
 ```bash
 ssh "admin@${GATEWAY_HOST}" 'bash -lc "
-  systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-notification.service
+  systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-receipt.service bm-gateway-boot-notification.service
   systemctl is-active bm-gateway.service bm-gateway-web.service bm-gateway-lifecycle.service bluetooth.service avahi-daemon.service
   test \$(systemctl show --property=Result --value bm-gateway-boot-notification.service) = success
   test \$(systemctl show --property=ExecMainStatus --value bm-gateway-boot-notification.service) -eq 0

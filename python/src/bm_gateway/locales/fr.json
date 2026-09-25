@@ -4,6 +4,8 @@
 "System started": "Système démarré",
 "System shutting down": "Arrêt du système en cours",
 "A system boot was observed. This is not an application restart.": "Un démarrage du système a été détecté. Il ne s’agit pas d’un redémarrage de l’application.",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "Un démarrage du système a été détecté après une demande de redémarrage pour rétablir le Wi-Fi.",
+"A system boot was observed after a BMGateway reboot request.": "Un démarrage du système a été détecté après une demande de redémarrage de BMGateway.",
 "The system is shutting down or rebooting.": "Le système est en cours d’arrêt ou de redémarrage.",
 "Software update completed": "Mise à jour logicielle terminée",
 "Software update failed": "Échec de la mise à jour logicielle",

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from dataclasses import replace
 from pathlib import Path
@@ -14,6 +15,12 @@ from .notifications import (
     notification_outbox_path,
     queue_notification_event,
     queue_notification_event_once,
+)
+from .reboot_intent import (
+    clear_reboot_intent,
+    has_reboot_intent_for_boot,
+    observe_boot,
+    record_reboot_intent,
 )
 from .self_healing import (
     SelfHealingEvent,
@@ -197,6 +204,12 @@ def run_self_healing(
     before = replace(state)
     try:
         with usb_otg_watchdog_transaction(path, state, allow_unavailable=True) as usb_state_error:
+            boot_receipt_error: OSError | ValueError | None = None
+            try:
+                observe_boot(state_dir, default_reboot_boot_id())
+            except (OSError, ValueError) as error:
+                boot_receipt_error = error
+                logging.warning("Cannot checkpoint boot receipt: %s", error)
             lifecycle_error: NotificationOutboxError | None = None
             lifecycle_time_ready = False
             try:
@@ -546,14 +559,7 @@ def run_self_healing(
                 event.action for event in events if event.action in _REBOOT_ACTIONS
             ]
             if requested_actions:
-                boot_id = (
-                    reboot_boot_id()
-                    if any(
-                        action in {"periodic_reboot_requested", "wifi_reboot_requested"}
-                        for action in requested_actions
-                    )
-                    else ""
-                )
+                boot_id = reboot_boot_id()
                 if (
                     "periodic_reboot_requested" in requested_actions
                     and state.periodic_reboot_requested
@@ -567,9 +573,20 @@ def run_self_healing(
                 ):
                     state.wifi_reboot_scheduled_boot_id = boot_id
                     wifi_checkpoint()
+                wrote_intent = False
                 try:
+                    if boot_receipt_error is not None:
+                        raise OSError("Cannot checkpoint boot receipt") from boot_receipt_error
+                    if not has_reboot_intent_for_boot(state_dir, boot_id):
+                        wrote_intent = True
+                        record_reboot_intent(state_dir, boot_id, requested_actions)
                     default_schedule_reboot()
-                except OSError:
+                except (OSError, ValueError):
+                    if wrote_intent:
+                        try:
+                            clear_reboot_intent(state_dir)
+                        except OSError:
+                            pass
                     events = _defer_reboots(events, state, before)
                     events.append(
                         SelfHealingEvent(

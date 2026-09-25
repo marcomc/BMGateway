@@ -4,6 +4,8 @@
 "System started": "সিস্টেম চালু হয়েছে",
 "System shutting down": "সিস্টেম বন্ধ হচ্ছে",
 "A system boot was observed. This is not an application restart.": "সিস্টেম বুট শনাক্ত হয়েছে। এটি অ্যাপ্লিকেশন পুনরায় চালু হওয়া নয়।",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "Wi-Fi সংযোগ পুনরুদ্ধারের জন্য পুনরায় চালুর অনুরোধের পরে সিস্টেম বুট শনাক্ত হয়েছে।",
+"A system boot was observed after a BMGateway reboot request.": "BMGateway-এর পুনরায় চালুর অনুরোধের পরে সিস্টেম বুট শনাক্ত হয়েছে।",
 "The system is shutting down or rebooting.": "সিস্টেম বন্ধ হচ্ছে বা পুনরায় চালু হচ্ছে।",
 "Software update completed": "সফ্টওয়্যার আপডেট সম্পন্ন হয়েছে",
 "Software update failed": "সফ্টওয়্যার আপডেট ব্যর্থ হয়েছে",

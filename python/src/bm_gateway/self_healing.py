@@ -21,6 +21,7 @@ from .config import AppConfig
 from .localization import translation_for
 
 ConnectivityChecker = Callable[[str, str], bool]
+GatewayChecker = Callable[[str, str], tuple[str | None, bool | None]]
 ReconnectAction = Callable[[str], bool]
 RebootAction = Callable[[], None]
 USBOTGHealthChecker = Callable[[str, str], "USBOTGHealth"]
@@ -59,6 +60,7 @@ class SelfHealingState:
     wifi_reboot_scheduled_boot_id: str = ""
     wifi_reconnect_notified_outcomes: tuple[str, ...] = ()
     wifi_reboot_notified_boot_id: str = ""
+    wifi_internet_unreachable: bool = False
     periodic_reboot_requested: bool = False
     periodic_reboot_scheduled_boot_id: str = ""
     usb_otg_rebind_attempted: bool = False
@@ -151,6 +153,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         reboot_scheduled_boot_id = raw.get("reboot_scheduled_boot_id", "")
         reconnect_notified_outcomes = raw.get("reconnect_notified_outcomes", [])
         reboot_notified_boot_id = raw.get("reboot_notified_boot_id", "")
+        internet_unreachable = raw.get("internet_unreachable", False)
         if recovery_pending and not recovery_phase:
             recovery_phase = "pending"
         recovery_observed = raw.get("recovery_observed", recovery_phase == "reconnect_pending")
@@ -181,6 +184,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
         or not isinstance(reconnect_notified_outcomes, list)
         or any(outcome not in ("failed", "completed") for outcome in reconnect_notified_outcomes)
         or not isinstance(reboot_notified_boot_id, str)
+        or not isinstance(internet_unreachable, bool)
         or not isinstance(recovery_observed, bool)
         or (recovery_observed and not recovery_pending)
     ):
@@ -196,6 +200,7 @@ def load_wifi_watchdog_state(path: Path, state: SelfHealingState) -> None:
     state.wifi_reboot_scheduled_boot_id = reboot_scheduled_boot_id
     state.wifi_reconnect_notified_outcomes = tuple(reconnect_notified_outcomes)
     state.wifi_reboot_notified_boot_id = reboot_notified_boot_id
+    state.wifi_internet_unreachable = internet_unreachable
 
 
 def ensure_wifi_recovery_identity(state: SelfHealingState) -> bool:
@@ -262,6 +267,7 @@ def persist_wifi_watchdog_state(
             "reboot_scheduled_boot_id": state.wifi_reboot_scheduled_boot_id,
             "reconnect_notified_outcomes": list(state.wifi_reconnect_notified_outcomes),
             "reboot_notified_boot_id": state.wifi_reboot_notified_boot_id,
+            "internet_unreachable": state.wifi_internet_unreachable,
         }
         if preserve_pending:
             try:
@@ -320,6 +326,7 @@ def clear_wifi_recovery_handoff(
                 "reboot_scheduled_boot_id": "",
                 "reconnect_notified_outcomes": [],
                 "reboot_notified_boot_id": "",
+                "internet_unreachable": current.wifi_internet_unreachable,
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -367,6 +374,7 @@ def consume_wifi_recovery_notification(
                     "reboot_scheduled_boot_id": current.wifi_reboot_scheduled_boot_id,
                     "reconnect_notified_outcomes": list(current.wifi_reconnect_notified_outcomes),
                     "reboot_notified_boot_id": current.wifi_reboot_notified_boot_id,
+                    "internet_unreachable": current.wifi_internet_unreachable,
                 },
                 WiFiWatchdogStateError,
                 "Cannot persist Wi-Fi watchdog state",
@@ -400,6 +408,7 @@ def consume_wifi_recovery_notification(
                 "reboot_scheduled_boot_id": "",
                 "reconnect_notified_outcomes": [],
                 "reboot_notified_boot_id": "",
+                "internet_unreachable": current.wifi_internet_unreachable,
             },
             WiFiWatchdogStateError,
             "Cannot persist Wi-Fi watchdog state",
@@ -428,6 +437,7 @@ def _copy_wifi_recovery_state(source: SelfHealingState, target: SelfHealingState
         "wifi_reboot_scheduled_boot_id",
         "wifi_reconnect_notified_outcomes",
         "wifi_reboot_notified_boot_id",
+        "wifi_internet_unreachable",
     ):
         setattr(target, name, getattr(source, name))
 
@@ -639,6 +649,30 @@ def default_connectivity_checker(host: str, interface: str) -> bool:
     return completed.returncode == 0
 
 
+def default_gateway_checker(host: str, interface: str) -> tuple[str | None, bool | None]:
+    """Probe the interface's default gateway independently of the public target."""
+    del host
+    if not interface.strip() or shutil.which("ip") is None:
+        return None, None
+    try:
+        route = subprocess.run(
+            ["ip", "-4", "route", "show", "default", "dev", interface],
+            check=False,
+            text=True,
+            capture_output=True,
+            timeout=3,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None, None
+    if route.returncode != 0:
+        return None, None
+    fields = route.stdout.split()
+    if "via" not in fields or fields.index("via") + 1 >= len(fields):
+        return None, None
+    gateway = fields[fields.index("via") + 1]
+    return gateway, default_connectivity_checker(gateway, interface)
+
+
 def default_wifi_reconnect(interface: str) -> bool:
     if shutil.which("nmcli") is not None:
         radio = subprocess.run(
@@ -759,6 +793,7 @@ def evaluate_self_healing(
     state: SelfHealingState,
     now_monotonic: float | None = None,
     connectivity_checker: ConnectivityChecker = default_connectivity_checker,
+    gateway_checker: GatewayChecker | None = None,
     reconnect_action: ReconnectAction = default_wifi_reconnect,
     reboot_action: RebootAction = default_schedule_reboot,
     usb_otg_health_checker: USBOTGHealthChecker = default_usb_otg_health_check,
@@ -772,6 +807,21 @@ def evaluate_self_healing(
     wall_time = time.time() if now_wall_time is None else now_wall_time
     events: list[SelfHealingEvent] = []
     healing = config.self_healing
+
+    if gateway_checker is None and connectivity_checker is default_connectivity_checker:
+        gateway_checker = default_gateway_checker
+
+    def connectivity_status() -> tuple[bool, bool, str | None, bool | None]:
+        internet_reachable = connectivity_checker(
+            healing.connectivity_check_host, healing.wifi_interface
+        )
+        gateway, gateway_reachable = (
+            gateway_checker(healing.connectivity_check_host, healing.wifi_interface)
+            if gateway_checker is not None
+            else (None, None)
+        )
+        local_reachable = internet_reachable or gateway_reachable is True
+        return local_reachable, internet_reachable, gateway, gateway_reachable
 
     if healing.periodic_reboot_enabled and not state.periodic_reboot_requested:
         elapsed_seconds = now - state.started_monotonic
@@ -792,7 +842,37 @@ def evaluate_self_healing(
 
     if not healing.wifi_watchdog_enabled:
         _clear_wifi_recovery_state(state)
+        state.wifi_internet_unreachable = False
     else:
+        local_reachable, internet_reachable, gateway, gateway_reachable = connectivity_status()
+        internet_only_outage = gateway_reachable is True and not internet_reachable
+        if internet_only_outage and not state.wifi_internet_unreachable:
+            state.wifi_internet_unreachable = True
+            events.append(
+                SelfHealingEvent(
+                    action="internet_connectivity_lost",
+                    status="failed",
+                    details={
+                        "gateway": gateway,
+                        "connectivity_check_host": healing.connectivity_check_host,
+                        "wifi_interface": healing.wifi_interface,
+                    },
+                )
+            )
+        elif not internet_only_outage and state.wifi_internet_unreachable:
+            state.wifi_internet_unreachable = False
+            if internet_reachable:
+                events.append(
+                    SelfHealingEvent(
+                        action="internet_connectivity_restored",
+                        status="completed",
+                        details={
+                            "gateway": gateway,
+                            "connectivity_check_host": healing.connectivity_check_host,
+                            "wifi_interface": healing.wifi_interface,
+                        },
+                    )
+                )
         if not healing.wifi_reboot_enabled and state.wifi_recovery_phase == "reboot_authorized":
             state.wifi_reboot_requested = False
             _clear_wifi_recovery_state(state)
@@ -802,7 +882,7 @@ def evaluate_self_healing(
         if (
             state.wifi_recovery_observed
             or state.wifi_outage_ended_monotonic is not None
-            or connectivity_checker(healing.connectivity_check_host, healing.wifi_interface)
+            or local_reachable
         ):
             if state.wifi_outage_started_monotonic is not None or state.wifi_recovery_pending:
                 outage_seconds = wifi_incident_outage_seconds(state, now, wall_time)
@@ -922,10 +1002,7 @@ def evaluate_self_healing(
                     state.wifi_reconnect_attempted = True
                     reconnected = reconnect_action(healing.wifi_interface)
                     if reconnected:
-                        reconnected = connectivity_checker(
-                            healing.connectivity_check_host,
-                            healing.wifi_interface,
-                        )
+                        reconnected = connectivity_status()[0]
                     reconnect_succeeded = reconnected
                     events.append(
                         SelfHealingEvent(

@@ -429,8 +429,8 @@ PY
 cat >"${unit_path}" <<EOF
 [Unit]
 Description=BMGateway Runtime
-After=network-online.target bluetooth.service
-Wants=network-online.target
+After=network-online.target bluetooth.service bm-gateway-boot-receipt.service
+Wants=network-online.target bm-gateway-boot-receipt.service
 
 [Service]
 Type=simple
@@ -579,11 +579,30 @@ RestartSec=30
 WantedBy=multi-user.target
 EOF
 
+cat > /etc/systemd/system/bm-gateway-boot-receipt.service <<EOF
+[Unit]
+Description=BMGateway Early Boot Receipt
+Before=bm-gateway.service
+
+[Service]
+Type=oneshot
+Environment=BMGATEWAY_CONFIG=${config_path}
+ExecStart=/usr/local/bin/bm-gateway --config \${BMGATEWAY_CONFIG} lifecycle receipt --state-dir ${state_dir}
+User=${service_user}
+Group=${service_user}
+WorkingDirectory=${state_dir}
+TimeoutStartSec=45
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
 systemctl daemon-reload
 # Optional notification hooks retain systemctl diagnostics without blocking
 # critical gateway activation; apply the same policy to their restarts below.
 systemctl enable bm-gateway-lifecycle.service || true
 systemctl enable bm-gateway-boot-notification.service || true
+systemctl enable bm-gateway-boot-receipt.service || true
 systemctl enable bm-gateway.service
 if [[ "${enable_web}" -eq 1 ]]; then
   systemctl enable bm-gateway-web.service
@@ -599,6 +618,7 @@ fi
 
 if [[ "${start_services}" -eq 1 ]]; then
   systemctl restart bm-gateway-lifecycle.service || true
+  systemctl restart bm-gateway-boot-receipt.service || true
   systemctl restart --no-block bm-gateway-boot-notification.service || true
   systemctl restart bm-gateway.service
   if [[ "${enable_web}" -eq 1 ]]; then

@@ -23,6 +23,7 @@ from .notifications import (
     notification_outbox_path,
     queue_notification_event_once,
 )
+from .reboot_intent import clear_reboot_intent, observe_boot
 from .self_healing import (
     confirm_wifi_watchdog_state_durable,
     default_reboot_boot_id,
@@ -82,6 +83,8 @@ def _load(path: Path) -> dict[str, Any]:
             if event["action"] not in {"boot", "shutdown"}:
                 raise ValueError("invalid lifecycle action")
             UUID(event["boot_id"])
+            if event.get("reboot_request") not in (None, "wifi", "other"):
+                raise ValueError("invalid reboot request")
             occurred_at = event["occurred_at"]
             if occurred_at is not None and (
                 not isinstance(occurred_at, str)
@@ -140,10 +143,13 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> b
         )
         if occurred_at < cutoff:
             continue
+        action = f"system_{event['action']}"
+        if event["action"] == "boot" and event.get("reboot_request"):
+            action += f"_after_{event['reboot_request']}_reboot_request"
         queue_notification_event_once(
             path=notification_outbox_path(state_dir),
             config=config.notifications,
-            action=f"system_{event['action']}",
+            action=action,
             detail="",
             idempotency_key=f"lifecycle:{event['boot_id']}:{event['action']}",
             now=occurred_at,
@@ -171,35 +177,42 @@ def shutdown_in_progress() -> bool:
 
 
 def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) -> None:
-    if action not in {"boot", "shutdown"}:
+    if action not in {"boot", "shutdown", "receipt"}:
         raise ValueError("Invalid lifecycle action")
-    if not config.notifications.enabled:
-        return
     if action == "shutdown" and not shutdown_in_progress():
         return
-    clock_is_synchronized = lifecycle_wall_clock_is_synchronized()
     boot_id = str(UUID(default_reboot_boot_id()))
     state = new_self_healing_state()
     with usb_otg_watchdog_transaction(
         usb_otg_watchdog_state_path(state_dir), state, allow_unavailable=True
     ) as usb_error:
+        reboot_request = observe_boot(state_dir, boot_id)
+        if action == "receipt" or not config.notifications.enabled:
+            return
+        clock_is_synchronized = lifecycle_wall_clock_is_synchronized()
         data = _load(_path(state_dir))
         if data["boot_id"] != boot_id:
             data["boot_id"] = boot_id
             data["recorded"] = []
         if action not in data["recorded"]:
             data["recorded"].append(action)
-            data["pending"].append(
-                {
-                    "boot_id": boot_id,
-                    "action": action,
-                    "occurred_at": (
-                        datetime.now(timezone.utc).isoformat() if clock_is_synchronized else None
-                    ),
-                }
-            )
+            pending_event = {
+                "boot_id": boot_id,
+                "action": action,
+                "occurred_at": (
+                    datetime.now(timezone.utc).isoformat() if clock_is_synchronized else None
+                ),
+            }
+            if action == "boot":
+                pending_event["reboot_request"] = reboot_request
+            data["pending"].append(pending_event)
             data["pending"] = data["pending"][-config.notifications.offline_max_events :]
             _save(_path(state_dir), data)
+            if action == "boot" and pending_event.get("reboot_request") is not None:
+                try:
+                    clear_reboot_intent(state_dir, consumed_by_boot_id=boot_id)
+                except (OSError, ValueError, KeyError, TypeError) as error:
+                    logging.warning("Cannot clear consumed reboot request: %s", error)
         if not transfer_lifecycle_notifications(config=config, state_dir=state_dir):
             return
         if usb_error is not None or state.usb_otg_escalation_notification_pending:

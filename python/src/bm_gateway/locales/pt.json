@@ -4,6 +4,8 @@
 "System started": "Sistema iniciado",
 "System shutting down": "O sistema está a desligar",
 "A system boot was observed. This is not an application restart.": "Foi detetado um arranque do sistema. Não é um reinício da aplicação.",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "Foi detetado um arranque do sistema após um pedido de reinício para recuperar o Wi-Fi.",
+"A system boot was observed after a BMGateway reboot request.": "Foi detetado um arranque do sistema após um pedido de reinício do BMGateway.",
 "The system is shutting down or rebooting.": "O sistema está a desligar ou a reiniciar.",
 "Software update completed": "Atualização de software concluída",
 "Software update failed": "Falha na atualização de software",

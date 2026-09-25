@@ -89,7 +89,7 @@ def test_completed_update_uses_the_delivery_locale(
         update_from_revision="a" * 40,
         update_to_revision="b" * 40,
         update_reboot_required=reboot_required,
-        now=datetime(2026, 9, 8, tzinfo=timezone.utc),
+        now=datetime.now(timezone.utc),
     )
     sent: list[str] = []
 

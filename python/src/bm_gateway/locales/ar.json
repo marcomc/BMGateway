@@ -4,6 +4,8 @@
 "System started": "بدأ تشغيل النظام",
 "System shutting down": "جارٍ إيقاف تشغيل النظام",
 "A system boot was observed. This is not an application restart.": "تم رصد إقلاع للنظام. هذا ليس إعادة تشغيل للتطبيق.",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "تم رصد إقلاع للنظام بعد طلب إعادة تشغيل لاستعادة اتصال Wi-Fi.",
+"A system boot was observed after a BMGateway reboot request.": "تم رصد إقلاع للنظام بعد طلب إعادة تشغيل من BMGateway.",
 "The system is shutting down or rebooting.": "يتم إيقاف تشغيل النظام أو إعادة تشغيله.",
 "Software update completed": "اكتمل تحديث البرنامج",
 "Software update failed": "فشل تحديث البرنامج",

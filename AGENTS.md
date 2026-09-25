@@ -55,6 +55,9 @@ At the start of every new AI agent chat for this repository, read:
   catalogs in the same change.
 - When adding or changing config keys, keep load, write, schema, examples,
   installer rewrite paths, docs, and tests in sync in the same change.
+- For structured outbox events, serialize every schema field, using explicit
+  `null` for unavailable optional values when the event contract distinguishes
+  it from an omitted field; test complete-shape round trips for each action.
 - When adding derived persistence such as rollups or summaries, rebuild or
   validate it from the canonical source rows and timestamps rather than
   incrementing a second source of truth independently.

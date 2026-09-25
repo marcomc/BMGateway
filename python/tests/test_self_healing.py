@@ -19,6 +19,7 @@ from bm_gateway.self_healing import (
     clear_wifi_recovery_handoff,
     consume_wifi_recovery_notification,
     default_connectivity_checker,
+    default_gateway_checker,
     default_schedule_reboot,
     default_usb_otg_health_check,
     default_usb_otg_rebind,
@@ -137,6 +138,94 @@ def test_self_healing_reconnects_wifi_before_rebooting(tmp_path: Path) -> None:
     assert [event.action for event in reboot] == ["wifi_connectivity_lost"]
     assert reconnect_calls == ["wlan1"]
     assert reboot_calls == 0
+
+
+def test_internet_only_failure_does_not_reconnect_or_reboot_wifi(tmp_path: Path) -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(
+            config.self_healing,
+            wifi_watchdog_enabled=True,
+            wifi_reconnect_enabled=True,
+            wifi_reconnect_after_minutes=1,
+            wifi_reboot_enabled=True,
+            wifi_reboot_after_minutes=2,
+        ),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    actions: list[str] = []
+
+    def check_gateway(_host: str, _interface: str) -> tuple[str, bool]:
+        return "192.168.1.1", True
+
+    def reconnect(interface: str) -> bool:
+        actions.append(interface)
+        return True
+
+    for second in (0.0, 180.0, 600.0):
+        events = evaluate_self_healing(
+            config=config,
+            state=state,
+            now_monotonic=second,
+            connectivity_checker=lambda *_: False,
+            gateway_checker=check_gateway,
+            reconnect_action=reconnect,
+            reboot_action=lambda: actions.append("reboot"),
+        )
+        assert [event.action for event in events] == (
+            ["internet_connectivity_lost"] if second == 0 else []
+        )
+    assert not actions
+    path = wifi_watchdog_state_path(tmp_path)
+    persist_wifi_watchdog_state(path, state)
+    restored = new_self_healing_state(now_monotonic=0.0)
+    load_wifi_watchdog_state(path, restored)
+    assert restored.wifi_internet_unreachable
+    events = evaluate_self_healing(
+        config=config,
+        state=restored,
+        now_monotonic=610.0,
+        connectivity_checker=lambda *_: True,
+        gateway_checker=check_gateway,
+    )
+    assert [event.action for event in events] == ["internet_connectivity_restored"]
+
+
+def test_local_gateway_and_internet_failure_still_triggers_wifi_recovery() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_watchdog_enabled=True),
+    )
+    events = evaluate_self_healing(
+        config=config,
+        state=new_self_healing_state(now_monotonic=0.0),
+        now_monotonic=10.0,
+        connectivity_checker=lambda *_: False,
+        gateway_checker=lambda *_: ("192.168.1.1", False),
+    )
+    assert [event.action for event in events] == ["wifi_connectivity_lost"]
+
+
+def test_internet_outage_becoming_local_outage_is_not_reported_as_restored() -> None:
+    config = load_config(Path("python/config/config.toml.example"))
+    config = replace(
+        config,
+        self_healing=replace(config.self_healing, wifi_watchdog_enabled=True),
+    )
+    state = new_self_healing_state(now_monotonic=0.0)
+    state.wifi_internet_unreachable = True
+
+    events = evaluate_self_healing(
+        config=config,
+        state=state,
+        now_monotonic=10.0,
+        connectivity_checker=lambda *_: False,
+        gateway_checker=lambda *_: ("192.168.1.1", False),
+    )
+
+    assert [event.action for event in events] == ["wifi_connectivity_lost"]
 
 
 def test_self_healing_resets_wifi_outage_after_connectivity_returns() -> None:
@@ -998,6 +1087,27 @@ def test_default_connectivity_checker_checks_configured_interface(
 
     assert default_connectivity_checker("1.1.1.1", "wlan0") is True
     assert captured["command"] == ["ping", "-c", "1", "-W", "3", "-I", "wlan0", "1.1.1.1"]
+
+
+def test_default_gateway_checker_uses_interface_route(monkeypatch: MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def run(command: list[str], **_kwargs: object) -> object:
+        commands.append(command)
+
+        class Completed:
+            returncode = 0
+            stdout = "default via 192.168.1.80 dev wlan0 metric 600\n"
+
+        return Completed()
+
+    monkeypatch.setattr("bm_gateway.self_healing.shutil.which", lambda _name: "/usr/bin/tool")
+    monkeypatch.setattr("bm_gateway.self_healing.subprocess.run", run)
+    assert default_gateway_checker("1.1.1.1", "wlan0") == ("192.168.1.80", True)
+    assert commands == [
+        ["ip", "-4", "route", "show", "default", "dev", "wlan0"],
+        ["ping", "-c", "1", "-W", "3", "-I", "wlan0", "192.168.1.80"],
+    ]
 
 
 def test_default_wifi_reconnect_prefers_networkmanager(monkeypatch: MonkeyPatch) -> None:

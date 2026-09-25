@@ -133,6 +133,8 @@ The example first-run script:
 - installs and enables `bm-gateway.service`
 - installs and enables `bm-gateway-web.service`
 - installs and enables `bm-gateway-lifecycle.service` for shutdown notifications
+- installs and enables `bm-gateway-boot-receipt.service` for early reboot
+  attribution
 - installs and enables `bm-gateway-boot-notification.service` for boot
   notifications
 
@@ -225,7 +227,7 @@ export GATEWAY_HOST="bmgateway.local"
 # Example:
 # export GATEWAY_HOST="192.168.1.x"
 ssh "${GATEWAY_USER}@${GATEWAY_HOST}"
-sudo systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-notification.service
+sudo systemctl is-enabled bm-gateway-lifecycle.service bm-gateway-boot-receipt.service bm-gateway-boot-notification.service
 sudo systemctl is-active bm-gateway.service bm-gateway-web.service bm-gateway-lifecycle.service
 test "$(sudo systemctl show --property=Result --value bm-gateway-boot-notification.service)" = success
 test "$(sudo systemctl show --property=ExecMainStatus --value bm-gateway-boot-notification.service)" -eq 0

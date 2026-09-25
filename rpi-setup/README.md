@@ -51,6 +51,7 @@ The install helper places these files:
 - `/etc/systemd/system/bm-gateway.service`
 - `/etc/systemd/system/bm-gateway-web.service`
 - `/etc/systemd/system/bm-gateway-lifecycle.service`
+- `/etc/systemd/system/bm-gateway-boot-receipt.service`
 - `/etc/systemd/system/bm-gateway-boot-notification.service`
 - `/usr/local/bin/bm-gateway`
 - `/usr/local/bin/bm-gateway-web`
@@ -63,6 +64,7 @@ The one-line bootstrap installs the full appliance by default:
 - runtime service
 - management web service
 - `bm-gateway-lifecycle.service` for shutdown notifications
+- `bm-gateway-boot-receipt.service` for early reboot attribution
 - `bm-gateway-boot-notification.service` for boot notifications
 - optional Glances API service for Home Assistant
 - optional Cockpit HTTPS host administration on port `9090`
@@ -81,6 +83,7 @@ flowchart LR
     Runtime["bm-gateway.service"]
     Web["bm-gateway-web.service"]
     Lifecycle["bm-gateway-lifecycle.service<br/>shutdown notifications"]
+    Receipt["bm-gateway-boot-receipt.service<br/>boot attribution"]
     Boot["bm-gateway-boot-notification.service<br/>boot notifications"]
 
     Bootstrap --> Install
@@ -89,6 +92,7 @@ flowchart LR
     Services --> Runtime
     Services --> Web
     Services --> Lifecycle
+    Services --> Receipt
     Services --> Boot
 ```
 
