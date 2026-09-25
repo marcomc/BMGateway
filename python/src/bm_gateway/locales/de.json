@@ -4,6 +4,8 @@
 "System started": "System gestartet",
 "System shutting down": "System wird heruntergefahren",
 "A system boot was observed. This is not an application restart.": "Ein Systemstart wurde erkannt. Dies ist kein Neustart der Anwendung.",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "Nach einer WLAN-Wiederherstellungsanforderung zum Neustart wurde ein Systemstart erkannt.",
+"A system boot was observed after a BMGateway reboot request.": "Nach einer Neustartanforderung von BMGateway wurde ein Systemstart erkannt.",
 "The system is shutting down or rebooting.": "Das System wird heruntergefahren oder neu gestartet.",
 "Software update completed": "Softwareaktualisierung abgeschlossen",
 "Software update failed": "Softwareaktualisierung fehlgeschlagen",

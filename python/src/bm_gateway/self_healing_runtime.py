@@ -15,6 +15,7 @@ from .notifications import (
     queue_notification_event,
     queue_notification_event_once,
 )
+from .reboot_intent import clear_reboot_intent, record_reboot_intent
 from .self_healing import (
     SelfHealingEvent,
     SelfHealingState,
@@ -546,14 +547,7 @@ def run_self_healing(
                 event.action for event in events if event.action in _REBOOT_ACTIONS
             ]
             if requested_actions:
-                boot_id = (
-                    reboot_boot_id()
-                    if any(
-                        action in {"periodic_reboot_requested", "wifi_reboot_requested"}
-                        for action in requested_actions
-                    )
-                    else ""
-                )
+                boot_id = reboot_boot_id()
                 if (
                     "periodic_reboot_requested" in requested_actions
                     and state.periodic_reboot_requested
@@ -568,8 +562,13 @@ def run_self_healing(
                     state.wifi_reboot_scheduled_boot_id = boot_id
                     wifi_checkpoint()
                 try:
+                    record_reboot_intent(state_dir, boot_id, requested_actions)
                     default_schedule_reboot()
-                except OSError:
+                except (OSError, ValueError):
+                    try:
+                        clear_reboot_intent(state_dir)
+                    except OSError:
+                        pass
                     events = _defer_reboots(events, state, before)
                     events.append(
                         SelfHealingEvent(

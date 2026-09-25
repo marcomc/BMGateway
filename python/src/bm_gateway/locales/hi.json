@@ -4,6 +4,8 @@
 "System started": "सिस्टम शुरू हुआ",
 "System shutting down": "सिस्टम बंद हो रहा है",
 "A system boot was observed. This is not an application restart.": "सिस्टम बूट देखा गया। यह एप्लिकेशन का पुनः आरंभ नहीं है।",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "Wi-Fi पुनर्प्राप्ति के लिए पुनः आरंभ अनुरोध के बाद सिस्टम बूट देखा गया।",
+"A system boot was observed after a BMGateway reboot request.": "BMGateway के पुनः आरंभ अनुरोध के बाद सिस्टम बूट देखा गया।",
 "The system is shutting down or rebooting.": "सिस्टम बंद हो रहा है या पुनः आरंभ हो रहा है।",
 "Software update completed": "सॉफ़्टवेयर अपडेट पूरा हुआ",
 "Software update failed": "सॉफ़्टवेयर अपडेट विफल हुआ",

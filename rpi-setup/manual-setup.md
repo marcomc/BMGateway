@@ -536,7 +536,10 @@ There are three independent recovery paths:
   `self_healing.periodic_reboot_hours` from `1` to `48`
 - Wi-Fi watchdog: set `self_healing.wifi_watchdog_enabled = true`, choose a
   reachable `self_healing.connectivity_check_host`, and tune the reconnect and
-  reboot delays in minutes
+  reboot delays in minutes. It probes both that Internet target and the default
+  gateway through the configured Wi-Fi interface. A reachable gateway with an
+  unreachable Internet target is logged as an Internet outage and does not
+  trigger Wi-Fi recovery; failure of both probes starts local recovery.
 - USB OTG watchdog: enable USB OTG image export first, then set
   `self_healing.usb_otg_watchdog_enabled = true` to monitor the USB device
   controller. It first refreshes the virtual drive, can then reboot up to
@@ -636,8 +639,12 @@ untrusted timestamp and receives its notification time after synchronization.
 Pending lifecycle events survive process restarts and follow the configured
 retention and event-count limits. Shutdown mail is best effort: sudden power
 loss cannot run the hook, and network teardown or the service timeout can defer
-delivery until the next boot. Events describe an observed boot or an orderly
-shutdown/reboot, not the cause of the event.
+delivery until the next boot. A boot notification identifies a recent Wi-Fi,
+periodic, or USB watchdog reboot request if its durable request came from the
+preceding Linux boot. This records sequence, not proof that the request caused
+the reboot. Without a matching request, it reports only the observed boot.
+Shutdown notifications can arrive after the next boot when delivery was
+deferred; compare event timestamps rather than email order.
 
 The installed CLI entrypoints are `bm-gateway lifecycle boot` and
 `bm-gateway lifecycle shutdown`, with the usual `--config` option and an optional

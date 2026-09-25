@@ -16,6 +16,7 @@ from bm_gateway import system_lifecycle as lifecycle
 from bm_gateway.cli import main
 from bm_gateway.config import AppConfig, load_config
 from bm_gateway.localization import supported_locale_codes, translation_for
+from bm_gateway.reboot_intent import record_reboot_intent
 
 
 @pytest.fixture
@@ -47,6 +48,35 @@ def test_repeated_boot_does_not_requeue_after_delivery(
         lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
     assert len(sent) == 1
     assert "system_boot" in sent[0]
+
+
+def test_boot_notification_attributes_recent_wifi_reboot_request(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "default_reboot_boot_id", lambda: "b" * 32)
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == ["system_boot_after_wifi_reboot_request"]
+
+
+def test_same_boot_request_does_not_attribute_new_boot(
+    config: AppConfig, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    record_reboot_intent(tmp_path, "a" * 32, ["wifi_reboot_requested"])
+    monkeypatch.setattr(lifecycle, "deliver_notification_outbox", lambda **_: (True, "ok"))
+
+    lifecycle.notify_system_lifecycle(config=config, state_dir=tmp_path, action="boot")
+
+    events = notifications.load_notification_outbox(
+        notifications.notification_outbox_path(tmp_path)
+    )
+    assert [event.action for event in events] == ["system_boot"]
 
 
 @pytest.mark.parametrize("stopping", [False, True])

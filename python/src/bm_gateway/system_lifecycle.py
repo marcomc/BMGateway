@@ -23,6 +23,7 @@ from .notifications import (
     notification_outbox_path,
     queue_notification_event_once,
 )
+from .reboot_intent import reboot_request_for_boot
 from .self_healing import (
     confirm_wifi_watchdog_state_durable,
     default_reboot_boot_id,
@@ -82,6 +83,8 @@ def _load(path: Path) -> dict[str, Any]:
             if event["action"] not in {"boot", "shutdown"}:
                 raise ValueError("invalid lifecycle action")
             UUID(event["boot_id"])
+            if event.get("reboot_request") not in (None, "wifi", "other"):
+                raise ValueError("invalid reboot request")
             occurred_at = event["occurred_at"]
             if occurred_at is not None and (
                 not isinstance(occurred_at, str)
@@ -140,10 +143,13 @@ def transfer_lifecycle_notifications(*, config: AppConfig, state_dir: Path) -> b
         )
         if occurred_at < cutoff:
             continue
+        action = f"system_{event['action']}"
+        if event["action"] == "boot" and event.get("reboot_request"):
+            action += f"_after_{event['reboot_request']}_reboot_request"
         queue_notification_event_once(
             path=notification_outbox_path(state_dir),
             config=config.notifications,
-            action=f"system_{event['action']}",
+            action=action,
             detail="",
             idempotency_key=f"lifecycle:{event['boot_id']}:{event['action']}",
             now=occurred_at,
@@ -189,15 +195,16 @@ def notify_system_lifecycle(*, config: AppConfig, state_dir: Path, action: str) 
             data["recorded"] = []
         if action not in data["recorded"]:
             data["recorded"].append(action)
-            data["pending"].append(
-                {
-                    "boot_id": boot_id,
-                    "action": action,
-                    "occurred_at": (
-                        datetime.now(timezone.utc).isoformat() if clock_is_synchronized else None
-                    ),
-                }
-            )
+            pending_event = {
+                "boot_id": boot_id,
+                "action": action,
+                "occurred_at": (
+                    datetime.now(timezone.utc).isoformat() if clock_is_synchronized else None
+                ),
+            }
+            if action == "boot":
+                pending_event["reboot_request"] = reboot_request_for_boot(state_dir, boot_id)
+            data["pending"].append(pending_event)
             data["pending"] = data["pending"][-config.notifications.offline_max_events :]
             _save(_path(state_dir), data)
         if not transfer_lifecycle_notifications(config=config, state_dir=state_dir):

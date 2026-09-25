@@ -4,6 +4,8 @@
 "System started": "系统已启动",
 "System shutting down": "系统正在关闭",
 "A system boot was observed. This is not an application restart.": "检测到系统启动。这不是应用程序重启。",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "检测到系统在 Wi-Fi 恢复重启请求后启动。",
+"A system boot was observed after a BMGateway reboot request.": "检测到系统在 BMGateway 重启请求后启动。",
 "The system is shutting down or rebooting.": "系统正在关闭或重新启动。",
 "Software update completed": "软件更新已完成",
 "Software update failed": "软件更新失败",

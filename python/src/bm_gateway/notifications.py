@@ -642,7 +642,11 @@ def _text(config: NotificationsConfig, key: str, **values: object) -> str:
 
 
 def _action_label(config: NotificationsConfig, action: str) -> str:
-    if action == "system_boot":
+    if action in {
+        "system_boot",
+        "system_boot_after_wifi_reboot_request",
+        "system_boot_after_other_reboot_request",
+    }:
         return _text(config, "System started")
     if action == "system_shutdown":
         return _text(config, "System shutting down")
@@ -664,6 +668,10 @@ def _action_label(config: NotificationsConfig, action: str) -> str:
 def _event_detail(config: NotificationsConfig, event: NotificationEvent) -> str:
     if event.action == "system_boot":
         return _text(config, "A system boot was observed. This is not an application restart.")
+    if event.action == "system_boot_after_wifi_reboot_request":
+        return _text(config, "A system boot was observed after a Wi-Fi recovery reboot request.")
+    if event.action == "system_boot_after_other_reboot_request":
+        return _text(config, "A system boot was observed after a BMGateway reboot request.")
     if event.action == "system_shutdown":
         return _text(config, "The system is shutting down or rebooting.")
     if event.wifi_outcome is not None:

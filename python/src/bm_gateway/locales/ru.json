@@ -4,6 +4,8 @@
 "System started": "Система запущена",
 "System shutting down": "Завершение работы системы",
 "A system boot was observed. This is not an application restart.": "Обнаружена загрузка системы. Это не перезапуск приложения.",
+"A system boot was observed after a Wi-Fi recovery reboot request.": "Обнаружена загрузка системы после запроса перезагрузки для восстановления Wi-Fi.",
+"A system boot was observed after a BMGateway reboot request.": "Обнаружена загрузка системы после запроса перезагрузки от BMGateway.",
 "The system is shutting down or rebooting.": "Система выключается или перезагружается.",
 "Software update completed": "Обновление программного обеспечения завершено",
 "Software update failed": "Сбой обновления программного обеспечения",
